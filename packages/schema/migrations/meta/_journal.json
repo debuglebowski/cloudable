@@ -8,6 +8,13 @@
       "when": 1787861772634,
       "tag": "0000_sloppy_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787868565468,
+      "tag": "0001_nosy_thunderball",
+      "breakpoints": true
     }
   ]
 }
