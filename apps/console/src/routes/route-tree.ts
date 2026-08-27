@@ -1,9 +1,10 @@
 import { createRootRoute, createRoute } from "@tanstack/react-router";
 
+import { auditRoute } from "./audit/route";
 import { IndexPage } from "./index";
 import { RootLayout } from "./root";
 
-const rootRoute = createRootRoute({
+export const rootRoute = createRootRoute({
   component: RootLayout,
 });
 
@@ -26,4 +27,4 @@ const indexRoute = createRoute({
 //     machinesRoute,
 //   ]);
 
-export const routeTree = rootRoute.addChildren([indexRoute]);
+export const routeTree = rootRoute.addChildren([indexRoute, auditRoute]);

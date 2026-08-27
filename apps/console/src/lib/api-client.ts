@@ -1,4 +1,5 @@
-const BASE_URL: string = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+/** Exported so feature units building non-fetch links (e.g. CSV export hrefs) can reuse it. */
+export const BASE_URL: string = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
