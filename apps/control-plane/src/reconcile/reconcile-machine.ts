@@ -1,6 +1,9 @@
 import { Data, Effect } from "effect";
-import type { MachineStatus, ProvisioningError } from "../services/ProvisioningService";
-import { ProvisioningServiceTag } from "../services/ProvisioningService";
+import {
+  type MachineStatus,
+  type ProvisioningError,
+  ProvisioningServiceTag,
+} from "../services/ProvisioningService";
 import type { DesiredMachineState, ReconcileMachineResult } from "./types";
 
 export class ReconcileError extends Data.TaggedError("ReconcileError")<{
@@ -20,7 +23,10 @@ export class ReconcileError extends Data.TaggedError("ReconcileError")<{
 export const diffUndeclaredPackages = (
   declared: ReadonlyArray<string>,
   reported: ReadonlyArray<string>,
-): ReadonlyArray<string> => reported.filter((pkg) => !declared.includes(pkg));
+): ReadonlyArray<string> => {
+  const declaredSet = new Set(declared);
+  return reported.filter((pkg) => !declaredSet.has(pkg));
+};
 
 /**
  * Reconciles one machine's desired state against its last-known provisioning

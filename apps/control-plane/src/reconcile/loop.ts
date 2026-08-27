@@ -1,7 +1,10 @@
 import type { Duration } from "effect";
 import { Effect, Schedule } from "effect";
-import type { ProvisioningError, ProvisioningServiceTag } from "../services/ProvisioningService";
-import type { MachineStatus } from "../services/ProvisioningService";
+import type {
+  MachineStatus,
+  ProvisioningError,
+  ProvisioningServiceTag,
+} from "../services/ProvisioningService";
 import { type ReconcileError, reconcileMachine } from "./reconcile-machine";
 import type { DesiredMachineState, ReconcileMachineResult } from "./types";
 
