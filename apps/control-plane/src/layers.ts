@@ -1,6 +1,7 @@
 import { Layer } from "effect";
 import { AppConfigLive } from "./config";
 import { DbLive } from "./db/layer";
+import { OffboardingLive } from "./domain/offboarding";
 import { ApprovalService } from "./services/ApprovalService";
 import { EventBus } from "./services/EventBus";
 import type { ProvisioningServiceTag } from "./services/ProvisioningService";
@@ -15,6 +16,7 @@ export const buildAppLive = (adapters: {
   Layer.mergeAll(
     EventBus.Default,
     ApprovalService.Default,
+    OffboardingLive,
     adapters.provisioning,
     adapters.signer,
     adapters.secrets,
