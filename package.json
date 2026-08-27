@@ -1,0 +1,23 @@
+{
+  "name": "cloudable",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "build": "bun run --filter '*' build",
+    "test:unit": "bun run --filter '*' test:unit",
+    "test:integration": "bun run --filter '*' test:integration",
+    "typecheck": "bun run --filter '*' typecheck",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "db:generate": "bun run --cwd packages/schema db:generate",
+    "db:migrate": "bun run --cwd packages/schema db:migrate"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.7.0"
+  }
+}

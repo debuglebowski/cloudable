@@ -1,0 +1,57 @@
+@import "tailwindcss";
+@config "../tailwind.config.ts";
+
+:root {
+  --background: 60 9% 96%;
+  --foreground: 220 12% 9%;
+  --card: 0 0% 100%;
+  --primary: 216 47% 33%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 50 12% 96%;
+  --muted-foreground: 215 4% 44%;
+  --accent: 213 44% 95%;
+  --accent-foreground: 216 47% 33%;
+  --destructive: 0 56% 41%;
+  --border: 55 9% 88%;
+  --input: 55 9% 88%;
+  --ring: 216 47% 33%;
+  --radius: 0.375rem;
+
+  --ok: 164 63% 29%;
+  --ok-soft: 162 33% 93%;
+  --drift: 34 90% 34%;
+  --drift-soft: 40 71% 93%;
+  --stale: 216 4% 53%;
+  --stale-soft: 60 7% 93%;
+}
+
+html,
+body {
+  font-size: 13.5px;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family:
+    "IBM Plex Sans",
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family:
+    "IBM Plex Mono",
+    ui-monospace,
+    monospace;
+}
+
+* {
+  border-color: hsl(var(--border));
+}

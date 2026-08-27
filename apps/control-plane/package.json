@@ -1,0 +1,31 @@
+{
+  "name": "cloudable-control-plane",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/server.ts",
+    "build": "exit 0",
+    "typecheck": "tsc -b",
+    "test:unit": "bun test",
+    "test:integration": "exit 0"
+  },
+  "dependencies": {
+    "@cloudable/contracts": "workspace:*",
+    "@cloudable/events": "workspace:*",
+    "@cloudable/schema": "workspace:*",
+    "@effect/platform": "0.97.1",
+    "@effect/platform-bun": "0.91.2",
+    "better-auth": "1.7.2",
+    "drizzle-orm": "0.45.2",
+    "effect": "^3",
+    "postgres": "3.4.9",
+    "ulid": "3.0.2"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.1.0",
+    "@types/bun": "^1.1.14",
+    "drizzle-kit": "0.31.10",
+    "typescript": "^5.7.0"
+  }
+}

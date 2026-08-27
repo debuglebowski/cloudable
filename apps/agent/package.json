@@ -1,0 +1,21 @@
+{
+  "name": "cloudable-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build ./src/index.ts --compile --target=bun-linux-x64 --outfile=dist/cloudable-agent-linux-x64",
+    "build:arm64": "bun build ./src/index.ts --compile --target=bun-linux-arm64 --outfile=dist/cloudable-agent-linux-arm64",
+    "typecheck": "tsc -b",
+    "test:unit": "bun test",
+    "test:integration": "exit 0"
+  },
+  "dependencies": {
+    "@cloudable/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "typescript": "^5.7.0"
+  }
+}
