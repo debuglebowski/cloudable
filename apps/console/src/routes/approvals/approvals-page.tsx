@@ -41,12 +41,23 @@ function formatExpiry(expiresAt: string): { label: string; urgent: boolean } {
   if (diffMs <= 0) return { label: "expired", urgent: true };
 
   const minutes = Math.round(diffMs / 60_000);
+  if (minutes < 1) {
+    // Sub-minute remaining still rounds to 0m, which reads as "already gone"
+    // even though the row is still actionable — show seconds instead.
+    const seconds = Math.max(1, Math.round(diffMs / 1000));
+    return { label: `in ${seconds}s`, urgent: true };
+  }
   if (minutes < 60) return { label: `in ${minutes}m`, urgent: minutes < 30 };
   const hours = Math.round(minutes / 60);
   if (hours < 48) return { label: `in ${hours}h`, urgent: hours < 2 };
   const days = Math.round(hours / 24);
   return { label: `in ${days}d`, urgent: false };
 }
+
+const VIEW_TABS: Array<{ key: View; label: string }> = [
+  { key: "pending", label: "Pending queue" },
+  { key: "decided", label: "Decided" },
+];
 
 function decisionSummary(approval: Approval): string {
   if (approval.mode === "none") return "—";
@@ -58,7 +69,7 @@ export function ApprovalsPage() {
   const [view, setView] = useState<View>("pending");
   const pendingCount = usePendingApprovalsCount();
   const pendingQuery = usePendingApprovalsQuery();
-  const decidedQuery = useDecidedApprovalsQuery();
+  const decidedQuery = useDecidedApprovalsQuery(view === "decided");
 
   const query = view === "pending" ? pendingQuery : decidedQuery;
   const rows = query.data ?? [];
@@ -81,32 +92,22 @@ export function ApprovalsPage() {
       </p>
 
       <div className="flex gap-1 border-b border-border" role="tablist" aria-label="Approval views">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === "pending"}
-          onClick={() => setView("pending")}
-          className={`px-3 py-2 text-sm font-medium ${
-            view === "pending"
-              ? "border-b-2 border-primary text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Pending queue
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === "decided"}
-          onClick={() => setView("decided")}
-          className={`px-3 py-2 text-sm font-medium ${
-            view === "decided"
-              ? "border-b-2 border-primary text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Decided
-        </button>
+        {VIEW_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={view === tab.key}
+            onClick={() => setView(tab.key)}
+            className={`px-3 py-2 text-sm font-medium ${
+              view === tab.key
+                ? "border-b-2 border-primary text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {query.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}

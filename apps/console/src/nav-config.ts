@@ -27,3 +27,17 @@ export type NavBadgeHook = () => number | undefined;
 export const NAV_BADGE_HOOKS: Record<string, NavBadgeHook> = {
   "/approvals": usePendingApprovalsCount,
 };
+
+if (import.meta.env.DEV) {
+  for (const to of Object.keys(NAV_BADGE_HOOKS)) {
+    if (!NAV_ITEMS.some((item) => item.to === to)) {
+      // NAV_BADGE_HOOKS keys are free-form strings, not tied to NavItem.to at the
+      // type level (nothing prevents a typo'd path in one but not the other), so
+      // this catches the mismatch at dev-time instead of it silently rendering no
+      // badge with no compiler error.
+      console.warn(
+        `NAV_BADGE_HOOKS has a hook registered for "${to}" but no NAV_ITEMS entry uses that path.`,
+      );
+    }
+  }
+}
