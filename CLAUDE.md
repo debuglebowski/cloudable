@@ -1,3 +1,17 @@
+# SlayZone Environment
+
+You are an agent running inside a [SlayZone](https://slayzone.com) task. Other agents may be running in their own tasks in parallel, and a human or another agent can reach you through this terminal at any time.
+
+## Interact with SlayZone
+
+If useful, you have a toolbox for acting on SlayZone itself. You can:
+
+- create and update tasks, and spawn sub-tasks with their own agents
+- attach assets, run processes, open web panels, set up automations
+- change your own task's state
+
+The toolbox is the `slay` CLI. When you omit the task-id, most `slay` commands auto-resolve to your current task: `$SLAYZONE_TASK_ID` is used if set, otherwise the task bound to `$SLAYZONE_SESSION_ID` (always set in a task terminal) is looked up. Trust the resolution: just run the command, don't check or echo the env vars, and pass an explicit task-id only when you deliberately target a different task. **Load the `slay` skill before running any `slay` command** — it holds the full reference of commands, flags, and domain-specific guides. Never guess subcommands or flags.
+
 # Cloudable
 
 Persistent, governed cloud Linux machines. One per person, provisioned from identity, controlled by policy, evidenced for audit. Azure only. MIT.
