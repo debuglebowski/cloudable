@@ -16,6 +16,16 @@ export interface AppConfig {
   readonly port: number;
   readonly betterAuthSecret: string;
   readonly betterAuthUrl: string;
+  /**
+   * Azure AD's published JWKS, used to verify Azure managed-identity IMDS
+   * tokens (docs/spec.md §9). Azure AD's signing keys are shared across
+   * tenants, so the "common" discovery endpoint's key set verifies a token
+   * for any tenant — configurable so tests can point it at a local mock
+   * JWKS server instead.
+   */
+  readonly managedIdentityJwksUrl: string;
+  /** Expected `aud` claim on an IMDS-issued managed-identity token. */
+  readonly managedIdentityAudience: string;
 }
 
 const readConfig = (): AppConfig => ({
@@ -23,6 +33,9 @@ const readConfig = (): AppConfig => ({
   port: Number(process.env["PORT"] ?? 3000),
   betterAuthSecret: process.env["BETTER_AUTH_SECRET"] ?? "dev-only-change-me",
   betterAuthUrl: process.env["BETTER_AUTH_URL"] ?? "http://localhost:3000",
+  managedIdentityJwksUrl:
+    process.env["MANAGED_IDENTITY_JWKS_URL"] ?? "https://login.microsoftonline.com/common/discovery/v2.0/keys",
+  managedIdentityAudience: process.env["MANAGED_IDENTITY_AUDIENCE"] ?? "https://management.azure.com/",
 });
 
 /** Plain, synchronous config — safe to import from anywhere, Effect or not. */

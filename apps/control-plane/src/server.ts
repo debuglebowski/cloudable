@@ -2,6 +2,7 @@ import { HttpApiBuilder } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Layer } from "effect";
 import { config } from "./config";
+import { AgentLive } from "./http/handlers/agent";
 import { HealthLive } from "./http/handlers/health";
 import { Api } from "./http/api";
 import { buildAppLive } from "./layers";
@@ -18,7 +19,7 @@ const AppLive = buildAppLive({
   secrets: FakeSecretsProviderLive,
 });
 
-const ApiLive = HttpApiBuilder.api(Api).pipe(Layer.provide(HealthLive));
+const ApiLive = HttpApiBuilder.api(Api).pipe(Layer.provide(HealthLive), Layer.provide(AgentLive));
 
 const ServerLive = HttpApiBuilder.serve().pipe(
   Layer.provide(ApiLive),
