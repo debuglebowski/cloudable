@@ -1,9 +1,12 @@
 import { createRootRoute, createRoute } from "@tanstack/react-router";
 
+import { archiveRoute } from "./archive/route";
 import { IndexPage } from "./index";
 import { RootLayout } from "./root";
 
-const rootRoute = createRootRoute({
+// Exported so feature units' own route modules (e.g. src/routes/archive/route.ts) can import it
+// for `getParentRoute: () => rootRoute` — see the additive-registration convention below.
+export const rootRoute = createRootRoute({
   component: RootLayout,
 });
 
@@ -26,4 +29,4 @@ const indexRoute = createRoute({
 //     machinesRoute,
 //   ]);
 
-export const routeTree = rootRoute.addChildren([indexRoute]);
+export const routeTree = rootRoute.addChildren([indexRoute, archiveRoute]);
