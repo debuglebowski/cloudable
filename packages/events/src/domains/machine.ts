@@ -70,7 +70,12 @@ export type MachineEvent =
     })
   | (EventEnvelope & {
       type: "machine.drift_resolved";
-      payload: { removed: string[]; approvalId: string };
+      // `approvalId` is nullable: unit 6's event-derivation engine can
+      // detect drift clearing (undeclared packages no longer reported)
+      // without any approval flow to attribute it to yet. Unit 1/8 will
+      // wire the real approval trigger through and this stays non-null
+      // once that lands.
+      payload: { removed: string[]; approvalId: string | null };
     })
   | (EventEnvelope & {
       // Emitted only when something changed.
