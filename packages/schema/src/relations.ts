@@ -8,6 +8,7 @@ import { integrations } from "./tables/integration";
 import { machines } from "./tables/machine";
 import { orgs } from "./tables/org";
 import { people } from "./tables/person";
+import { secretBindings } from "./tables/secret-binding";
 import { sessions } from "./tables/session";
 import { snapshots } from "./tables/snapshot";
 
@@ -25,6 +26,7 @@ export const orgsRelations = relations(orgs, ({ many }) => ({
   integrations: many(integrations),
   elevations: many(elevations),
   events: many(events),
+  secretBindings: many(secretBindings),
 }));
 
 export const peopleRelations = relations(people, ({ one, many }) => ({
@@ -160,5 +162,12 @@ export const accessCommandRecordedRelations = relations(accessCommandRecorded, (
   machine: one(machines, {
     fields: [accessCommandRecorded.machineId],
     references: [machines.id],
+  }),
+}));
+
+export const secretBindingsRelations = relations(secretBindings, ({ one }) => ({
+  org: one(orgs, {
+    fields: [secretBindings.orgId],
+    references: [orgs.id],
   }),
 }));
