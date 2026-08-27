@@ -8,6 +8,13 @@
       "when": 1787861772634,
       "tag": "0000_sloppy_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787869331541,
+      "tag": "0001_stiff_proudstar",
+      "breakpoints": true
     }
   ]
 }

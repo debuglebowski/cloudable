@@ -1,0 +1,1 @@
+ALTER TABLE "machines" ADD COLUMN "desired_state_version" integer DEFAULT 0 NOT NULL;
