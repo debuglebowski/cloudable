@@ -1,0 +1,65 @@
+# Cloudable — self-hosted control plane deploy (Docker Compose, non-Azure path)
+#
+# For self-hosters who are not on Azure. The Terraform/Bicep templates in
+# `infra/terraform/control-plane/` and `infra/bicep/control-plane.bicep` are the
+# primary self-host artefacts (docs/spec.md §25: Terraform is the primary format,
+# Bicep the one-click alternative); this Compose file is the equivalent for anyone
+# who just wants a single host running the same two things — one stateless
+# container plus PostgreSQL (docs/spec.md §25: "No Helm chart in v1 ... Azure
+# Container Apps or Compose").
+#
+# NOTE: this is about where the CONTROL PLANE runs, which is unconstrained per
+# docs/spec.md §2. The MACHINES Cloudable manages are Azure-only regardless of
+# where you run this.
+#
+# Prerequisites:
+#   - Docker + the Compose plugin (`docker compose version`)
+#   - A published control-plane image (no Dockerfile exists yet in this build of
+#     the monorepo — a separate, not-yet-merged unit adds
+#     apps/control-plane/Dockerfile; build and push your own from it in the
+#     meantime, or use CONTROL_PLANE_IMAGE below to point at one you built)
+#   - A copy of control-plane.self-host.env.example as .env in this directory,
+#     with BETTER_AUTH_SECRET and POSTGRES_PASSWORD set to real random values
+#     (e.g. `openssl rand -base64 32`) — never commit the real .env
+#
+# Commands:
+#   cd infra/docker-compose
+#   cp control-plane.self-host.env.example .env   # then edit .env
+#   docker compose -f control-plane.self-host.yml up -d
+#
+# Validate the file parses without starting anything (what this build's PR
+# verification used):
+#   docker compose -f control-plane.self-host.yml config
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cloudable}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-cloudable}
+    volumes:
+      - cloudable-control-plane-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cloudable}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  control-plane:
+    image: ${CONTROL_PLANE_IMAGE:-ghcr.io/debuglebowski/cloudable-control-plane:latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cloudable}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-cloudable}
+      PORT: ${PORT:-3000}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env, e.g. openssl rand -base64 32}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+
+volumes:
+  cloudable-control-plane-postgres-data:
