@@ -20,6 +20,12 @@ export class CurrentUserTag extends Context.Tag("CurrentUser")<CurrentUserTag, C
 // Left as a stub for now: wiring a real `HttpApiMiddleware.Tag` against
 // BetterAuth's session API is a meaningful design decision (which endpoints
 // require auth, how org scoping is derived, session vs. bearer token for
-// the CLI/agent) better left to the feature unit that owns it. No endpoint
-// currently requires `CurrentUserTag` — nothing is unauthenticated that
-// shouldn't be, since nothing beyond the public health check exists yet.
+// the CLI/agent) better left to the feature unit that owns it.
+//
+// UNLIKE the health check, `GET /api/v1/evidence` (see `../../evidence/`)
+// takes `orgId` as a caller-supplied query parameter with no check that the
+// caller belongs to that org — a cross-tenant read once real orgs/auth
+// exist. Wiring this middleware MUST also update
+// `evidence/handler.ts` to scope every query to `CurrentUserTag.orgId`
+// (rejecting or ignoring a mismatched `orgId` param) rather than trusting
+// the query string.
