@@ -1,0 +1,262 @@
+import type { DomainEvent, MachineEvent, OrgEvent } from "@cloudable/events";
+import { type SettingRow, machines, resolveSetting, settingValues } from "@cloudable/schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { Effect } from "effect";
+import { ulid } from "ulid";
+import { Db } from "../../db/layer";
+import { EventBus } from "../../services/EventBus";
+import {
+  InvalidScopeError,
+  MachineNotFoundError,
+  PinnedSettingError,
+  SettingWriteError,
+} from "./errors";
+import { isPackageManifestKey } from "./validate-pinning";
+
+export interface ApplySettingChangeInput {
+  orgId: string;
+  scopeType: "org" | "machine";
+  scopeId: string;
+  key: string;
+  value: unknown;
+  /** Org-scope only. Ignored (existing flag preserved) on a machine-scope write. */
+  pinned?: boolean | undefined;
+  actorType: "person" | "system";
+  actorId: string;
+  correlationId: string;
+  /** Defaults to now. Exposed for tests. */
+  occurredAt?: Date;
+}
+
+export interface ApplySettingChangeResult {
+  previous: unknown;
+  current: unknown;
+  event: DomainEvent;
+}
+
+export type ApplySettingChangeError =
+  | InvalidScopeError
+  | MachineNotFoundError
+  | PinnedSettingError
+  | SettingWriteError;
+
+/**
+ * The single code path that writes a `settingValues` row and emits the
+ * corresponding `*.setting_changed` event. Both the UI-facing PATCH
+ * endpoint (`handlePatchSetting`) and the Git-sourced bulk import endpoint
+ * (`handleImportConfig`) call this exact function, entry for entry — see
+ * docs/spec.md §16: "Same path whether the change came from the UI or a
+ * Git commit."
+ *
+ * Purely inert (invariant #10 / docs/spec.md §16): it only ever touches
+ * `setting_values` and the append-only `events` table. It never reads or
+ * writes `machines.desiredStateVersion` and never triggers reconcile — the
+ * agent picks up the new resolved value on its own next poll. See
+ * `trigger-reconcile.ts` for the only operation allowed to mutate a
+ * machine, which is confirmation-gated.
+ */
+export const applySettingChange = (
+  input: ApplySettingChangeInput,
+): Effect.Effect<ApplySettingChangeResult, ApplySettingChangeError, Db | EventBus> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const eventBus = yield* EventBus;
+
+    if (input.scopeType === "org" && input.scopeId !== input.orgId) {
+      return yield* Effect.fail(
+        new InvalidScopeError({ message: "an org-scope edit's scopeId must equal orgId" }),
+      );
+    }
+
+    // Machine-scope: resolve the machine, verify tenancy, and (for the
+    // package manifest key only — see validate-pinning.ts) check pinning
+    // and compute which level this write overrides.
+    let machine: typeof machines.$inferSelect | undefined;
+    let overridesLevel: "org" | "template" | "machine" = "org";
+
+    if (input.scopeType === "machine") {
+      const machineRows = yield* Effect.tryPromise({
+        try: () => db.select().from(machines).where(eq(machines.id, input.scopeId)).limit(1),
+        catch: (cause) =>
+          new SettingWriteError({ message: `looking up machine: ${String(cause)}` }),
+      });
+      machine = machineRows[0];
+      if (!machine || machine.orgId !== input.orgId) {
+        return yield* Effect.fail(new MachineNotFoundError({ machineId: input.scopeId }));
+      }
+
+      // Scoped to exactly the org/template/machine ids in this machine's own
+      // chain — not every row for this key across every org. `scopeId` is a
+      // globally-unique uuid so the unscoped query was correct, but it would
+      // pull every tenant's rows for a common key (e.g. "packages") into
+      // memory on every write.
+      const chainScopeIds = [
+        input.orgId,
+        input.scopeId,
+        ...(machine.templateId ? [machine.templateId] : []),
+      ];
+      const keyRows = yield* Effect.tryPromise({
+        try: () =>
+          db
+            .select()
+            .from(settingValues)
+            .where(
+              and(eq(settingValues.key, input.key), inArray(settingValues.scopeId, chainScopeIds)),
+            ),
+        catch: (cause) =>
+          new SettingWriteError({ message: `reading setting chain: ${String(cause)}` }),
+      });
+
+      if (isPackageManifestKey(input.key)) {
+        const parentScopes: ReadonlyArray<{ scopeType: "org" | "template"; scopeId: string }> = [
+          { scopeType: "org", scopeId: input.orgId },
+          ...(machine.templateId
+            ? [{ scopeType: "template" as const, scopeId: machine.templateId }]
+            : []),
+        ];
+        const pinnedParent = keyRows.find(
+          (row) =>
+            row.pinned &&
+            parentScopes.some((p) => p.scopeType === row.scopeType && p.scopeId === row.scopeId),
+        );
+        if (pinnedParent) {
+          return yield* Effect.fail(
+            new PinnedSettingError({
+              key: input.key,
+              pinnedAtScopeType: pinnedParent.scopeType,
+              pinnedAtScopeId: pinnedParent.scopeId,
+            }),
+          );
+        }
+      }
+
+      // What would this key resolve to without this machine's own row? That
+      // is the level this write now overrides.
+      const rowsExcludingThisMachine = keyRows.filter(
+        (r) => !(r.scopeType === "machine" && r.scopeId === input.scopeId),
+      ) as ReadonlyArray<SettingRow>;
+      const resolved = resolveSetting(input.key, rowsExcludingThisMachine, {
+        orgId: input.orgId,
+        templateId: machine.templateId,
+        machineId: input.scopeId,
+      });
+      overridesLevel = resolved?.source ?? "org";
+    }
+
+    // --- upsert the raw declared value (find-then-write; setting_values has
+    // no unique constraint to `onConflictDoUpdate` against) ---
+    const existingRows = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select()
+          .from(settingValues)
+          .where(
+            and(
+              eq(settingValues.scopeType, input.scopeType),
+              eq(settingValues.scopeId, input.scopeId),
+              eq(settingValues.key, input.key),
+            ),
+          )
+          .limit(1),
+      catch: (cause) =>
+        new SettingWriteError({ message: `reading setting value: ${String(cause)}` }),
+    });
+    const existing = existingRows[0];
+    // `null`, not `undefined` — the payload is stored as JSONB, and
+    // `JSON.stringify` silently drops `undefined` object keys, which would
+    // make "no previous value" indistinguishable from "key never set" on
+    // the event row. `null` round-trips explicitly.
+    const previous: unknown = existing ? existing.value : null;
+
+    // `pinned` is an org-scope-only concept (docs/spec.md §6: the
+    // organisation marks an entry pinned so nothing below it can override).
+    // A machine-scope write must never be able to set or clear it — that
+    // would let the very override this flag exists to block also toggle it.
+    const nextPinned =
+      input.scopeType === "org"
+        ? (input.pinned ?? existing?.pinned ?? false)
+        : (existing?.pinned ?? false);
+
+    yield* Effect.tryPromise({
+      try: async () => {
+        if (existing) {
+          await db
+            .update(settingValues)
+            .set({
+              value: input.value,
+              pinned: nextPinned,
+              updatedAt: new Date(),
+            })
+            .where(eq(settingValues.id, existing.id));
+        } else {
+          await db.insert(settingValues).values({
+            scopeType: input.scopeType,
+            scopeId: input.scopeId,
+            key: input.key,
+            value: input.value,
+            source: input.scopeType,
+            pinned: nextPinned,
+          });
+        }
+      },
+      catch: (cause) =>
+        new SettingWriteError({ message: `writing setting value: ${String(cause)}` }),
+    });
+
+    // --- build + publish the resulting event ---
+    const occurredAt = input.occurredAt ?? new Date();
+    let event: DomainEvent;
+    if (input.scopeType === "machine") {
+      event = {
+        id: ulid(),
+        occurredAt,
+        recordedAt: occurredAt,
+        orgId: input.orgId,
+        actorType: input.actorType,
+        actorId: input.actorId,
+        machineId: input.scopeId,
+        correlationId: input.correlationId,
+        schemaVersion: 1,
+        type: "machine.setting_changed",
+        payload: {
+          key: input.key,
+          previous,
+          current: input.value,
+          overridesLevel,
+        },
+      } satisfies MachineEvent;
+    } else {
+      event = {
+        id: ulid(),
+        occurredAt,
+        recordedAt: occurredAt,
+        orgId: input.orgId,
+        actorType: input.actorType,
+        actorId: input.actorId,
+        machineId: null,
+        correlationId: input.correlationId,
+        schemaVersion: 1,
+        type: "org.setting_changed",
+        payload: {
+          key: input.key,
+          previous,
+          current: input.value,
+          // v1 has no template UI, so an org-scope edit through this
+          // endpoint always changes the org-wide default. "machine" is
+          // reserved for a future path where an org admin pushes a value
+          // that targets machine-level defaults directly.
+          level: "org",
+        },
+      } satisfies OrgEvent;
+    }
+
+    yield* eventBus
+      .publish([event])
+      .pipe(
+        Effect.mapError(
+          (cause) => new SettingWriteError({ message: `publishing event: ${cause.reason}` }),
+        ),
+      );
+
+    return { previous, current: input.value, event };
+  });

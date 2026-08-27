@@ -1,4 +1,5 @@
 export * from "./common";
+export * from "./domains/config";
 
 // Domain files (e.g. ./domains/machines, ./domains/approvals) are added additively
 // by feature units as each domain lands, and re-exported here with their own
