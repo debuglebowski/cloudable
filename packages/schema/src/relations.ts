@@ -10,6 +10,7 @@ import { orgs } from "./tables/org";
 import { people } from "./tables/person";
 import { sessions } from "./tables/session";
 import { snapshots } from "./tables/snapshot";
+import { upgradeAttempts } from "./tables/upgrade-attempt";
 
 // Kept separate from the table files so that no table file ever needs to
 // import a sibling table file just to declare a relation — every table file
@@ -25,6 +26,7 @@ export const orgsRelations = relations(orgs, ({ many }) => ({
   integrations: many(integrations),
   elevations: many(elevations),
   events: many(events),
+  upgradeAttempts: many(upgradeAttempts),
 }));
 
 export const peopleRelations = relations(people, ({ one, many }) => ({
@@ -53,6 +55,7 @@ export const machinesRelations = relations(machines, ({ one, many }) => ({
   elevations: many(elevations),
   accessCommandRecords: many(accessCommandRecorded),
   events: many(events),
+  upgradeAttempts: many(upgradeAttempts),
 }));
 
 export const approvalsRelations = relations(approvals, ({ one, many }) => ({
@@ -159,6 +162,17 @@ export const eventsRelations = relations(events, ({ one }) => ({
 export const accessCommandRecordedRelations = relations(accessCommandRecorded, ({ one }) => ({
   machine: one(machines, {
     fields: [accessCommandRecorded.machineId],
+    references: [machines.id],
+  }),
+}));
+
+export const upgradeAttemptsRelations = relations(upgradeAttempts, ({ one }) => ({
+  org: one(orgs, {
+    fields: [upgradeAttempts.orgId],
+    references: [orgs.id],
+  }),
+  machine: one(machines, {
+    fields: [upgradeAttempts.machineId],
     references: [machines.id],
   }),
 }));

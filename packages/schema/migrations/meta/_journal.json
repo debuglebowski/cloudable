@@ -8,6 +8,13 @@
       "when": 1787861772634,
       "tag": "0000_sloppy_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787869612468,
+      "tag": "0001_complete_wallop",
+      "breakpoints": true
     }
   ]
 }
