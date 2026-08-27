@@ -1,9 +1,13 @@
 import { createRootRoute, createRoute } from "@tanstack/react-router";
 
+import { accessRoute } from "./access/route";
 import { IndexPage } from "./index";
 import { RootLayout } from "./root";
 
-const rootRoute = createRootRoute({
+// Exported so feature units' route modules (e.g. src/routes/access/route.ts)
+// can build `createRoute({ getParentRoute: () => rootRoute, ... })` per
+// docs/frontend.md's routing convention.
+export const rootRoute = createRootRoute({
   component: RootLayout,
 });
 
@@ -26,4 +30,4 @@ const indexRoute = createRoute({
 //     machinesRoute,
 //   ]);
 
-export const routeTree = rootRoute.addChildren([indexRoute]);
+export const routeTree = rootRoute.addChildren([indexRoute, accessRoute]);
