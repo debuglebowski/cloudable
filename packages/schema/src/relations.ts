@@ -2,6 +2,7 @@ import { relations } from "drizzle-orm";
 import { accessCommandRecorded } from "./tables/access-command-recorded";
 import { approvalDecisions, approvals } from "./tables/approval";
 import { certificates } from "./tables/certificate";
+import { complianceFindingState } from "./tables/compliance-finding-state";
 import { elevations } from "./tables/elevation";
 import { events } from "./tables/events";
 import { integrations } from "./tables/integration";
@@ -25,6 +26,7 @@ export const orgsRelations = relations(orgs, ({ many }) => ({
   integrations: many(integrations),
   elevations: many(elevations),
   events: many(events),
+  complianceFindingState: many(complianceFindingState),
 }));
 
 export const peopleRelations = relations(people, ({ one, many }) => ({
@@ -159,6 +161,17 @@ export const eventsRelations = relations(events, ({ one }) => ({
 export const accessCommandRecordedRelations = relations(accessCommandRecorded, ({ one }) => ({
   machine: one(machines, {
     fields: [accessCommandRecorded.machineId],
+    references: [machines.id],
+  }),
+}));
+
+export const complianceFindingStateRelations = relations(complianceFindingState, ({ one }) => ({
+  org: one(orgs, {
+    fields: [complianceFindingState.orgId],
+    references: [orgs.id],
+  }),
+  machine: one(machines, {
+    fields: [complianceFindingState.machineId],
     references: [machines.id],
   }),
 }));
