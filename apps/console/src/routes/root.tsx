@@ -11,6 +11,14 @@ const NO_LIVE_BADGE: () => number | undefined = () => undefined;
  * A nav item's badge count: a registered live hook (see NAV_BADGE_HOOKS) wins over
  * the static NavItem.badgeCount when both are present; an item with neither renders
  * no badge at all.
+ *
+ * `NAV_BADGE_HOOKS[item.to]` is looked up by key rather than called as a literal
+ * `useXxx()` identifier, which normal rules-of-hooks lint checks can't verify. It's
+ * safe today only because NAV_ITEMS is a fixed array evaluated once at module load —
+ * a given `item.to` always resolves to the same hook (or none) for this component
+ * instance's whole lifetime. If NAV_ITEMS is ever made conditional (e.g. filtered by
+ * permissions), this lookup needs to change to something that can't vary between
+ * renders of the same instance.
  */
 function NavBadge({ item }: { item: NavItem }) {
   const liveHook = NAV_BADGE_HOOKS[item.to] ?? NO_LIVE_BADGE;
@@ -19,6 +27,7 @@ function NavBadge({ item }: { item: NavItem }) {
   if (!count) return null;
   return (
     <Badge
+      aria-hidden="true"
       variant="secondary"
       className="ml-auto h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[10px] leading-none"
     >

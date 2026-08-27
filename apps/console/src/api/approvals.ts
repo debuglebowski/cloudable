@@ -14,9 +14,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
  * shaped to match the eventual real response (mirrors `approvals` /
  * `approval_decisions` columns and the `ApprovalRequest` / `ApprovalResult` /
  * `ApprovalDecision` shapes in `ApprovalService.ts`). Swapping `fetchApprovals` /
- * `fetchPendingApprovalsCount` / `decideApproval` for `apiGet`/`apiPost` calls
- * against the real endpoint is the only change needed once unit 5 lands — the query
- * keys, hooks, and `Approval` shape consumed by the page can stay as-is.
+ * `decideApproval` for `apiGet`/`apiPost` calls against the real endpoint is the
+ * only change needed once unit 5 lands — the query keys, hooks, and `Approval`
+ * shape consumed by the page can stay as-is.
+ *
+ * The mock also encodes the two invariants a real backend must enforce
+ * independently of the client: a decision is rejected once `expiresAt` has
+ * passed (checked at decide-time, not just displayed as a countdown), and the
+ * same identity cannot cast two decisions on one approval — which is what
+ * actually makes dual mode "two distinct approvers" rather than "two clicks."
+ * Both live in `decideApproval` below; mirror them when unit 5 replaces this.
  */
 
 export type ApprovalActionType =
@@ -65,7 +72,6 @@ export const approvalKeys = {
   all: ["approvals"] as const,
   lists: () => [...approvalKeys.all, "list"] as const,
   list: (view: "pending" | "decided") => [...approvalKeys.lists(), view] as const,
-  pendingCount: () => [...approvalKeys.all, "pending-count"] as const,
 };
 
 const NETWORK_DELAY_MS = 200;
@@ -80,6 +86,19 @@ function hoursFromNow(hours: number): string {
 
 function hoursAgo(hours: number): string {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * A `pending` approval whose `expiresAt` has passed is effectively expired even
+ * before anything writes that back to `status` — derived at read time (and
+ * re-checked independently in `decideApproval`) rather than requiring a
+ * background sweep to flip the stored value.
+ */
+function effectiveStatus(approval: Approval): ApprovalStatus {
+  if (approval.status === "pending" && new Date(approval.expiresAt).getTime() <= Date.now()) {
+    return "expired";
+  }
+  return approval.status;
 }
 
 let nextDecisionId = 1;
@@ -197,14 +216,12 @@ const store: Approval[] = [
 ];
 
 export async function fetchApprovals(view: "pending" | "decided"): Promise<Approval[]> {
-  const rows = store.filter((approval) =>
-    view === "pending" ? approval.status === "pending" : approval.status !== "pending",
-  );
+  const rows = store
+    .map((approval) => ({ ...approval, status: effectiveStatus(approval) }))
+    .filter((approval) =>
+      view === "pending" ? approval.status === "pending" : approval.status !== "pending",
+    );
   return delay(rows.map((approval) => ({ ...approval, decisions: [...approval.decisions] })));
-}
-
-export async function fetchPendingApprovalsCount(): Promise<number> {
-  return delay(store.filter((approval) => approval.status === "pending").length);
 }
 
 export interface DecideApprovalInput {
@@ -219,11 +236,24 @@ export async function decideApproval(input: DecideApprovalInput): Promise<Approv
   if (!approval) {
     throw new Error(`Approval ${input.approvalId} not found`);
   }
-  if (approval.status !== "pending") {
-    throw new Error("This approval has already been decided.");
+
+  const currentStatus = effectiveStatus(approval);
+  if (currentStatus !== "pending") {
+    throw new Error(
+      currentStatus === "expired"
+        ? "This approval expired before a decision was recorded."
+        : "This approval has already been decided.",
+    );
   }
   if (input.decision === "rejected" && !input.reason?.trim()) {
     throw new Error("A reason is required to deny an approval.");
+  }
+  // Dual mode means two *distinct* approvers — without this, the same identity
+  // could click Grant twice and satisfy requiredApprovals alone. Mock identity is
+  // just a name (see CURRENT_APPROVER_NAME in decision-dialog.tsx); a real backend
+  // keys this on the authenticated person's id instead.
+  if (approval.decisions.some((decision) => decision.personName === input.decidedByName)) {
+    throw new Error(`This approval already has a decision recorded from ${input.decidedByName}.`);
   }
 
   const decisionRecord: ApprovalDecisionRecord = {
@@ -260,25 +290,26 @@ export function usePendingApprovalsQuery() {
   });
 }
 
-export function useDecidedApprovalsQuery() {
+/** `enabled` lets the page skip fetching the tab that isn't currently shown. */
+export function useDecidedApprovalsQuery(enabled = true) {
   return useQuery({
     queryKey: approvalKeys.list("decided"),
     queryFn: () => fetchApprovals("decided"),
+    enabled,
   });
 }
 
 /**
- * Backs the nav item's live badge (registered in `src/nav-config.ts`). Polls on its
- * own interval independently of whether the Approvals page itself is mounted, so the
- * queue depth stays visible from anywhere in the console.
+ * Backs the nav item's live badge (registered in `src/nav-config.ts`). Deliberately
+ * shares `usePendingApprovalsQuery`'s query key rather than hitting a separate
+ * lightweight count endpoint: a distinct query with its own 15s timer would drift
+ * out of phase with the page's list query and refetch the same rows a second time
+ * whenever both are mounted together. Sharing the key means one poll, one fetch,
+ * and the badge and the rendered row count can never disagree.
  */
 export function usePendingApprovalsCount(): number | undefined {
-  const { data } = useQuery({
-    queryKey: approvalKeys.pendingCount(),
-    queryFn: fetchPendingApprovalsCount,
-    refetchInterval: 15_000,
-  });
-  return data;
+  const { data } = usePendingApprovalsQuery();
+  return data?.length;
 }
 
 export function useDecideApprovalMutation() {
@@ -286,7 +317,8 @@ export function useDecideApprovalMutation() {
   return useMutation({
     mutationFn: decideApproval,
     onSuccess: () => {
-      // Invalidates the pending/decided lists and the nav badge's count together.
+      // Invalidates both lists — the nav badge updates too since it shares the
+      // pending list's query key (see usePendingApprovalsCount above).
       queryClient.invalidateQueries({ queryKey: approvalKeys.all });
     },
   });
