@@ -1,4 +1,4 @@
-import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { orgs } from "./org";
 import { people } from "./person";
 
@@ -20,7 +20,14 @@ export const machines = pgTable("machines", {
   sizeSku: text("size_sku").notNull(),
   image: text("image").notNull(),
   state: text("state", {
-    enum: ["provisioning", "running", "stopped", "archived_restorable", "archived_expired", "error"],
+    enum: [
+      "provisioning",
+      "running",
+      "stopped",
+      "archived_restorable",
+      "archived_expired",
+      "error",
+    ],
   })
     .notNull()
     .default("provisioning"),
@@ -29,6 +36,15 @@ export const machines = pgTable("machines", {
   // Last time the control agent successfully checked in — feeds the
   // "machines are reporting" compliance check.
   lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+  // The last `MachineReportedState` (see apps/control-plane/src/domain/machine/types.ts)
+  // received from this machine's agent, as raw JSON. Feature unit 6's
+  // event-derivation engine (services/reconcile-diff.ts) is the only writer:
+  // it diffs each new report against this column via `deriveEvents`, then
+  // overwrites it with the new report. Reused rather than a dedicated
+  // `machineLastKnownState` table — it's a 1:1 relationship with `machines`,
+  // and null (no report yet) is exactly the "never reported" case
+  // `deriveEvents` treats as `previous: undefined`.
+  lastReportedState: jsonb("last_reported_state"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   legalHold: boolean("legal_hold").notNull().default(false),
