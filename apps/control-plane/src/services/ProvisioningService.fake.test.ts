@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { FakeProvisioningServiceLive } from "./ProvisioningService.fake";
 import { ProvisioningServiceTag } from "./ProvisioningService";
+import {
+  FakeProvisioningServiceLive,
+  makeFakeProvisioningServiceLive,
+} from "./ProvisioningService.fake";
 
 describe("ProvisioningService.fake", () => {
   test("create -> running, archive -> archived, reconcile reports current status", async () => {
@@ -44,5 +47,48 @@ describe("ProvisioningService.fake", () => {
     );
     expect(archiveError.reason).toBe("not_found");
     expect(reconcileError.reason).toBe("not_found");
+  });
+
+  test("reconcile reports declared packages plus configured simulated extras, never fewer or more", async () => {
+    const layer = makeFakeProvisioningServiceLive({
+      simulatedExtraPackages: new Map([["m-1", ["unapproved-cli"]]]),
+    });
+
+    const program = Effect.gen(function* () {
+      const provisioning = yield* ProvisioningServiceTag;
+      const created = yield* provisioning.create({
+        machineId: "m-1",
+        orgId: "org-1",
+        region: "eastus",
+        sizeSku: "Standard_B2s",
+        packages: ["docker"],
+      });
+      const reconciled = yield* provisioning.reconcile("m-1");
+      return { created, reconciled };
+    });
+
+    const { created, reconciled } = await Effect.runPromise(Effect.provide(program, layer));
+
+    expect(created.reportedPackages).toEqual(["docker", "unapproved-cli"]);
+    expect(reconciled.reportedPackages).toEqual(["docker", "unapproved-cli"]);
+  });
+
+  test("with no simulated extras configured, reconcile reports exactly the declared packages", async () => {
+    const program = Effect.gen(function* () {
+      const provisioning = yield* ProvisioningServiceTag;
+      yield* provisioning.create({
+        machineId: "m-2",
+        orgId: "org-1",
+        region: "eastus",
+        sizeSku: "Standard_B2s",
+        packages: ["docker", "nodejs 20"],
+      });
+      return yield* provisioning.reconcile("m-2");
+    });
+
+    const reconciled = await Effect.runPromise(
+      Effect.provide(program, FakeProvisioningServiceLive),
+    );
+    expect(reconciled.reportedPackages).toEqual(["docker", "nodejs 20"]);
   });
 });
