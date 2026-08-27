@@ -3,3 +3,4 @@
 // contracts/event domain files are created. Kept type-only (`export type`) so nothing is
 // pulled into the compiled binary.
 export type { PageInfo, ApiErrorBody } from "@cloudable/contracts";
+export type { AttestMethod, AttestRequest, AttestResponse } from "@cloudable/contracts";

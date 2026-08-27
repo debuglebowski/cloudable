@@ -2,6 +2,7 @@ import { Layer } from "effect";
 import { AppConfigLive } from "./config";
 import { DbLive } from "./db/layer";
 import { ApprovalService } from "./services/ApprovalService";
+import { AttestationRegistryLive } from "./services/attestation/registry";
 import { EventBus } from "./services/EventBus";
 import type { ProvisioningServiceTag } from "./services/ProvisioningService";
 import type { SecretsProviderTag } from "./services/SecretsProvider";
@@ -18,6 +19,7 @@ export const buildAppLive = (adapters: {
     adapters.provisioning,
     adapters.signer,
     adapters.secrets,
+    AttestationRegistryLive,
     // Feature units: append your service's `.Default` (or Layer) to the Layer.mergeAll(...) argument
     // list above. Never reorder existing entries.
   ).pipe(Layer.provide(Layer.mergeAll(AppConfigLive, DbLive)));
