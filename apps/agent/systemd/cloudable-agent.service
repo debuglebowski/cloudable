@@ -1,0 +1,42 @@
+# Example systemd unit for the Cloudable control agent (spec §8.1).
+#
+# Install:
+#   cp cloudable-agent-linux-<arch> /opt/cloudable/cloudable-agent
+#   cp cloudable-agent.service /etc/systemd/system/cloudable-agent.service
+#   printf 'CONTROL_PLANE_URL=https://your-control-plane.example.com\nMACHINE_TOKEN=<join token>\n' \
+#     > /etc/cloudable/agent.env
+#   chmod 600 /etc/cloudable/agent.env   # it holds the machine's join token
+#   systemctl daemon-reload
+#   systemctl enable --now cloudable-agent
+#
+# The agent is pull-only (invariant #7: no inbound access to any machine) —
+# it never listens on a socket, so no [Socket] unit or firewall opening is
+# needed. `Restart=always` plus the agent's own exponential-backoff-with-
+# jitter loop (see docs/agents.md) is what carries it through a control
+# plane outage; systemd's job here is just "come back after a crash",
+# not retry timing.
+
+[Unit]
+Description=Cloudable control agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/cloudable/agent.env
+ExecStart=/opt/cloudable/cloudable-agent
+Restart=always
+RestartSec=5
+
+# The agent needs no elevated privileges — reconciliation decisions are its
+# own; anything it can't do as an unprivileged user, it isn't supposed to
+# do (invariant #4: reconcile only closes gaps, it never installs).
+User=cloudable-agent
+Group=cloudable-agent
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
