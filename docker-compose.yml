@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cloudable
+      POSTGRES_PASSWORD: cloudable
+      POSTGRES_DB: cloudable
+    ports:
+      # Host port 5442 (not 5432) — this machine runs other tasks' Postgres containers
+      # concurrently on 5432-5434; do not reclaim those.
+      - "5442:5432"
+    volumes:
+      - cloudable-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  cloudable-postgres-data:
