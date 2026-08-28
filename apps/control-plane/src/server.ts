@@ -2,6 +2,8 @@ import { HttpApiBuilder } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Layer } from "effect";
 import { config } from "./config";
+import { DbLive } from "./db/layer";
+import { EvidenceLive } from "./evidence/handler";
 import { Api } from "./http/api";
 import { AgentProtocolLive } from "./http/handlers/agent-protocol";
 import { ApprovalsLive } from "./http/handlers/approvals";
@@ -24,10 +26,23 @@ const AppLive = buildAppLive({
   secrets: FakeSecretsProviderLive,
 });
 
+// `EvidenceLive`'s handler needs `Db`, which — unlike the services in
+// `buildAppLive` — isn't exposed outside that layer (it's consumed
+// internally there). Provide the same `DbLive` singleton again here;
+// Effect's layer graph memoizes it by reference, so this doesn't open a
+// second Postgres connection pool alongside the one inside `AppLive`.
 const ApiLive = HttpApiBuilder.api(Api).pipe(
   Layer.provide(
-    Layer.mergeAll(HealthLive, MachinesLive, AgentProtocolLive, ApprovalsLive, ComplianceLive),
+    Layer.mergeAll(
+      HealthLive,
+      MachinesLive,
+      AgentProtocolLive,
+      ApprovalsLive,
+      ComplianceLive,
+      EvidenceLive,
+    ),
   ),
+  Layer.provide(DbLive),
 );
 
 const ServerLive = HttpApiBuilder.serve().pipe(

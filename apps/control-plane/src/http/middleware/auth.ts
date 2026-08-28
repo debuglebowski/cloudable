@@ -23,9 +23,11 @@ export class CurrentUserTag extends Context.Tag("CurrentUser")<CurrentUserTag, C
 // the CLI/agent) better left to the feature unit that owns it. No endpoint
 // currently requires `CurrentUserTag`.
 //
-// KNOWN GAP as of the `/api/v1/compliance/*` endpoints (unit 10): those take
-// `orgId` as a plain, unauthenticated query param (see
-// `http/routes/compliance.ts`) as a stopgap until this lands — any caller
-// can currently read any org's compliance findings/exports by passing its
-// id. Wiring auth here should scope those endpoints to the caller's own org
-// (or add an explicit authz check) rather than trusting the param.
+// KNOWN GAP, currently affecting every one of the following endpoints: each
+// takes `orgId` as a plain, unauthenticated query param as a stopgap until
+// this lands — any caller can currently read/act on any org's data by
+// passing its id. Wiring this middleware MUST also update each handler to
+// scope its queries to `CurrentUserTag.orgId` (rejecting or ignoring a
+// mismatched `orgId` param) rather than trusting the query string:
+// - `/api/v1/compliance/*` (`http/routes/compliance.ts`, unit 10)
+// - `GET /api/v1/evidence` (`../../evidence/`, unit 14)

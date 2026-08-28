@@ -11,6 +11,7 @@ import { ApprovalsLive } from "../src/http/handlers/approvals";
 import { ComplianceLive } from "../src/http/handlers/compliance";
 import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
+import { EvidenceLive } from "../src/evidence/handler";
 import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
 import { AgentSessionToken } from "../src/services/attestation/AgentSessionToken";
@@ -71,7 +72,14 @@ describe("agent-protocol handlers (integration)", () => {
 
     const ApiLive = HttpApiBuilder.api(Api).pipe(
       Layer.provide(
-        Layer.mergeAll(HealthLive, AgentProtocolLive, MachinesLive, ApprovalsLive, ComplianceLive),
+        Layer.mergeAll(
+          HealthLive,
+          AgentProtocolLive,
+          MachinesLive,
+          ApprovalsLive,
+          ComplianceLive,
+          EvidenceLive,
+        ),
       ),
     );
     const AttestationRegistryLive = Layer.succeed(
@@ -88,7 +96,13 @@ describe("agent-protocol handlers (integration)", () => {
     ).pipe(Layer.provide(Layer.succeed(Db, testDb.db)));
 
     const built = HttpApiBuilder.toWebHandler(
-      Layer.mergeAll(ApiLive, HttpServer.layerContext).pipe(Layer.provide(AppLayer)),
+      Layer.mergeAll(ApiLive, HttpServer.layerContext).pipe(
+        Layer.provide(AppLayer),
+        // EvidenceLive (folded into ApiLive above) needs Db directly, same
+        // as the real server.ts — AppLayer's Db provision is internal to
+        // its own construction and isn't exposed outward.
+        Layer.provide(Layer.succeed(Db, testDb.db)),
+      ),
     );
     handler = built.handler;
     dispose = built.dispose;
