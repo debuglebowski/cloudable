@@ -1,6 +1,6 @@
+import { snapshots } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
-import { snapshots } from "@cloudable/schema";
 import { Db } from "../../db/layer";
 
 /**
@@ -71,7 +71,9 @@ export const restoreSnapshot = (
       catch: (cause) => new SnapshotError({ reason: "db_error", cause }),
     });
     if (!snapshotRows[0]) {
-      return yield* Effect.fail(new SnapshotError({ reason: "snapshot_not_found", cause: snapshotId }));
+      return yield* Effect.fail(
+        new SnapshotError({ reason: "snapshot_not_found", cause: snapshotId }),
+      );
     }
 
     // STUB: a real restore reattaches the snapshotted volume/config to

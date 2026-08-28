@@ -11,7 +11,10 @@ describe("JoinTokenAttestation", () => {
     const identity = await run(
       Effect.gen(function* () {
         const attestation = yield* AttestationMethodTag;
-        const credential = yield* attestation.issueCredential({ orgId: "org-1", machineId: "machine-1" });
+        const credential = yield* attestation.issueCredential({
+          orgId: "org-1",
+          machineId: "machine-1",
+        });
         return yield* attestation.verifyCredential(credential);
       }),
     );
@@ -34,7 +37,9 @@ describe("JoinTokenAttestation", () => {
       return yield* attestation.verifyCredential("this-is-not-a-real-token");
     });
 
-    const error = await Effect.runPromise(Effect.flip(Effect.provide(program, JoinTokenAttestationLive)));
+    const error = await Effect.runPromise(
+      Effect.flip(Effect.provide(program, JoinTokenAttestationLive)),
+    );
     expect(error._tag).toBe("AttestationError");
     expect(error.reason).toBe("malformed_credential");
     expect(error.claimedOrgId).toBeUndefined();
@@ -47,7 +52,9 @@ describe("JoinTokenAttestation", () => {
       return yield* attestation.verifyCredential("");
     });
 
-    const error = await Effect.runPromise(Effect.flip(Effect.provide(program, JoinTokenAttestationLive)));
+    const error = await Effect.runPromise(
+      Effect.flip(Effect.provide(program, JoinTokenAttestationLive)),
+    );
     expect(error.reason).toBe("malformed_credential");
   });
 
@@ -57,7 +64,10 @@ describe("JoinTokenAttestation", () => {
         Effect.provide(
           Effect.gen(function* () {
             const attestation = yield* AttestationMethodTag;
-            const credential = yield* attestation.issueCredential({ orgId: "org-1", machineId: "machine-1" });
+            const credential = yield* attestation.issueCredential({
+              orgId: "org-1",
+              machineId: "machine-1",
+            });
             const tampered = `${credential.slice(0, -4)}AAAA`;
             return yield* attestation.verifyCredential(tampered);
           }),
@@ -73,7 +83,9 @@ describe("JoinTokenAttestation", () => {
 
   test("rejects a credential signed under a different secret", async () => {
     const credential = await run(
-      Effect.flatMap(AttestationMethodTag, (a) => a.issueCredential({ orgId: "org-1", machineId: "machine-1" })),
+      Effect.flatMap(AttestationMethodTag, (a) =>
+        a.issueCredential({ orgId: "org-1", machineId: "machine-1" }),
+      ),
     );
 
     const previous = process.env["JOIN_TOKEN_SECRET"];

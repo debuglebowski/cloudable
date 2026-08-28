@@ -95,7 +95,8 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
 
   const requiresReason = mode !== "data";
   const requiresAck = mode === "full";
-  const canProceed = (!requiresReason || reason.trim().length > 0) && (!requiresAck || acknowledged);
+  const canProceed =
+    (!requiresReason || reason.trim().length > 0) && (!requiresAck || acknowledged);
 
   function reset() {
     setMode("data");
@@ -164,9 +165,7 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
                   onClick={() => selectMode(option.mode)}
                   className={cn(
                     "flex flex-col gap-1.5 rounded-md border p-3 text-left transition-colors",
-                    selected
-                      ? "border-primary bg-accent"
-                      : "border-border hover:bg-muted/50",
+                    selected ? "border-primary bg-accent" : "border-border hover:bg-muted/50",
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -206,8 +205,8 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
               onChange={(e) => setAcknowledged(e.target.checked)}
             />
             <span>
-              I understand this reattaches secret bindings to the restored machine. Secret
-              bindings are never reattached silently.
+              I understand this reattaches secret bindings to the restored machine. Secret bindings
+              are never reattached silently.
             </span>
           </label>
         )}
@@ -216,8 +215,8 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
           <div className="flex flex-col gap-2 rounded-md border border-destructive bg-destructive/5 p-3 text-sm">
             <p className="font-medium text-destructive">Final confirmation — full restore</p>
             <p className="text-muted-foreground">
-              Restoring <strong>{snapshot.machineName}</strong> with data, configuration, and
-              secret bindings. This requires dual approval and cannot be undone silently.
+              Restoring <strong>{snapshot.machineName}</strong> with data, configuration, and secret
+              bindings. This requires dual approval and cannot be undone silently.
             </p>
             <p className="text-xs text-muted-foreground">Reason on file: "{reason.trim()}"</p>
           </div>

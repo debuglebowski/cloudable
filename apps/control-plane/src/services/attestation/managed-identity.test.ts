@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { AttestationError, type MachineIdentity } from "./AttestationMethod";
 import { makeManagedIdentityAttestation } from "./managed-identity";
 
@@ -48,7 +48,9 @@ describe("managed-identity attestation", () => {
     const { privateKey: attackerKey } = await generateKeyPair("RS256");
     const { publicKey: publishedKey } = await generateKeyPair("RS256");
     const publishedJwk = await exportJWK(publishedKey);
-    const server = serveJwks({ keys: [{ ...publishedJwk, kid: "published-key", alg: "RS256", use: "sig" }] });
+    const server = serveJwks({
+      keys: [{ ...publishedJwk, kid: "published-key", alg: "RS256", use: "sig" }],
+    });
 
     try {
       const token = await new SignJWT({ xms_mirid: RESOURCE_ID })
@@ -97,7 +99,9 @@ describe("managed-identity attestation", () => {
         resolveMachine: () => Effect.fail(new AttestationError({ reason: "should_not_be_called" })),
       });
 
-      const error = await Effect.runPromise(Effect.flip(method.verifyCredential(malformedCredential)));
+      const error = await Effect.runPromise(
+        Effect.flip(method.verifyCredential(malformedCredential)),
+      );
 
       expect(error).toBeInstanceOf(AttestationError);
       expect(JSON.stringify(error)).not.toContain(malformedCredential);

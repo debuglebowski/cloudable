@@ -8,7 +8,9 @@ export const people = pgTable("people", {
     .notNull()
     .references(() => orgs.id),
   email: text("email").notNull(),
-  source: text("source", { enum: ["manual", "scim"] }).notNull().default("manual"),
+  source: text("source", { enum: ["manual", "scim"] })
+    .notNull()
+    .default("manual"),
   active: boolean("active").notNull().default(true),
   role: text("role").notNull().default("member"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

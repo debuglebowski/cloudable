@@ -152,7 +152,6 @@ export function deriveEvents(
 
 // --- Below: machine lifecycle event builders (unit 2 — creation/ownership/setting-change) ---
 
-
 type ActorType = "person" | "system" | "agent" | "idp";
 
 interface ActorContext {

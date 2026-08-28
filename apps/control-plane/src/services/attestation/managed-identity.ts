@@ -1,10 +1,14 @@
+import { machines } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
-import { machines } from "@cloudable/schema";
+import { type JWTPayload, createRemoteJWKSet, jwtVerify } from "jose";
 import { config } from "../../config";
 import { Db } from "../../db/layer";
-import { type AttestationMethod, AttestationError, type MachineIdentity } from "./AttestationMethod";
+import {
+  AttestationError,
+  type AttestationMethod,
+  type MachineIdentity,
+} from "./AttestationMethod";
 
 /**
  * Azure claim carrying the managed identity's ARM resource id (`xms_mirid`)
@@ -103,8 +107,8 @@ export const makeManagedIdentityAttestation = (
  * by `registry.ts`, which composes this Effect (and the other methods') into
  * the single `AttestationRegistryTag` layer.
  */
-export const managedIdentityAttestationEffect: Effect.Effect<AttestationMethod, never, Db> = Effect.gen(
-  function* () {
+export const managedIdentityAttestationEffect: Effect.Effect<AttestationMethod, never, Db> =
+  Effect.gen(function* () {
     const db = yield* Db;
 
     const resolveMachine = (claims: JWTPayload): Effect.Effect<MachineIdentity, AttestationError> =>
@@ -133,5 +137,4 @@ export const managedIdentityAttestationEffect: Effect.Effect<AttestationMethod, 
       audience: config.managedIdentityAudience,
       resolveMachine,
     });
-  },
-);
+  });

@@ -1,7 +1,7 @@
+import type { ApiErrorBody } from "@cloudable/contracts";
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { Effect } from "effect";
 import { ulid } from "ulid";
-import type { ApiErrorBody } from "@cloudable/contracts";
 import { upgradeMachine } from "../../domain/upgrade/UpgradeService";
 import type { UpgradeError } from "../../domain/upgrade/types";
 import { Api } from "../api";
@@ -30,7 +30,9 @@ const errorBodyFor = (error: UpgradeError): ApiErrorBody => ({
     requestId: ulid(),
     // `exactOptionalPropertyTypes`: only include `details` when there's
     // something to put in it, rather than assigning it `undefined`.
-    ...(error.nextEligibleAt ? { details: { nextEligibleAt: error.nextEligibleAt.toISOString() } } : {}),
+    ...(error.nextEligibleAt
+      ? { details: { nextEligibleAt: error.nextEligibleAt.toISOString() } }
+      : {}),
   },
 });
 
@@ -47,7 +49,9 @@ export const UpgradeLive = HttpApiBuilder.group(Api, "upgrade", (handlers) =>
       // literal bodies, so `orDie` closes that channel rather than
       // threading it through the endpoint's (currently `never`) error type.
       Effect.catchTag("UpgradeError", (error) =>
-        HttpServerResponse.json(errorBodyFor(error), { status: statusFor(error) }).pipe(Effect.orDie),
+        HttpServerResponse.json(errorBodyFor(error), { status: statusFor(error) }).pipe(
+          Effect.orDie,
+        ),
       ),
       // Anything else (an EventBus write failure, an unexpected defect) is a
       // genuine infra fault, not a modeled outcome — collapse to a 500.

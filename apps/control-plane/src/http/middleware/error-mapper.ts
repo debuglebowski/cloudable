@@ -1,7 +1,7 @@
-import { HttpServerResponse } from "@effect/platform";
-import type { Effect } from "effect";
 import type { ApiErrorBody } from "@cloudable/contracts";
+import { HttpServerResponse } from "@effect/platform";
 import type { HttpBodyError } from "@effect/platform/HttpBody";
+import type { Effect } from "effect";
 
 /**
  * Placeholder error mapper: collapses any error to a 500 with a well-formed

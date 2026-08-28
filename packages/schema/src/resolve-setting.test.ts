@@ -1,9 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { resolveSetting, type SettingRow } from "./resolve-setting";
+import { type SettingRow, resolveSetting } from "./resolve-setting";
 
 const rows: ReadonlyArray<SettingRow<string>> = [
   { scopeType: "org", scopeId: "org-1", key: "region", value: "eu-west", source: "org" },
-  { scopeType: "machine", scopeId: "machine-1", key: "region", value: "us-east", source: "machine" },
+  {
+    scopeType: "machine",
+    scopeId: "machine-1",
+    key: "region",
+    value: "us-east",
+    source: "machine",
+  },
   { scopeType: "template", scopeId: "template-1", key: "size", value: "small", source: "template" },
 ];
 

@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 import * as crypto from "node:crypto";
 import { Effect, Layer, Ref } from "effect";
-import { type Signer, SignerError, SignerTag, type SignRequest } from "./Signer";
+import { type SignRequest, type Signer, SignerError, SignerTag } from "./Signer";
 
 interface KeyPair {
   readonly publicKey: crypto.KeyObject;

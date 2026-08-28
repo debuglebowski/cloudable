@@ -4,7 +4,11 @@
 // "No Terraform for provisioning machines — direct ARM SDK calls and a
 // reconciliation loop.").
 import { Effect, Layer } from "effect";
-import { ProvisioningError, type ProvisioningService, ProvisioningServiceTag } from "./ProvisioningService";
+import {
+  ProvisioningError,
+  type ProvisioningService,
+  ProvisioningServiceTag,
+} from "./ProvisioningService";
 
 const notImplemented = Effect.fail(
   new ProvisioningError({

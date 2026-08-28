@@ -1,11 +1,11 @@
+import type { AccessEvent } from "./domains/access";
+import type { AgentEvent } from "./domains/agent";
+import type { ApprovalEvent } from "./domains/approval";
+import type { CloudEvent } from "./domains/cloud";
+import type { MachineEvent } from "./domains/machine";
 import type { OrgEvent } from "./domains/org";
 import type { PersonEvent } from "./domains/person";
-import type { MachineEvent } from "./domains/machine";
-import type { AccessEvent } from "./domains/access";
-import type { ApprovalEvent } from "./domains/approval";
 import type { SnapshotEvent } from "./domains/snapshot";
-import type { CloudEvent } from "./domains/cloud";
-import type { AgentEvent } from "./domains/agent";
 
 export type DomainEvent =
   | OrgEvent

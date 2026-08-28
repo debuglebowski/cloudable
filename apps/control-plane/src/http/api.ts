@@ -1,17 +1,17 @@
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
-import { MachinesGroup } from "./routes/machines";
+import { EvidenceGroup } from "../evidence/api";
+import { AccessGroup } from "./routes/access";
 import { AgentProtocolGroup } from "./routes/agent-protocol";
 import { ApprovalsGroup } from "./routes/approvals";
-import { ComplianceGroup } from "./routes/compliance";
-import { EvidenceGroup } from "../evidence/api";
 import { ArchiveGroup } from "./routes/archive";
+import { ComplianceGroup } from "./routes/compliance";
+import { ConfigGroup } from "./routes/config";
+import { ElevationsGroup } from "./routes/elevations";
+import { FederationGroup } from "./routes/federation";
+import { MachinesGroup } from "./routes/machines";
 import { OffboardingGroup } from "./routes/offboarding";
 import { UpgradeGroup } from "./routes/upgrade";
-import { ElevationsGroup } from "./routes/elevations";
-import { ConfigGroup } from "./routes/config";
-import { FederationGroup } from "./routes/federation";
-import { AccessGroup } from "./routes/access";
 
 const HealthGroup = HttpApiGroup.make("health").add(
   HttpApiEndpoint.get("check", "/api/v1/health").addSuccess(

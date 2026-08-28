@@ -1,7 +1,7 @@
+import { machines, upgradeAttempts } from "@cloudable/schema";
 import { desc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { ulid } from "ulid";
-import { machines, upgradeAttempts } from "@cloudable/schema";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import { ProvisioningServiceTag } from "../../services/ProvisioningService";
@@ -9,7 +9,7 @@ import type { ArchiveDbError, MachineNotFoundError } from "../archive/errors";
 import { createSnapshot } from "../archive/snapshot";
 import { computeNextEligibleAt } from "./backoff";
 import { restoreSnapshot } from "./snapshot-port";
-import { driftViewUrl, UpgradeError, type UpgradeOutcome, type UpgradeResult } from "./types";
+import { UpgradeError, type UpgradeOutcome, type UpgradeResult, driftViewUrl } from "./types";
 
 /**
  * Transactional OS upgrade (spec §19 "Upgrades are transactional"; spec §7:
@@ -65,7 +65,9 @@ interface LatestAttempt {
   nextEligibleAt: Date;
 }
 
-const fetchLatestAttempt = (machineId: string): Effect.Effect<LatestAttempt | undefined, UpgradeError, Db> =>
+const fetchLatestAttempt = (
+  machineId: string,
+): Effect.Effect<LatestAttempt | undefined, UpgradeError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const rows = yield* Effect.tryPromise({
@@ -202,7 +204,9 @@ const recordAttempt = (
 
     const row = rows[0];
     if (!row) {
-      return yield* Effect.fail(new UpgradeError({ reason: "db_error", cause: "insert returned no row" }));
+      return yield* Effect.fail(
+        new UpgradeError({ reason: "db_error", cause: "insert returned no row" }),
+      );
     }
     return { id: row.id, nextEligibleAt };
   });
@@ -222,7 +226,9 @@ export const upgradeMachine = (
     });
     const machine = machineRows[0];
     if (!machine) {
-      return yield* Effect.fail(new UpgradeError({ reason: "machine_not_found", cause: machineId }));
+      return yield* Effect.fail(
+        new UpgradeError({ reason: "machine_not_found", cause: machineId }),
+      );
     }
 
     // KNOWN LIMITATION: this is a read of the latest attempt, not a lock —
@@ -279,7 +285,13 @@ export const upgradeMachine = (
 
     // --- 2. apply (reimage) -----------------------------------------------
     const reimageOutcome = yield* Effect.either(
-      provisioning.reimage({ machineId, orgId, region: machine.region, sizeSku: machine.sizeSku, targetImage }),
+      provisioning.reimage({
+        machineId,
+        orgId,
+        region: machine.region,
+        sizeSku: machine.sizeSku,
+        targetImage,
+      }),
     );
 
     // --- 3. verify declared state ------------------------------------------
@@ -352,10 +364,13 @@ export const upgradeMachine = (
       }),
     );
 
-    const outcome: UpgradeOutcome = restoreOutcome._tag === "Right" ? "rolled_back" : "rollback_failed";
+    const outcome: UpgradeOutcome =
+      restoreOutcome._tag === "Right" ? "rolled_back" : "rollback_failed";
     const restoredSnapshotId = restoreOutcome._tag === "Right" ? snapshot.id : null;
     const detail =
-      restoreOutcome._tag === "Right" ? failureReason : `${failureReason}; rollback also failed: ${restoreOutcome.left.reason}`;
+      restoreOutcome._tag === "Right"
+        ? failureReason
+        : `${failureReason}; rollback also failed: ${restoreOutcome.left.reason}`;
 
     const attempt = yield* recordAttempt({
       orgId,

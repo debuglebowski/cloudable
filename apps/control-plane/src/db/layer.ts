@@ -1,7 +1,7 @@
-import { Context, Effect, Layer } from "effect";
-import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
 import * as schema from "@cloudable/schema";
+import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
+import { Context, Effect, Layer } from "effect";
+import postgres from "postgres";
 import { config } from "../config";
 
 /** The Drizzle database handle, scoped to the process's Postgres connection. */
