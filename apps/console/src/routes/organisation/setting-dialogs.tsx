@@ -10,6 +10,7 @@ import {
   type RetentionLocation,
 } from "@/api/organisation";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 import { ValueEditDialog } from "./value-edit-dialog";
 
@@ -156,9 +157,7 @@ export function RetentionDaysDialog({
     >
       {(days, setDays) => (
         <div className="flex flex-col gap-1">
-          <label htmlFor={inputId} className="text-sm font-medium">
-            Retention days
-          </label>
+          <Label htmlFor={inputId}>Retention days</Label>
           <Input
             id={inputId}
             type="number"
@@ -173,10 +172,7 @@ export function RetentionDaysDialog({
   );
 }
 
-const RETENTION_LOCATIONS: RetentionLocation[] = [
-  "customer_controlled",
-  "cloudable_held_sweden_central",
-];
+const RETENTION_LOCATIONS: RetentionLocation[] = ["customer", "cloudable_sweden_central"];
 
 export interface RetentionLocationDialogProps {
   open: boolean;

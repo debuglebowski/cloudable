@@ -1,17 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
-import { delay } from "./integrations";
+import { apiGet, apiPatch } from "@/lib/api-client";
+import { CURRENT_ORG_ID } from "@/lib/current-org";
 
 /**
- * MOCK DATA LAYER — no backend yet.
- *
- * Mirrors the shape implied by `packages/schema/src/tables/org.ts`,
- * `packages/schema/src/tables/approval.ts` (`mode` enum) and
- * `docs/spec.md` §17 (Logging). `apps/control-plane` has no org-settings
- * HTTP routes in this bootstrap-only fork, so this is an in-memory stand-in.
- * Swap the `queryFn`/`mutationFn` bodies for real `apiGet`/`apiPost` calls
- * once a real endpoint exists — the hook shapes and query keys should not
- * need to change.
+ * Organisation settings — wired to the real `apps/control-plane/src/http/
+ * routes/organisation.ts`, an aggregate read/write over settings that
+ * already live in (and are governed by) several other real domains:
+ * `ApprovalService.ts` (approval mode per action type), `logging/
+ * settings.ts` (logging tier, retention location), `domain/archive/
+ * org-policy.ts` (default retention days). See that route file's own
+ * header comment for why one dedicated endpoint reads/writes all of them
+ * rather than the console making four separate calls.
  */
 
 /** Matches `approvals.actionType` in packages/schema/src/tables/approval.ts. */
@@ -27,8 +28,9 @@ export type ApprovalMode = "none" | "single" | "dual";
 /** See docs/spec.md §17. Tier 3 puts Cloudable on the plaintext path — stated, not hidden. */
 export type LoggingTier = 1 | 2 | 3;
 
-/** Single org-wide value — no per-machine variant. See docs/spec.md §17. */
-export type RetentionLocation = "customer_controlled" | "cloudable_held_sweden_central";
+/** Matches `logging/settings.ts`'s `RetentionLocation` — the real setting values,
+ * not the more verbose names this page's mock previously invented. */
+export type RetentionLocation = "customer" | "cloudable_sweden_central";
 
 export interface OrgSettings {
   id: string;
@@ -60,22 +62,8 @@ export const LOGGING_TIER_LABELS: Record<LoggingTier, string> = {
 };
 
 export const RETENTION_LOCATION_LABELS: Record<RetentionLocation, string> = {
-  customer_controlled: "Customer-controlled",
-  cloudable_held_sweden_central: "Cloudable-held — Sweden Central",
-};
-
-let mockOrgSettings: OrgSettings = {
-  id: "org-1",
-  name: "Normain",
-  approvalModes: {
-    snapshot_restore: "single",
-    break_glass: "dual",
-    admin_access: "dual",
-    offboarding: "single",
-  },
-  loggingTier: 2,
-  retentionDefaultDays: 30,
-  retentionLocation: "cloudable_held_sweden_central",
+  customer: "Customer-controlled",
+  cloudable_sweden_central: "Cloudable-held — Sweden Central",
 };
 
 export const organisationKeys = {
@@ -86,7 +74,7 @@ export const organisationKeys = {
 export function useOrgSettings() {
   return useQuery({
     queryKey: organisationKeys.settings(),
-    queryFn: () => delay(mockOrgSettings),
+    queryFn: () => apiGet<OrgSettings>(`/api/v1/organisation?orgId=${CURRENT_ORG_ID}`),
   });
 }
 
@@ -95,14 +83,21 @@ export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id">>;
 export function useUpdateOrgSettings() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: UpdateOrgSettingsInput) => {
-      mockOrgSettings = {
-        ...mockOrgSettings,
+    mutationFn: (input: UpdateOrgSettingsInput) =>
+      apiPatch<OrgSettings>("/api/v1/organisation", {
+        orgId: CURRENT_ORG_ID,
         ...input,
-        approvalModes: { ...mockOrgSettings.approvalModes, ...input.approvalModes },
-      };
-      return delay(mockOrgSettings);
+        // No auth/identity system yet — same gap as Approvals/Archive. Recorded as
+        // a system actor rather than inventing a fake person, since no real one
+        // is selected anywhere in this settings UI.
+        actor: { type: "system", id: "console" },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: organisationKeys.all });
+      toast.success("Organisation settings updated");
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: organisationKeys.all }),
+    onError: (error) => {
+      toast.error("Couldn't update settings", { description: error.message });
+    },
   });
 }
