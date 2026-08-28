@@ -10,12 +10,29 @@ export interface MachineDescriptor {
   orgId: string;
   region: string;
   sizeSku: string;
+  /**
+   * The declared package manifest to provision the machine with, as plain
+   * entry strings (e.g. "docker", "nodejs 20" — see `docs/spec.md` §6).
+   * Optional and provisional: real manifest resolution (org → template →
+   * machine inheritance, pinning) lands with unit 2/5. Absent means "no
+   * declared packages known yet".
+   */
+  packages?: ReadonlyArray<string>;
 }
 
 export interface MachineStatus {
   machineId: string;
   state: "provisioning" | "running" | "archived" | "missing" | "error";
   externalId: string | null;
+  /**
+   * Packages/software actually observed running on the machine as of this
+   * status report. Undefined when the provider can't report package-level
+   * detail. Reporting facts here must never itself decide what's out of
+   * policy — comparing this against desired state to find undeclared
+   * software is the reconciliation loop's job
+   * (`src/reconcile/reconcile-machine.ts`), not this port's.
+   */
+  reportedPackages?: ReadonlyArray<string>;
 }
 
 /**
