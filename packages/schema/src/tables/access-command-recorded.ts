@@ -14,5 +14,7 @@ export const accessCommandRecorded = pgTable(
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     correlationId: text("correlation_id").notNull(),
   },
-  (table) => [index("access_command_recorded_machine_occurred_idx").on(table.machineId, table.occurredAt)],
+  (table) => [
+    index("access_command_recorded_machine_occurred_idx").on(table.machineId, table.occurredAt),
+  ],
 );

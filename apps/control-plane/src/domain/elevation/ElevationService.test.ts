@@ -163,8 +163,7 @@ function makeFakeApprovalService() {
   const decide = (): Effect.Effect<ApprovalResult, ApprovalError> =>
     Effect.fail(new ApprovalError({ reason: "not_found" }));
 
-  const list = (): Effect.Effect<never, ApprovalError> =>
-    Effect.die("not used in this test");
+  const list = (): Effect.Effect<never, ApprovalError> => Effect.die("not used in this test");
 
   return {
     layer: Layer.succeed(ApprovalService, {

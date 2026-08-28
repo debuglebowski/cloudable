@@ -20,11 +20,20 @@ export function resolveSetting<T>(
   const byScope = (scopeType: SettingRow["scopeType"], scopeId: string) =>
     rows.find((r) => r.key === key && r.scopeType === scopeType && r.scopeId === scopeId);
   const machine = byScope("machine", chain.machineId);
-  if (machine) return { key, value: machine.value, source: machine.source, resolvedFromScopeId: chain.machineId };
+  if (machine)
+    return {
+      key,
+      value: machine.value,
+      source: machine.source,
+      resolvedFromScopeId: chain.machineId,
+    };
   if (chain.templateId) {
     const tpl = byScope("template", chain.templateId);
-    if (tpl) return { key, value: tpl.value, source: tpl.source, resolvedFromScopeId: chain.templateId };
+    if (tpl)
+      return { key, value: tpl.value, source: tpl.source, resolvedFromScopeId: chain.templateId };
   }
   const org = byScope("org", chain.orgId);
-  return org ? { key, value: org.value, source: org.source, resolvedFromScopeId: chain.orgId } : undefined;
+  return org
+    ? { key, value: org.value, source: org.source, resolvedFromScopeId: chain.orgId }
+    : undefined;
 }

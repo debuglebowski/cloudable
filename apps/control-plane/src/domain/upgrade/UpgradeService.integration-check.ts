@@ -1,12 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { events, machines, orgs, upgradeAttempts } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, ManagedRuntime } from "effect";
-import { events, machines, orgs, upgradeAttempts } from "@cloudable/schema";
 import { startTestDb } from "../../../test/testcontainers";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
-import { FAKE_VERIFICATION_FAILURE_IMAGE, FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { ProvisioningServiceTag } from "../../services/ProvisioningService";
+import {
+  FAKE_VERIFICATION_FAILURE_IMAGE,
+  FakeProvisioningServiceLive,
+} from "../../services/ProvisioningService.fake";
 import { isEligibleForUpgrade, upgradeMachine } from "./UpgradeService";
 import { UpgradeError } from "./types";
 
@@ -40,7 +43,10 @@ describe("UpgradeService", () => {
    * SAME runtime (that's what `ManagedRuntime` is for).
    */
   const setUpMachine = async (initialImage = "ubuntu-22.04") => {
-    const [org] = await testDb.db.insert(orgs).values({ name: `org-${crypto.randomUUID()}` }).returning();
+    const [org] = await testDb.db
+      .insert(orgs)
+      .values({ name: `org-${crypto.randomUUID()}` })
+      .returning();
     const [machine] = await testDb.db
       .insert(machines)
       .values({
@@ -66,7 +72,12 @@ describe("UpgradeService", () => {
     await runtime.runPromise(
       Effect.gen(function* () {
         const provisioning = yield* ProvisioningServiceTag;
-        yield* provisioning.create({ machineId: machine!.id, orgId: org!.id, region: "eastus", sizeSku: "Standard_B2s" });
+        yield* provisioning.create({
+          machineId: machine!.id,
+          orgId: org!.id,
+          region: "eastus",
+          sizeSku: "Standard_B2s",
+        });
       }),
     );
 
@@ -84,13 +95,20 @@ describe("UpgradeService", () => {
     expect(result.snapshotId).not.toBeNull();
     expect(result.driftUrl).toBeUndefined();
 
-    const [updated] = await testDb.db.select().from(machines).where(eq(machines.id, machine.id)).limit(1);
+    const [updated] = await testDb.db
+      .select()
+      .from(machines)
+      .where(eq(machines.id, machine.id))
+      .limit(1);
     expect(updated?.image).toBe("ubuntu-24.04");
 
     const emitted = await testDb.db.select().from(events).where(eq(events.machineId, machine.id));
     const reimaged = emitted.find((e) => e.type === "machine.reimaged");
     expect(reimaged).toBeDefined();
-    expect(reimaged?.payload).toEqual({ previousImage: "ubuntu-22.04", currentImage: "ubuntu-24.04" });
+    expect(reimaged?.payload).toEqual({
+      previousImage: "ubuntu-22.04",
+      currentImage: "ubuntu-24.04",
+    });
 
     expect(result.nextEligibleAt.getTime()).toBeGreaterThan(Date.now());
   });
@@ -98,7 +116,9 @@ describe("UpgradeService", () => {
   test("failure: verification failure rolls back — image is unchanged, no machine.reimaged, drift link present", async () => {
     const { machine, runtime } = await setUpMachine();
 
-    const result = await runtime.runPromise(upgradeMachine(machine.id, FAKE_VERIFICATION_FAILURE_IMAGE));
+    const result = await runtime.runPromise(
+      upgradeMachine(machine.id, FAKE_VERIFICATION_FAILURE_IMAGE),
+    );
 
     expect(result.outcome).toBe("rolled_back");
     expect(result.previousImage).toBe("ubuntu-22.04");
@@ -107,7 +127,11 @@ describe("UpgradeService", () => {
     expect(result.driftUrl).toBe(`/machines/${machine.id}#drift`);
     expect(result.failureReason).toBeDefined();
 
-    const [updated] = await testDb.db.select().from(machines).where(eq(machines.id, machine.id)).limit(1);
+    const [updated] = await testDb.db
+      .select()
+      .from(machines)
+      .where(eq(machines.id, machine.id))
+      .limit(1);
     expect(updated?.image).toBe("ubuntu-22.04");
 
     const emitted = await testDb.db.select().from(events).where(eq(events.machineId, machine.id));
@@ -116,7 +140,9 @@ describe("UpgradeService", () => {
 
   test("both success and failure equally advance nextEligibleAt", async () => {
     const successSetup = await setUpMachine();
-    const successResult = await successSetup.runtime.runPromise(upgradeMachine(successSetup.machine.id, "ubuntu-24.04"));
+    const successResult = await successSetup.runtime.runPromise(
+      upgradeMachine(successSetup.machine.id, "ubuntu-24.04"),
+    );
 
     const failureSetup = await setUpMachine();
     const failureResult = await failureSetup.runtime.runPromise(
@@ -131,7 +157,9 @@ describe("UpgradeService", () => {
     const { machine, runtime } = await setUpMachine();
 
     // First failing attempt.
-    const first = await runtime.runPromise(upgradeMachine(machine.id, FAKE_VERIFICATION_FAILURE_IMAGE));
+    const first = await runtime.runPromise(
+      upgradeMachine(machine.id, FAKE_VERIFICATION_FAILURE_IMAGE),
+    );
 
     // Force eligibility open again (bypassing the real clock) so we can
     // observe the SECOND consecutive failure's backoff without waiting.
@@ -140,7 +168,9 @@ describe("UpgradeService", () => {
       .set({ nextEligibleAt: new Date(Date.now() - 1000) })
       .where(eq(upgradeAttempts.machineId, machine.id));
 
-    const second = await runtime.runPromise(upgradeMachine(machine.id, FAKE_VERIFICATION_FAILURE_IMAGE));
+    const second = await runtime.runPromise(
+      upgradeMachine(machine.id, FAKE_VERIFICATION_FAILURE_IMAGE),
+    );
 
     const firstInterval = first.nextEligibleAt.getTime() - Date.now();
     const secondInterval = second.nextEligibleAt.getTime() - Date.now();
@@ -179,7 +209,9 @@ describe("UpgradeService", () => {
     const runtime = ManagedRuntime.make(layer);
     runtimes.push(runtime);
 
-    const error = await runtime.runPromise(Effect.flip(upgradeMachine(crypto.randomUUID(), "ubuntu-24.04")));
+    const error = await runtime.runPromise(
+      Effect.flip(upgradeMachine(crypto.randomUUID(), "ubuntu-24.04")),
+    );
     expect((error as UpgradeError).reason).toBe("machine_not_found");
   });
 });

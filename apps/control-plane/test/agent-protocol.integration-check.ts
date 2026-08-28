@@ -8,6 +8,8 @@ import { Db } from "../src/db/layer";
 import { ElevationRepoLive } from "../src/domain/elevation/ElevationRepo.live";
 import { ElevationService } from "../src/domain/elevation/ElevationService";
 import { MachineService } from "../src/domain/machine/MachineService";
+import { OffboardingLive } from "../src/domain/offboarding";
+import { EvidenceLive } from "../src/evidence/handler";
 import { Api } from "../src/http/api";
 import { AccessLive } from "../src/http/handlers/access";
 import { AgentProtocolLive } from "../src/http/handlers/agent-protocol";
@@ -21,18 +23,16 @@ import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
 import { UpgradeLive } from "../src/http/handlers/upgrade";
-import { EvidenceLive } from "../src/evidence/handler";
-import { OffboardingLive } from "../src/domain/offboarding";
 import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
-import { FederationService } from "../src/services/federation/FederationService";
 import { FakeProvisioningServiceLive } from "../src/services/ProvisioningService.fake";
 import { LocalSignerLive } from "../src/services/Signer.local";
-import { SshCaService } from "../src/services/ssh-ca/SshCaService";
 import { AgentSessionToken } from "../src/services/attestation/AgentSessionToken";
 import { AttestationRegistryTag } from "../src/services/attestation/AttestationMethod";
 import { joinTokenAttestation } from "../src/services/attestation/JoinTokenAttestation";
 import { MachineDirectory } from "../src/services/attestation/MachineDirectory";
+import { FederationService } from "../src/services/federation/FederationService";
+import { SshCaService } from "../src/services/ssh-ca/SshCaService";
 import { TunnelServer } from "../src/tunnel/server";
 import { startTestDb } from "./testcontainers";
 
@@ -190,7 +190,9 @@ describe("agent-protocol handlers (integration)", () => {
   });
 
   test("POST /attest with a valid join token succeeds and emits agent.attested", async () => {
-    const credential = await Effect.runPromise(joinTokenAttestation.issueCredential({ orgId, machineId }));
+    const credential = await Effect.runPromise(
+      joinTokenAttestation.issueCredential({ orgId, machineId }),
+    );
 
     const res = await handler(
       new Request("http://localhost/api/v1/agent/attest", {
@@ -216,7 +218,9 @@ describe("agent-protocol handlers (integration)", () => {
   });
 
   test("GET /poll returns 200 with an ETag, then 304 when it's replayed", async () => {
-    const credential = await Effect.runPromise(joinTokenAttestation.issueCredential({ orgId, machineId }));
+    const credential = await Effect.runPromise(
+      joinTokenAttestation.issueCredential({ orgId, machineId }),
+    );
     const attestRes = await handler(
       new Request("http://localhost/api/v1/agent/attest", {
         method: "POST",
@@ -244,7 +248,9 @@ describe("agent-protocol handlers (integration)", () => {
   });
 
   test("POST /report updates last_verified_at and emits machine.first_seen on first report", async () => {
-    const credential = await Effect.runPromise(joinTokenAttestation.issueCredential({ orgId, machineId }));
+    const credential = await Effect.runPromise(
+      joinTokenAttestation.issueCredential({ orgId, machineId }),
+    );
     const attestRes = await handler(
       new Request("http://localhost/api/v1/agent/attest", {
         method: "POST",

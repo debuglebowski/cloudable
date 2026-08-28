@@ -31,7 +31,5 @@ export const events = pgTable(
     schemaVersion: integer("schema_version").notNull(),
     payload: jsonb("payload").notNull(),
   },
-  (table) => [
-    index("events_org_type_occurred_idx").on(table.orgId, table.type, table.occurredAt),
-  ],
+  (table) => [index("events_org_type_occurred_idx").on(table.orgId, table.type, table.occurredAt)],
 );

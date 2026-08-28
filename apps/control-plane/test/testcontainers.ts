@@ -1,8 +1,8 @@
+import * as schema from "@cloudable/schema";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import * as schema from "@cloudable/schema";
 
 /**
  * Spins up a throwaway Postgres container, migrates it with

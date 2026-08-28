@@ -103,11 +103,7 @@ export function LegalHoldDialog({ snapshot }: LegalHoldDialogProps) {
             onClick={handleConfirm}
             disabled={reason.trim().length === 0 || setLegalHold.isPending}
           >
-            {setLegalHold.isPending
-              ? "Saving…"
-              : snapshot.legalHold
-                ? "Clear hold"
-                : "Place hold"}
+            {setLegalHold.isPending ? "Saving…" : snapshot.legalHold ? "Clear hold" : "Place hold"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -20,7 +20,10 @@ describe("AgentSessionToken", () => {
   test("mint sets expiresAt in the future by the configured TTL", async () => {
     const before = Date.now();
     const expiresAt = await run(
-      Effect.map(AgentSessionToken, (sessions) => sessions.mint({ orgId: "org-1", machineId: "machine-1" }).expiresAt),
+      Effect.map(
+        AgentSessionToken,
+        (sessions) => sessions.mint({ orgId: "org-1", machineId: "machine-1" }).expiresAt,
+      ),
     );
     expect(expiresAt.getTime()).toBeGreaterThan(before);
   });
@@ -39,13 +42,19 @@ describe("AgentSessionToken", () => {
 
   test("rejects a tampered signature", async () => {
     const token = await run(
-      Effect.map(AgentSessionToken, (sessions) => sessions.mint({ orgId: "org-1", machineId: "machine-1" }).token),
+      Effect.map(
+        AgentSessionToken,
+        (sessions) => sessions.mint({ orgId: "org-1", machineId: "machine-1" }).token,
+      ),
     );
     const tampered = `${token.slice(0, -4)}AAAA`;
 
     const error = await Effect.runPromise(
       Effect.flip(
-        Effect.provide(Effect.flatMap(AgentSessionToken, (sessions) => sessions.verify(tampered)), AgentSessionToken.Default),
+        Effect.provide(
+          Effect.flatMap(AgentSessionToken, (sessions) => sessions.verify(tampered)),
+          AgentSessionToken.Default,
+        ),
       ),
     );
     expect(error.reason).toBe("invalid_signature");

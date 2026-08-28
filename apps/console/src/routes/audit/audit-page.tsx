@@ -1,13 +1,15 @@
 import { useState } from "react";
 
 import {
-  type AuditTimelineEntry,
   AUDIT_EXPORT_URLS,
+  type AuditTimelineEntry,
   type ControlCheckEvidence,
   type FindingSeverity,
   useAuditTimeline,
   useControlEvidence,
 } from "@/api/audit";
+import { ControlStatus } from "@/components/control-status";
+import { Freshness } from "@/components/freshness";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,8 +21,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ControlStatus } from "@/components/control-status";
-import { Freshness } from "@/components/freshness";
 import { cn } from "@/lib/utils";
 
 type AuditView = "timeline" | "evidence";
@@ -48,7 +48,11 @@ export function AuditPage() {
         aria-label="Audit view"
         className="inline-flex w-fit items-center rounded-md border border-border bg-muted p-0.5"
       >
-        <ViewTab label="Timeline" active={view === "timeline"} onClick={() => setView("timeline")} />
+        <ViewTab
+          label="Timeline"
+          active={view === "timeline"}
+          onClick={() => setView("timeline")}
+        />
         <ViewTab
           label="Evidence export"
           active={view === "evidence"}
@@ -123,9 +127,7 @@ function TimelineView() {
                     <code className="font-mono text-xs text-muted-foreground">{entry.type}</code>
                   </TableCell>
                   <TableCell className="max-w-md">{entry.summary}</TableCell>
-                  <TableCell className="whitespace-nowrap text-sm">
-                    {formatActor(entry)}
-                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-sm">{formatActor(entry)}</TableCell>
                   <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
                     {entry.machineId ?? "—"}
                   </TableCell>
@@ -154,8 +156,13 @@ function daysOpen(iso: string): number {
 }
 
 /** Oldest (earliest) openSince among a non-empty findings list. */
-function oldestOpenSince(findings: [ControlCheckEvidence["findings"][number], ...ControlCheckEvidence["findings"]]): string {
-  return findings.reduce((oldest, f) => (f.openSince < oldest ? f.openSince : oldest), findings[0].openSince);
+function oldestOpenSince(
+  findings: [ControlCheckEvidence["findings"][number], ...ControlCheckEvidence["findings"]],
+): string {
+  return findings.reduce(
+    (oldest, f) => (f.openSince < oldest ? f.openSince : oldest),
+    findings[0].openSince,
+  );
 }
 
 function CheckRow({ check }: { check: ControlCheckEvidence }) {
@@ -171,14 +178,18 @@ function CheckRow({ check }: { check: ControlCheckEvidence }) {
         />
         {firstFinding && (
           <span className="text-xs text-muted-foreground">
-            {check.findings.length} open · oldest {daysOpen(oldestOpenSince([firstFinding, ...restFindings]))}d
+            {check.findings.length} open · oldest{" "}
+            {daysOpen(oldestOpenSince([firstFinding, ...restFindings]))}d
           </span>
         )}
       </div>
       <p className="text-xs text-muted-foreground">{check.detail}</p>
 
       {firstFinding && (
-        <ul id={`findings-${check.id}`} className="flex flex-col gap-1.5 rounded-md bg-muted/50 p-2.5">
+        <ul
+          id={`findings-${check.id}`}
+          className="flex flex-col gap-1.5 rounded-md bg-muted/50 p-2.5"
+        >
           {check.findings.map((finding) => (
             <li key={finding.id} className="flex items-center justify-between gap-3 text-xs">
               <span className="text-foreground">{finding.summary}</span>
@@ -201,8 +212,8 @@ function EvidenceExportView() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-prose text-sm text-muted-foreground">
-          Grouped by control, not by time (§19). Cloud-specific detail lives in the raw event
-          layer; this is the normalised projection an auditor reads.
+          Grouped by control, not by time (§19). Cloud-specific detail lives in the raw event layer;
+          this is the normalised projection an auditor reads.
         </p>
         <div className="flex shrink-0 gap-2">
           <Button asChild variant="outline" size="sm">

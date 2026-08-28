@@ -97,7 +97,8 @@ const MOCK_TIMELINE: AuditTimelineEntry[] = [
     actorType: "person",
     actorId: "priya@acme.com",
     machineId: "mach-0098",
-    summary: "priya@acme.com denied sam@acme.com's break-glass request for mach-0098: reason insufficient.",
+    summary:
+      "priya@acme.com denied sam@acme.com's break-glass request for mach-0098: reason insufficient.",
   },
   {
     id: "01J8Q3EK5N7Q9S1U3W5X7Z9B1D",
@@ -107,7 +108,8 @@ const MOCK_TIMELINE: AuditTimelineEntry[] = [
     actorType: "person",
     actorId: "sam@acme.com",
     machineId: "mach-0098",
-    summary: "sam@acme.com requested approval for an interactive shell break-glass session on mach-0098.",
+    summary:
+      "sam@acme.com requested approval for an interactive shell break-glass session on mach-0098.",
   },
   {
     id: "01J8Q3EF3R5T7V9X1Z3B5D7F9H",
@@ -135,7 +137,8 @@ const MOCK_TIMELINE: AuditTimelineEntry[] = [
     actorType: "person",
     actorId: "priya@acme.com",
     machineId: "mach-0231",
-    summary: "priya@acme.com offboarded mach-0231; certificate revocation and retention clock started.",
+    summary:
+      "priya@acme.com offboarded mach-0231; certificate revocation and retention clock started.",
   },
   {
     id: "01J8Q3E1Y8A0C2E4G6J8L0N2P4",
@@ -161,7 +164,8 @@ const MOCK_TIMELINE: AuditTimelineEntry[] = [
     occurredAt: "2026-08-26T22:40:00Z",
     recordedAt: "2026-08-26T22:40:05Z",
     actorType: "system",
-    summary: "Workload identity federation token minted for tenant acme (subject cloudable:tenant:acme).",
+    summary:
+      "Workload identity federation token minted for tenant acme (subject cloudable:tenant:acme).",
   },
   {
     id: "01J8Q3DKS2U4W6Y8A0C2E4G6I8",
@@ -190,7 +194,8 @@ const MOCK_TIMELINE: AuditTimelineEntry[] = [
     recordedAt: "2026-08-26T03:00:02Z",
     actorType: "system",
     machineId: "mach-0501",
-    summary: "Archived snapshot for mach-0501 passed its 30-day retention window; volume data purged.",
+    summary:
+      "Archived snapshot for mach-0501 passed its 30-day retention window; volume data purged.",
   },
   {
     id: "01J8Q3D5L6O8Q0S2U4W6Y8A0C2",
@@ -200,7 +205,8 @@ const MOCK_TIMELINE: AuditTimelineEntry[] = [
     actorType: "person",
     actorId: "priya@acme.com",
     machineId: "mach-0098",
-    summary: "priya@acme.com granted a 1h interactive shell elevation on mach-0098 to sam@acme.com.",
+    summary:
+      "priya@acme.com granted a 1h interactive shell elevation on mach-0098 to sam@acme.com.",
   },
 ];
 
@@ -290,7 +296,8 @@ const MOCK_EVIDENCE: ControlEvidenceGroup[] = [
         id: "check-retention-honoured",
         checkLabel: "Retention is honoured",
         status: "unknown",
-        detail: "Legal-hold exceptions are not yet distinguished from expired snapshots in this build — not covered.",
+        detail:
+          "Legal-hold exceptions are not yet distinguished from expired snapshots in this build — not covered.",
         findings: [],
       },
     ],

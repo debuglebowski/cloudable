@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import { AttestationRegistryTag, type AttestationMethod } from "./AttestationMethod";
+import { type AttestationMethod, AttestationRegistryTag } from "./AttestationMethod";
 import { joinTokenAttestation } from "./JoinTokenAttestation";
 import { managedIdentityAttestationEffect } from "./managed-identity";
 

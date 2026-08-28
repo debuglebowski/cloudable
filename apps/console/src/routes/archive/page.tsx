@@ -60,7 +60,9 @@ function RetentionStatus({ snapshot }: { snapshot: ArchivedSnapshot }) {
       <Badge variant={urgent ? "drift" : "ok"}>
         {remaining} day{remaining === 1 ? "" : "s"} left
       </Badge>
-      <span className="text-xs text-muted-foreground">expires {formatDate(snapshot.expiresAt)}</span>
+      <span className="text-xs text-muted-foreground">
+        expires {formatDate(snapshot.expiresAt)}
+      </span>
     </div>
   );
 }
@@ -82,8 +84,8 @@ export function ArchivePage() {
         <CardHeader>
           <CardTitle>Snapshots</CardTitle>
           <CardDescription>
-            Volume data plus machine desired state and configuration, captured on archive. Region
-            is inherited from the machine.
+            Volume data plus machine desired state and configuration, captured on archive. Region is
+            inherited from the machine.
           </CardDescription>
         </CardHeader>
         <CardContent>
