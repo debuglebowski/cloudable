@@ -62,7 +62,7 @@ type ApprovalRow = typeof approvals.$inferSelect;
 
 // No policy configured for an action type: require at least one approval —
 // the safe default for actions this object exists to gate.
-const DEFAULT_APPROVAL_MODE: ApprovalMode = "single";
+export const DEFAULT_APPROVAL_MODE: ApprovalMode = "single";
 
 const REQUIRED_APPROVALS_BY_MODE: Record<ApprovalMode, number> = {
   none: 0,
@@ -85,7 +85,10 @@ const NIL_MACHINE_ID = "00000000-0000-0000-0000-000000000000";
 // so a system actor is still identified, just by this fixed id rather than null).
 const SYSTEM_ACTOR_ID = "system";
 
-const settingKeyFor = (actionType: ApprovalActionType) => `approval_mode:${actionType}`;
+// Exported so other real domains reading/writing this same setting (the
+// Organisation page's approval-mode-per-action-type editor) use the exact
+// same key format rather than risking a second, drifting string template.
+export const settingKeyFor = (actionType: ApprovalActionType) => `approval_mode:${actionType}`;
 
 const resolveApprovalMode = (
   db: Context.Tag.Service<typeof Db>,
