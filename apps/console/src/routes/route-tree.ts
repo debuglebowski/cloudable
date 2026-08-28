@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute } from "@tanstack/react-router";
 
 import { approvalsRoute } from "./approvals/route";
+import { archiveRoute } from "./archive/route";
 import { auditRoute } from "./audit/route";
 import { IndexPage } from "./index";
 import { machinesDetailRoute, machinesListRoute } from "./machines/route";
@@ -43,4 +44,5 @@ export const routeTree = rootRoute.addChildren([
   peopleRoute,
   approvalsRoute,
   auditRoute,
+  archiveRoute,
 ]);
