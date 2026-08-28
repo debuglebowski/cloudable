@@ -15,6 +15,13 @@
       "when": 1787868314696,
       "tag": "0001_glamorous_sprite",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787868565468,
+      "tag": "0002_nosy_thunderball",
+      "breakpoints": true
     }
   ]
 }
