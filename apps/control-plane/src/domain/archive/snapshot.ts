@@ -79,6 +79,19 @@ export const createSnapshot = (
             containsConfig: true,
             retentionDays,
             expiresAt,
+            // A machine under legal hold (`machines.legalHold`) must produce a
+            // snapshot that is ALSO under hold — otherwise the hold is silently
+            // defeated the moment the machine is archived (invariant: "Retention
+            // is honoured" fails when a snapshot outlives its retention window
+            // without a legal hold — a snapshot that never inherited the hold in
+            // the first place would incorrectly pass that check). The machine
+            // itself carries no hold *reason*, only the boolean flag, so the
+            // inherited reason is a fixed, honest statement of provenance rather
+            // than fabricating detail the source of truth never had.
+            legalHold: machine.legalHold,
+            legalHoldReason: machine.legalHold
+              ? "Inherited from machine legal hold at archive time"
+              : null,
           })
           .returning(),
       "insert_snapshot",

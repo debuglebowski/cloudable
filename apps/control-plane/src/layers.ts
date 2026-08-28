@@ -2,6 +2,7 @@ import { Layer } from "effect";
 import { AppConfigLive } from "./config";
 import { DbLive } from "./db/layer";
 import { MachineService } from "./domain/machine/MachineService";
+import { OffboardingLive } from "./domain/offboarding";
 import { ApprovalService } from "./services/ApprovalService";
 import { AttestationRegistryLive } from "./services/attestation/registry";
 import { EventBus } from "./services/EventBus";
@@ -38,6 +39,12 @@ export const buildAppLive = (adapters: {
     MachineService.Default,
     AgentSessionToken.Default,
     MachineDirectory.Default,
+    // OffboardingLive's MachineArchiver delegates to the real archiveMachine,
+    // which needs ProvisioningServiceTag — not a fixed `.Default` sibling
+    // like EventBus, but the caller-chosen adapter, so it's provided
+    // explicitly here rather than relying on mergeAll's flat union (see the
+    // note below on why that doesn't resolve cross-layer dependencies).
+    OffboardingLive.pipe(Layer.provide(adapters.provisioning)),
     adapters.provisioning,
     adapters.signer,
     adapters.secrets,

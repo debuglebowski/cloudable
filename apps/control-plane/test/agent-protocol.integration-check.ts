@@ -12,7 +12,9 @@ import { ArchiveLive } from "../src/http/handlers/archive";
 import { ComplianceLive } from "../src/http/handlers/compliance";
 import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
+import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
 import { EvidenceLive } from "../src/evidence/handler";
+import { OffboardingLive } from "../src/domain/offboarding";
 import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
 import { FakeProvisioningServiceLive } from "../src/services/ProvisioningService.fake";
@@ -82,6 +84,7 @@ describe("agent-protocol handlers (integration)", () => {
           ComplianceLive,
           EvidenceLive,
           ArchiveLive,
+          OffboardingHttpLive,
         ),
       ),
     );
@@ -97,6 +100,7 @@ describe("agent-protocol handlers (integration)", () => {
       ApprovalService.Default,
       AttestationRegistryLive,
       FakeProvisioningServiceLive,
+      OffboardingLive.pipe(Layer.provide(FakeProvisioningServiceLive)),
     ).pipe(Layer.provide(Layer.succeed(Db, testDb.db)));
 
     const built = HttpApiBuilder.toWebHandler(
