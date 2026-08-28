@@ -5,6 +5,7 @@ import { config } from "./config";
 import { DbLive } from "./db/layer";
 import { EvidenceLive } from "./evidence/handler";
 import { Api } from "./http/api";
+import { AccessLive } from "./http/handlers/access";
 import { AgentProtocolLive } from "./http/handlers/agent-protocol";
 import { ApprovalsLive } from "./http/handlers/approvals";
 import { ArchiveLive } from "./http/handlers/archive";
@@ -52,6 +53,7 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       ArchiveLive,
       ConfigLive,
       FederationLive,
+      AccessLive,
     ),
   ),
   Layer.provide(DbLive),
