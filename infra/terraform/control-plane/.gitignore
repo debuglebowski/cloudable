@@ -1,0 +1,20 @@
+# Local Terraform working state — never commit provider binaries or state.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Real variable files contain the Postgres admin password and BETTER_AUTH_SECRET
+# (both marked sensitive in variables.tf, but Terraform can't stop a committed
+# file from leaking them). dummy.tfvars holds only placeholder values used for
+# `validate`/offline `plan` and is intentionally exempted.
+*.tfvars
+*.tfvars.json
+!dummy.tfvars
