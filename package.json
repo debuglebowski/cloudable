@@ -16,7 +16,7 @@
     "db:migrate": "bun --env-file=\"$PWD/.env\" run --cwd packages/schema db:migrate"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.5.10",
     "typescript": "^5.7.0"
   }
 }
