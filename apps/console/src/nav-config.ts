@@ -4,7 +4,4 @@ export interface NavItem {
   group: "Operate" | "Govern" | "Configure";
 }
 
-export const NAV_ITEMS: NavItem[] = [
-  // Feature units append their own entry here, one object literal per line, e.g.:
-  // { label: "Machines", to: "/machines", group: "Operate" },
-];
+export const NAV_ITEMS: NavItem[] = [{ label: "Machines", to: "/machines", group: "Operate" }];
