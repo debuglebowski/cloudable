@@ -7,6 +7,7 @@ import { EvidenceLive } from "./evidence/handler";
 import { Api } from "./http/api";
 import { AgentProtocolLive } from "./http/handlers/agent-protocol";
 import { ApprovalsLive } from "./http/handlers/approvals";
+import { ArchiveLive } from "./http/handlers/archive";
 import { ComplianceLive } from "./http/handlers/compliance";
 import { HealthLive } from "./http/handlers/health";
 import { MachinesLive } from "./http/handlers/machines";
@@ -26,11 +27,11 @@ const AppLive = buildAppLive({
   secrets: FakeSecretsProviderLive,
 });
 
-// `EvidenceLive`'s handler needs `Db`, which — unlike the services in
-// `buildAppLive` — isn't exposed outside that layer (it's consumed
-// internally there). Provide the same `DbLive` singleton again here;
-// Effect's layer graph memoizes it by reference, so this doesn't open a
-// second Postgres connection pool alongside the one inside `AppLive`.
+// `buildAppLive` deliberately keeps `Db` internal to the services it wires (see
+// layers.ts) rather than re-exposing it. Handler groups whose domain logic reads `Db`
+// directly (EvidenceLive, ArchiveLive) need it provided here too. `DbLive` is a
+// single scoped layer shared by reference, so this does not open a second
+// Postgres connection pool alongside the one inside `AppLive`.
 const ApiLive = HttpApiBuilder.api(Api).pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -40,6 +41,7 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       ApprovalsLive,
       ComplianceLive,
       EvidenceLive,
+      ArchiveLive,
     ),
   ),
   Layer.provide(DbLive),
