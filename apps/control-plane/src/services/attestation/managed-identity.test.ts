@@ -113,7 +113,9 @@ describe("managed-identity attestation", () => {
       audience: AUDIENCE,
       resolveMachine: () => Effect.fail(new AttestationError({ reason: "should_not_be_called" })),
     });
-    const error = await Effect.runPromise(Effect.flip(method.issueCredential()));
+    const error = await Effect.runPromise(
+      Effect.flip(method.issueCredential({ orgId: "org-1", machineId: "machine-1" })),
+    );
     expect(error.reason).toBe("not_supported");
   });
 });

@@ -4,13 +4,17 @@ import { HttpApiBuilder, HttpServer } from "@effect/platform";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { Db } from "../src/db/layer";
+import { MachineService } from "../src/domain/machine/MachineService";
 import { Api } from "../src/http/api";
 import { AgentProtocolLive } from "../src/http/handlers/agent-protocol";
+import { ApprovalsLive } from "../src/http/handlers/approvals";
 import { HealthLive } from "../src/http/handlers/health";
+import { MachinesLive } from "../src/http/handlers/machines";
+import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
 import { AgentSessionToken } from "../src/services/attestation/AgentSessionToken";
-import { AttestationMethodTag } from "../src/services/attestation/AttestationMethod";
-import { JoinTokenAttestationLive } from "../src/services/attestation/JoinTokenAttestation";
+import { AttestationRegistryTag } from "../src/services/attestation/AttestationMethod";
+import { joinTokenAttestation } from "../src/services/attestation/JoinTokenAttestation";
 import { MachineDirectory } from "../src/services/attestation/MachineDirectory";
 import { startTestDb } from "./testcontainers";
 
@@ -18,9 +22,11 @@ import { startTestDb } from "./testcontainers";
  * Exercises the real `POST /attest`/`GET /poll`/`POST /report` handlers end
  * to end against a throwaway Postgres (via testcontainers), through
  * `HttpApiBuilder.toWebHandler` — an in-process `Request -> Response`
- * function, so this needs no bound TCP port. `JoinTokenAttestationLive` and
- * `AgentSessionToken.Default` are the real implementations; nothing here is
- * faked except which Postgres instance `Db` points at.
+ * function, so this needs no bound TCP port. The registry is seeded with
+ * only the real `joinTokenAttestation` (managed-identity needs a live JWKS
+ * endpoint, out of scope for this check) and `AgentSessionToken.Default` is
+ * the real implementation; nothing here is faked except which Postgres
+ * instance `Db` points at.
  *
  * Lives under `test/` (not `src/`, like `testcontainers.ts` itself — see
  * that file's own comment) and is NOT named `*.test.ts`, so it isn't picked
@@ -63,13 +69,19 @@ describe("agent-protocol handlers (integration)", () => {
     machineId = machine.id;
 
     const ApiLive = HttpApiBuilder.api(Api).pipe(
-      Layer.provide(Layer.mergeAll(HealthLive, AgentProtocolLive)),
+      Layer.provide(Layer.mergeAll(HealthLive, AgentProtocolLive, MachinesLive, ApprovalsLive)),
+    );
+    const AttestationRegistryLive = Layer.succeed(
+      AttestationRegistryTag,
+      new Map([[joinTokenAttestation.method, joinTokenAttestation]]),
     );
     const AppLayer = Layer.mergeAll(
       EventBus.Default,
       MachineDirectory.Default,
       AgentSessionToken.Default,
-      JoinTokenAttestationLive,
+      MachineService.Default,
+      ApprovalService.Default,
+      AttestationRegistryLive,
     ).pipe(Layer.provide(Layer.succeed(Db, testDb.db)));
 
     const built = HttpApiBuilder.toWebHandler(
@@ -94,7 +106,7 @@ describe("agent-protocol handlers (integration)", () => {
       new Request("http://localhost/api/v1/agent/attest", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ credential: "this-is-not-a-real-token" }),
+        body: JSON.stringify({ method: "join_token", credential: "this-is-not-a-real-token" }),
       }),
     );
 
@@ -108,18 +120,13 @@ describe("agent-protocol handlers (integration)", () => {
   });
 
   test("POST /attest with a valid join token succeeds and emits agent.attested", async () => {
-    const credential = await Effect.runPromise(
-      Effect.provide(
-        Effect.flatMap(AttestationMethodTag, (a) => a.issueCredential({ orgId, machineId })),
-        JoinTokenAttestationLive,
-      ),
-    );
+    const credential = await Effect.runPromise(joinTokenAttestation.issueCredential({ orgId, machineId }));
 
     const res = await handler(
       new Request("http://localhost/api/v1/agent/attest", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ credential }),
+        body: JSON.stringify({ method: "join_token", credential }),
       }),
     );
 
@@ -139,17 +146,12 @@ describe("agent-protocol handlers (integration)", () => {
   });
 
   test("GET /poll returns 200 with an ETag, then 304 when it's replayed", async () => {
-    const credential = await Effect.runPromise(
-      Effect.provide(
-        Effect.flatMap(AttestationMethodTag, (a) => a.issueCredential({ orgId, machineId })),
-        JoinTokenAttestationLive,
-      ),
-    );
+    const credential = await Effect.runPromise(joinTokenAttestation.issueCredential({ orgId, machineId }));
     const attestRes = await handler(
       new Request("http://localhost/api/v1/agent/attest", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ credential }),
+        body: JSON.stringify({ method: "join_token", credential }),
       }),
     );
     const { bearerToken } = (await attestRes.json()) as { bearerToken: string };
@@ -172,17 +174,12 @@ describe("agent-protocol handlers (integration)", () => {
   });
 
   test("POST /report updates last_verified_at and emits machine.first_seen on first report", async () => {
-    const credential = await Effect.runPromise(
-      Effect.provide(
-        Effect.flatMap(AttestationMethodTag, (a) => a.issueCredential({ orgId, machineId })),
-        JoinTokenAttestationLive,
-      ),
-    );
+    const credential = await Effect.runPromise(joinTokenAttestation.issueCredential({ orgId, machineId }));
     const attestRes = await handler(
       new Request("http://localhost/api/v1/agent/attest", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ credential }),
+        body: JSON.stringify({ method: "join_token", credential }),
       }),
     );
     const { bearerToken } = (await attestRes.json()) as { bearerToken: string };

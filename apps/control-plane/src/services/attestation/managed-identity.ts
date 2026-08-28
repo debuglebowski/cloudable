@@ -87,7 +87,7 @@ export const makeManagedIdentityAttestation = (
     method: "managed_identity",
     // Azure issues managed-identity tokens via IMDS, not the control plane —
     // there is nothing for the control plane to mint here.
-    issueCredential: () =>
+    issueCredential: (_claim) =>
       Effect.fail(
         new AttestationError({
           reason: "not_supported",
