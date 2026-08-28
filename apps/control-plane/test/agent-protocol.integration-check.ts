@@ -12,6 +12,7 @@ import { AgentProtocolLive } from "../src/http/handlers/agent-protocol";
 import { ApprovalsLive } from "../src/http/handlers/approvals";
 import { ArchiveLive } from "../src/http/handlers/archive";
 import { ComplianceLive } from "../src/http/handlers/compliance";
+import { ConfigLive } from "../src/http/handlers/config";
 import { ElevationsLive } from "../src/http/handlers/elevations";
 import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
@@ -91,6 +92,7 @@ describe("agent-protocol handlers (integration)", () => {
           OffboardingHttpLive,
           UpgradeLive,
           ElevationsLive,
+          ConfigLive,
         ),
       ),
     );

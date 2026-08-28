@@ -9,6 +9,7 @@ import { AgentProtocolLive } from "./http/handlers/agent-protocol";
 import { ApprovalsLive } from "./http/handlers/approvals";
 import { ArchiveLive } from "./http/handlers/archive";
 import { ComplianceLive } from "./http/handlers/compliance";
+import { ConfigLive } from "./http/handlers/config";
 import { ElevationsLive } from "./http/handlers/elevations";
 import { HealthLive } from "./http/handlers/health";
 import { MachinesLive } from "./http/handlers/machines";
@@ -32,7 +33,7 @@ const AppLive = buildAppLive({
 
 // `buildAppLive` deliberately keeps `Db` internal to the services it wires (see
 // layers.ts) rather than re-exposing it. Handler groups whose domain logic reads `Db`
-// directly (EvidenceLive, ArchiveLive, UpgradeLive) need it provided here too. `DbLive`
+// directly (EvidenceLive, ArchiveLive, UpgradeLive, ConfigLive) need it provided here too. `DbLive`
 // is a single scoped layer shared by reference, so this does not open a second
 // Postgres connection pool alongside the one inside `AppLive`.
 const ApiLive = HttpApiBuilder.api(Api).pipe(
@@ -48,6 +49,7 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       ComplianceLive,
       EvidenceLive,
       ArchiveLive,
+      ConfigLive,
     ),
   ),
   Layer.provide(DbLive),

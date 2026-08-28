@@ -29,9 +29,11 @@ CREATE TABLE "machines" (
 	"state" text DEFAULT 'provisioning' NOT NULL,
 	"external_resource_id" text,
 	"last_verified_at" timestamp with time zone,
+	"last_reported_state" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"archived_at" timestamp with time zone,
-	"legal_hold" boolean DEFAULT false NOT NULL
+	"legal_hold" boolean DEFAULT false NOT NULL,
+	"desired_state_version" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "setting_values" (
@@ -42,6 +44,18 @@ CREATE TABLE "setting_values" (
 	"value" jsonb NOT NULL,
 	"source" "setting_source" NOT NULL,
 	"pinned" boolean DEFAULT false NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "machine_packages" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"scope_type" text NOT NULL,
+	"scope_id" uuid NOT NULL,
+	"package_name" text NOT NULL,
+	"version_pin" text,
+	"source" "setting_source" NOT NULL,
+	"pinned" boolean DEFAULT false NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -155,10 +169,54 @@ CREATE TABLE "elevations" (
 	"status" text DEFAULT 'requested' NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "compliance_finding_state" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"check_id" text NOT NULL,
+	"org_id" uuid NOT NULL,
+	"machine_id" uuid NOT NULL,
+	"detail_key" text NOT NULL,
+	"first_seen_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"last_seen_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "secret_bindings" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid NOT NULL,
+	"scope_type" text NOT NULL,
+	"scope_id" uuid NOT NULL,
+	"key" text NOT NULL,
+	"provider" text NOT NULL,
+	"pointer" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"removed_at" timestamp with time zone
+);
+--> statement-breakpoint
+CREATE TABLE "upgrade_attempts" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"org_id" uuid NOT NULL,
+	"machine_id" uuid NOT NULL,
+	"previous_image" text NOT NULL,
+	"target_image" text NOT NULL,
+	"outcome" text NOT NULL,
+	"pre_upgrade_snapshot_id" uuid,
+	"restored_snapshot_id" uuid,
+	"consecutive_failures" integer DEFAULT 0 NOT NULL,
+	"backoff_ms" integer NOT NULL,
+	"detail" text,
+	"attempted_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"next_eligible_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
 ALTER TABLE "people" ADD CONSTRAINT "people_org_id_orgs_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."orgs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "machines" ADD CONSTRAINT "machines_org_id_orgs_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."orgs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "machines" ADD CONSTRAINT "machines_owner_person_id_people_id_fk" FOREIGN KEY ("owner_person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "approval_decisions" ADD CONSTRAINT "approval_decisions_approval_id_approvals_id_fk" FOREIGN KEY ("approval_id") REFERENCES "public"."approvals"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "secret_bindings" ADD CONSTRAINT "secret_bindings_org_id_orgs_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."orgs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "upgrade_attempts" ADD CONSTRAINT "upgrade_attempts_machine_id_machines_id_fk" FOREIGN KEY ("machine_id") REFERENCES "public"."machines"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "setting_values_scope_key_idx" ON "setting_values" USING btree ("scope_type","scope_id","key");--> statement-breakpoint
+CREATE UNIQUE INDEX "machine_packages_scope_package_idx" ON "machine_packages" USING btree ("scope_type","scope_id","package_name");--> statement-breakpoint
 CREATE INDEX "events_org_type_occurred_idx" ON "events" USING btree ("org_id","type","occurred_at");--> statement-breakpoint
-CREATE INDEX "access_command_recorded_machine_occurred_idx" ON "access_command_recorded" USING btree ("machine_id","occurred_at");
+CREATE INDEX "access_command_recorded_machine_occurred_idx" ON "access_command_recorded" USING btree ("machine_id","occurred_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "compliance_finding_state_key_idx" ON "compliance_finding_state" USING btree ("check_id","org_id","machine_id","detail_key");--> statement-breakpoint
+CREATE INDEX "secret_bindings_scope_idx" ON "secret_bindings" USING btree ("scope_type","scope_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "secret_bindings_scope_key_idx" ON "secret_bindings" USING btree ("scope_type","scope_id","key") WHERE "secret_bindings"."removed_at" is null;
