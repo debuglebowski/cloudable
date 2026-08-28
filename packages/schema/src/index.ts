@@ -15,6 +15,7 @@ export * from "./tables/session";
 export * from "./tables/snapshot";
 export * from "./tables/integration";
 export * from "./tables/elevation";
+export * from "./tables/compliance-finding-state";
 
 export * from "./shared";
 export * from "./relations";
