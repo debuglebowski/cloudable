@@ -44,6 +44,21 @@ export const ElevationSchema = Schema.Struct({
   status: ElevationStatusSchema,
 });
 
+export const ListElevationsUrlParams = Schema.Struct({ orgId: Schema.String });
+export const ElevationListItemSchema = Schema.Struct({
+  id: Schema.String,
+  personId: Schema.String,
+  machineId: Schema.String,
+  machineName: Schema.String,
+  level: ElevationLevelSchema,
+  reason: Schema.String,
+  status: ElevationStatusSchema,
+  expiresAt: Schema.NullOr(Schema.String),
+});
+export const ListElevationsResponse = Schema.Struct({
+  elevations: Schema.Array(ElevationListItemSchema),
+});
+
 export function toWire(elevation: Elevation): typeof ElevationSchema.Type {
   return {
     id: elevation.id,
@@ -101,5 +116,11 @@ export const ElevationsGroup = HttpApiGroup.make("elevations")
       .addSuccess(ElevationSchema)
       .addError(ElevationNotFoundError, { status: 404 })
       .addError(ElevationStateError, { status: 409 })
+      .addError(ElevationInfraError, { status: 500 }),
+  )
+  .add(
+    HttpApiEndpoint.get("list", "/api/v1/elevations")
+      .setUrlParams(ListElevationsUrlParams)
+      .addSuccess(ListElevationsResponse)
       .addError(ElevationInfraError, { status: 500 }),
   );

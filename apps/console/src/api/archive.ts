@@ -1,4 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+
+import { apiGet, apiPost } from "@/lib/api-client";
+import { CURRENT_ORG_ID } from "@/lib/current-org";
+import { listMachines } from "./machines";
 
 /**
  * Restore modes, escalating approval (spec §14): data (default, no approval) <
@@ -38,118 +43,63 @@ export const archiveKeys = {
   snapshots: () => [...archiveKeys.all, "snapshots"] as const,
 };
 
-// Placeholder Azure managed-disk snapshot storage rate (Standard HDD, per GB-month). Swap for a
-// real control-plane cost figure once one exists — this is only ever surfaced as an estimate.
+// Placeholder Azure managed-disk snapshot storage rate (Standard HDD, per GB-month). The real
+// backend has its own cost-estimate endpoint (GET .../cost-estimate) with the same disclaimer
+// contract — not called here since the Archive page shows every snapshot's estimate inline in
+// one table render rather than one request per row; swap to that endpoint if per-row accuracy
+// (it accounts for containsData/containsConfig) matters more than one request per page load.
 const ESTIMATED_USD_PER_GB_MONTH = 0.05;
 
-function estimateProjectedCostUsd(sizeBytes: number, retentionDays: number): number {
-  const gb = sizeBytes / 1_000_000_000;
+function estimateProjectedCostUsd(sizeBytes: number | null, retentionDays: number): number {
+  const gb = (sizeBytes ?? 0) / 1_000_000_000;
   const months = retentionDays / 30;
   return Math.round(gb * ESTIMATED_USD_PER_GB_MONTH * months * 100) / 100;
 }
 
-function daysAgo(days: number): string {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+interface SnapshotViewWire {
+  id: string;
+  orgId: string;
+  machineId: string;
+  trigger: "archive" | "upgrade" | "manual";
+  region: string;
+  sizeBytes: number | null;
+  containsData: boolean;
+  containsConfig: boolean;
+  legalHold: boolean;
+  legalHoldReason: string | null;
+  retentionDays: number;
+  createdAt: string;
+  expiresAt: string;
+  expiredAt: string | null;
+  subState: "restorable" | "expired";
+  restoreUnavailableReason: string | null;
 }
 
-function daysFromNow(days: number): string {
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-}
-
-/**
- * GET /archive/snapshots does not exist yet — unit 15's archive/restore endpoints are an open,
- * not-yet-merged PR against `main`, and this branch forks from bootstrap-only `main`. Until that
- * lands, this hook serves realistic mock data covering both archived sub-states (spec §14):
- * restorable (with and without legal hold, one near its retention deadline) and expired (data
- * hard-deleted, record retained). Swap the `queryFn` body for
- * `apiGet<ArchivedSnapshot[]>("/archive/snapshots")` once the endpoint exists.
- */
-function loadMockSnapshots(): ArchivedSnapshot[] {
-  const rows: Array<Omit<ArchivedSnapshot, "projectedCostUsd">> = [
-    {
-      id: "snap-001",
-      machineId: "machine-001",
-      machineName: "web-prod-01",
-      region: "eastus",
-      sizeBytes: 42_000_000_000,
-      archivedAt: daysAgo(5),
-      retentionDays: 30,
-      expiresAt: daysFromNow(25),
-      expiredAt: null,
-      legalHold: false,
-      legalHoldReason: null,
-    },
-    {
-      id: "snap-002",
-      machineId: "machine-002",
-      machineName: "db-shadow-02",
-      region: "westeurope",
-      sizeBytes: 120_000_000_000,
-      archivedAt: daysAgo(27),
-      retentionDays: 30,
-      expiresAt: daysFromNow(3),
-      expiredAt: null,
-      legalHold: false,
-      legalHoldReason: null,
-    },
-    {
-      id: "snap-003",
-      machineId: "machine-003",
-      machineName: "finance-archive-03",
-      region: "eastus",
-      sizeBytes: 8_000_000_000,
-      archivedAt: daysAgo(40),
-      retentionDays: 30,
-      expiresAt: daysAgo(10),
-      expiredAt: null,
-      legalHold: true,
-      legalHoldReason: "Litigation hold — Doe v. Acme, case #4471 (Legal)",
-    },
-    {
-      id: "snap-004",
-      machineId: "machine-004",
-      machineName: "temp-build-04",
-      region: "westus2",
-      sizeBytes: 15_000_000_000,
-      archivedAt: daysAgo(65),
-      retentionDays: 30,
-      expiresAt: daysAgo(35),
-      expiredAt: daysAgo(35),
-      legalHold: false,
-      legalHoldReason: null,
-    },
-    {
-      id: "snap-005",
-      machineId: "machine-005",
-      machineName: "batch-worker-05",
-      region: "eastus",
-      sizeBytes: 5_000_000_000,
-      archivedAt: daysAgo(1),
-      retentionDays: 30,
-      expiresAt: daysFromNow(29),
-      expiredAt: null,
-      legalHold: false,
-      legalHoldReason: null,
-    },
-  ];
-
-  return rows.map((row) => ({
-    ...row,
-    projectedCostUsd: estimateProjectedCostUsd(row.sizeBytes, row.retentionDays),
+export async function fetchArchivedSnapshots(): Promise<ArchivedSnapshot[]> {
+  const [res, machines] = await Promise.all([
+    apiGet<{ items: SnapshotViewWire[] }>(`/api/v1/archive/snapshots?orgId=${CURRENT_ORG_ID}`),
+    listMachines(),
+  ]);
+  return res.items.map((s) => ({
+    id: s.id,
+    machineId: s.machineId,
+    machineName: machines.find((m) => m.id === s.machineId)?.name ?? s.machineId,
+    region: s.region,
+    sizeBytes: s.sizeBytes ?? 0,
+    archivedAt: s.createdAt,
+    retentionDays: s.retentionDays,
+    expiresAt: s.expiresAt,
+    expiredAt: s.expiredAt,
+    legalHold: s.legalHold,
+    legalHoldReason: s.legalHoldReason,
+    projectedCostUsd: estimateProjectedCostUsd(s.sizeBytes, s.retentionDays),
   }));
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function useArchivedSnapshots() {
   return useQuery({
     queryKey: archiveKeys.snapshots(),
-    queryFn: async () => {
-      await sleep(150);
-      return loadMockSnapshots();
-    },
+    queryFn: fetchArchivedSnapshots,
   });
 }
 
@@ -160,29 +110,22 @@ export interface SetLegalHoldInput {
   reason: string;
 }
 
-/**
- * Mocked until unit 15's endpoints land (see `useArchivedSnapshots`). Would be
- * `apiPost(`/archive/snapshots/${snapshotId}/legal-hold`, { legalHold, reason })`.
- */
 export function useSetLegalHold() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (input: SetLegalHoldInput) => {
-      await sleep(300);
+      const path = input.legalHold
+        ? `/api/v1/archive/snapshots/${input.snapshotId}/legal-hold`
+        : `/api/v1/archive/snapshots/${input.snapshotId}/legal-hold/clear`;
+      await apiPost(path, { reason: input.reason });
       return input;
     },
     onSuccess: (input) => {
-      queryClient.setQueryData<ArchivedSnapshot[]>(archiveKeys.snapshots(), (prev) =>
-        prev?.map((snapshot) =>
-          snapshot.id === input.snapshotId
-            ? {
-                ...snapshot,
-                legalHold: input.legalHold,
-                legalHoldReason: input.legalHold ? input.reason : null,
-              }
-            : snapshot,
-        ),
-      );
+      void queryClient.invalidateQueries({ queryKey: archiveKeys.snapshots() });
+      toast.success(input.legalHold ? "Legal hold placed" : "Legal hold removed");
+    },
+    onError: (error) => {
+      toast.error("Couldn't update legal hold", { description: error.message });
     },
   });
 }
@@ -190,20 +133,51 @@ export function useSetLegalHold() {
 export interface RestoreSnapshotInput {
   snapshotId: string;
   mode: RestoreMode;
-  /** Required for config/full; data-only carries no approval gate so no reason is collected. */
+  /** Every restore is backed by an approval object (spec §13: reason is "required free text,
+   * never optional") — the real endpoint rejects an empty reason regardless of mode. */
   reason: string;
+  /** No auth/identity system yet — same gap as the Approvals decide flow. */
+  requestedByPersonId: string;
 }
 
-/**
- * Mocked until unit 15's endpoints land (see `useArchivedSnapshots`). Would be
- * `apiPost(`/archive/snapshots/${snapshotId}/restore`, { mode, reason })`, gated server-side by
- * the approval mode in `RESTORE_MODE_APPROVAL` and writing `snapshot.restored`.
- */
+interface RestoreSnapshotResponseWire {
+  snapshotId: string;
+  targetMachineId: string;
+  mode: RestoreMode;
+  approvalId: string;
+  approvalStatus: "pending" | "approved" | "rejected" | "expired";
+  restored: boolean;
+}
+
 export function useRestoreSnapshot() {
   return useMutation({
     mutationFn: async (input: RestoreSnapshotInput) => {
-      await sleep(400);
-      return input;
+      const snapshots = await fetchArchivedSnapshots();
+      const snapshot = snapshots.find((s) => s.id === input.snapshotId);
+      if (!snapshot) throw new Error(`Snapshot ${input.snapshotId} not found`);
+      return apiPost<RestoreSnapshotResponseWire>(
+        `/api/v1/archive/snapshots/${input.snapshotId}/restore`,
+        {
+          mode: input.mode,
+          // Restoring onto the same machine record the snapshot was taken from — the
+          // dialog has no "restore to a different machine" picker, and that's the
+          // common case (spec §7: disposable machines, reimage-in-place).
+          targetMachineId: snapshot.machineId,
+          requestedByPersonId: input.requestedByPersonId,
+          reason: input.reason,
+          ...(input.mode === "full" ? { confirmSecretBindings: true } : {}),
+        },
+      );
+    },
+    onSuccess: (result) => {
+      toast.success(
+        result.approvalStatus === "approved" && result.restored
+          ? "Restore started"
+          : "Restore requested — awaiting approval",
+      );
+    },
+    onError: (error) => {
+      toast.error("Couldn't start restore", { description: error.message });
     },
   });
 }

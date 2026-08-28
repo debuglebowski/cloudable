@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import {
@@ -6,6 +7,7 @@ import {
   type Decision,
   useDecideApprovalMutation,
 } from "@/api/approvals";
+import { listPeople } from "@/api/people-directory";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,8 +20,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-// Stand-in for the signed-in approver's identity until console auth lands.
-const CURRENT_APPROVER_NAME = "You";
+// There is no auth/identity system yet (see docs/spec.md's known-gaps note),
+// so "who is deciding" has to be picked from the org's real people instead
+// of assumed to be "the signed-in user" — there is no such session concept
+// to read it from.
 
 export interface ApprovalDecisionDialogProps {
   approval: Approval;
@@ -41,16 +45,19 @@ export interface ApprovalDecisionDialogProps {
 export function ApprovalDecisionDialog({ approval, decision }: ApprovalDecisionDialogProps) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
+  const [deciderId, setDeciderId] = useState("");
   const mutation = useDecideApprovalMutation();
+  const peopleQuery = useQuery({ queryKey: ["people-directory"], queryFn: listPeople, enabled: open });
 
   const isDeny = decision === "rejected";
   const reasonTrimmed = reason.trim();
-  const canSubmit = isDeny ? reasonTrimmed.length > 0 : true;
+  const canSubmit = (isDeny ? reasonTrimmed.length > 0 : true) && deciderId.length > 0;
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (!next) {
       setReason("");
+      setDeciderId("");
       mutation.reset();
     }
   }
@@ -61,7 +68,7 @@ export function ApprovalDecisionDialog({ approval, decision }: ApprovalDecisionD
       {
         approvalId: approval.id,
         decision,
-        decidedByName: CURRENT_APPROVER_NAME,
+        decidedByPersonId: deciderId,
         ...(isDeny ? { reason: reasonTrimmed } : {}),
       },
       { onSuccess: () => handleOpenChange(false) },
@@ -87,6 +94,30 @@ export function ApprovalDecisionDialog({ approval, decision }: ApprovalDecisionD
         <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
           {approval.reason}
         </p>
+
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={`decider-${approval.id}`} className="text-sm font-medium">
+            Deciding as <span className="text-destructive">(required)</span>
+          </label>
+          <select
+            id={`decider-${approval.id}`}
+            value={deciderId}
+            onChange={(event) => setDeciderId(event.target.value)}
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            <option value="" disabled>
+              {peopleQuery.isLoading ? "Loading people…" : "Select a person"}
+            </option>
+            {peopleQuery.data?.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.email}
+              </option>
+            ))}
+          </select>
+          {peopleQuery.isError && (
+            <span className="text-xs text-destructive">Failed to load people.</span>
+          )}
+        </div>
 
         {isDeny && (
           <div className="flex flex-col gap-1.5">

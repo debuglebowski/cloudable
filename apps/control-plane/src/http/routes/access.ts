@@ -89,6 +89,18 @@ const MintSessionTokenResponse = Schema.Struct({
 
 const EndSessionRequest = Schema.Struct({ orgId: Schema.String, sessionId: Schema.String });
 
+const ListSessionsUrlParams = Schema.Struct({ orgId: Schema.String });
+const SessionSummary = Schema.Struct({
+  id: Schema.String,
+  machineId: Schema.String,
+  machineName: Schema.String,
+  personId: Schema.String,
+  method: Schema.Literal("terminal", "ssh"),
+  osUser: Schema.String,
+  startedAt: Schema.String,
+});
+const ListSessionsResponse = Schema.Struct({ sessions: Schema.Array(SessionSummary) });
+
 const Ok = Schema.Struct({ ok: Schema.Literal(true) });
 
 export const AccessGroup = HttpApiGroup.make("access")
@@ -135,5 +147,11 @@ export const AccessGroup = HttpApiGroup.make("access")
       .addError(NotFoundError, { status: 404 })
       .addError(DeniedError, { status: 403 })
       .addError(BadRequestError, { status: 400 })
+      .addError(InternalError, { status: 500 }),
+  )
+  .add(
+    HttpApiEndpoint.get("listSessions", "/api/v1/access/sessions")
+      .setUrlParams(ListSessionsUrlParams)
+      .addSuccess(ListSessionsResponse)
       .addError(InternalError, { status: 500 }),
   );

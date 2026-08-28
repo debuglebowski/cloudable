@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
 import { useState } from "react";
 
@@ -7,6 +8,7 @@ import {
   type RestoreMode,
   useRestoreSnapshot,
 } from "@/api/archive";
+import { listPeople } from "@/api/people-directory";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,18 +91,22 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<RestoreMode>("data");
   const [reason, setReason] = useState("");
+  const [requesterId, setRequesterId] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [confirmingFull, setConfirmingFull] = useState(false);
   const restore = useRestoreSnapshot();
+  const peopleQuery = useQuery({ queryKey: ["people-directory"], queryFn: listPeople, enabled: open });
 
-  const requiresReason = mode !== "data";
+  // Every restore is backed by an approval object regardless of mode (spec §13:
+  // reason is "required free text, never optional") — the real endpoint rejects
+  // an empty reason even for data-only restores, unlike the mock this replaced.
   const requiresAck = mode === "full";
-  const canProceed =
-    (!requiresReason || reason.trim().length > 0) && (!requiresAck || acknowledged);
+  const canProceed = reason.trim().length > 0 && requesterId.length > 0 && (!requiresAck || acknowledged);
 
   function reset() {
     setMode("data");
     setReason("");
+    setRequesterId("");
     setAcknowledged(false);
     setConfirmingFull(false);
   }
@@ -121,7 +127,7 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
       return;
     }
     restore.mutate(
-      { snapshotId: snapshot.id, mode, reason: reason.trim() },
+      { snapshotId: snapshot.id, mode, reason: reason.trim(), requestedByPersonId: requesterId },
       { onSuccess: () => handleOpenChange(false) },
     );
   }
@@ -182,7 +188,7 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
           </div>
         )}
 
-        {!confirmingFull && requiresReason && (
+        {!confirmingFull && (
           <div className="flex flex-col gap-1.5">
             <label htmlFor="restore-reason" className="text-sm font-medium">
               Reason <Badge variant="outline">required</Badge>
@@ -193,6 +199,29 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
               onChange={(e) => setReason(e.target.value)}
               placeholder="Why is this restore needed?"
             />
+          </div>
+        )}
+
+        {!confirmingFull && (
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="restore-requester" className="text-sm font-medium">
+              Requested by <Badge variant="outline">required</Badge>
+            </label>
+            <select
+              id="restore-requester"
+              value={requesterId}
+              onChange={(e) => setRequesterId(e.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="" disabled>
+                {peopleQuery.isLoading ? "Loading people…" : "Select a person"}
+              </option>
+              {peopleQuery.data?.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.email}
+                </option>
+              ))}
+            </select>
           </div>
         )}
 

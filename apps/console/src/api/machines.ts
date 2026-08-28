@@ -1,13 +1,6 @@
+import { ApiError, apiGet, apiPatch } from "@/lib/api-client";
+import { CURRENT_ORG_ID } from "@/lib/current-org";
 import type { ApiErrorBody } from "@cloudable/contracts";
-
-// TODO: replace Machine / ManifestEntry / DriftInfo below with real types from
-// `@cloudable/contracts/domains/machines` once unit 2 (control-plane backend) merges.
-// As of this branch, `packages/contracts/src/domains/machines.ts` is still just a
-// `.gitkeep` and `apps/control-plane/src/http/routes/machines.ts` does not exist yet,
-// so this whole module is a mock: field names are guessed from
-// `packages/schema/src/tables/machine.ts` / `.../tables/setting.ts`, and all data below
-// is realistic sample data, not a real API client. Swap `listMachines` etc. for
-// `apiGet`/`apiPost` calls once the real endpoints land.
 
 export type MachineState =
   | "provisioning"
@@ -40,7 +33,8 @@ export interface ManifestEntry {
   source: SettingLevel;
   /** Org-level pin: cannot be overridden below (spec §6). */
   pinned: boolean;
-  /** Count of machines that override this entry below the level shown here. */
+  /** Count of machines that override this entry below the level shown here. No real endpoint
+   * aggregates this yet (see `getMachineManifest` below) — always undefined against real data. */
   overriddenBelow?: number;
 }
 
@@ -52,6 +46,12 @@ export type DriftStatus = "clean" | "detected" | "unknown";
  * `status: "unknown"` is distinct from `"clean"` — it means no drift event data exists
  * yet for this machine (never reconciled, or currently stopped), not that drift was
  * checked and found absent.
+ *
+ * NO real endpoint surfaces this today: drift is an *event* (`machine.drift_detected`),
+ * not a queryable machine field, and no unit built a "current drift status per machine"
+ * projection over that event stream. `getMachineDrift` below always returns `unknown`
+ * against the real backend rather than fabricating a plausible-looking clean/detected
+ * value — flagged as a real gap, not silently faked.
  */
 export interface DriftInfo {
   status: DriftStatus;
@@ -79,196 +79,115 @@ export const machinesKeys = {
   drift: (machineId: string) => [...machinesKeys.all, "drift", machineId] as const,
 };
 
-function delay<T>(value: T, ms = 250): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+interface MachineSummaryWire {
+  id: string;
+  orgId: string;
+  templateId: string | null;
+  ownerPersonId: string | null;
+  name: string;
+  region: string;
+  sizeSku: string;
+  image: string;
+  state: MachineState;
+  lastVerifiedAt: string | null;
+  createdAt: string;
 }
 
-function minutesAgo(minutes: number): string {
-  return new Date(Date.now() - minutes * 60_000).toISOString();
+function toMachine(wire: MachineSummaryWire): Machine {
+  return {
+    id: wire.id,
+    orgId: wire.orgId,
+    templateId: wire.templateId,
+    ownerPersonId: wire.ownerPersonId,
+    name: wire.name,
+    region: wire.region,
+    sizeSku: wire.sizeSku,
+    image: wire.image,
+    state: wire.state,
+    lastVerifiedAt: wire.lastVerifiedAt,
+    // The real machines table has no archivedAt-on-summary field distinct from
+    // `state` — "archived" is the state itself. Kept as a separate field here only
+    // because the Machines/Archive pages both read it; derive it from state.
+    archivedAt: wire.state.startsWith("archived") ? wire.lastVerifiedAt : null,
+  };
 }
 
-const MOCK_ORG_ID = "org_9f2c1a";
+interface ResolvedManifestEntryWire {
+  packageName: string;
+  versionPin: string | null;
+  pinned: boolean;
+  source: SettingLevel;
+  resolvedFromScopeId: string;
+}
 
-const MOCK_MACHINES: Machine[] = [
-  {
-    id: "m_web01",
-    orgId: MOCK_ORG_ID,
-    templateId: "tpl_web",
-    ownerPersonId: "person_amelia",
-    name: "web-01",
-    region: "westeurope",
-    sizeSku: "Standard_B2s",
-    image: "ubuntu-22.04-lts",
-    state: "running",
-    lastVerifiedAt: minutesAgo(4),
-    archivedAt: null,
-  },
-  {
-    id: "m_ci03",
-    orgId: MOCK_ORG_ID,
-    templateId: "tpl_ci",
-    ownerPersonId: "person_devon",
-    name: "build-agent-03",
-    region: "eastus",
-    sizeSku: "Standard_D4s_v5",
-    image: "ubuntu-24.04-lts",
-    state: "error",
-    lastVerifiedAt: minutesAgo(130),
-    archivedAt: null,
-  },
-  {
-    id: "m_sandbox",
-    orgId: MOCK_ORG_ID,
-    templateId: null,
-    ownerPersonId: "person_priya",
-    name: "data-sandbox",
-    region: "westeurope",
-    sizeSku: "Standard_E8s_v5",
-    image: "ubuntu-22.04-lts",
-    state: "provisioning",
-    lastVerifiedAt: null,
-    archivedAt: null,
-  },
-  {
-    id: "m_legacy",
-    orgId: MOCK_ORG_ID,
-    templateId: "tpl_web",
-    ownerPersonId: null,
-    name: "legacy-app-node",
-    region: "northeurope",
-    sizeSku: "Standard_B4ms",
-    image: "debian-12",
-    state: "archived_restorable",
-    lastVerifiedAt: minutesAgo(60 * 24 * 40),
-    archivedAt: minutesAgo(60 * 24 * 30),
-  },
-  {
-    id: "m_kalledev",
-    orgId: MOCK_ORG_ID,
-    templateId: "tpl_dev",
-    ownerPersonId: "person_kalle",
-    name: "kalle-dev",
-    region: "westeurope",
-    sizeSku: "Standard_D2s_v5",
-    image: "ubuntu-24.04-lts",
-    state: "running",
-    lastVerifiedAt: minutesAgo(0.3),
-    archivedAt: null,
-  },
-  {
-    id: "m_cirunner02",
-    orgId: MOCK_ORG_ID,
-    templateId: "tpl_ci",
-    ownerPersonId: "person_devon",
-    name: "ci-runner-02",
-    region: "eastus",
-    sizeSku: "Standard_D4s_v5",
-    image: "ubuntu-24.04-lts",
-    state: "stopped",
-    lastVerifiedAt: minutesAgo(360),
-    archivedAt: null,
-  },
-];
+interface MachineDetailWire extends MachineSummaryWire {
+  manifest: ResolvedManifestEntryWire[];
+}
 
-// Mutated in place by `overrideManifestEntry` so a demo session sees its own edits
-// reflected back — this is a mock store standing in for the real backend, not app state.
-const MOCK_MANIFESTS: Record<string, ManifestEntry[]> = {
-  m_web01: [
-    { package: "docker", version: "24.0", source: "org", pinned: true },
-    { package: "nodejs", version: "20", source: "template", pinned: false, overriddenBelow: 2 },
-    { package: "nginx", version: null, source: "org", pinned: false },
-    { package: "ripgrep", version: "13.0", source: "machine", pinned: false },
-  ],
-  m_ci03: [
-    { package: "docker", version: "24.0", source: "org", pinned: true },
-    { package: "python3", version: "3.11", source: "template", pinned: false },
-  ],
-  m_sandbox: [
-    { package: "docker", version: "24.0", source: "org", pinned: true },
-    { package: "python3", version: null, source: "org", pinned: false },
-  ],
-  m_legacy: [
-    { package: "docker", version: "24.0", source: "org", pinned: true },
-    { package: "nodejs", version: "18", source: "machine", pinned: false },
-  ],
-  m_kalledev: [
-    { package: "docker", version: "24.0", source: "org", pinned: true },
-    { package: "nodejs", version: "20", source: "template", pinned: false, overriddenBelow: 2 },
-    { package: "git", version: null, source: "org", pinned: false },
-  ],
-  m_cirunner02: [
-    { package: "docker", version: "24.0", source: "org", pinned: true },
-    { package: "python3", version: "3.11", source: "template", pinned: false },
-  ],
-};
-
-const MOCK_DRIFT: Record<string, DriftInfo> = {
-  m_web01: { status: "clean" },
-  m_ci03: {
-    status: "detected",
-    undeclaredPackages: ["ripgrep", "htop"],
-    undeclaredPorts: [8081],
-    detectedAt: minutesAgo(130),
-  },
-  // Never verified yet — no reconcile pass has run, so there is no drift event to show.
-  m_sandbox: { status: "unknown" },
-  m_legacy: { status: "clean" },
-  m_kalledev: { status: "clean" },
-  // Stopped machines don't reconcile while stopped, so their drift status goes stale too.
-  m_cirunner02: { status: "unknown" },
-};
+function toManifestEntry(wire: ResolvedManifestEntryWire): ManifestEntry {
+  return {
+    package: wire.packageName,
+    version: wire.versionPin,
+    source: wire.source,
+    pinned: wire.pinned,
+  };
+}
 
 export async function listMachines(): Promise<Machine[]> {
-  return delay([...MOCK_MACHINES]);
+  const res = await apiGet<{ items: MachineSummaryWire[] }>(
+    `/api/v1/machines?orgId=${CURRENT_ORG_ID}`,
+  );
+  return res.items.map(toMachine);
 }
 
 export async function getMachine(machineId: string): Promise<Machine | undefined> {
-  return delay(MOCK_MACHINES.find((m) => m.id === machineId));
+  const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`).catch(
+    () => undefined,
+  );
+  return wire ? toMachine(wire) : undefined;
 }
 
 export async function getMachineManifest(machineId: string): Promise<ManifestEntry[]> {
-  return delay([...(MOCK_MANIFESTS[machineId] ?? [])]);
+  const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`);
+  return wire.manifest.map(toManifestEntry);
 }
 
-export async function getMachineDrift(machineId: string): Promise<DriftInfo> {
-  return delay(MOCK_DRIFT[machineId] ?? { status: "unknown" });
+export async function getMachineDrift(_machineId: string): Promise<DriftInfo> {
+  // See the DriftInfo doc comment above — there is no real endpoint for this yet.
+  return { status: "unknown" };
 }
 
 /**
- * Mock mutation standing in for `PATCH /machines/:id/manifest/:package`. Rejects pinned
- * entries with a 422-shaped `ApiErrorBody`, mirroring spec §6: "Attempting to override
- * [a pinned entry] is a validation error at edit time, not a silent no-op at reconcile."
+ * `PATCH /machines/:id/packages` — writes a machine-scoped override. Real
+ * server-side enforcement of spec §6's "pinned entries cannot be overridden
+ * below" (returns a 422 with `code: "pinned_entry_conflict"`), same
+ * validation-error-at-edit-time behavior the mock used to simulate by hand.
  */
 export async function overrideManifestEntry(
   machineId: string,
   packageName: string,
   nextVersion: string | null,
 ): Promise<ManifestEntry> {
-  await delay(undefined, 200);
-
-  const manifest = MOCK_MANIFESTS[machineId];
-  const entry = manifest?.find((e) => e.package === packageName);
-  if (!manifest || !entry) {
-    throw new ManifestOverrideError({
-      error: {
-        code: "NOT_FOUND",
-        message: `No manifest entry named "${packageName}" on this machine.`,
-        requestId: `mock_${Date.now()}`,
-      },
-    });
+  try {
+    const res = await apiPatch<{ manifest: ResolvedManifestEntryWire[] }>(
+      `/api/v1/machines/${machineId}/packages`,
+      { upserts: [{ packageName, versionPin: nextVersion }] },
+    );
+    const entry = res.manifest.find((e) => e.packageName === packageName);
+    if (!entry) {
+      throw new ManifestOverrideError({
+        error: {
+          code: "NOT_FOUND",
+          message: `No manifest entry named "${packageName}" on this machine.`,
+          requestId: crypto.randomUUID(),
+        },
+      });
+    }
+    return toManifestEntry(entry);
+  } catch (err) {
+    if (err instanceof ApiError && err.body) {
+      throw new ManifestOverrideError(err.body as ApiErrorBody);
+    }
+    throw err;
   }
-
-  if (entry.pinned && entry.source !== "machine") {
-    throw new ManifestOverrideError({
-      error: {
-        code: "SETTING_PINNED",
-        message: `"${packageName}" is pinned at the organisation level and cannot be overridden below org.`,
-        requestId: `mock_${Date.now()}`,
-      },
-    });
-  }
-
-  entry.version = nextVersion;
-  entry.source = "machine";
-  return { ...entry };
 }
