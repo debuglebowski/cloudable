@@ -9,6 +9,7 @@ import { ElevationRepoLive } from "../src/domain/elevation/ElevationRepo.live";
 import { ElevationService } from "../src/domain/elevation/ElevationService";
 import { MachineService } from "../src/domain/machine/MachineService";
 import { Api } from "../src/http/api";
+import { AccessLive } from "../src/http/handlers/access";
 import { AgentProtocolLive } from "../src/http/handlers/agent-protocol";
 import { ApprovalsLive } from "../src/http/handlers/approvals";
 import { ArchiveLive } from "../src/http/handlers/archive";
@@ -27,10 +28,12 @@ import { EventBus } from "../src/services/EventBus";
 import { FederationService } from "../src/services/federation/FederationService";
 import { FakeProvisioningServiceLive } from "../src/services/ProvisioningService.fake";
 import { LocalSignerLive } from "../src/services/Signer.local";
+import { SshCaService } from "../src/services/ssh-ca/SshCaService";
 import { AgentSessionToken } from "../src/services/attestation/AgentSessionToken";
 import { AttestationRegistryTag } from "../src/services/attestation/AttestationMethod";
 import { joinTokenAttestation } from "../src/services/attestation/JoinTokenAttestation";
 import { MachineDirectory } from "../src/services/attestation/MachineDirectory";
+import { TunnelServer } from "../src/tunnel/server";
 import { startTestDb } from "./testcontainers";
 
 /**
@@ -98,6 +101,7 @@ describe("agent-protocol handlers (integration)", () => {
           ElevationsLive,
           ConfigLive,
           FederationLive,
+          AccessLive,
         ),
       ),
     );
@@ -127,6 +131,20 @@ describe("agent-protocol handlers (integration)", () => {
       // explicitly — `Layer.mergeAll` doesn't wire siblings automatically.
       FederationService.Default.pipe(
         Layer.provide(Layer.mergeAll(EventBus.Default, LocalSignerLive)),
+      ),
+      // Same wiring as `layers.ts`: SshCaService/TunnelServer read
+      // Signer/EventBus/Db lazily when their methods are called, not only
+      // during construction, so `provideMerge` (not `provide`) is needed to
+      // keep those services present in the final ambient context.
+      SshCaService.Default.pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(EventBus.Default, LocalSignerLive, Layer.succeed(Db, testDb.db)),
+        ),
+      ),
+      TunnelServer.Default.pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(EventBus.Default, LocalSignerLive, Layer.succeed(Db, testDb.db)),
+        ),
       ),
     ).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Db, testDb.db), AppConfigLive)));
 

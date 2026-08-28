@@ -14,6 +14,8 @@ import type { SignerTag } from "./services/Signer";
 import { AgentSessionToken } from "./services/attestation/AgentSessionToken";
 import { MachineDirectory } from "./services/attestation/MachineDirectory";
 import { FederationService } from "./services/federation/FederationService";
+import { SshCaService } from "./services/ssh-ca/SshCaService";
+import { TunnelServer } from "./tunnel/server";
 
 /**
  * `attestation` is deliberately NOT one of the swappable `adapters` below,
@@ -30,9 +32,29 @@ export const buildAppLive = (adapters: {
   provisioning: Layer.Layer<ProvisioningServiceTag>;
   signer: Layer.Layer<SignerTag>;
   secrets: Layer.Layer<SecretsProviderTag>;
-}) =>
-  Layer.mergeAll(
-    EventBus.Default,
+}) => {
+  const infra = Layer.mergeAll(AppConfigLive, DbLive);
+  // EventBus is provided from `infra` up front (rather than left as a flat sibling below) so
+  // that SshCaService/TunnelServer — which both depend on it — can be wired against it
+  // explicitly: `Layer.mergeAll` does not resolve one merged layer's requirement against
+  // another merged layer's output, only against what an enclosing `Layer.provide` supplies.
+  //
+  // `provideMerge` (not `provide`) here: both services' methods return Effects that read
+  // `SignerTag`/`EventBus`/`Db` lazily *when called*, not only while the service's own
+  // constructor effect runs — `provide` would satisfy construction but then hide those
+  // services from the ambient context a caller later runs the method in, which fails at
+  // call time (`Service not found`) despite type-checking cleanly. `provideMerge` keeps
+  // them present in the final context alongside `SshCaService`/`TunnelServer` themselves.
+  const eventBus = EventBus.Default.pipe(Layer.provide(infra));
+  const sshCa = SshCaService.Default.pipe(
+    Layer.provideMerge(Layer.mergeAll(eventBus, adapters.signer, infra)),
+  );
+  const tunnel = TunnelServer.Default.pipe(
+    Layer.provideMerge(Layer.mergeAll(eventBus, adapters.signer, infra)),
+  );
+
+  return Layer.mergeAll(
+    eventBus,
     // `ApprovalService` writes its `approval.*` events in the same DB
     // transaction as the state change they evidence (see
     // `services/ApprovalService.ts`'s use of `EventBus.ts`'s exported
@@ -75,9 +97,6 @@ export const buildAppLive = (adapters: {
     // connection as the `DbLive` below (and `server.ts`'s own
     // `Layer.provide(DbLive)` on `ApiLive`) rather than opening a second pool.
     DbLive,
-    // Feature units: append your service's `.Default` (or Layer) to the Layer.mergeAll(...) argument
-    // list above. Never reorder existing entries.
-    //
     // FederationService depends on EventBus and Signer, both siblings in
     // this same list — `Layer.mergeAll` builds siblings independently, so a
     // service needing another sibling's output must wire it explicitly via
@@ -86,12 +105,19 @@ export const buildAppLive = (adapters: {
     FederationService.Default.pipe(
       Layer.provide(Layer.mergeAll(EventBus.Default, adapters.signer)),
     ),
+    sshCa,
+    tunnel,
+    // Feature units: append your service's `.Default` (or Layer) to the Layer.mergeAll(...) argument
+    // list above. Never reorder existing entries.
+    //
     // Note: `Layer.mergeAll` does not wire sibling layers' dependencies into
     // each other — it's a flat union, not a dependency graph (verified: a
     // service depending on another `Effect.Service` sibling here fails at
     // runtime with "Service not found: <Tag>" unless wired explicitly). If
     // your service depends on another `Effect.Service` (e.g. `EventBus`),
     // provide it explicitly: `YourService.Default.pipe(Layer.provide(TheDependency.Default))`
-    // — `Layer.provide`'s outer `DbLive` below still only has to appear once,
-    // thanks to Effect's default layer memoization.
-  ).pipe(Layer.provide(Layer.mergeAll(AppConfigLive, DbLive)));
+    // — `Layer.provide`'s outer `infra` below still only has to appear once,
+    // thanks to Effect's default layer memoization. `sshCa`/`tunnel` need
+    // `provideMerge` rather than this pattern — see the comment above.
+  ).pipe(Layer.provide(infra));
+};
