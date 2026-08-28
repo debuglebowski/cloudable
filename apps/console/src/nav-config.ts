@@ -4,4 +4,7 @@ export interface NavItem {
   group: "Operate" | "Govern" | "Configure";
 }
 
-export const NAV_ITEMS: NavItem[] = [{ label: "Machines", to: "/machines", group: "Operate" }];
+export const NAV_ITEMS: NavItem[] = [
+  { label: "Machines", to: "/machines", group: "Operate" },
+  { label: "People", to: "/people", group: "Operate" },
+];

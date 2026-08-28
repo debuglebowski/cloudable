@@ -2,6 +2,7 @@ import { createRootRoute, createRoute } from "@tanstack/react-router";
 
 import { IndexPage } from "./index";
 import { machinesDetailRoute, machinesListRoute } from "./machines/route";
+import { peopleRoute } from "./people/route";
 import { RootLayout } from "./root";
 
 export const rootRoute = createRootRoute({
@@ -31,4 +32,5 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   machinesListRoute,
   machinesDetailRoute,
+  peopleRoute,
 ]);
