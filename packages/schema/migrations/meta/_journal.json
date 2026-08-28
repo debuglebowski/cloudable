@@ -5,43 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1787861772634,
-      "tag": "0000_sloppy_skreet",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1787868314696,
-      "tag": "0001_glamorous_sprite",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1787868565468,
-      "tag": "0002_nosy_thunderball",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1787869588883,
-      "tag": "0003_new_stingray",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1787869737971,
-      "tag": "0004_many_old_lace",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1787869612468,
-      "tag": "0005_complete_wallop",
+      "when": 1787879874389,
+      "tag": "0000_nice_betty_ross",
       "breakpoints": true
     }
   ]

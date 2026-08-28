@@ -64,13 +64,15 @@ export const buildAppLive = (adapters: {
     adapters.signer,
     adapters.secrets,
     AttestationRegistryLive,
-    // Unit 18 (upgrade transactionality): `domain/upgrade/UpgradeService.ts`
-    // is plain functions (per the shared "Effect.Service/plain functions"
-    // convention), not a wrapping service, so it needs `Db` itself in its
-    // handler's context, not just through a service that holds one
-    // internally. Exposing `DbLive` here too is safe — Effect memoizes
-    // layers by reference, so this shares the same connection as the
-    // `DbLive` below rather than opening a second pool.
+    // Unit 18 (upgrade transactionality) and unit 19 (config editor):
+    // `domain/upgrade/UpgradeService.ts` and the config feature's
+    // `ConfigLive` are plain functions/handlers (per the shared
+    // "Effect.Service/plain functions" convention), not wrapping services,
+    // so they need `Db` itself in their handler's context, not just through
+    // a service that holds one internally. Exposing `DbLive` here too is
+    // safe — Effect memoizes layers by reference, so this shares the same
+    // connection as the `DbLive` below (and `server.ts`'s own
+    // `Layer.provide(DbLive)` on `ApiLive`) rather than opening a second pool.
     DbLive,
     // Feature units: append your service's `.Default` (or Layer) to the Layer.mergeAll(...) argument
     // list above. Never reorder existing entries.

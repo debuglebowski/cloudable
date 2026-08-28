@@ -1,4 +1,4 @@
-import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { orgs } from "./org";
 import { people } from "./person";
 
@@ -48,4 +48,10 @@ export const machines = pgTable("machines", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   legalHold: boolean("legal_hold").notNull().default(false),
+  // Bumped only by the confirmation-gated reconcile-trigger endpoint
+  // (config feature unit — see apps/control-plane/src/domain/config).
+  // Editing desired state (settingValues) never touches this column; it is
+  // the version/ETag the agent's poll endpoint compares against to decide
+  // there is new desired state to pull (docs/spec.md §16, §23).
+  desiredStateVersion: integer("desired_state_version").notNull().default(0),
 });
