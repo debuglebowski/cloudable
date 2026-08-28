@@ -1,6 +1,8 @@
 import { Layer } from "effect";
 import { AppConfigLive } from "./config";
 import { DbLive } from "./db/layer";
+import { ElevationRepoLive } from "./domain/elevation/ElevationRepo.live";
+import { ElevationService } from "./domain/elevation/ElevationService";
 import { MachineService } from "./domain/machine/MachineService";
 import { OffboardingLive } from "./domain/offboarding";
 import { ApprovalService } from "./services/ApprovalService";
@@ -45,6 +47,19 @@ export const buildAppLive = (adapters: {
     // explicitly here rather than relying on mergeAll's flat union (see the
     // note below on why that doesn't resolve cross-layer dependencies).
     OffboardingLive.pipe(Layer.provide(adapters.provisioning)),
+    // `Layer.mergeAll` does not let sibling entries satisfy each other's
+    // requirements — only the trailing `.pipe(Layer.provide(...))` below
+    // does that, and only for `AppConfigLive`/`DbLive`. ElevationService
+    // depends on EventBus, ApprovalService, and its own ElevationRepoLive
+    // (Postgres-backed persistence) too, so it provides them to itself
+    // here; Effect's layer memoization means this reuses the same
+    // `EventBus`/`ApprovalService` instances built for the bare entries
+    // above, rather than constructing separate ones.
+    ElevationService.Default.pipe(
+      Layer.provide(EventBus.Default),
+      Layer.provide(ApprovalService.Default),
+      Layer.provide(ElevationRepoLive),
+    ),
     adapters.provisioning,
     adapters.signer,
     adapters.secrets,
