@@ -6,6 +6,7 @@ import { ApprovalsGroup } from "./routes/approvals";
 import { ComplianceGroup } from "./routes/compliance";
 import { EvidenceGroup } from "../evidence/api";
 import { ArchiveGroup } from "./routes/archive";
+import { OffboardingGroup } from "./routes/offboarding";
 
 const HealthGroup = HttpApiGroup.make("health").add(
   HttpApiEndpoint.get("check", "/api/v1/health").addSuccess(
@@ -20,6 +21,7 @@ export class Api extends HttpApi.make("cloudable")
   .add(ApprovalsGroup)
   .add(ComplianceGroup)
   .add(EvidenceGroup)
-  .add(ArchiveGroup) {}
+  .add(ArchiveGroup)
+  .add(OffboardingGroup) {}
 // Feature units: import your HttpApiGroup and append `.add(YourGroup)` to the chain above.
 // Never reorder existing `.add()` calls.

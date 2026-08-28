@@ -11,6 +11,7 @@ import { ArchiveLive } from "./http/handlers/archive";
 import { ComplianceLive } from "./http/handlers/compliance";
 import { HealthLive } from "./http/handlers/health";
 import { MachinesLive } from "./http/handlers/machines";
+import { OffboardingHttpLive } from "./http/handlers/offboarding";
 import { buildAppLive } from "./layers";
 import { FakeProvisioningServiceLive } from "./services/ProvisioningService.fake";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
@@ -35,6 +36,7 @@ const AppLive = buildAppLive({
 const ApiLive = HttpApiBuilder.api(Api).pipe(
   Layer.provide(
     Layer.mergeAll(
+      OffboardingHttpLive,
       HealthLive,
       MachinesLive,
       AgentProtocolLive,
