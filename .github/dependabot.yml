@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Dependabot has a dedicated "bun" ecosystem (GA Feb 2025) that reads
+  # bun.lock directly — the "npm" ecosystem only recognizes
+  # package-lock.json/yarn.lock/pnpm-lock.yaml and would silently never
+  # open a version-bump PR against this repo (docs/spec.md §26 "Minimum
+  # internal compliance posture").
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
