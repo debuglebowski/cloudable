@@ -13,6 +13,7 @@ import type { SecretsProviderTag } from "./services/SecretsProvider";
 import type { SignerTag } from "./services/Signer";
 import { AgentSessionToken } from "./services/attestation/AgentSessionToken";
 import { MachineDirectory } from "./services/attestation/MachineDirectory";
+import { FederationService } from "./services/federation/FederationService";
 
 /**
  * `attestation` is deliberately NOT one of the swappable `adapters` below,
@@ -77,6 +78,14 @@ export const buildAppLive = (adapters: {
     // Feature units: append your service's `.Default` (or Layer) to the Layer.mergeAll(...) argument
     // list above. Never reorder existing entries.
     //
+    // FederationService depends on EventBus and Signer, both siblings in
+    // this same list — `Layer.mergeAll` builds siblings independently, so a
+    // service needing another sibling's output must wire it explicitly via
+    // `Layer.provide` like this (Db/AppConfig are already ambient for the
+    // whole list via the `.pipe(Layer.provide(...))` below).
+    FederationService.Default.pipe(
+      Layer.provide(Layer.mergeAll(EventBus.Default, adapters.signer)),
+    ),
     // Note: `Layer.mergeAll` does not wire sibling layers' dependencies into
     // each other — it's a flat union, not a dependency graph (verified: a
     // service depending on another `Effect.Service` sibling here fails at

@@ -3,6 +3,7 @@ import * as schema from "@cloudable/schema";
 import { HttpApiBuilder, HttpServer } from "@effect/platform";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
+import { AppConfigLive } from "../src/config";
 import { Db } from "../src/db/layer";
 import { ElevationRepoLive } from "../src/domain/elevation/ElevationRepo.live";
 import { ElevationService } from "../src/domain/elevation/ElevationService";
@@ -14,6 +15,7 @@ import { ArchiveLive } from "../src/http/handlers/archive";
 import { ComplianceLive } from "../src/http/handlers/compliance";
 import { ConfigLive } from "../src/http/handlers/config";
 import { ElevationsLive } from "../src/http/handlers/elevations";
+import { FederationLive } from "../src/http/handlers/federation";
 import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
@@ -22,7 +24,9 @@ import { EvidenceLive } from "../src/evidence/handler";
 import { OffboardingLive } from "../src/domain/offboarding";
 import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
+import { FederationService } from "../src/services/federation/FederationService";
 import { FakeProvisioningServiceLive } from "../src/services/ProvisioningService.fake";
+import { LocalSignerLive } from "../src/services/Signer.local";
 import { AgentSessionToken } from "../src/services/attestation/AgentSessionToken";
 import { AttestationRegistryTag } from "../src/services/attestation/AttestationMethod";
 import { joinTokenAttestation } from "../src/services/attestation/JoinTokenAttestation";
@@ -93,6 +97,7 @@ describe("agent-protocol handlers (integration)", () => {
           UpgradeLive,
           ElevationsLive,
           ConfigLive,
+          FederationLive,
         ),
       ),
     );
@@ -117,7 +122,13 @@ describe("agent-protocol handlers (integration)", () => {
         Layer.provide(ApprovalService.Default),
         Layer.provide(ElevationRepoLive),
       ),
-    ).pipe(Layer.provide(Layer.succeed(Db, testDb.db)));
+      // Same wiring as `layers.ts`: FederationService needs EventBus (a
+      // sibling here) and Signer/AppConfig (ambient below) provided
+      // explicitly — `Layer.mergeAll` doesn't wire siblings automatically.
+      FederationService.Default.pipe(
+        Layer.provide(Layer.mergeAll(EventBus.Default, LocalSignerLive)),
+      ),
+    ).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Db, testDb.db), AppConfigLive)));
 
     const built = HttpApiBuilder.toWebHandler(
       Layer.mergeAll(ApiLive, HttpServer.layerContext).pipe(
