@@ -1,6 +1,15 @@
+import { acquireManagedIdentityCredential } from "./attestation/managed-identity";
 import { config } from "./config";
 import { ApiError, apiRequest } from "./http-client";
 import type { AttestRequest, AttestResponse } from "./wire-types";
+
+/** Fetches this method's opaque credential, per `config.attestationMethod`. */
+async function acquireCredential(): Promise<string> {
+  if (config.attestationMethod === "managed_identity") {
+    return acquireManagedIdentityCredential();
+  }
+  return config.machineToken;
+}
 
 /**
  * A specific, typed failure for a credential the control plane rejected —
@@ -45,7 +54,10 @@ export function clearCachedSession(): void {
 export async function attest(): Promise<CachedSession> {
   if (cached && isFresh(cached)) return cached;
 
-  const request: AttestRequest = { credential: config.machineToken };
+  const request: AttestRequest = {
+    method: config.attestationMethod,
+    credential: await acquireCredential(),
+  };
   let response: AttestResponse;
   try {
     response = await apiRequest<AttestResponse>("/api/v1/agent/attest", {

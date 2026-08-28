@@ -7,6 +7,7 @@ export type { PageInfo, ApiErrorBody } from "@cloudable/contracts";
 // Agent protocol (attest/poll/report/wake) — see docs/agents.md and
 // apps/control-plane/src/http/routes/agent-protocol.ts for the server side.
 export type {
+  AttestMethod,
   AttestRequest,
   AttestResponse,
   DesiredStateResponse,

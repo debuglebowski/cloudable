@@ -27,7 +27,10 @@ export class AgentUnauthorized extends Schema.TaggedError<AgentUnauthorized>()(
   },
 ) {}
 
-const AttestPayload = Schema.Struct({ credential: Schema.String });
+const AttestPayload = Schema.Struct({
+  method: Schema.Literal("join_token", "managed_identity"),
+  credential: Schema.String,
+});
 
 const AttestSuccess = Schema.Struct({
   bearerToken: Schema.String,
