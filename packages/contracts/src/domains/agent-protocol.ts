@@ -8,8 +8,18 @@
  * runtime-validated Effect Schema counterparts of these shapes.
  */
 
-/** `POST /api/v1/agent/attest` request: an opaque credential (a join token, for now). */
+/**
+ * The attestation methods wired end-to-end (docs/spec.md §9). One
+ * `AttestationMethod` port implementation exists per value, dispatched by
+ * the control plane's `AttestationRegistryTag` (see
+ * `apps/control-plane/src/services/attestation/AttestationMethod.ts`) —
+ * both are live concurrently, not a fallback chain.
+ */
+export type AttestMethod = "join_token" | "managed_identity";
+
+/** `POST /api/v1/agent/attest` request: an opaque credential plus which method verifies it. */
 export interface AttestRequest {
+  readonly method: AttestMethod;
   readonly credential: string;
 }
 

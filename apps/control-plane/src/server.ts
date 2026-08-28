@@ -10,19 +10,16 @@ import { buildAppLive } from "./layers";
 import { FakeProvisioningServiceLive } from "./services/ProvisioningService.fake";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
 import { LocalSignerLive } from "./services/Signer.local";
-import { JoinTokenAttestationLive } from "./services/attestation/JoinTokenAttestation";
 
 // Fakes by default for this skeleton — a real deployment would swap the
 // Azure-backed adapters in here, but no Azure account exists in this build
-// (see Signer.azure.ts / ProvisioningService.azure.ts). Join-token
-// attestation is real (not a fake) — it's first-class per spec §9, not a
-// placeholder for an Azure managed-identity implementation unit 4 adds
-// alongside it.
+// (see Signer.azure.ts / ProvisioningService.azure.ts). Attestation isn't
+// swappable here at all — see `layers.ts`'s doc comment on `buildAppLive`
+// for why both join-token and managed-identity are always wired in live.
 const AppLive = buildAppLive({
   provisioning: FakeProvisioningServiceLive,
   signer: LocalSignerLive,
   secrets: FakeSecretsProviderLive,
-  attestation: JoinTokenAttestationLive,
 });
 
 const ApiLive = HttpApiBuilder.api(Api).pipe(

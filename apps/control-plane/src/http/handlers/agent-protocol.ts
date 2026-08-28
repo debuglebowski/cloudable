@@ -4,7 +4,7 @@ import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { Effect } from "effect";
 import { EventBus } from "../../services/EventBus";
 import { AgentSessionToken } from "../../services/attestation/AgentSessionToken";
-import { AttestationMethodTag } from "../../services/attestation/AttestationMethod";
+import { AttestationRegistryTag } from "../../services/attestation/AttestationMethod";
 import { MachineDirectory } from "../../services/attestation/MachineDirectory";
 import { Api } from "../api";
 import { AgentUnauthorized, AttestRejected } from "../routes/agent-protocol";
@@ -93,10 +93,15 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
   handlers
     .handle("attest", ({ payload }) =>
       Effect.gen(function* () {
-        const attestation = yield* AttestationMethodTag;
+        const registry = yield* AttestationRegistryTag;
         const sessions = yield* AgentSessionToken;
         const eventBus = yield* EventBus;
         const directory = yield* MachineDirectory;
+
+        const attestation = registry.get(payload.method);
+        if (!attestation) {
+          return yield* Effect.fail(new AttestRejected({ reason: "unsupported_method" }));
+        }
 
         const claim = yield* attestation.verifyCredential(payload.credential).pipe(
           Effect.catchAll((error) =>

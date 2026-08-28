@@ -63,7 +63,12 @@ const peekClaim = (body: string): { claimedOrgId?: string; claimedMachineId?: st
   return {};
 };
 
-export const JoinTokenAttestationLive = Layer.succeed(AttestationMethodTag, {
+/**
+ * The plain `AttestationMethod` object, for callers that need it directly
+ * rather than through a `Layer` — e.g. `registry.ts`'s
+ * `AttestationRegistryLive`, which composes every method into one map.
+ */
+export const joinTokenAttestation = {
   method: "join_token",
 
   issueCredential: (claim: CredentialClaim) =>
@@ -109,4 +114,7 @@ export const JoinTokenAttestationLive = Layer.succeed(AttestationMethodTag, {
 
       return { orgId: decoded.orgId, machineId: decoded.machineId } satisfies MachineIdentity;
     }),
-} satisfies AttestationMethod);
+} satisfies AttestationMethod;
+
+/** Kept for any caller that still wants join-token as the single, fixed `AttestationMethodTag` (e.g. a unit test). Production dispatch goes through `registry.ts`'s `AttestationRegistryLive` instead, which supports join-token AND managed-identity concurrently. */
+export const JoinTokenAttestationLive = Layer.succeed(AttestationMethodTag, joinTokenAttestation);
