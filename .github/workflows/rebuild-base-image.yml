@@ -5,7 +5,8 @@ name: Rebuild control-plane image
 # `apps/control-plane/Dockerfile` pins an exact `oven/bun` tag — this is
 # what re-pulls that tag's digest and rebuilds weekly, so a base-image CVE
 # disclosed in a week with zero control-plane commits still gets picked
-# up (and scanned — see trivy-scan.yml, invoked below).
+# up (and scanned — see trivy-scan.yml, invoked below against the exact
+# image just pushed, not a second build of the same source).
 #
 # Actions are pinned to full commit SHAs rather than tags — see the note
 # in trivy-scan.yml on why a mutable tag isn't good enough here.
@@ -26,14 +27,15 @@ on:
 permissions:
   contents: read
   packages: write
-  security-events: write
 
 jobs:
   build-and-push:
     name: Build + push control-plane image
     runs-on: ubuntu-latest
     outputs:
-      image: ${{ steps.image-name.outputs.image }}
+      # The exact, immutable reference the `scan` job below scans — never
+      # `:main`, which a concurrent run could repoint mid-scan.
+      scanned-ref: ${{ steps.image-name.outputs.image }}:run-${{ github.run_id }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -59,17 +61,30 @@ jobs:
           context: .
           file: apps/control-plane/Dockerfile
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           # No `latest` tag: the run id makes "what is running right now"
           # unambiguous (docs/spec.md §26 — the same reasoning as pinning
-          # deploy images by digest rather than by tag).
+          # deploy images by digest rather than by tag). The sha- tag plus
+          # the OCI revision label carry the producing commit on the image
+          # itself, for the same "what is running right now" traceability.
           tags: |
             ${{ steps.image-name.outputs.image }}:main
             ${{ steps.image-name.outputs.image }}:run-${{ github.run_id }}
+            ${{ steps.image-name.outputs.image }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
   scan:
-    name: Trivy scan of the freshly built image
+    name: Trivy scan of the freshly pushed image
     needs: build-and-push
     uses: ./.github/workflows/trivy-scan.yml
     permissions:
       contents: read
       security-events: write
+      packages: read # to `docker pull` the just-pushed image from GHCR
+    with:
+      # Scans the exact image just pushed above, not a second,
+      # never-published build of the same Dockerfile.
+      image-ref: ${{ needs.build-and-push.outputs.scanned-ref }}
