@@ -2,6 +2,7 @@ import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import { SshCaService } from "../../services/ssh-ca/SshCaService";
 import { TunnelServer } from "../../tunnel/server";
+import { listActiveSessionsByOrg } from "../../tunnel/queries";
 import { Api } from "../api";
 
 type AccessErrorBody =
@@ -104,5 +105,23 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
         yield* tunnel.endSession({ orgId: payload.orgId, sessionId: payload.sessionId });
         return { ok: true as const };
       }).pipe(Effect.catchTag("TunnelError", (e) => Effect.fail(asAccessError(e)))),
+    )
+    .handle("listSessions", ({ urlParams }) =>
+      listActiveSessionsByOrg(urlParams.orgId).pipe(
+        Effect.map((rows) => ({
+          sessions: rows.map((row) => ({
+            id: row.id,
+            machineId: row.machineId,
+            machineName: row.machineName,
+            personId: row.personId,
+            method: row.method,
+            osUser: row.osUser,
+            startedAt: row.startedAt.toISOString(),
+          })),
+        })),
+        Effect.catchTag("SessionQueryError", (e) =>
+          Effect.fail({ code: "internal_error" as const, message: e.reason }),
+        ),
+      ),
     ),
 );

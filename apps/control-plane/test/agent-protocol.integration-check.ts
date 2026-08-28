@@ -22,6 +22,7 @@ import { FederationLive } from "../src/http/handlers/federation";
 import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
+import { PeopleLive } from "../src/http/handlers/people";
 import { UpgradeLive } from "../src/http/handlers/upgrade";
 import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
@@ -102,6 +103,7 @@ describe("agent-protocol handlers (integration)", () => {
           ConfigLive,
           FederationLive,
           AccessLive,
+          PeopleLive,
         ),
       ),
     );

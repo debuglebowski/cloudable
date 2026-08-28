@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun run src/server.ts",
     "seed:agent": "bun run scripts/seed-agent.ts",
+    "seed:demo": "bun run scripts/seed-demo.ts",
     "build": "exit 0",
     "typecheck": "tsc -b",
     "test:unit": "bun test",

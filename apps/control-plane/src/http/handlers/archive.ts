@@ -9,6 +9,7 @@ import {
   fetchLatestSnapshotForMachine,
   fetchSnapshot,
   getSnapshotSubState,
+  listSnapshotsByOrg,
   restoreSnapshot,
   restoreUnavailableReason,
   setLegalHold,
@@ -86,6 +87,19 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
       clearLegalHold(path.snapshotId, payload.reason).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
         Effect.map(toLegalHoldResponse),
+      ),
+    )
+    .handle("listSnapshots", ({ urlParams }) =>
+      listSnapshotsByOrg({
+        orgId: urlParams.orgId,
+        cursor: urlParams.cursor,
+        limit: urlParams.limit,
+      }).pipe(
+        Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
+        Effect.map((result) => ({
+          items: result.items.map(toSnapshotView),
+          pageInfo: { nextCursor: result.nextCursor, hasMore: result.hasMore },
+        })),
       ),
     )
     .handle("getSnapshot", ({ path }) =>

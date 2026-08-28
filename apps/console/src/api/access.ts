@@ -1,21 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import type { BadgeProps } from "@/components/ui/badge";
+import { apiGet, apiPost } from "@/lib/api-client";
+import { CURRENT_ORG_ID } from "@/lib/current-org";
+import { listMachines } from "./machines";
+import { listPeople } from "./people-directory";
 
 // ---------------------------------------------------------------------------
 // Access domain: live SSH certificates, active sessions, elevation requests.
-//
-// Units 12 (SSH/tunnel) and 17 (elevation) own the control-plane routes this
-// page would read from (`packages/schema/src/tables/{certificate,session,
-// elevation}.ts`). Their PRs are open but not merged into the bootstrap-only
-// `main` this unit forked from, so there is no `/access/*` HTTP surface to
-// call yet. Everything below is realistic in-memory mock data (with
-// simulated network latency) behind the same query-hook shape a real
-// implementation would use — no `apiGet`/`apiPost` calls from
-// `@/lib/api-client` yet, since there's nothing to call. Wiring this up to
-// the real endpoints later means swapping the bodies of the
-// `fetch*`/`*Request` functions below for `apiGet`/`apiPost` calls; the
-// hooks, the query keys, and the page do not need to change.
+// Wired to the real `apps/control-plane/src/http/routes/{access,elevations}
+// .ts` (units 12/17), including two list endpoints
+// (`listSessions`/`elevations.list`) added specifically for this page — the
+// real backend originally had no way to list either beyond a single item by
+// id. `personName`/`machineScopeLabel` are resolved client-side against the
+// real `/api/v1/people` and machines lists; sessions/elevations already come
+// back with `machineName` pre-joined server-side.
 // ---------------------------------------------------------------------------
 
 export interface LiveCertificate {
@@ -70,194 +70,101 @@ export const ELEVATION_STATUS_BADGE_VARIANT: Record<
   denied: "destructive",
 };
 
-const now = Date.now();
-const hoursFromNow = (n: number): string => new Date(now + n * 60 * 60 * 1000).toISOString();
-
-interface CertificateRecord extends LiveCertificate {
+interface CertificateSummaryWire {
+  id: string;
+  personId: string;
+  machineScope: "all" | string[];
+  fingerprint: string;
+  issuedAt: string;
+  expiresAt: string;
   revokedAt: string | null;
   revokedReason: string | null;
 }
 
-interface SessionRecord extends ActiveSession {
-  endedAt: string | null;
+interface SessionSummaryWire {
+  id: string;
+  machineId: string;
+  machineName: string;
+  personId: string;
+  method: "terminal" | "ssh";
+  osUser: string;
+  startedAt: string;
 }
 
-function delay<T>(value: T, ms = 300): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
-}
-
-const mockCertificates: CertificateRecord[] = [
-  {
-    id: "cert-1",
-    personName: "Amara Chen",
-    machineScopeLabel: "All machines",
-    fingerprint: "SHA256:1f9c7a3e5d2b8064af11cd77e2f0938a6b4d5c1e9f0a3b7c2d8e4f6019a2b3c4",
-    issuedAt: hoursFromNow(-3),
-    expiresAt: hoursFromNow(5),
-    revokedAt: null,
-    revokedReason: null,
-  },
-  {
-    id: "cert-2",
-    personName: "Diego Ramirez",
-    machineScopeLabel: "web-01, web-02",
-    fingerprint: "SHA256:8e2d4f6a0c1b3d5e7f9a2c4e6081a3b5d7f9012c4e6a8b0d2f4610a3c5e7f901",
-    issuedAt: hoursFromNow(-1),
-    expiresAt: hoursFromNow(7),
-    revokedAt: null,
-    revokedReason: null,
-  },
-  {
-    id: "cert-3",
-    personName: "Priya Natarajan",
-    machineScopeLabel: "All machines",
-    fingerprint: "SHA256:4b6d8f0a2c4e6801a3c5e7f90b2d4f6180a2c4e6f8091b3d5f7a9c1e3f5a7b90",
-    issuedAt: hoursFromNow(-6),
-    expiresAt: hoursFromNow(2),
-    revokedAt: null,
-    revokedReason: null,
-  },
-  {
-    id: "cert-4",
-    personName: "Owen Fitzgerald",
-    machineScopeLabel: "db-primary",
-    fingerprint: "SHA256:7a9c1e3f5b7d9f01c3e5a7092c4e6f81a3c5e7091b3d5f7a9c1e3f5a7c9e1f30",
-    issuedAt: hoursFromNow(-0.5),
-    expiresAt: hoursFromNow(7.5),
-    revokedAt: null,
-    revokedReason: null,
-  },
-];
-
-const mockSessions: SessionRecord[] = [
-  {
-    id: "session-1",
-    personName: "Amara Chen",
-    machineName: "web-01",
-    method: "terminal",
-    osUser: "amara",
-    startedAt: hoursFromNow(-0.4),
-    endedAt: null,
-  },
-  {
-    id: "session-2",
-    personName: "Diego Ramirez",
-    machineName: "db-primary",
-    method: "ssh",
-    osUser: "diego",
-    startedAt: hoursFromNow(-0.07),
-    endedAt: null,
-  },
-  {
-    id: "session-3",
-    personName: "Priya Natarajan",
-    machineName: "web-02",
-    method: "terminal",
-    osUser: "priya",
-    startedAt: hoursFromNow(-1.2),
-    endedAt: null,
-  },
-];
-
-const mockElevations: ElevationGrant[] = [
-  {
-    id: "elevation-1",
-    personName: "Owen Fitzgerald",
-    machineName: "db-primary",
-    level: "shell",
-    reason: "Investigate slow query locking checkout table",
-    status: "granted",
-    expiresAt: hoursFromNow(0.7),
-  },
-  {
-    id: "elevation-2",
-    personName: "Diego Ramirez",
-    machineName: "web-01",
-    level: "file_recovery",
-    reason: "Restore nginx config from last night's snapshot",
-    status: "requested",
-    expiresAt: null,
-  },
-  {
-    id: "elevation-3",
-    personName: "Priya Natarajan",
-    machineName: "web-02",
-    level: "shell",
-    reason: "Attach a profiler to debug a suspected memory leak",
-    status: "requested",
-    expiresAt: null,
-  },
-  {
-    id: "elevation-4",
-    personName: "Amara Chen",
-    machineName: "db-primary",
-    level: "file_recovery",
-    reason: "Recover accidentally deleted audit logs",
-    status: "expired",
-    expiresAt: hoursFromNow(-0.2),
-  },
-  {
-    id: "elevation-5",
-    personName: "Diego Ramirez",
-    machineName: "db-primary",
-    level: "shell",
-    reason: "Read production secrets to reproduce a payments bug locally",
-    status: "denied",
-    expiresAt: null,
-  },
-];
-
-function isCertificateLive(cert: CertificateRecord): boolean {
-  return cert.revokedAt == null && new Date(cert.expiresAt).getTime() > Date.now();
+interface ElevationListItemWire {
+  id: string;
+  personId: string;
+  machineId: string;
+  machineName: string;
+  level: "file_recovery" | "shell";
+  reason: string;
+  status: "requested" | "granted" | "expired" | "denied";
+  expiresAt: string | null;
 }
 
 async function fetchLiveCertificates(): Promise<LiveCertificate[]> {
-  const live = mockCertificates
-    .filter(isCertificateLive)
-    .map(({ id, personName, machineScopeLabel, fingerprint, issuedAt, expiresAt }) => ({
-      id,
-      personName,
-      machineScopeLabel,
-      fingerprint,
-      issuedAt,
-      expiresAt,
+  const [res, people, machines] = await Promise.all([
+    apiGet<{ certificates: CertificateSummaryWire[] }>(
+      `/api/v1/access/certificates?orgId=${CURRENT_ORG_ID}`,
+    ),
+    listPeople(),
+    listMachines(),
+  ]);
+  const machineName = (id: string) => machines.find((m) => m.id === id)?.name ?? id;
+  return res.certificates
+    .filter((c) => c.revokedAt == null && new Date(c.expiresAt).getTime() > Date.now())
+    .map((c) => ({
+      id: c.id,
+      personName: people.find((p) => p.id === c.personId)?.email ?? c.personId,
+      machineScopeLabel:
+        c.machineScope === "all" ? "All machines" : c.machineScope.map(machineName).join(", "),
+      fingerprint: c.fingerprint,
+      issuedAt: c.issuedAt,
+      expiresAt: c.expiresAt,
     }));
-  return delay(live);
 }
 
 async function revokeCertificateRequest(id: string, reason: string): Promise<void> {
-  const cert = mockCertificates.find((candidate) => candidate.id === id);
-  if (cert) {
-    cert.revokedAt = new Date().toISOString();
-    cert.revokedReason = reason;
-  }
-  await delay(undefined, 300);
+  await apiPost("/api/v1/access/certificates/revoke", {
+    orgId: CURRENT_ORG_ID,
+    certificateId: id,
+    reason,
+  });
 }
 
 async function fetchActiveSessions(): Promise<ActiveSession[]> {
-  const active = mockSessions
-    .filter((session) => session.endedAt == null)
-    .map(({ id, personName, machineName, method, osUser, startedAt }) => ({
-      id,
-      personName,
-      machineName,
-      method,
-      osUser,
-      startedAt,
-    }));
-  return delay(active);
+  const [res, people] = await Promise.all([
+    apiGet<{ sessions: SessionSummaryWire[] }>(`/api/v1/access/sessions?orgId=${CURRENT_ORG_ID}`),
+    listPeople(),
+  ]);
+  return res.sessions.map((s) => ({
+    id: s.id,
+    personName: people.find((p) => p.id === s.personId)?.email ?? s.personId,
+    machineName: s.machineName,
+    method: s.method,
+    osUser: s.osUser,
+    startedAt: s.startedAt,
+  }));
 }
 
 async function terminateSessionRequest(id: string): Promise<void> {
-  const session = mockSessions.find((candidate) => candidate.id === id);
-  if (session) {
-    session.endedAt = new Date().toISOString();
-  }
-  await delay(undefined, 300);
+  await apiPost("/api/v1/access/sessions/end", { orgId: CURRENT_ORG_ID, sessionId: id });
 }
 
 async function fetchElevations(): Promise<ElevationGrant[]> {
-  return delay([...mockElevations]);
+  const [res, people] = await Promise.all([
+    apiGet<{ elevations: ElevationListItemWire[] }>(`/api/v1/elevations?orgId=${CURRENT_ORG_ID}`),
+    listPeople(),
+  ]);
+  return res.elevations.map((e) => ({
+    id: e.id,
+    personName: people.find((p) => p.id === e.personId)?.email ?? e.personId,
+    machineName: e.machineName,
+    level: e.level,
+    reason: e.reason,
+    status: e.status,
+    expiresAt: e.expiresAt,
+  }));
 }
 
 export const accessKeys = {
@@ -294,6 +201,10 @@ export function useRevokeCertificate() {
       revokeCertificateRequest(id, reason),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: accessKeys.certificates() });
+      toast.success("Certificate revoked");
+    },
+    onError: (error) => {
+      toast.error("Couldn't revoke certificate", { description: error.message });
     },
   });
 }
@@ -304,6 +215,10 @@ export function useTerminateSession() {
     mutationFn: (id: string) => terminateSessionRequest(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: accessKeys.sessions() });
+      toast.success("Session terminated");
+    },
+    onError: (error) => {
+      toast.error("Couldn't terminate session", { description: error.message });
     },
   });
 }

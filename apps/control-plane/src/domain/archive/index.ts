@@ -14,7 +14,10 @@ export {
   fetchMachine,
   fetchSnapshot,
   fetchLatestSnapshotForMachine,
+  listSnapshotsByOrg,
   type MachineRow,
+  type ListSnapshotsParams,
+  type ListSnapshotsResult,
 } from "./queries";
 export {
   createSnapshot,

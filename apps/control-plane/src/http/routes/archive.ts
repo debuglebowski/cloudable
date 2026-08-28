@@ -84,6 +84,20 @@ const CostEstimateSuccess = Schema.Struct({
   disclaimer: Schema.String,
 });
 
+const ListSnapshotsUrlParams = Schema.Struct({
+  orgId: Schema.String,
+  cursor: Schema.optional(Schema.String),
+  limit: Schema.optional(Schema.NumberFromString),
+});
+
+const ListSnapshotsResponse = Schema.Struct({
+  items: Schema.Array(SnapshotViewSuccess),
+  pageInfo: Schema.Struct({
+    nextCursor: Schema.NullOr(Schema.String),
+    hasMore: Schema.Boolean,
+  }),
+});
+
 export const ArchiveGroup = HttpApiGroup.make("archive")
   .add(
     HttpApiEndpoint.post("archiveMachine", "/api/v1/archive/machines/:machineId/archive")
@@ -119,6 +133,11 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .addSuccess(LegalHoldSuccess)
       .addError(SnapshotNotFoundError, { status: 404 })
       .addError(InvalidLegalHoldReasonError, { status: 400 }),
+  )
+  .add(
+    HttpApiEndpoint.get("listSnapshots", "/api/v1/archive/snapshots")
+      .setUrlParams(ListSnapshotsUrlParams)
+      .addSuccess(ListSnapshotsResponse),
   )
   .add(
     HttpApiEndpoint.get("getSnapshot", "/api/v1/archive/snapshots/:snapshotId")

@@ -61,8 +61,7 @@ const VIEW_TABS: Array<{ key: View; label: string }> = [
 
 function decisionSummary(approval: Approval): string {
   if (approval.mode === "none") return "—";
-  const approvedCount = approval.decisions.filter((d) => d.decision === "approved").length;
-  return `${approvedCount} / ${approval.requiredApprovals}`;
+  return `${approval.approvedCount} / ${approval.requiredApprovals}`;
 }
 
 export function ApprovalsPage() {
