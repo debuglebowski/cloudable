@@ -23,7 +23,7 @@ name: Trivy scan
 on:
   push:
     branches: [main]
-    paths:
+    paths: &image-paths
       - "apps/control-plane/**"
       - "packages/schema/**"
       - "packages/events/**"
@@ -31,19 +31,31 @@ on:
       - "bun.lock"
       - ".github/workflows/trivy-scan.yml"
   pull_request:
-    paths:
-      - "apps/control-plane/**"
-      - "packages/schema/**"
-      - "packages/events/**"
-      - "packages/contracts/**"
-      - "bun.lock"
-      - ".github/workflows/trivy-scan.yml"
-  workflow_call: {}
-  workflow_dispatch: {}
+    paths: *image-paths
+  workflow_call:
+    inputs:
+      image-ref:
+        description: >-
+          Pre-built, already-pushed image reference to scan (e.g. from
+          GHCR) instead of building fresh from source. Used by
+          rebuild-base-image.yml so the evidence produced here is for the
+          exact image that was published, not a second, never-published
+          build of the same Dockerfile.
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      image-ref:
+        description: "Optional pre-built image reference to scan instead of building from source."
+        required: false
+        type: string
 
 permissions:
   contents: read
   security-events: write
+  # Only exercised on the workflow_call/workflow_dispatch path with
+  # image-ref set, to `docker pull` the pre-built image from GHCR.
+  packages: read
 
 jobs:
   trivy:
@@ -53,17 +65,51 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Build control-plane image
-        run: docker build -t cloudable-control-plane:scan -f apps/control-plane/Dockerfile .
+      - name: Set up Docker Buildx
+        if: inputs.image-ref == ''
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build control-plane image (from source)
+        if: inputs.image-ref == ''
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: apps/control-plane/Dockerfile
+          push: false
+          load: true
+          tags: cloudable-control-plane:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Log in to GHCR (to pull a pre-built image)
+        if: inputs.image-ref != ''
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull pre-built image
+        if: inputs.image-ref != ''
+        run: docker pull "${{ inputs.image-ref }}"
+
+      - name: Resolve image reference to scan
+        id: image
+        run: |
+          if [ -n "${{ inputs.image-ref }}" ]; then
+            echo "ref=${{ inputs.image-ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=cloudable-control-plane:scan" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Scan date
         id: date
         run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
-      - name: Trivy scan (SARIF, for code scanning)
+      - name: Trivy scan (SARIF)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: cloudable-control-plane:scan
+          image-ref: ${{ steps.image.outputs.ref }}
           format: sarif
           output: trivy-results.sarif
           severity: "CRITICAL,HIGH,MEDIUM,LOW"
@@ -78,20 +124,13 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
-      - name: Trivy scan (human-readable table, for the dated artifact)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: cloudable-control-plane:scan
-          format: table
-          output: trivy-results-${{ steps.date.outputs.date }}.txt
-          severity: "CRITICAL,HIGH,MEDIUM,LOW"
-          exit-code: "0"
-
+      # Same SARIF file, archived under a dated artifact name — satisfies
+      # docs/spec.md's "workflow artifact or SARIF to code scanning"
+      # (both, from a single scan) without paying for Trivy's vulnerability
+      # DB pull and the image scan itself a second time.
       - name: Upload dated scan artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: trivy-scan-${{ steps.date.outputs.date }}
-          path: |
-            trivy-results.sarif
-            trivy-results-${{ steps.date.outputs.date }}.txt
+          path: trivy-results.sarif
           retention-days: 90

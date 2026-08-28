@@ -14,8 +14,15 @@
 # Keep EXPOSE 3000 and the CMD entrypoint stable: infra unit 27 references
 # this image from terraform/bicep once merged.
 
+# Single source of truth for the pinned base image tag — both stages
+# below build FROM the same version. Redeclared after each FROM because
+# ARG scope doesn't cross build stages; the top-level default is what
+# actually pins the version (bump it here, deliberately, per the note
+# above — not by overriding --build-arg at build time).
+ARG BUN_VERSION=1.3.6
+
 # ---- Builder ----------------------------------------------------------
-FROM oven/bun:1.3.6-slim AS builder
+FROM oven/bun:${BUN_VERSION}-slim AS builder
 WORKDIR /app
 
 # Install with every workspace's package.json present (Bun's workspace
@@ -58,17 +65,25 @@ RUN bun run --cwd packages/contracts build \
 RUN rm -rf node_modules && bun install --frozen-lockfile --production --ignore-scripts
 
 # ---- Runtime ------------------------------------------------------------
-FROM oven/bun:1.3.6-slim AS runtime
+ARG BUN_VERSION
+FROM oven/bun:${BUN_VERSION}-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/packages/contracts ./packages/contracts
-COPY --from=builder /app/packages/events ./packages/events
-COPY --from=builder /app/packages/schema ./packages/schema
-COPY --from=builder /app/apps/control-plane ./apps/control-plane
+# oven/bun's own image already ships a non-root `bun` user (uid/gid 1000).
+# Own the copied tree by it and drop root before CMD runs — this is a
+# network-facing server built on a dependency graph (Effect/drizzle/
+# postgres/better-auth) processing untrusted HTTP input; there's no
+# reason a bug in any of that should hand an attacker root in the
+# container.
+COPY --from=builder --chown=bun:bun /app/node_modules ./node_modules
+COPY --from=builder --chown=bun:bun /app/package.json ./package.json
+COPY --from=builder --chown=bun:bun /app/packages/contracts ./packages/contracts
+COPY --from=builder --chown=bun:bun /app/packages/events ./packages/events
+COPY --from=builder --chown=bun:bun /app/packages/schema ./packages/schema
+COPY --from=builder --chown=bun:bun /app/apps/control-plane ./apps/control-plane
 
+USER bun
 EXPOSE 3000
 
 WORKDIR /app/apps/control-plane
