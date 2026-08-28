@@ -12,6 +12,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Machines", to: "/machines", group: "Operate" },
   { label: "People", to: "/people", group: "Operate" },
   { label: "Approvals", to: "/approvals", group: "Govern" },
+  { label: "Audit", to: "/audit", group: "Govern" },
 ];
 
 /**
