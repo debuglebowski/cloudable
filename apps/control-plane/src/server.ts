@@ -5,6 +5,7 @@ import { config } from "./config";
 import { Api } from "./http/api";
 import { AgentProtocolLive } from "./http/handlers/agent-protocol";
 import { ApprovalsLive } from "./http/handlers/approvals";
+import { ComplianceLive } from "./http/handlers/compliance";
 import { HealthLive } from "./http/handlers/health";
 import { MachinesLive } from "./http/handlers/machines";
 import { buildAppLive } from "./layers";
@@ -24,7 +25,9 @@ const AppLive = buildAppLive({
 });
 
 const ApiLive = HttpApiBuilder.api(Api).pipe(
-  Layer.provide(Layer.mergeAll(HealthLive, MachinesLive, AgentProtocolLive, ApprovalsLive)),
+  Layer.provide(
+    Layer.mergeAll(HealthLive, MachinesLive, AgentProtocolLive, ApprovalsLive, ComplianceLive),
+  ),
 );
 
 const ServerLive = HttpApiBuilder.serve().pipe(

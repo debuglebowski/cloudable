@@ -1,6 +1,7 @@
 export * from "./common";
 export * from "./domains/machines";
 export * from "./domains/agent-protocol";
+export * from "./domains/compliance";
 
 export * from "./domains/approvals";
 

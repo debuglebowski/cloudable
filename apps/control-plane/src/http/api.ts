@@ -3,6 +3,7 @@ import { Schema } from "effect";
 import { MachinesGroup } from "./routes/machines";
 import { AgentProtocolGroup } from "./routes/agent-protocol";
 import { ApprovalsGroup } from "./routes/approvals";
+import { ComplianceGroup } from "./routes/compliance";
 
 const HealthGroup = HttpApiGroup.make("health").add(
   HttpApiEndpoint.get("check", "/api/v1/health").addSuccess(
@@ -14,6 +15,7 @@ export class Api extends HttpApi.make("cloudable")
   .add(HealthGroup)
   .add(MachinesGroup)
   .add(AgentProtocolGroup)
-  .add(ApprovalsGroup) {}
+  .add(ApprovalsGroup)
+  .add(ComplianceGroup) {}
 // Feature units: import your HttpApiGroup and append `.add(YourGroup)` to the chain above.
 // Never reorder existing `.add()` calls.

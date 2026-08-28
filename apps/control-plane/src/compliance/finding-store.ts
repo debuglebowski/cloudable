@@ -106,3 +106,7 @@ export const clearResolvedFindings = (
       catch: (cause) => new FindingStoreError({ reason: "delete_failed", cause }),
     });
   });
+
+/** Age in whole days between `firstSeen` and `now` (default: the current time), floored at 0. */
+export const ageInDays = (firstSeen: Date, now: Date = new Date()): number =>
+  Math.max(0, Math.floor((now.getTime() - firstSeen.getTime()) / 86_400_000));

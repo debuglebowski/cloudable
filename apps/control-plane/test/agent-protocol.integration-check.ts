@@ -8,6 +8,7 @@ import { MachineService } from "../src/domain/machine/MachineService";
 import { Api } from "../src/http/api";
 import { AgentProtocolLive } from "../src/http/handlers/agent-protocol";
 import { ApprovalsLive } from "../src/http/handlers/approvals";
+import { ComplianceLive } from "../src/http/handlers/compliance";
 import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
 import { ApprovalService } from "../src/services/ApprovalService";
@@ -69,7 +70,9 @@ describe("agent-protocol handlers (integration)", () => {
     machineId = machine.id;
 
     const ApiLive = HttpApiBuilder.api(Api).pipe(
-      Layer.provide(Layer.mergeAll(HealthLive, AgentProtocolLive, MachinesLive, ApprovalsLive)),
+      Layer.provide(
+        Layer.mergeAll(HealthLive, AgentProtocolLive, MachinesLive, ApprovalsLive, ComplianceLive),
+      ),
     );
     const AttestationRegistryLive = Layer.succeed(
       AttestationRegistryTag,
