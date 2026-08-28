@@ -8,12 +8,14 @@ import { MachineService } from "../src/domain/machine/MachineService";
 import { Api } from "../src/http/api";
 import { AgentProtocolLive } from "../src/http/handlers/agent-protocol";
 import { ApprovalsLive } from "../src/http/handlers/approvals";
+import { ArchiveLive } from "../src/http/handlers/archive";
 import { ComplianceLive } from "../src/http/handlers/compliance";
 import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
 import { EvidenceLive } from "../src/evidence/handler";
 import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
+import { FakeProvisioningServiceLive } from "../src/services/ProvisioningService.fake";
 import { AgentSessionToken } from "../src/services/attestation/AgentSessionToken";
 import { AttestationRegistryTag } from "../src/services/attestation/AttestationMethod";
 import { joinTokenAttestation } from "../src/services/attestation/JoinTokenAttestation";
@@ -79,6 +81,7 @@ describe("agent-protocol handlers (integration)", () => {
           ApprovalsLive,
           ComplianceLive,
           EvidenceLive,
+          ArchiveLive,
         ),
       ),
     );
@@ -93,6 +96,7 @@ describe("agent-protocol handlers (integration)", () => {
       MachineService.Default,
       ApprovalService.Default,
       AttestationRegistryLive,
+      FakeProvisioningServiceLive,
     ).pipe(Layer.provide(Layer.succeed(Db, testDb.db)));
 
     const built = HttpApiBuilder.toWebHandler(
