@@ -5,7 +5,9 @@ import { approvalsRoute } from "./approvals/route";
 import { archiveRoute } from "./archive/route";
 import { auditRoute } from "./audit/route";
 import { IndexPage } from "./index";
+import { integrationsRoute } from "./integrations/route";
 import { machinesDetailRoute, machinesListRoute } from "./machines/route";
+import { organisationRoute } from "./organisation/route";
 import { peopleRoute } from "./people/route";
 import { RootLayout } from "./root";
 
@@ -47,4 +49,6 @@ export const routeTree = rootRoute.addChildren([
   auditRoute,
   archiveRoute,
   accessRoute,
+  integrationsRoute,
+  organisationRoute,
 ]);
