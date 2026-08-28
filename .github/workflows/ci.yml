@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: typecheck, unit tests, integration tests, lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Bun workspace
+        uses: ./.github/actions/setup-bun
+
+      - name: Typecheck (all workspaces)
+        run: bun run --filter '*' typecheck
+
+      - name: Unit tests (all workspaces)
+        run: bun run --filter '*' test:unit
+
+      # Placeholder `exit 0` everywhere today, but docs/spec.md is explicit
+      # that some invariants (tenant-subject binding, signature validation)
+      # are only ever caught by a negative-path integration test — wiring
+      # this in now means a real test:integration script starts running in
+      # CI the moment it's written, not silently ignored.
+      - name: Integration tests (all workspaces)
+        run: bun run --filter '*' test:integration
+
+      - name: Lint (Biome)
+        run: bun run lint

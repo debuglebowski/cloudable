@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+.git
+.github
+.claude
+*.log
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.data
+docs
+infra

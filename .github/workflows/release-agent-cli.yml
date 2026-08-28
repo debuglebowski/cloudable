@@ -1,0 +1,86 @@
+name: Release agent & CLI
+
+# docs/spec.md §25 "Packaging and distribution": agent and CLI are
+# versioned binaries on GitHub releases (the control plane is a container
+# image instead — see trivy-scan.yml / rebuild-base-image.yml).
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build agent & cli binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Bun workspace
+        uses: ./.github/actions/setup-bun
+
+      # One install for both apps instead of a 2-way matrix — apps/agent
+      # and apps/cli share the same workspace root install.
+      - name: Build agent (linux-x64, linux-arm64)
+        run: |
+          bun run --cwd apps/agent build
+          bun run --cwd apps/agent build:arm64
+
+      - name: Build cli (linux-x64, linux-arm64)
+        run: |
+          bun run --cwd apps/cli build
+          bun run --cwd apps/cli build:arm64
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-binaries
+          path: |
+            apps/agent/dist/*
+            apps/cli/dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-binaries
+          path: dist
+
+      # upload-artifact keeps the apps/{agent,cli}/dist/* directory
+      # structure below the common `apps/` ancestor, so flatten to bare
+      # filenames before handing them to `gh release create`, which
+      # expects individual file assets, not directories.
+      - name: Flatten binaries into one release directory
+        run: |
+          mkdir -p release
+          find dist -type f -exec cp {} release/ \;
+          ls -la release
+
+      - name: Create release and upload binaries
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Never interpolate ${{ github.ref_name }} directly into a `run:`
+          # shell block — git tag names are only lightly restricted (no
+          # control chars/spaces/`~^:?*[`/`..`/`@{`, but `$()`, backticks,
+          # `;`, `|` are all legal) and a literal Actions template
+          # substitution happens before the shell ever sees this, so an
+          # attacker-pushed tag could otherwise inject commands into a job
+          # holding `contents: write` and the default GITHUB_TOKEN.
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release/* \
+            --title "$RELEASE_TAG" \
+            --generate-notes
