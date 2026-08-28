@@ -9,6 +9,7 @@ import { integrations } from "./tables/integration";
 import { machines } from "./tables/machine";
 import { orgs } from "./tables/org";
 import { people } from "./tables/person";
+import { secretBindings } from "./tables/secret-binding";
 import { sessions } from "./tables/session";
 import { snapshots } from "./tables/snapshot";
 
@@ -27,6 +28,7 @@ export const orgsRelations = relations(orgs, ({ many }) => ({
   elevations: many(elevations),
   events: many(events),
   complianceFindingState: many(complianceFindingState),
+  secretBindings: many(secretBindings),
 }));
 
 export const peopleRelations = relations(people, ({ one, many }) => ({
@@ -173,5 +175,12 @@ export const complianceFindingStateRelations = relations(complianceFindingState,
   machine: one(machines, {
     fields: [complianceFindingState.machineId],
     references: [machines.id],
+  }),
+}));
+
+export const secretBindingsRelations = relations(secretBindings, ({ one }) => ({
+  org: one(orgs, {
+    fields: [secretBindings.orgId],
+    references: [orgs.id],
   }),
 }));
