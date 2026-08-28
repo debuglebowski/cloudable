@@ -1,0 +1,97 @@
+# Vulnerability scan for the control-plane container image.
+#
+# docs/spec.md §26 "Minimum internal compliance posture": Cloudable running
+# in Cloudable's own tenant is privileged internal infrastructure, same
+# tier as CI. This uses Trivy (aquasecurity/trivy-action), explicitly NOT
+# Microsoft Defender for Containers — no Azure account exists for this
+# internal tooling posture yet.
+#
+# The remediation SLA is written down (see SECURITY.md — Critical: 7 days,
+# High: 30 days); scanning existing is not the control, findings being
+# closed is. This workflow's job is only to produce the dated,
+# severity-broken-down evidence that a finding exists and when it was
+# first seen — closing it is tracked against SECURITY.md's SLA, not
+# enforced by failing this job (Trivy runs here with exit-code 0).
+#
+# Every action below is pinned to a full commit SHA, not a mutable tag —
+# aquasecurity/trivy-action itself was the target of a supply-chain
+# compromise in March 2026 (tags 0.0.1-0.34.2 force-pushed to point at
+# malicious commits; see GHSA-69fq-xp46-6x23). The SHA pinned here
+# (v0.36.0) was published after remediation.
+name: Trivy scan
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/control-plane/**"
+      - "packages/schema/**"
+      - "packages/events/**"
+      - "packages/contracts/**"
+      - "bun.lock"
+      - ".github/workflows/trivy-scan.yml"
+  pull_request:
+    paths:
+      - "apps/control-plane/**"
+      - "packages/schema/**"
+      - "packages/events/**"
+      - "packages/contracts/**"
+      - "bun.lock"
+      - ".github/workflows/trivy-scan.yml"
+  workflow_call: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  trivy:
+    name: Build + scan control-plane image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build control-plane image
+        run: docker build -t cloudable-control-plane:scan -f apps/control-plane/Dockerfile .
+
+      - name: Scan date
+        id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Trivy scan (SARIF, for code scanning)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: cloudable-control-plane:scan
+          format: sarif
+          output: trivy-results.sarif
+          severity: "CRITICAL,HIGH,MEDIUM,LOW"
+          # Report only — see the note at the top of this file. Closing
+          # findings against the SECURITY.md SLA is the control, not a
+          # merge gate here.
+          exit-code: "0"
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d # v3.37.9
+        continue-on-error: true
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Trivy scan (human-readable table, for the dated artifact)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: cloudable-control-plane:scan
+          format: table
+          output: trivy-results-${{ steps.date.outputs.date }}.txt
+          severity: "CRITICAL,HIGH,MEDIUM,LOW"
+          exit-code: "0"
+
+      - name: Upload dated scan artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trivy-scan-${{ steps.date.outputs.date }}
+          path: |
+            trivy-results.sarif
+            trivy-results-${{ steps.date.outputs.date }}.txt
+          retention-days: 90

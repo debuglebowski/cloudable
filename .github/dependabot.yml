@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Bun uses the npm registry and npm-compatible lockfile semantics, so the
+  # "npm" ecosystem type is the correct one for `bun.lock` (docs/spec.md
+  # §26 "Minimum internal compliance posture").
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
