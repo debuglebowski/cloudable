@@ -14,6 +14,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Approvals", to: "/approvals", group: "Govern" },
   { label: "Audit", to: "/audit", group: "Govern" },
   { label: "Archive", to: "/archive", group: "Govern" },
+  { label: "Access", to: "/access", group: "Operate" },
 ];
 
 /**
