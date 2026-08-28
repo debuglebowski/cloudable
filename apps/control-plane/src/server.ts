@@ -9,6 +9,7 @@ import { AgentProtocolLive } from "./http/handlers/agent-protocol";
 import { ApprovalsLive } from "./http/handlers/approvals";
 import { ArchiveLive } from "./http/handlers/archive";
 import { ComplianceLive } from "./http/handlers/compliance";
+import { ElevationsLive } from "./http/handlers/elevations";
 import { HealthLive } from "./http/handlers/health";
 import { MachinesLive } from "./http/handlers/machines";
 import { OffboardingHttpLive } from "./http/handlers/offboarding";
@@ -37,6 +38,7 @@ const AppLive = buildAppLive({
 const ApiLive = HttpApiBuilder.api(Api).pipe(
   Layer.provide(
     Layer.mergeAll(
+      ElevationsLive,
       UpgradeLive,
       OffboardingHttpLive,
       HealthLive,

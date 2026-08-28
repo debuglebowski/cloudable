@@ -4,12 +4,15 @@ import { HttpApiBuilder, HttpServer } from "@effect/platform";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { Db } from "../src/db/layer";
+import { ElevationRepoLive } from "../src/domain/elevation/ElevationRepo.live";
+import { ElevationService } from "../src/domain/elevation/ElevationService";
 import { MachineService } from "../src/domain/machine/MachineService";
 import { Api } from "../src/http/api";
 import { AgentProtocolLive } from "../src/http/handlers/agent-protocol";
 import { ApprovalsLive } from "../src/http/handlers/approvals";
 import { ArchiveLive } from "../src/http/handlers/archive";
 import { ComplianceLive } from "../src/http/handlers/compliance";
+import { ElevationsLive } from "../src/http/handlers/elevations";
 import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
@@ -87,6 +90,7 @@ describe("agent-protocol handlers (integration)", () => {
           ArchiveLive,
           OffboardingHttpLive,
           UpgradeLive,
+          ElevationsLive,
         ),
       ),
     );
@@ -103,6 +107,14 @@ describe("agent-protocol handlers (integration)", () => {
       AttestationRegistryLive,
       FakeProvisioningServiceLive,
       OffboardingLive.pipe(Layer.provide(FakeProvisioningServiceLive)),
+      // Same wiring as `layers.ts`'s `buildAppLive`: `ElevationService`
+      // needs EventBus/ApprovalService/its own repo provided explicitly —
+      // `Layer.mergeAll` is a flat union, not a dependency graph.
+      ElevationService.Default.pipe(
+        Layer.provide(EventBus.Default),
+        Layer.provide(ApprovalService.Default),
+        Layer.provide(ElevationRepoLive),
+      ),
     ).pipe(Layer.provide(Layer.succeed(Db, testDb.db)));
 
     const built = HttpApiBuilder.toWebHandler(
