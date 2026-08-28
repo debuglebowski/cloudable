@@ -4,6 +4,8 @@
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "bun run --filter '*' dev",
+    "dev:control-plane": "bun --env-file=\"$PWD/.env\" run --cwd apps/control-plane dev",
+    "dev:console": "bun run --cwd apps/console dev",
     "build": "bun run --filter '*' build",
     "test:unit": "bun run --filter '*' test:unit",
     "test:integration": "bun run --filter '*' test:integration",
@@ -11,7 +13,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "db:generate": "bun run --cwd packages/schema db:generate",
-    "db:migrate": "bun run --cwd packages/schema db:migrate"
+    "db:migrate": "bun --env-file=\"$PWD/.env\" run --cwd packages/schema db:migrate"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
