@@ -7,4 +7,6 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   // Feature units append their own entry here, one object literal per line, e.g.:
   // { label: "Machines", to: "/machines", group: "Operate" },
+  { label: "Integrations", to: "/integrations", group: "Configure" },
+  { label: "Organisation", to: "/organisation", group: "Configure" },
 ];
