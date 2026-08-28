@@ -5,6 +5,7 @@ import {
   ProvisioningError,
   type ProvisioningService,
   ProvisioningServiceTag,
+  type ReimageDescriptor,
 } from "./ProvisioningService";
 
 interface FakeMachineEntry {
@@ -26,13 +27,27 @@ export interface FakeProvisioningOptions {
 }
 
 /**
+ * Dev/test-only sentinel `targetImage`: reimaging to this value (via unit
+ * 18's `upgradeMachine`) lands the fake machine in `"error"` state instead
+ * of `"running"`, so the subsequent `reconcile()` call — the "verify
+ * declared state" step — reports a mismatch. This is how the transactional
+ * upgrade rollback path is exercised end-to-end (unit tests and manual
+ * `curl` verification) without a real Azure account. It is not a real image
+ * name and `ProvisioningService.azure.ts` has no matching behavior.
+ */
+export const FAKE_VERIFICATION_FAILURE_IMAGE = "cloudable/dev-force-verification-failure";
+
+/**
  * In-memory `ProvisioningService` for dev/test — no real Azure account
  * exists in this build (see `ProvisioningService.azure.ts`). `create` moves
  * a machine through "provisioning" then "running" synchronously; `archive`
  * flips it to "archived"; `reconcile` only ever reports the machine's
  * current status plus its currently-observed packages (invariants #4, #5 —
  * never installs, never auto-corrects; see `src/reconcile/reconcile-machine.ts`
- * for the code that decides what counts as drift).
+ * for the code that decides what counts as drift); `reimage` (unit 18) moves
+ * it through "provisioning" then back to "running" — unless `targetImage` is
+ * `FAKE_VERIFICATION_FAILURE_IMAGE`, in which case it settles on "error" to
+ * simulate a machine that came up broken/drifted post-reimage.
  */
 export const makeFakeProvisioningServiceLive = (
   options: FakeProvisioningOptions = {},
@@ -110,7 +125,32 @@ export const makeFakeProvisioningServiceLive = (
           } satisfies MachineStatus;
         });
 
-      return { create, archive, reconcile } satisfies ProvisioningService;
+      const reimage: ProvisioningService["reimage"] = (desc: ReimageDescriptor) =>
+        Effect.gen(function* () {
+          const existing = yield* require(desc.machineId);
+
+          const provisioning: FakeMachineEntry = {
+            ...existing,
+            status: { ...existing.status, state: "provisioning" },
+          };
+          yield* Ref.update(state, (map) => new Map(map).set(desc.machineId, provisioning));
+
+          const finalState: MachineStatus["state"] =
+            desc.targetImage === FAKE_VERIFICATION_FAILURE_IMAGE ? "error" : "running";
+          const settled: FakeMachineEntry = {
+            ...existing,
+            status: {
+              ...existing.status,
+              state: finalState,
+              reportedPackages: reportedPackagesFor(desc.machineId, existing.declaredPackages),
+            },
+          };
+          yield* Ref.update(state, (map) => new Map(map).set(desc.machineId, settled));
+
+          return settled.status;
+        });
+
+      return { create, archive, reconcile, reimage } satisfies ProvisioningService;
     }),
   );
 

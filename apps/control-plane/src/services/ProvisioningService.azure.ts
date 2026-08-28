@@ -17,6 +17,7 @@ const service: ProvisioningService = {
   create: () => notImplemented,
   archive: () => notImplemented,
   reconcile: () => notImplemented,
+  reimage: () => notImplemented,
 };
 
 export const AzureProvisioningServiceLive = Layer.succeed(ProvisioningServiceTag, service);

@@ -98,6 +98,7 @@ function buildTestLayers(opts: {
         return { machineId, state: "archived" as const, externalId: `fake-${machineId}` };
       }),
     reconcile: () => Effect.die("not used in this test"),
+    reimage: () => Effect.die("not used in this test"),
   };
 
   const approvalResult: ApprovalResult = {

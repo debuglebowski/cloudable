@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { ProvisioningServiceTag } from "./ProvisioningService";
 import {
+  FAKE_VERIFICATION_FAILURE_IMAGE,
   FakeProvisioningServiceLive,
   makeFakeProvisioningServiceLive,
 } from "./ProvisioningService.fake";
@@ -90,5 +91,75 @@ describe("ProvisioningService.fake", () => {
       Effect.provide(program, FakeProvisioningServiceLive),
     );
     expect(reconciled.reportedPackages).toEqual(["docker", "nodejs 20"]);
+  });
+
+  test("reimage -> running, reconcile then reports running (verification success)", async () => {
+    const program = Effect.gen(function* () {
+      const provisioning = yield* ProvisioningServiceTag;
+      yield* provisioning.create({
+        machineId: "m-reimage-1",
+        orgId: "org-1",
+        region: "eastus",
+        sizeSku: "Standard_B2s",
+      });
+
+      const reimaged = yield* provisioning.reimage({
+        machineId: "m-reimage-1",
+        orgId: "org-1",
+        region: "eastus",
+        sizeSku: "Standard_B2s",
+        targetImage: "ubuntu-24.04",
+      });
+      expect(reimaged.state).toBe("running");
+
+      const reconciled = yield* provisioning.reconcile("m-reimage-1");
+      expect(reconciled.state).toBe("running");
+    });
+
+    await Effect.runPromise(Effect.provide(program, FakeProvisioningServiceLive));
+  });
+
+  test("reimage to the sentinel image lands in error state, so reconcile reports verification failure", async () => {
+    const program = Effect.gen(function* () {
+      const provisioning = yield* ProvisioningServiceTag;
+      yield* provisioning.create({
+        machineId: "m-reimage-2",
+        orgId: "org-1",
+        region: "eastus",
+        sizeSku: "Standard_B2s",
+      });
+
+      const reimaged = yield* provisioning.reimage({
+        machineId: "m-reimage-2",
+        orgId: "org-1",
+        region: "eastus",
+        sizeSku: "Standard_B2s",
+        targetImage: FAKE_VERIFICATION_FAILURE_IMAGE,
+      });
+      expect(reimaged.state).toBe("error");
+
+      const reconciled = yield* provisioning.reconcile("m-reimage-2");
+      expect(reconciled.state).toBe("error");
+    });
+
+    await Effect.runPromise(Effect.provide(program, FakeProvisioningServiceLive));
+  });
+
+  test("reimage fails with not_found for an unknown machine", async () => {
+    const program = Effect.gen(function* () {
+      const provisioning = yield* ProvisioningServiceTag;
+      return yield* Effect.flip(
+        provisioning.reimage({
+          machineId: "does-not-exist",
+          orgId: "org-1",
+          region: "eastus",
+          sizeSku: "Standard_B2s",
+          targetImage: "ubuntu-24.04",
+        }),
+      );
+    });
+
+    const error = await Effect.runPromise(Effect.provide(program, FakeProvisioningServiceLive));
+    expect(error.reason).toBe("not_found");
   });
 });
