@@ -13,6 +13,7 @@ import { ComplianceLive } from "../src/http/handlers/compliance";
 import { HealthLive } from "../src/http/handlers/health";
 import { MachinesLive } from "../src/http/handlers/machines";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
+import { UpgradeLive } from "../src/http/handlers/upgrade";
 import { EvidenceLive } from "../src/evidence/handler";
 import { OffboardingLive } from "../src/domain/offboarding";
 import { ApprovalService } from "../src/services/ApprovalService";
@@ -85,6 +86,7 @@ describe("agent-protocol handlers (integration)", () => {
           EvidenceLive,
           ArchiveLive,
           OffboardingHttpLive,
+          UpgradeLive,
         ),
       ),
     );

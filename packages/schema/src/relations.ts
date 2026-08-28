@@ -12,6 +12,7 @@ import { people } from "./tables/person";
 import { secretBindings } from "./tables/secret-binding";
 import { sessions } from "./tables/session";
 import { snapshots } from "./tables/snapshot";
+import { upgradeAttempts } from "./tables/upgrade-attempt";
 
 // Kept separate from the table files so that no table file ever needs to
 // import a sibling table file just to declare a relation — every table file
@@ -29,6 +30,7 @@ export const orgsRelations = relations(orgs, ({ many }) => ({
   events: many(events),
   complianceFindingState: many(complianceFindingState),
   secretBindings: many(secretBindings),
+  upgradeAttempts: many(upgradeAttempts),
 }));
 
 export const peopleRelations = relations(people, ({ one, many }) => ({
@@ -57,6 +59,7 @@ export const machinesRelations = relations(machines, ({ one, many }) => ({
   elevations: many(elevations),
   accessCommandRecords: many(accessCommandRecorded),
   events: many(events),
+  upgradeAttempts: many(upgradeAttempts),
 }));
 
 export const approvalsRelations = relations(approvals, ({ one, many }) => ({
@@ -182,5 +185,16 @@ export const secretBindingsRelations = relations(secretBindings, ({ one }) => ({
   org: one(orgs, {
     fields: [secretBindings.orgId],
     references: [orgs.id],
+  }),
+}));
+
+export const upgradeAttemptsRelations = relations(upgradeAttempts, ({ one }) => ({
+  org: one(orgs, {
+    fields: [upgradeAttempts.orgId],
+    references: [orgs.id],
+  }),
+  machine: one(machines, {
+    fields: [upgradeAttempts.machineId],
+    references: [machines.id],
   }),
 }));
