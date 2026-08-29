@@ -1,23 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { BASE_URL } from "@/lib/api-client";
+import { apiGet, BASE_URL } from "@/lib/api-client";
+import { CURRENT_ORG_ID } from "@/lib/current-org";
 
 /**
- * Audit domain: timeline (raw event feed) and evidence export (events → checks →
- * controls, grouped by control per docs/spec.md §19/§20).
- *
- * The compliance control-map / evidence-export endpoints and evidence projection
- * (backend unit 10) are not present on the `main` this unit forked from — this file
- * mocks realistic data shaped like the real projection so the page can be built and
- * reviewed now. Swap `fetchAuditTimeline` / `fetchControlEvidence` for real `apiGet`
- * calls once those endpoints land; the query keys and return shapes are designed to
- * carry over unchanged.
+ * Audit domain: timeline (raw event feed) and evidence export (events →
+ * checks → controls, grouped by control per docs/spec.md §19/§20). Wired to
+ * the real `evidence/api.ts` (timeline) and `http/routes/compliance.ts`
+ * (control-map + findings + CSV exports) — both already existed and
+ * worked; this file was never updated after they merged.
  */
 
-/** Expected backend export endpoints (§19 "Exports"). 404 today; see PR notes. */
 export const AUDIT_EXPORT_URLS = {
-  assetInventoryCsv: `${BASE_URL}/api/v1/compliance/exports/asset-inventory.csv`,
-  openFindingsCsv: `${BASE_URL}/api/v1/compliance/exports/open-findings.csv`,
+  assetInventoryCsv: `${BASE_URL}/api/v1/compliance/exports/asset-inventory.csv?orgId=${CURRENT_ORG_ID}`,
+  // Real path is exports/findings.csv, not open-findings.csv — the mock's
+  // guessed name never got corrected against the real endpoint unit 10 shipped.
+  openFindingsCsv: `${BASE_URL}/api/v1/compliance/exports/findings.csv?orgId=${CURRENT_ORG_ID}`,
 } as const;
 
 /** Domain-first query key tuples. */
@@ -37,8 +35,8 @@ export interface AuditTimelineEntry {
   occurredAt: string;
   recordedAt: string;
   actorType: AuditActorType;
-  actorId?: string;
-  machineId?: string;
+  actorId?: string | undefined;
+  machineId?: string | undefined;
   summary: string;
 }
 
@@ -70,246 +68,145 @@ export interface ControlEvidenceGroup {
   checks: ControlCheckEvidence[];
 }
 
-const MOCK_TIMELINE: AuditTimelineEntry[] = [
-  {
-    id: "01J8Q3F1V6K9X5M2N4P7R8T0W1",
-    type: "access.session_denied",
-    occurredAt: "2026-08-27T18:42:10Z",
-    recordedAt: "2026-08-27T18:42:11Z",
-    actorType: "system",
-    machineId: "mach-0231",
-    summary: "Web terminal session denied for priya@acme.com: certificate revoked.",
-  },
-  {
-    id: "01J8Q3EWD2H4B7C1E9F3G5J6K8",
-    type: "org.setting_changed",
-    occurredAt: "2026-08-27T16:05:33Z",
-    recordedAt: "2026-08-27T16:05:35Z",
-    actorType: "person",
-    actorId: "priya@acme.com",
-    summary: "priya@acme.com changed default logging tier from Metadata only to Session-level.",
-  },
-  {
-    id: "01J8Q3ENT8M0P2Q4R6S8U0V2W4",
-    type: "approval.denied",
-    occurredAt: "2026-08-27T15:26:44Z",
-    recordedAt: "2026-08-27T15:26:44Z",
-    actorType: "person",
-    actorId: "priya@acme.com",
-    machineId: "mach-0098",
-    summary:
-      "priya@acme.com denied sam@acme.com's break-glass request for mach-0098: reason insufficient.",
-  },
-  {
-    id: "01J8Q3EK5N7Q9S1U3W5X7Z9B1D",
-    type: "approval.requested",
-    occurredAt: "2026-08-27T15:20:00Z",
-    recordedAt: "2026-08-27T15:20:01Z",
-    actorType: "person",
-    actorId: "sam@acme.com",
-    machineId: "mach-0098",
-    summary:
-      "sam@acme.com requested approval for an interactive shell break-glass session on mach-0098.",
-  },
-  {
-    id: "01J8Q3EF3R5T7V9X1Z3B5D7F9H",
-    type: "machine.drift_detected",
-    occurredAt: "2026-08-27T14:03:11Z",
-    recordedAt: "2026-08-27T14:03:40Z",
-    actorType: "agent",
-    machineId: "mach-0117",
-    summary: "Agent reported 'ripgrep' installed outside the declared package manifest.",
-  },
-  {
-    id: "01J8Q3EA1V3X5Z7B9D1F3H5J7L",
-    type: "access.certificate_revoked",
-    occurredAt: "2026-08-27T09:12:04Z",
-    recordedAt: "2026-08-27T09:12:05Z",
-    actorType: "system",
-    machineId: "mach-0231",
-    summary: "SSH certificate for owner priya@acme.com revoked following offboarding.",
-  },
-  {
-    id: "01J8Q3E60X2Z4B6D8F0H2J4L6N",
-    type: "machine.offboarded",
-    occurredAt: "2026-08-27T09:12:00Z",
-    recordedAt: "2026-08-27T09:12:03Z",
-    actorType: "person",
-    actorId: "priya@acme.com",
-    machineId: "mach-0231",
-    summary:
-      "priya@acme.com offboarded mach-0231; certificate revocation and retention clock started.",
-  },
-  {
-    id: "01J8Q3E1Y8A0C2E4G6J8L0N2P4",
-    type: "agent.attestation_failed",
-    occurredAt: "2026-08-27T06:10:00Z",
-    recordedAt: "2026-08-27T06:10:04Z",
-    actorType: "system",
-    machineId: "mach-0099",
-    summary: "Attestation rejected for mach-0099: join token expired.",
-  },
-  {
-    id: "01J8Q3DVW6Y8A0C2E4G6I8K0M2",
-    type: "machine.state_reported",
-    occurredAt: "2026-08-27T02:00:00Z",
-    recordedAt: "2026-08-27T06:14:52Z",
-    actorType: "agent",
-    machineId: "mach-0305",
-    summary: "mach-0305 woke from sleep and reported state after a multi-hour gap.",
-  },
-  {
-    id: "01J8Q3DQU4W6Y8A0C2E4G6I8K0",
-    type: "cloud.credential_federated",
-    occurredAt: "2026-08-26T22:40:00Z",
-    recordedAt: "2026-08-26T22:40:05Z",
-    actorType: "system",
-    summary:
-      "Workload identity federation token minted for tenant acme (subject cloudable:tenant:acme).",
-  },
-  {
-    id: "01J8Q3DKS2U4W6Y8A0C2E4G6I8",
-    type: "snapshot.legal_hold_set",
-    occurredAt: "2026-08-26T19:15:00Z",
-    recordedAt: "2026-08-26T19:15:02Z",
-    actorType: "person",
-    actorId: "priya@acme.com",
-    machineId: "mach-0044",
-    summary: "priya@acme.com placed a legal hold on the archived snapshot for mach-0044.",
-  },
-  {
-    id: "01J8Q3DFQ0S2U4W6Y8A0C2E4G6",
-    type: "person.deactivated",
-    occurredAt: "2026-08-26T11:00:00Z",
-    recordedAt: "2026-08-26T11:00:01Z",
-    // actorType "idp": the IdP sync is the actor, not the person it deactivated —
-    // actorId names who/what did this, not the affected subject (see summary).
-    actorType: "idp",
-    summary: "IdP deactivated sam@acme.com; dependent machine ownership checks re-evaluated.",
-  },
-  {
-    id: "01J8Q3DAN8Q0S2U4W6Y8A0C2E4",
-    type: "snapshot.expired",
-    occurredAt: "2026-08-26T03:00:00Z",
-    recordedAt: "2026-08-26T03:00:02Z",
-    actorType: "system",
-    machineId: "mach-0501",
-    summary:
-      "Archived snapshot for mach-0501 passed its 30-day retention window; volume data purged.",
-  },
-  {
-    id: "01J8Q3D5L6O8Q0S2U4W6Y8A0C2",
-    type: "access.elevation_granted",
-    occurredAt: "2026-08-25T20:00:00Z",
-    recordedAt: "2026-08-25T20:00:01Z",
-    actorType: "person",
-    actorId: "priya@acme.com",
-    machineId: "mach-0098",
-    summary:
-      "priya@acme.com granted a 1h interactive shell elevation on mach-0098 to sam@acme.com.",
-  },
-];
-
-const MOCK_EVIDENCE: ControlEvidenceGroup[] = [
-  {
-    id: "access-deprovisioning",
-    control: "Access is revoked within policy window",
-    framework: "ISO 27001 A.9.2.6 · SOC 2 CC6.2",
-    checks: [
-      {
-        id: "check-offboarding-revocation",
-        checkLabel: "Access revoked on offboarding",
-        status: "fail",
-        detail: "A certificate is still valid 24h after the owner was offboarded.",
-        findings: [
-          {
-            id: "finding-cert-mach-0231",
-            summary: "SSH certificate for mach-0231 still valid 36h after owner offboarded",
-            severity: "high",
-            openSince: "2026-08-14",
-          },
-        ],
-      },
-      {
-        id: "check-elevation-approved",
-        checkLabel: "Elevated access was approved",
-        status: "pass",
-        detail: "Every break-glass and admin session in the audit window has an approval record.",
-        findings: [],
-      },
-    ],
-  },
-  {
-    id: "asset-authorized-software",
-    control: "Only declared software is installed",
-    framework: "ISO 27001 A.8.1.1 · SOC 2 CC6.1",
-    checks: [
-      {
-        id: "check-no-undeclared-software",
-        checkLabel: "No undeclared software",
-        status: "fail",
-        detail: "Installed packages diverge from the resolved manifest on 2 machines.",
-        findings: [
-          {
-            id: "finding-drift-mach-0117",
-            summary: "mach-0117 has 'ripgrep' installed outside the manifest",
-            severity: "medium",
-            openSince: "2026-08-14",
-          },
-          {
-            id: "finding-drift-mach-0098",
-            summary: "mach-0098 has 'docker-compose' installed outside the manifest",
-            severity: "low",
-            openSince: "2026-08-24",
-          },
-        ],
-      },
-      {
-        id: "check-machines-reporting",
-        checkLabel: "Machines are reporting",
-        status: "pass",
-        detail: "Every machine's last-verified timestamp is inside the expected reconcile window.",
-        findings: [],
-      },
-    ],
-  },
-  {
-    id: "asset-ownership",
-    control: "Every asset has an accountable owner",
-    framework: "ISO 27001 A.8.1.2",
-    checks: [
-      {
-        id: "check-active-owner",
-        checkLabel: "Machine has an active owner",
-        status: "pass",
-        detail: "Every machine's owner is present and active in the IdP.",
-        findings: [],
-      },
-    ],
-  },
-  {
-    id: "retention",
-    control: "Retention windows are honoured",
-    framework: "SOC 2 CC6.5",
-    checks: [
-      {
-        id: "check-retention-honoured",
-        checkLabel: "Retention is honoured",
-        status: "unknown",
-        detail:
-          "Legal-hold exceptions are not yet distinguished from expired snapshots in this build — not covered.",
-        findings: [],
-      },
-    ],
-  },
-];
+interface EvidenceRecordWire {
+  id: string;
+  type: string;
+  occurredAt: string;
+  recordedAt: string;
+  actor: { type: AuditActorType; id: string };
+  machineId: string | null;
+  summary: string;
+}
 
 async function fetchAuditTimeline(): Promise<AuditTimelineEntry[]> {
-  return MOCK_TIMELINE;
+  const res = await apiGet<{ data: EvidenceRecordWire[] }>(
+    `/api/v1/evidence?orgId=${CURRENT_ORG_ID}&limit=100`,
+  );
+  return res.data.map((e) => ({
+    id: e.id,
+    type: e.type,
+    occurredAt: e.occurredAt,
+    recordedAt: e.recordedAt,
+    actorType: e.actor.type,
+    actorId: e.actor.id,
+    machineId: e.machineId ?? undefined,
+    summary: e.summary,
+  }));
+}
+
+interface ControlMapEntryWire {
+  id: string;
+  label: string;
+  framework: string;
+  status: "implemented" | "manual_action_required" | "not_covered";
+  evidencedByCheckIds: string[];
+}
+
+interface ComplianceFindingWire {
+  machineId: string | null;
+  firstSeenAt: string;
+  ageDays: number;
+  detail: Record<string, unknown>;
+}
+
+interface ComplianceCheckResultWire {
+  checkId: string;
+  label: string;
+  controlRefs: string[];
+  status: "pass" | "fail" | "not_applicable";
+  findings: ComplianceFindingWire[];
+}
+
+/**
+ * The real backend has no per-finding severity — findings are a fact
+ * ("this machine diverges from its manifest"), not a graded risk score.
+ * This is a fixed, check-level editorial classification (which of the six
+ * v1 checks tends to matter more if it fails), not a fabricated per-finding
+ * value — every finding under the same check gets the same severity.
+ * Unlisted/future checks default to "medium".
+ */
+const CHECK_SEVERITY: Record<string, FindingSeverity> = {
+  "elevated-access-approved": "high",
+  "access-revoked-on-offboarding": "high",
+  "retention-honoured": "medium",
+  "no-undeclared-software": "medium",
+  "active-owner": "medium",
+  "machines-reporting": "low",
+};
+
+function summarizeDetail(detail: Record<string, unknown>): string {
+  const entries = Object.entries(detail).map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
+  return entries.length > 0 ? entries.join(", ") : "No further detail.";
+}
+
+function toCheckStatus(status: ComplianceCheckResultWire["status"]): ControlCheckStatus {
+  return status === "not_applicable" ? "unknown" : status;
+}
+
+function checkDetailLine(check: ComplianceCheckResultWire): string {
+  if (check.status === "not_applicable") {
+    return "Not applicable to this org's current fleet — applicability-gated per spec §19.";
+  }
+  if (check.findings.length === 0) {
+    return "No open findings.";
+  }
+  return `${check.findings.length} open finding${check.findings.length === 1 ? "" : "s"}.`;
 }
 
 async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
-  return MOCK_EVIDENCE;
+  const [controlMap, findingsRes] = await Promise.all([
+    apiGet<{ controls: ControlMapEntryWire[] }>("/api/v1/compliance/control-map"),
+    apiGet<{ checks: ComplianceCheckResultWire[] }>(
+      `/api/v1/compliance/findings?orgId=${CURRENT_ORG_ID}`,
+    ),
+  ]);
+  const checksById = new Map(findingsRes.checks.map((c) => [c.checkId, c]));
+
+  return controlMap.controls.map((control) => {
+    const checks: ControlCheckEvidence[] = control.evidencedByCheckIds
+      .map((checkId) => checksById.get(checkId))
+      .filter((check): check is ComplianceCheckResultWire => check !== undefined)
+      .map((check) => ({
+        id: check.checkId,
+        checkLabel: check.label,
+        status: toCheckStatus(check.status),
+        detail: checkDetailLine(check),
+        findings: check.findings.map((finding, index) => ({
+          id: `${check.checkId}:${finding.machineId ?? "org"}:${index}`,
+          summary: finding.machineId
+            ? `${finding.machineId}: ${summarizeDetail(finding.detail)}`
+            : summarizeDetail(finding.detail),
+          severity: CHECK_SEVERITY[check.checkId] ?? "medium",
+          openSince: finding.firstSeenAt,
+        })),
+      }));
+
+    // A control with no implemented check evidencing it (spec §19: "most of
+    // ISO Annex A... has no bearing on the product and must not be claimed
+    // as evidenced") still renders — as an explicit "not covered" row, not
+    // silently dropped. Dashboards full of N/A train people to ignore them,
+    // per spec, but that's an argument for a clear N/A row, not for hiding
+    // the control entirely.
+    if (checks.length === 0) {
+      checks.push({
+        id: `${control.id}:not-covered`,
+        checkLabel: "No implemented check",
+        status: "unknown",
+        detail:
+          control.status === "not_covered"
+            ? "Not covered by any of the six v1 compliance checks."
+            : "Manual action required — no automated check evidences this control yet.",
+        findings: [],
+      });
+    }
+
+    return {
+      id: control.id,
+      control: control.label,
+      framework: control.framework,
+      checks,
+    };
+  });
 }
 
 export function useAuditTimeline() {
