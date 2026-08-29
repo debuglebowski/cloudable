@@ -1,5 +1,5 @@
 /** Exported so feature units building non-fetch links (e.g. CSV export hrefs) can reuse it. */
-export const BASE_URL: string = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+export const BASE_URL: string = import.meta.env.VITE_API_URL ?? "http://localhost:4780";
 
 /**
  * Thrown on any non-2xx response. `body` carries the parsed JSON error body
