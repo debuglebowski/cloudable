@@ -14,6 +14,7 @@ import { ConfigLive } from "./http/handlers/config";
 import { ElevationsLive } from "./http/handlers/elevations";
 import { FederationLive } from "./http/handlers/federation";
 import { HealthLive } from "./http/handlers/health";
+import { IntegrationsLive } from "./http/handlers/integrations";
 import { MachinesLive } from "./http/handlers/machines";
 import { OffboardingHttpLive } from "./http/handlers/offboarding";
 import { OrganisationLive } from "./http/handlers/organisation";
@@ -58,6 +59,7 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       AccessLive,
       PeopleLive,
       OrganisationLive,
+      IntegrationsLive,
     ),
   ),
   Layer.provide(DbLive),
