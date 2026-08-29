@@ -33,4 +33,4 @@ bun run db:migrate
 bun run dev
 ```
 
-Control plane on `http://localhost:3000`, console on the Vite dev port. See `.env.example`.
+Control plane on `http://localhost:4780`, console on `http://localhost:5180`. See `.env.example`.
