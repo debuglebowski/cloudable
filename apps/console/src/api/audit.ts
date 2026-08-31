@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { apiGet, BASE_URL } from "@/lib/api-client";
+import { BASE_URL, apiGet } from "@/lib/api-client";
 import { CURRENT_ORG_ID } from "@/lib/current-org";
 
 /**
@@ -155,7 +155,9 @@ function checkDetailLine(check: ComplianceCheckResultWire): string {
 
 async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
   const [controlMap, findingsRes] = await Promise.all([
-    apiGet<{ controls: ControlMapEntryWire[] }>("/api/v1/compliance/control-map"),
+    apiGet<{ controls: ControlMapEntryWire[] }>(
+      `/api/v1/compliance/control-map?orgId=${CURRENT_ORG_ID}`,
+    ),
     apiGet<{ checks: ComplianceCheckResultWire[] }>(
       `/api/v1/compliance/findings?orgId=${CURRENT_ORG_ID}`,
     ),
