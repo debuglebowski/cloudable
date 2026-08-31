@@ -51,11 +51,24 @@ export const accessRevokedOnOffboardingCheck: ComplianceCheck = {
   label: "Access revoked on offboarding",
   controlRefs: ["access-management"],
 
-  // Org-level check: it doesn't gate on machine type today. Kept as a real
-  // predicate over `ctx` (rather than a bare `true`) so a future
-  // refinement — e.g. only orgs with SSH certificates enabled — changes
-  // this function's body, not the `ComplianceCheck` interface.
-  appliesTo: (_ctx) => Effect.succeed(true),
+  // Not applicable to an org that has never issued a single certificate —
+  // "access revoked on offboarding" presumes there was ever any SSH-certificate
+  // access to revoke in the first place. A `pass` for an org that has never
+  // touched this feature is a false reassurance, not a real result (spec §19:
+  // "a dashboard full of N/A" is the thing to avoid — but a false `pass` for a
+  // feature never exercised is worse, not better).
+  appliesTo: ({ orgId }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const rows = yield* Effect.tryPromise(() =>
+        db
+          .select({ id: certificates.id })
+          .from(certificates)
+          .where(eq(certificates.orgId, orgId))
+          .limit(1),
+      ).pipe(Effect.orDie);
+      return rows.length > 0;
+    }),
 
   evaluate: ({ orgId }) =>
     Effect.gen(function* () {
