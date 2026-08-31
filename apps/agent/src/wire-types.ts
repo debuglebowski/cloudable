@@ -16,3 +16,13 @@ export type {
   AgentReportResponse,
   WakeMessage,
 } from "@cloudable/contracts";
+
+// Tunnel-signal channel (CP -> agent, deliberately separate from `wake` — see
+// tunnel/signal-listener.ts and apps/control-plane/src/tunnel/signal.ts for why) — see
+// apps/control-plane/src/http/routes/tunnel-signal.ts for the server side.
+export type { TunnelSignalMessage, TunnelSignalResponse } from "@cloudable/contracts";
+
+// Tunnel / session-token verification (spec §11.1) — see docs/access.md §4.
+// Consumed by `./tunnel/session-token-verify.ts`'s `getSessionTokenPublicKey`,
+// fetched from `GET /api/v1/access/session-token-public-key`.
+export type { SessionTokenPublicKeyResponse } from "@cloudable/contracts";

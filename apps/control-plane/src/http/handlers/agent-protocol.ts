@@ -7,6 +7,7 @@ import { AgentSessionToken } from "../../services/attestation/AgentSessionToken"
 import { AttestationRegistryTag } from "../../services/attestation/AttestationMethod";
 import { MachineDirectory } from "../../services/attestation/MachineDirectory";
 import { Api } from "../api";
+import { bearerToken } from "../bearer-token";
 import { AgentUnauthorized, AttestRejected } from "../routes/agent-protocol";
 
 /**
@@ -17,11 +18,6 @@ import { AgentUnauthorized, AttestRejected } from "../routes/agent-protocol";
  * sentinel is the pragmatic stand-in for one).
  */
 const UNATTRIBUTED_ORG_ID = "00000000-0000-0000-0000-000000000000";
-
-const BEARER_PREFIX = "Bearer ";
-
-const bearerToken = (authorization: string | undefined): string | undefined =>
-  authorization?.startsWith(BEARER_PREFIX) ? authorization.slice(BEARER_PREFIX.length) : undefined;
 
 /**
  * Builds an envelope + payload for one of the agent-authored event types.

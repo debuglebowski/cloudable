@@ -22,9 +22,11 @@ import { FederationLive } from "../src/http/handlers/federation";
 import { HealthLive } from "../src/http/handlers/health";
 import { IntegrationsLive } from "../src/http/handlers/integrations";
 import { MachinesLive } from "../src/http/handlers/machines";
+import { NotificationsLive } from "../src/http/handlers/notifications";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
 import { OrganisationLive } from "../src/http/handlers/organisation";
 import { PeopleLive } from "../src/http/handlers/people";
+import { TunnelSignalLive } from "../src/http/handlers/tunnel-signal";
 import { UpgradeLive } from "../src/http/handlers/upgrade";
 import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
@@ -37,6 +39,7 @@ import { MachineDirectory } from "../src/services/attestation/MachineDirectory";
 import { FederationService } from "../src/services/federation/FederationService";
 import { SshCaService } from "../src/services/ssh-ca/SshCaService";
 import { TunnelServer } from "../src/tunnel/server";
+import { TunnelSignal } from "../src/tunnel/signal";
 import { startTestDb } from "./testcontainers";
 
 /**
@@ -108,6 +111,8 @@ describe("agent-protocol handlers (integration)", () => {
           PeopleLive,
           OrganisationLive,
           IntegrationsLive,
+          TunnelSignalLive,
+          NotificationsLive,
         ),
       ),
     );
@@ -149,9 +154,18 @@ describe("agent-protocol handlers (integration)", () => {
       ),
       TunnelServer.Default.pipe(
         Layer.provideMerge(
-          Layer.mergeAll(EventBus.Default, LocalSignerLive, Layer.succeed(Db, testDb.db)),
+          Layer.mergeAll(
+            EventBus.Default,
+            LocalSignerLive,
+            Layer.succeed(Db, testDb.db),
+            TunnelSignal.Default,
+          ),
         ),
       ),
+      // Same reference `TunnelServer` above provides itself via `provideMerge` — exposed
+      // standalone too so `TunnelSignalLive` (folded into `ApiLive` above) can depend on it
+      // directly, same wiring as `layers.ts`'s `buildAppLive`.
+      TunnelSignal.Default,
     ).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Db, testDb.db), AppConfigLive)));
 
     const built = HttpApiBuilder.toWebHandler(

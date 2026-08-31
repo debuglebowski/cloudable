@@ -4,6 +4,7 @@ import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
 import { ApiError } from "./http-client";
 import { listOpenPorts } from "./open-ports";
+import { connectWake } from "./wake";
 import type { AgentReportRequest, AgentReportResponse, DesiredStateResponse } from "./wire-types";
 
 /**
@@ -20,7 +21,51 @@ export const AGENT_VERSION = process.env.AGENT_VERSION ?? "0.0.0-dev";
 
 const POLL_INTERVAL_MS = 30_000;
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Resolves after `ms`, or immediately if `pullNow()` is called first — the
+ * mechanism the wake fast path (`wake.ts`) short-circuits onto instead of
+ * this loop waiting out the rest of its interval or backoff. Only one wait
+ * is ever pending at a time in this loop, so a single pending slot is
+ * enough — a `pullNow()` with nothing pending (no sleep in progress, e.g.
+ * mid-poll) is simply a no-op: there's nothing to cut short yet, and the
+ * next sleep call will run to completion normally, which is fine since the
+ * loop was already about to poll anyway.
+ *
+ * `signal`, when given, is also wired into *every* `wait()` call (not a
+ * single listener attached once outside): each call checks `signal.aborted`
+ * up front and attaches its own listener, so an abort that lands mid-cycle
+ * (during `attest`/`poll`/`report`, with nothing pending yet) still resolves
+ * the very next `wait()` immediately instead of only cutting short a wait
+ * that happened to already be in progress.
+ */
+function makeWaker(signal?: AbortSignal): {
+  wait: (ms: number) => Promise<void>;
+  pullNow: () => void;
+} {
+  let pending: (() => void) | undefined;
+  return {
+    wait(ms: number): Promise<void> {
+      if (signal?.aborted) return Promise.resolve();
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          pending = undefined;
+          resolve();
+        }, ms);
+        const onAbort = (): void => pending?.();
+        signal?.addEventListener("abort", onAbort, { once: true });
+        pending = () => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          pending = undefined;
+          resolve();
+        };
+      });
+    },
+    pullNow(): void {
+      pending?.();
+    },
+  };
+}
 
 interface PollResult {
   readonly changed: boolean;
@@ -80,62 +125,86 @@ async function reportObservedState(
 export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Promise<never> {
   let attempt = 0;
   let lastEtag: string | null = null;
+  const waker = makeWaker(options.signal);
 
-  for (;;) {
-    if (options.signal?.aborted) {
-      throw new Error("agent loop aborted");
-    }
+  // Optional fast path (spec §8.1): wakes this loop's sleep the instant the control plane has
+  // fresh desired state, instead of it always waiting out the full interval/backoff. Purely an
+  // optimization — `getBearerToken` re-attesting on every (re)connect, and this loop polling on
+  // a plain timer regardless, means a wake that never connects (or never arrives) changes
+  // nothing but latency.
+  //
+  // Built via `URL`, not a `.replace(/^http/, "ws")` string hack — that regex is an unanchored,
+  // case-sensitive 4-char prefix match, so it silently mangles a scheme-less host (matches
+  // "http" inside a hostname, not just the protocol) or leaves a differently-cased scheme
+  // untouched, either of which hands `connectWake` an invalid URL.
+  const wakeUrl = new URL("/api/v1/agent/wake", config.controlPlaneUrl);
+  wakeUrl.protocol = wakeUrl.protocol === "https:" ? "wss:" : "ws:";
 
-    try {
-      const session = await attest();
+  const wake = connectWake(
+    wakeUrl.toString(),
+    () => attest().then((session) => session.bearerToken),
+    () => waker.pullNow(),
+  );
 
-      const poll = await pollDesiredState(session.bearerToken, lastEtag);
-      if (poll.changed) {
-        lastEtag = poll.etag;
-        console.log(
-          `poll: desired state changed (version=${poll.desiredState?.version ?? "unknown"})`,
-        );
-        // Reconcile locally against `poll.desiredState` here once there's a real package
-        // manifest to reconcile against (spec §8.1: "reconcile only closes gaps — it removes
-        // undeclared software, never installs"). `poll.desiredState` is a stub today (see
-        // docs/agents.md and this unit's PR description), so there's nothing to reconcile yet.
+  try {
+    for (;;) {
+      if (options.signal?.aborted) {
+        throw new Error("agent loop aborted");
       }
 
-      // Real observed state: installed-package inventory is a stub still (see
-      // docs/agents.md), but `openPorts` and `configState` are now real scans —
-      // `open-ports.ts`/`access-methods.ts` — not hardcoded placeholders. The two
-      // scans are independent `/proc` reads with no data dependency, so they run
-      // concurrently rather than one after the other.
-      const [openPorts, runningAccessMethods] = await Promise.all([
-        listOpenPorts(),
-        listRunningAccessMethods(),
-      ]);
-      await reportObservedState(session.bearerToken, {
-        agentVersion: AGENT_VERSION,
-        observedAt: new Date().toISOString(),
-        installedPackages: [],
-        openPorts,
-        configState: { runningAccessMethods },
-      });
+      try {
+        const session = await attest();
 
-      attempt = 0;
-      await sleep(POLL_INTERVAL_MS);
-    } catch (error) {
-      if (error instanceof AttestationRejectedError) {
-        // Not transient — a bad join token doesn't become good on retry. Still backs off
-        // rather than crash-looping, but logs loudly: this needs a human, not a retry.
-        console.error(`attestation rejected: ${error.reason} — check MACHINE_TOKEN`);
-      } else if (error instanceof ApiError && error.status === 401) {
-        console.error("bearer session rejected by control plane — re-attesting next cycle");
-        clearCachedSession();
-      } else {
-        console.error(`poll/report cycle failed: ${String(error)}`);
+        const poll = await pollDesiredState(session.bearerToken, lastEtag);
+        if (poll.changed) {
+          lastEtag = poll.etag;
+          console.log(
+            `poll: desired state changed (version=${poll.desiredState?.version ?? "unknown"})`,
+          );
+          // Reconcile locally against `poll.desiredState` here once there's a real package
+          // manifest to reconcile against (spec §8.1: "reconcile only closes gaps — it removes
+          // undeclared software, never installs"). `poll.desiredState` is a stub today (see
+          // docs/agents.md and this unit's PR description), so there's nothing to reconcile yet.
+        }
+
+        // Real observed state: installed-package inventory is a stub still (see
+        // docs/agents.md), but `openPorts` and `configState` are now real scans —
+        // `open-ports.ts`/`access-methods.ts` — not hardcoded placeholders. The two
+        // scans are independent `/proc` reads with no data dependency, so they run
+        // concurrently rather than one after the other.
+        const [openPorts, runningAccessMethods] = await Promise.all([
+          listOpenPorts(),
+          listRunningAccessMethods(),
+        ]);
+        await reportObservedState(session.bearerToken, {
+          agentVersion: AGENT_VERSION,
+          observedAt: new Date().toISOString(),
+          installedPackages: [],
+          openPorts,
+          configState: { runningAccessMethods },
+        });
+
+        attempt = 0;
+        await waker.wait(POLL_INTERVAL_MS);
+      } catch (error) {
+        if (error instanceof AttestationRejectedError) {
+          // Not transient — a bad join token doesn't become good on retry. Still backs off
+          // rather than crash-looping, but logs loudly: this needs a human, not a retry.
+          console.error(`attestation rejected: ${error.reason} — check MACHINE_TOKEN`);
+        } else if (error instanceof ApiError && error.status === 401) {
+          console.error("bearer session rejected by control plane — re-attesting next cycle");
+          clearCachedSession();
+        } else {
+          console.error(`poll/report cycle failed: ${String(error)}`);
+        }
+
+        const delay = fullJitterBackoffMs(attempt, DEFAULT_BACKOFF);
+        attempt += 1;
+        console.log(`backing off ${Math.round(delay)}ms before retrying (attempt ${attempt})`);
+        await waker.wait(delay);
       }
-
-      const delay = fullJitterBackoffMs(attempt, DEFAULT_BACKOFF);
-      attempt += 1;
-      console.log(`backing off ${Math.round(delay)}ms before retrying (attempt ${attempt})`);
-      await sleep(delay);
     }
+  } finally {
+    wake.close();
   }
 }
