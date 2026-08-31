@@ -100,7 +100,7 @@ One `HttpApiGroup` (`agent-protocol`, `/api/v1/agent/*`, spec §23):
 | Attest | `POST /attest` | Credential → machine identity → bearer token. Rejects with 401 + `agent.attestation_failed`, never a crash. |
 | Poll | `GET /poll` | Desired state. `If-None-Match` / `ETag`; `304` when unchanged. |
 | Report | `POST /report` | Observed state, submitted after the agent reconciles locally. |
-| Wake | `GET /wake` (websocket) | Optional fast path, CP → agent. **Stub in this build — see below.** |
+| Wake | `GET /wake` (websocket) | Optional fast path, CP → agent. See below. |
 
 **Poll** returns a minimal stub shape today
 (`{version, packages, settings}`) — unit 2's package manifest isn't merged
@@ -135,19 +135,55 @@ doesn't own. Unit 6 replaces this with its proper `deriveEvents` pattern;
 this unit only had to make the two event types real enough to be useful in
 the meantime.
 
-**Wake** is a stub. `HttpApiEndpoint`/`HttpApiGroup` model HTTP verbs, not
-a websocket upgrade, and wiring a full upgrade path through this
-skeleton's router (`@effect/platform`'s `Socket`, `platform-bun`'s
-`BunSocket`) was more than this slice's time budget justified for an
-operation the spec itself calls optional (spec §8.1: "optional fast
-path"). What's real: the wire contract both sides agree on
-(`WakeMessage` in `packages/contracts/src/domains/agent-protocol.ts`,
-`{type: "pull_now"}`, no payload, and it cannot carry instructions), plus
-placeholder integration points on both sides —
-`apps/control-plane/src/http/routes/agent-wake.ts` and
-`apps/agent/src/wake.ts` — documenting exactly what a real implementation
-would do. Functionally, this just means a machine always waits out its
-full poll interval to pick up a change; it never gets fed one instantly.
+**Wake** is real. `HttpApiEndpoint`/`HttpApiGroup` model HTTP verbs, not a
+websocket upgrade, so it isn't part of `AgentProtocolGroup` — instead
+`apps/control-plane/src/http/routes/agent-wake.ts` mounts a raw route
+directly on the shared `HttpApiBuilder.Router` (the same `HttpRouter`
+instance `HttpApiBuilder.serve()` turns into the one running `HttpApp`),
+using `@effect/platform-bun`'s `HttpServerRequest.upgrade` getter to
+perform the upgrade against that same `Bun.serve` instance — no second
+port, no raw `Bun.serve({websocket})` alongside the Effect router.
+
+The route bearer-authenticates the upgrade the same way as `/poll`/`/report`
+(but only once, at the upgrade — this channel never carries another message
+from the agent to re-verify against), then registers the socket in an
+in-memory `WakeRegistry` keyed by `machineId` and blocks that route's own
+fiber until the connection closes, at which point it unregisters. A second
+connection for the same machine (a reconnect) replaces the first and
+actively closes the one it displaces, rather than leaking it.
+`WakeRegistry.wake(machineId)` sends exactly `{"type":"pull_now"}` — the
+wire contract in `WakeMessage`
+(`packages/contracts/src/domains/agent-protocol.ts`) — to whichever socket
+is currently registered for that machine, and reports back whether one was
+found; nothing in this build calls it yet (poll's own desired state is
+still a stub, so there's nothing yet to notify a machine about), so the
+channel is wired end-to-end but currently idle.
+
+`apps/agent/src/wake.ts`'s `connectWake` is the agent side: it dials out
+(invariant #7 — the control plane only ever sends on a connection the
+agent already opened) with the cached bearer token, and reconnects with
+the same full-jitter backoff as the poll/report loop on any drop.
+`poll-report-loop.ts` wires its `onPullNow` callback into the sleep
+between cycles, so a wake short-circuits the wait instead of the machine
+sitting out its full ~30s interval — the agent still finds out *what*
+changed via the next `poll`, same as before.
+
+**In-memory, per-process, single-replica only** — like `AgentSessionToken`'s
+signing secret and `agent-protocol.ts`'s `lastObserved` diff cache,
+`WakeRegistry` lives in one control-plane process. A machine's wake socket
+only exists on whichever replica it happened to connect to; a `wake()` call
+handled by a *different* replica finds nothing registered and reports "not
+delivered," even though the machine is connected — to a sibling. This is a
+real gap against `infra/bicep/control-plane.bicep` and
+`infra/terraform/control-plane/variables.tf`'s default multi-replica
+autoscaling, not just a theoretical one, and there's no metric today that
+distinguishes "machine not connected anywhere" from "connected to the wrong
+replica." Tolerable only because nothing calls `wake()` yet and the whole
+channel is spec-optional (a missed wake just means the machine waits out
+its normal poll interval, same as if this channel didn't exist at all) —
+revisit before wiring a real caller in a multi-replica deployment: either
+pin the control plane to one replica, or replace this in-memory map with
+something shared across replicas (e.g. Postgres `LISTEN`/`NOTIFY`).
 
 ### Poll/report loop, backoff, and jitter
 
