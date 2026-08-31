@@ -16,10 +16,13 @@ import { FederationLive } from "./http/handlers/federation";
 import { HealthLive } from "./http/handlers/health";
 import { IntegrationsLive } from "./http/handlers/integrations";
 import { MachinesLive } from "./http/handlers/machines";
+import { NotificationsLive } from "./http/handlers/notifications";
 import { OffboardingHttpLive } from "./http/handlers/offboarding";
 import { OrganisationLive } from "./http/handlers/organisation";
 import { PeopleLive } from "./http/handlers/people";
+import { TunnelSignalLive } from "./http/handlers/tunnel-signal";
 import { UpgradeLive } from "./http/handlers/upgrade";
+import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
 import { buildAppLive } from "./layers";
 import { FakeProvisioningServiceLive } from "./services/ProvisioningService.fake";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
@@ -38,9 +41,9 @@ const AppLive = buildAppLive({
 
 // `buildAppLive` deliberately keeps `Db` internal to the services it wires (see
 // layers.ts) rather than re-exposing it. Handler groups whose domain logic reads `Db`
-// directly (EvidenceLive, ArchiveLive, UpgradeLive, ConfigLive) need it provided here too. `DbLive`
-// is a single scoped layer shared by reference, so this does not open a second
-// Postgres connection pool alongside the one inside `AppLive`.
+// directly (EvidenceLive, ArchiveLive, UpgradeLive, ConfigLive, NotificationsLive) need it
+// provided here too. `DbLive` is a single scoped layer shared by reference, so this does
+// not open a second Postgres connection pool alongside the one inside `AppLive`.
 const ApiLive = HttpApiBuilder.api(Api).pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -60,13 +63,22 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       PeopleLive,
       OrganisationLive,
       IntegrationsLive,
+      TunnelSignalLive,
+      NotificationsLive,
     ),
   ),
   Layer.provide(DbLive),
 );
 
+// Not part of `Api`/`ApiLive` above — `wake` is a raw route on the same shared
+// `HttpApiBuilder.Router`, not an `HttpApiEndpoint` (see agent-wake.ts) — but it needs the
+// same `AgentSessionToken`/`MachineDirectory` singletons `AgentProtocolLive` uses, which
+// `AppLive` (provided to `ServerLive` below) already supplies.
+const AgentWakeLive = AgentWakeRouteLive.pipe(Layer.provide(WakeRegistry.Default));
+
 const ServerLive = HttpApiBuilder.serve().pipe(
   Layer.provide(ApiLive),
+  Layer.provide(AgentWakeLive),
   Layer.provide(AppLive),
   Layer.provide(BunHttpServer.layer({ port: config.port })),
 );

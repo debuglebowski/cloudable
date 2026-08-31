@@ -14,10 +14,11 @@
 #
 # Prerequisites:
 #   - Docker + the Compose plugin (`docker compose version`)
-#   - A published control-plane image (no Dockerfile exists yet in this build of
-#     the monorepo — a separate, not-yet-merged unit adds
-#     apps/control-plane/Dockerfile; build and push your own from it in the
-#     meantime, or use CONTROL_PLANE_IMAGE below to point at one you built)
+#   - A published control-plane image. Build it from apps/control-plane/Dockerfile
+#     (a multi-stage oven/bun build) and push it, or use CONTROL_PLANE_IMAGE below
+#     to point at one you built:
+#       docker build -t <your-image> -f apps/control-plane/Dockerfile .
+#       docker push <your-image>
 #   - A copy of control-plane.self-host.env.example as .env in this directory,
 #     with BETTER_AUTH_SECRET and POSTGRES_PASSWORD set to real random values
 #     (e.g. `openssl rand -base64 32`) — never commit the real .env

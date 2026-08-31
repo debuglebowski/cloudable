@@ -19,6 +19,7 @@ export * from "./tables/compliance-finding-state";
 export * from "./tables/control-override";
 export * from "./tables/secret-binding";
 export * from "./tables/upgrade-attempt";
+export * from "./tables/notification";
 
 export * from "./shared";
 export * from "./relations";

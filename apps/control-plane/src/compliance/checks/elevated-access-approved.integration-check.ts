@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { events, approvals } from "@cloudable/schema";
+import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ulid } from "ulid";
 import { startTestDb } from "../../../test/testcontainers";
@@ -120,5 +121,41 @@ describe("elevatedAccessApprovedCheck", () => {
 
   test("an org with no elevation events -> no findings", async () => {
     expect(await evaluate(randomUUID())).toEqual([]);
+  });
+
+  // Regression test for the finding-age reopen bug (docs/compliance.md,
+  // "a finding that closes and later reopens is treated as newly opened"):
+  // without `clearResolvedFindings`, the state row from the first
+  // detection survives the resolution and the reopened finding reports the
+  // ORIGINAL, stale `firstSeenAt` instead of a fresh one. The elevation
+  // event itself is immutable (events are append-only), so resolve/reopen
+  // is driven by mutating the referenced `approvals.reason` — the same
+  // approval record the check reads live.
+  test("closes and reopens -> firstSeenAt resets, not the stale original", async () => {
+    const orgId = randomUUID();
+    const correlationId = randomUUID();
+    const machineId = randomUUID();
+    const approval = await insertApproval({ orgId, reason: "" });
+    await insertElevationGranted({ orgId, machineId, correlationId, approvalId: approval.id });
+    await insertApprovalGranted({ orgId, correlationId });
+
+    const opened = await evaluate(orgId);
+    expect(opened).toHaveLength(1);
+    const firstSeenAt = opened[0]?.firstSeenAt;
+
+    // Resolve: the approval gets a real reason.
+    await testDb.db
+      .update(approvals)
+      .set({ reason: "on-call incident #125" })
+      .where(eq(approvals.id, approval.id));
+    expect(await evaluate(orgId)).toEqual([]);
+
+    // Reopen: the reason is cleared again.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await testDb.db.update(approvals).set({ reason: "" }).where(eq(approvals.id, approval.id));
+    const reopened = await evaluate(orgId);
+    expect(reopened).toHaveLength(1);
+    expect(reopened[0]?.firstSeenAt.getTime()).not.toBe(firstSeenAt?.getTime());
+    expect(reopened[0]?.firstSeenAt.getTime()).toBeGreaterThan(firstSeenAt?.getTime() ?? 0);
   });
 });

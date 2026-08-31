@@ -7,6 +7,8 @@ export interface MachineRecord {
   orgId: string;
   templateId: string | null;
   ownerPersonId: string | null;
+  /** For the owner-notification message (`../notify.ts`) — human-readable, unlike `id`. */
+  name: string;
 }
 
 export interface PersonRecord {
@@ -28,11 +30,11 @@ export interface InsertElevationValues {
   status: ElevationStatus;
 }
 
-export interface InsertAutoApprovedApprovalArgs {
+export interface InsertNotificationArgs {
   orgId: string;
-  personId: string;
-  machineId: string;
-  reason: string;
+  ownerPersonId: string;
+  elevationId: string;
+  message: string;
   now: Date;
 }
 
@@ -57,9 +59,6 @@ export interface ElevationRepo {
     keys: ReadonlyArray<string>,
     scopeIds: ReadonlyArray<string>,
   ): Effect.Effect<ReadonlyArray<SettingRow<unknown>>, Error>;
-  insertAutoApprovedApproval(
-    args: InsertAutoApprovedApprovalArgs,
-  ): Effect.Effect<{ id: string }, Error>;
   insertElevation(values: InsertElevationValues): Effect.Effect<Elevation, Error>;
   updateElevationGranted(
     elevationId: string,
@@ -70,6 +69,17 @@ export interface ElevationRepo {
     elevationId: string,
     status: "denied" | "expired",
   ): Effect.Effect<Elevation, Error>;
+  /**
+   * Persists an in-app owner notification (spec §15: "owner notified") —
+   * see `../notify.ts`. Idempotent per `elevationId` (the table enforces a
+   * unique constraint on it — see `packages/schema/src/tables/
+   * notification.ts`): calling this again for an elevation that already has
+   * a notification returns the existing row's id rather than erroring or
+   * inserting a duplicate, so a retried grant-finalization (see
+   * `ElevationService.syncApproval`'s "already granted" branch) is safe to
+   * call this unconditionally.
+   */
+  insertNotification(args: InsertNotificationArgs): Effect.Effect<{ id: string }, Error>;
 }
 
 export class ElevationRepoTag extends Context.Tag("ElevationRepo")<
