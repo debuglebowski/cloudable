@@ -28,6 +28,9 @@ const ARCHIVED_STATES: Array<"archived_restorable" | "archived_expired"> = [
 export const activeOwnerCheck: ComplianceCheck = {
   id: "active-owner",
   label: "Machine has an active owner",
+  // An unowned or deactivated-owner machine is an accountability gap, not
+  // an active exposure by itself — medium, not high.
+  severity: "medium",
   controlRefs: ["access-management"],
 
   // Not applicable to an org with no live machines — nothing to have an

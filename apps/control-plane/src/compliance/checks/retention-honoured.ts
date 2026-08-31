@@ -20,6 +20,9 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export const retentionHonouredCheck: ComplianceCheck = {
   id: CHECK_ID,
   label: "Retention is honoured",
+  // Data outliving its declared retention window is a real compliance
+  // exposure, but a slower-burning one than live unauthorised access — medium.
+  severity: "medium",
   controlRefs: ["asset-management"],
 
   // Not applicable to an org with no snapshots at all — an org that has

@@ -87,13 +87,13 @@ Status, computed purely from `COMPLIANCE_CHECKS` (no DB access needed for this e
 
 `GET /api/v1/compliance/findings/export` — CSV, **grouped by control, not by time** (`docs/spec.md` §19). For every in-scope control with at least one evidencing check, lists that check's current open findings. Columns: `control, control_label, framework, check, check_label, machine_id, first_seen_at, open_days, severity, detail`.
 
-`severity` is a fixed stub (`"medium"`) for every row — `ComplianceFinding` has no severity field yet.
+`severity` is real, sourced from `ComplianceCheck.severity` (`apps/control-plane/src/domain/compliance/types.ts`) — a fixed, per-check editorial classification (which of the six v1 checks tends to matter more if it fails: `access-revoked-on-offboarding` and `elevated-access-approved` are `high`; `active-owner`, `no-undeclared-software`, and `retention-honoured` are `medium`; `machines-reporting` is `low`). Every finding under the same check shares its check's severity — there is no finer-grained per-finding score. This is the one place severity is defined: both evidence CSVs and `GET /api/v1/compliance/findings` (as `ComplianceCheckResult.severity`) read it from here, rather than each keeping an independent classification.
 
 Two named exports (`docs/spec.md` §19, "Exports"):
 
 - `GET /api/v1/compliance/exports/findings.csv` — same underlying open-findings data as the main export, narrower columns: `control, check, machine_id, severity, open_since`.
 - `GET /api/v1/compliance/exports/asset-inventory.csv` — one row per machine in the org: `machine_id, machine_name, owner, state, encryption_status, drift_status, patch_status`.
-  - `encryption_status` and `patch_status` are stubs (`true` / `"unknown"`) — neither is tracked yet.
+  - `encryption_status` and `patch_status` are explicit fixed placeholders (`true` / `"unknown"`) — no encryption-status or patch-status signal exists anywhere in the system yet (no event, no column on `machines`), so these columns intentionally report a fixed value rather than guessing one.
   - `drift_status` comes from the `no-undeclared-software` check (unit 8) when it's registered in `COMPLIANCE_CHECKS`: `"drifted"` if that check has an open finding for the machine, `"clean"` otherwise. Reports `"unknown"` for every machine if that check isn't registered yet, rather than guessing.
 
 All three exports guard against CSV/formula injection (`apps/control-plane/src/compliance/csv.ts`): a field starting with `=`, `+`, `-`, `@`, or a tab is prefixed with `'` before quoting, since machine names and finding detail are free text that flows straight into a file auditors typically open in Excel or Sheets.

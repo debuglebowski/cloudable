@@ -13,6 +13,7 @@ function fakeCheck(overrides: Partial<ComplianceCheck> & { id: string }): Compli
   return {
     label: overrides.id,
     controlRefs: [],
+    severity: "medium",
     appliesTo: () => Effect.succeed(true),
     evaluate: () => Effect.succeed([]),
     ...overrides,

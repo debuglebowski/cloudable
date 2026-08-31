@@ -61,6 +61,9 @@ function extractUndeclaredPackages(payload: unknown): string[] {
 export const noUndeclaredSoftwareCheck: ComplianceCheck = {
   id: "no-undeclared-software",
   label: "No undeclared software",
+  // Drift from the declared manifest matters, but is a divergence to
+  // investigate, not by itself proof of active harm — medium.
+  severity: "medium",
   controlRefs: ["asset-management"],
 
   // Not applicable to an org with no live machines — nothing to have
