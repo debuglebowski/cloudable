@@ -22,6 +22,12 @@ export interface ComplianceCheckResult {
   status: ComplianceCheckStatus;
   /** Empty when `status` is `"pass"` or `"not_applicable"`. */
   findings: ComplianceFindingDto[];
+  /**
+   * Median `ageDays` across `findings` (spec §19 "Finding age": "surface
+   * median age and trend ... not just the current count"). `null` when
+   * `findings` is empty — there is no age distribution to summarize.
+   */
+  medianAgeDays: number | null;
 }
 
 export interface ComplianceFindingsResponse {

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { snapshots } from "@cloudable/schema";
+import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { startTestDb } from "../../../test/testcontainers";
 import { Db } from "../../db/layer";
@@ -109,5 +110,43 @@ describe("retentionHonouredCheck", () => {
     });
 
     expect(await evaluate(orgId)).toEqual([]);
+  });
+
+  // Regression test for the finding-age reopen bug (docs/compliance.md,
+  // "a finding that closes and later reopens is treated as newly opened"):
+  // without `clearResolvedFindings`, the state row from the first overdue
+  // period survives the resolution and the reopened finding reports the
+  // ORIGINAL, stale `firstSeenAt` instead of a fresh one. `legalHold` is a
+  // mutable flag on the same snapshot row, so toggling it resolves/reopens
+  // the finding without ever touching `events`.
+  test("closes and reopens -> firstSeenAt resets, not the stale original", async () => {
+    const orgId = randomUUID();
+    const machineId = randomUUID();
+    const snapshot = await insertSnapshot({
+      orgId,
+      machineId,
+      expiresAt: daysAgo(5),
+      expiredAt: null,
+      legalHold: false,
+    });
+
+    const opened = await evaluate(orgId);
+    expect(opened).toHaveLength(1);
+    const firstSeenAt = opened[0]?.firstSeenAt;
+
+    // Resolve: place the snapshot under legal hold.
+    await testDb.db.update(snapshots).set({ legalHold: true }).where(eq(snapshots.id, snapshot.id));
+    expect(await evaluate(orgId)).toEqual([]);
+
+    // Reopen: lift the hold again.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await testDb.db
+      .update(snapshots)
+      .set({ legalHold: false })
+      .where(eq(snapshots.id, snapshot.id));
+    const reopened = await evaluate(orgId);
+    expect(reopened).toHaveLength(1);
+    expect(reopened[0]?.firstSeenAt.getTime()).not.toBe(firstSeenAt?.getTime());
+    expect(reopened[0]?.firstSeenAt.getTime()).toBeGreaterThan(firstSeenAt?.getTime() ?? 0);
   });
 });
