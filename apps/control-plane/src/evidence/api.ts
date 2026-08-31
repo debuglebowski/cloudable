@@ -3,9 +3,10 @@ import { Schema } from "effect";
 
 /**
  * Wire schema for the normalised evidence projection (spec §18). Kept in
- * lockstep with `./projection.ts`'s `EvidenceRecord`/`CommandRecordingRef`
- * TypeScript shapes by hand — there's exactly one of each in this unit, so
- * a codegen step would be more machinery than the duplication it removes.
+ * lockstep with `./projection.ts`'s `EvidenceRecord`/`CommandRecordingRef`/
+ * `EvidenceExtensions` TypeScript shapes by hand — there's exactly one of
+ * each in this unit, so a codegen step would be more machinery than the
+ * duplication it removes.
  */
 const ActorSchema = Schema.Struct({
   type: Schema.Literal("person", "system", "agent", "idp"),
@@ -15,6 +16,15 @@ const ActorSchema = Schema.Struct({
 const CommandRecordingRefSchema = Schema.Struct({
   correlationId: Schema.String,
   count: Schema.Number,
+});
+
+// `EvidenceExtensions` (./projection.ts) is a union of small string-only
+// `cloud` shapes that vary per cloud event type — loosened here to a plain
+// string record rather than mirroring the union case-by-case in Schema,
+// since the wire contract only needs "cloud-specific string fields", not
+// the TS-side per-event-type precision.
+const EvidenceExtensionsSchema = Schema.Struct({
+  cloud: Schema.Record({ key: Schema.String, value: Schema.String }),
 });
 
 export const EvidenceRecordSchema = Schema.Struct({
@@ -27,6 +37,7 @@ export const EvidenceRecordSchema = Schema.Struct({
   machineId: Schema.NullOr(Schema.String),
   correlationId: Schema.String,
   summary: Schema.String,
+  extensions: Schema.optional(EvidenceExtensionsSchema),
   commandRecording: Schema.NullOr(CommandRecordingRefSchema),
 });
 

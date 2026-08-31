@@ -34,7 +34,9 @@ const ComplianceCheckResult = Schema.Struct({
   label: Schema.String,
   controlRefs: Schema.Array(Schema.String),
   status: Schema.Literal("pass", "fail", "not_applicable"),
+  severity: Schema.Literal("low", "medium", "high"),
   findings: Schema.Array(ComplianceFindingDto),
+  medianAgeDays: Schema.NullOr(Schema.Number),
 });
 
 const ComplianceFindingsResponse = Schema.Struct({

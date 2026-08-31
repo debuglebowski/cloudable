@@ -1,4 +1,4 @@
-import { approvals, elevations, machines, people, settingValues } from "@cloudable/schema";
+import { elevations, machines, notifications, people, settingValues } from "@cloudable/schema";
 import type { SettingRow } from "@cloudable/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
@@ -81,29 +81,6 @@ export const ElevationRepoLive = Layer.effect(
         ),
       );
 
-    const insertAutoApprovedApproval: ElevationRepo["insertAutoApprovedApproval"] = (args) =>
-      Effect.tryPromise({
-        try: () =>
-          db
-            .insert(approvals)
-            .values({
-              orgId: args.orgId,
-              actionType: "admin_access",
-              mode: "none",
-              status: "approved",
-              requestedByPersonId: args.personId,
-              targetMachineId: args.machineId,
-              reason: args.reason,
-              requiredApprovals: 0,
-              createdAt: args.now,
-              expiresAt: args.now,
-              decidedAt: args.now,
-            })
-            .returning({ id: approvals.id })
-            .then(single),
-        catch: toError,
-      });
-
     const insertElevation: ElevationRepo["insertElevation"] = (values) =>
       Effect.tryPromise({
         try: () => db.insert(elevations).values(values).returning().then(single),
@@ -138,15 +115,44 @@ export const ElevationRepoLive = Layer.effect(
         catch: toError,
       });
 
+    const insertNotification: ElevationRepo["insertNotification"] = (args) =>
+      Effect.tryPromise({
+        try: async () => {
+          // `onConflictDoNothing` against the table's unique `elevationId`
+          // constraint, rather than a plain insert, is what makes this
+          // idempotent (see this method's doc comment in `ElevationRepo.ts`):
+          // a retried or concurrently-raced grant-finalization can call this
+          // again for the same elevation without erroring or duplicating.
+          const inserted = await db
+            .insert(notifications)
+            .values({
+              orgId: args.orgId,
+              ownerPersonId: args.ownerPersonId,
+              elevationId: args.elevationId,
+              message: args.message,
+              createdAt: args.now,
+            })
+            .onConflictDoNothing({ target: notifications.elevationId })
+            .returning({ id: notifications.id });
+          if (inserted[0]) return inserted[0];
+          return await db
+            .select({ id: notifications.id })
+            .from(notifications)
+            .where(eq(notifications.elevationId, args.elevationId))
+            .then(single);
+        },
+        catch: toError,
+      });
+
     return {
       findMachine,
       findPerson,
       findElevation,
       findSettingRows,
-      insertAutoApprovedApproval,
       insertElevation,
       updateElevationGranted,
       updateElevationStatus,
+      insertNotification,
     } satisfies ElevationRepo;
   }),
 );

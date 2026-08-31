@@ -8,6 +8,8 @@ import { cleanupOrgRows, connectTestDb } from "../test-support/db";
 import {
   DEFAULT_LOGGING_TIER,
   DEFAULT_RETENTION_LOCATION,
+  LOGGING_TIER_KEY,
+  getEffectiveLoggingTier,
   getOrgLoggingTier,
   getOrgRetentionLocation,
   setOrgLoggingTier,
@@ -140,5 +142,83 @@ describe("logging settings (spec §17)", () => {
     const payload = rows[0]?.payload as { previous: unknown; current: unknown };
     expect(payload.previous).toBe(DEFAULT_LOGGING_TIER);
     expect(payload.current).toBe(3);
+  });
+});
+
+describe("getEffectiveLoggingTier — machine-level override (spec §17)", () => {
+  test("defaults to DEFAULT_LOGGING_TIER with source 'org' when nothing is set anywhere", async () => {
+    const orgId = freshOrgId();
+    const machineId = crypto.randomUUID();
+    testMachineScopeIds.push(machineId);
+
+    const resolved = await Effect.runPromise(getEffectiveLoggingTier(db, { orgId, machineId }));
+    expect(resolved).toEqual({ tier: DEFAULT_LOGGING_TIER, source: "org" });
+  });
+
+  test("resolves the org value with source 'org' when the machine has no override of its own", async () => {
+    const orgId = freshOrgId();
+    const machineId = crypto.randomUUID();
+    testMachineScopeIds.push(machineId);
+    await Effect.runPromise(setOrgLoggingTier(db, orgId, 3, testActor));
+
+    const resolved = await Effect.runPromise(getEffectiveLoggingTier(db, { orgId, machineId }));
+    expect(resolved).toEqual({ tier: 3, source: "org" });
+  });
+
+  test("a machine-scoped row wins over the org value, with source 'machine'", async () => {
+    const orgId = freshOrgId();
+    const machineId = crypto.randomUUID();
+    testMachineScopeIds.push(machineId);
+    await Effect.runPromise(setOrgLoggingTier(db, orgId, 1, testActor));
+    await db.insert(settingValues).values({
+      scopeType: "machine",
+      scopeId: machineId,
+      key: LOGGING_TIER_KEY,
+      value: 3,
+      source: "machine",
+    });
+
+    const resolved = await Effect.runPromise(getEffectiveLoggingTier(db, { orgId, machineId }));
+    expect(resolved).toEqual({ tier: 3, source: "machine" });
+  });
+
+  test("a machine-scoped row wins even when the org has never configured a tier at all", async () => {
+    const orgId = freshOrgId();
+    const machineId = crypto.randomUUID();
+    testMachineScopeIds.push(machineId);
+    await db.insert(settingValues).values({
+      scopeType: "machine",
+      scopeId: machineId,
+      key: LOGGING_TIER_KEY,
+      value: 1,
+      source: "machine",
+    });
+
+    const resolved = await Effect.runPromise(getEffectiveLoggingTier(db, { orgId, machineId }));
+    expect(resolved).toEqual({ tier: 1, source: "machine" });
+  });
+
+  test("a machine's override never leaks to a different machine in the same org", async () => {
+    const orgId = freshOrgId();
+    const overriddenMachine = crypto.randomUUID();
+    const plainMachine = crypto.randomUUID();
+    testMachineScopeIds.push(overriddenMachine, plainMachine);
+    await Effect.runPromise(setOrgLoggingTier(db, orgId, 2, testActor));
+    await db.insert(settingValues).values({
+      scopeType: "machine",
+      scopeId: overriddenMachine,
+      key: LOGGING_TIER_KEY,
+      value: 3,
+      source: "machine",
+    });
+
+    const overridden = await Effect.runPromise(
+      getEffectiveLoggingTier(db, { orgId, machineId: overriddenMachine }),
+    );
+    const plain = await Effect.runPromise(
+      getEffectiveLoggingTier(db, { orgId, machineId: plainMachine }),
+    );
+    expect(overridden).toEqual({ tier: 3, source: "machine" });
+    expect(plain).toEqual({ tier: 2, source: "org" });
   });
 });
