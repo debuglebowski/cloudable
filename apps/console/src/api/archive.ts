@@ -6,13 +6,25 @@ import { CURRENT_ORG_ID } from "@/lib/current-org";
 import { listMachines } from "./machines";
 
 /**
- * Restore modes, escalating approval (spec §14): data (default, no approval) <
- * config (single approval) < full including secret bindings (dual approval,
- * deliberately hardest to reach). Mirrors `SnapshotEvent["snapshot.restored"].payload.mode`
- * in `packages/events/src/domains/snapshot.ts`.
+ * Restore modes, escalating approval (spec §14): data < config < full including secret
+ * bindings (deliberately hardest to reach). Mirrors
+ * `SnapshotEvent["snapshot.restored"].payload.mode` in
+ * `packages/events/src/domains/snapshot.ts`.
  */
 export type RestoreMode = "data" | "config" | "full";
 
+/**
+ * The MINIMUM approval mode the control plane structurally guarantees per restore mode —
+ * mirrors `resolveRestoreApprovalFloor` in
+ * `apps/control-plane/src/domain/archive/approval-escalation.ts`, enforced there via
+ * `ApprovalService.request()`'s `requiredModeFloor` (clamped up, never satisfiable by a
+ * weaker org-configured `approval_mode:snapshot_restore` setting). This is a FLOOR, not
+ * the exact mode that will apply: `"data"` has no floor at all, so its actual approval
+ * mode is whatever the org has configured (which may well be stricter than `"none"`);
+ * `"config"` is guaranteed to be at least `"single"` but could be `"dual"` if the org
+ * configured that; `"full"` is the only mode with an exact, unconditional guarantee —
+ * always `"dual"`, regardless of org configuration.
+ */
 export const RESTORE_MODE_APPROVAL: Record<RestoreMode, "none" | "single" | "dual"> = {
   data: "none",
   config: "single",

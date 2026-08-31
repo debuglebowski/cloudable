@@ -31,19 +31,27 @@ interface RestoreModeOption {
   icon: typeof ShieldOff;
 }
 
+// "none" (data mode) is deliberately NOT the reassuring "ok"/green variant: it means "no
+// floor enforced," not "no approval will be asked for" — the org's own policy still
+// applies and may well be stricter. Neutral "outline" avoids implying a guarantee this
+// mode doesn't actually make; only "dual" (full mode) is an unconditional guarantee.
 const APPROVAL_BADGE_VARIANT: Record<
   (typeof RESTORE_MODE_APPROVAL)[RestoreMode],
   BadgeProps["variant"]
 > = {
-  none: "ok",
+  none: "outline",
   single: "drift",
   dual: "destructive",
 };
 
+// Phrased as a floor/guarantee, not an exact value — `RESTORE_MODE_APPROVAL["data"]`
+// being `"none"` means no *minimum* is enforced, not that no approval will be asked for
+// (the org's own configured policy still applies). Only `"dual"` (full mode) is an exact,
+// unconditional guarantee — see `RESTORE_MODE_APPROVAL`'s doc comment in `api/archive.ts`.
 const APPROVAL_LABEL: Record<(typeof RESTORE_MODE_APPROVAL)[RestoreMode], string> = {
-  none: "No approval required",
-  single: "Approval required · single",
-  dual: "Approval required · dual",
+  none: "Follows org policy",
+  single: "Always at least single approval",
+  dual: "Always dual approval",
 };
 
 function approvalLabelFor(mode: RestoreMode): string {
@@ -54,9 +62,10 @@ function approvalBadgeVariantFor(mode: RestoreMode): BadgeProps["variant"] {
   return APPROVAL_BADGE_VARIANT[RESTORE_MODE_APPROVAL[mode]];
 }
 
-// Escalating order — data (default, no approval) < config (single) < full (dual, deliberately
-// hardest to reach). See spec §14 "Restore modes — escalating approval". Approval level itself
-// comes from RESTORE_MODE_APPROVAL in api/archive.ts, the single source of truth for that mapping.
+// Escalating order — data (no minimum, follows org policy) < config (at least single) <
+// full (always dual, deliberately hardest to reach). See spec §14 "Restore modes —
+// escalating approval". The floor itself comes from RESTORE_MODE_APPROVAL in
+// api/archive.ts, the single source of truth for that mapping.
 const RESTORE_MODE_OPTIONS: RestoreModeOption[] = [
   {
     mode: "data",
@@ -245,7 +254,8 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
             <p className="font-medium text-destructive">Final confirmation — full restore</p>
             <p className="text-muted-foreground">
               Restoring <strong>{snapshot.machineName}</strong> with data, configuration, and secret
-              bindings. This requires dual approval and cannot be undone silently.
+              bindings. {approvalLabelFor("full")} — enforced by the control plane regardless of the
+              org's configured restore-approval policy — and cannot be undone silently.
             </p>
             <p className="text-xs text-muted-foreground">Reason on file: "{reason.trim()}"</p>
           </div>

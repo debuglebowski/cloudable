@@ -28,6 +28,18 @@ export interface ApprovalRequest {
   requestedByPersonId: string;
   targetMachineId: string | null;
   reason: string;
+  /**
+   * A minimum mode a caller can require ON TOP OF whatever the org has configured for
+   * `actionType` — e.g. `domain/archive/approval-escalation.ts`'s `resolveRestoreApprovalFloor`
+   * escalating `"full"`-mode snapshot restores to always be at least `"dual"`, regardless of
+   * the org's own `approval_mode:snapshot_restore` setting. Same concept as
+   * `domain/elevation/policy.ts`'s `requiredApprovalModeFloor`, but enforced structurally
+   * here rather than as a pre-check the caller has to run itself: the org's configured mode
+   * is clamped UP to this floor, never down, so a weaker org configuration (e.g. `"none"`)
+   * can never satisfy less than what the caller requires. Omitted (the common case) means no
+   * floor beyond the org's own configured mode.
+   */
+  requiredModeFloor?: ApprovalMode | undefined;
 }
 
 export interface ApprovalResult {
@@ -69,6 +81,17 @@ const REQUIRED_APPROVALS_BY_MODE: Record<ApprovalMode, number> = {
   single: 1,
   dual: 2,
 };
+
+// Same rank table as `domain/elevation/policy.ts`'s `APPROVAL_MODE_RANK` — used below to
+// clamp a resolved org mode UP to a caller-required floor, never down.
+const APPROVAL_MODE_RANK: Record<ApprovalMode, number> = { none: 0, single: 1, dual: 2 };
+
+/** The stricter of `configured` (the org's own policy) and `floor` (a caller's minimum
+ * requirement) — never weaker than either. */
+const applyModeFloor = (configured: ApprovalMode, floor: ApprovalMode | undefined): ApprovalMode =>
+  floor !== undefined && APPROVAL_MODE_RANK[floor] > APPROVAL_MODE_RANK[configured]
+    ? floor
+    : configured;
 
 // Approval requests are time-boxed — an undecided request doesn't linger
 // forever (see `expireOverdueApprovals`).
@@ -196,7 +219,11 @@ const decodeCursor = (cursor: string): Cursor | null => {
  * The generic approval object (spec §13): single/dual-control gate for
  * sensitive actions (snapshot restore, break-glass, admin access,
  * offboarding). Approval mode is policy, resolved per action type through
- * the org -> machine chain (`resolveSetting`, template inert in v1).
+ * the org -> machine chain (`resolveSetting`, template inert in v1), then
+ * clamped up to `ApprovalRequest.requiredModeFloor` when the caller passes
+ * one — a caller-side escalation (see `domain/archive/approval-escalation.ts`)
+ * always wins over a weaker org configuration; the org's own mode can never
+ * be used to satisfy less than a caller's required floor.
  *
  * Every decision writes an event, granted or denied — denials are evidence
  * and are never silently dropped. Even a "none"-mode auto-approval still
@@ -240,7 +267,13 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
           return yield* Effect.fail(new ApprovalError({ reason: "reason_required" }));
         }
 
-        const mode = yield* resolveApprovalMode(db, req.orgId, req.targetMachineId, req.actionType);
+        const configuredMode = yield* resolveApprovalMode(
+          db,
+          req.orgId,
+          req.targetMachineId,
+          req.actionType,
+        );
+        const mode = applyModeFloor(configuredMode, req.requiredModeFloor);
         const requiredApprovals = REQUIRED_APPROVALS_BY_MODE[mode];
         const expiresAt = new Date(Date.now() + APPROVAL_TTL_MS);
 
