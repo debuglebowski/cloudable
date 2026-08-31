@@ -9,6 +9,7 @@ import {
   useOrgSettings,
   useUpdateOrgSettings,
 } from "@/api/organisation";
+import { LineageGutter } from "@/components/lineage-gutter";
 import { SettingRow } from "@/components/setting-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -117,6 +118,13 @@ export function OrganisationPage() {
             source="org"
             onOverride={() => setEditingLoggingTier(true)}
           />
+          {settings.loggingTierOverrideCount > 0 && (
+            <LineageGutter
+              source="org"
+              viewing="org"
+              overriddenBelow={settings.loggingTierOverrideCount}
+            />
+          )}
           <ul className="flex flex-col gap-1 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
             <li>Tier 1 — metadata only: provisioning, auth, lifecycle.</li>
             <li>Tier 2 — session-level: connections, elevations, config changes.</li>

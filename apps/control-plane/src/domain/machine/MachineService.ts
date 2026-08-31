@@ -3,6 +3,7 @@ import { and, asc, eq, gt, or } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
+import { type EffectiveLoggingTier, getEffectiveLoggingTier } from "../../logging/settings";
 import { EventBus } from "../../services/EventBus";
 import { InvalidCursorError, MachineNotFoundError, PackagePinConflictError } from "./errors";
 import {
@@ -53,6 +54,8 @@ export interface ListMachinesResult {
 
 export interface MachineDetail extends MachineRow {
   manifest: ResolvedManifestEntry[];
+  /** The tier actually in effect for this machine — its own override if it has one, else the org default (spec §17, docs/inheritance.md). */
+  loggingTier: EffectiveLoggingTier;
 }
 
 export interface PackageManifestEdit {
@@ -275,7 +278,16 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           templateId: machine.templateId,
           machineId: machine.id,
         });
-        return { ...machine, manifest };
+        const loggingTier = yield* getEffectiveLoggingTier(db, {
+          orgId: machine.orgId,
+          templateId: machine.templateId,
+          machineId: machine.id,
+        }).pipe(
+          Effect.mapError(
+            (cause) => new MachineServiceError({ reason: "logging_tier_read_failed", cause }),
+          ),
+        );
+        return { ...machine, manifest, loggingTier };
       });
 
     const updatePackages = (
