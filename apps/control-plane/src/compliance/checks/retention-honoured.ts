@@ -3,7 +3,7 @@ import { and, eq, isNull, lt } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
-import { upsertFindingFirstSeen } from "../finding-store";
+import { clearResolvedFindings, upsertFindingFirstSeen } from "../finding-store";
 
 const CHECK_ID = "retention-honoured";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -63,6 +63,16 @@ export const retentionHonouredCheck: ComplianceCheck = {
           },
         });
       }
+
+      // Anything previously open for this check+org that isn't among the
+      // overdue snapshots found just now has resolved (expired, or placed
+      // under legal hold) — stop aging it, so the same snapshot id going
+      // overdue again later is treated as newly opened.
+      yield* clearResolvedFindings(
+        CHECK_ID,
+        orgId,
+        overdueSnapshots.map((snapshot) => snapshot.id),
+      ).pipe(Effect.orDie);
 
       return findings;
     }),

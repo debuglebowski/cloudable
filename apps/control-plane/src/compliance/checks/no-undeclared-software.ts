@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
-import { upsertFindingFirstSeen } from "../finding-store";
+import { clearResolvedFindings, upsertFindingFirstSeen } from "../finding-store";
 
 const DRIFT_EVENT_TYPES = ["machine.drift_detected", "machine.drift_resolved"] as const;
 
@@ -103,9 +103,12 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
       }
 
       const findings: ComplianceFinding[] = [];
+      const openMachineIds: string[] = [];
       for (const [machineId, latest] of latestByMachine) {
         if (latest.type !== "machine.drift_detected") continue;
         if (!liveMachineIds.has(machineId)) continue;
+
+        openMachineIds.push(machineId);
 
         const firstSeenAt = yield* upsertFindingFirstSeen({
           checkId: "no-undeclared-software",
@@ -122,6 +125,15 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
           detail: { undeclaredPackages: extractUndeclaredPackages(latest.payload) },
         });
       }
+
+      // Anything previously open for this check+org that isn't among the
+      // machines found just now has resolved (a `drift_resolved` landed, or
+      // the machine was archived) — stop aging it, so a later re-drift of
+      // the same machine is treated as newly opened.
+      yield* clearResolvedFindings("no-undeclared-software", orgId, openMachineIds).pipe(
+        Effect.orDie,
+      );
+
       return findings;
     }),
 };
