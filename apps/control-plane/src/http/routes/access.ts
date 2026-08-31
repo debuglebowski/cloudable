@@ -103,6 +103,16 @@ const ListSessionsResponse = Schema.Struct({ sessions: Schema.Array(SessionSumma
 
 const Ok = Schema.Struct({ ok: Schema.Literal(true) });
 
+// Response for `GET /api/v1/access/session-token-public-key` (§3, §4 of
+// docs/access.md) — wraps `Signer.publicKey(SESSION_TOKEN_KEY_ID)`. Not
+// secret: only the PUBLIC half of the signing key, so the agent can fetch
+// and cache it with no auth/secret involved and validate a session token's
+// signature locally before attaching (spec §11.1).
+const SessionTokenPublicKeyResponse = Schema.Struct({
+  keyId: Schema.String,
+  publicKeyDerBase64: Schema.String,
+});
+
 export const AccessGroup = HttpApiGroup.make("access")
   .add(
     HttpApiEndpoint.post("issueCertificate", "/api/v1/access/certificates")
@@ -153,5 +163,10 @@ export const AccessGroup = HttpApiGroup.make("access")
     HttpApiEndpoint.get("listSessions", "/api/v1/access/sessions")
       .setUrlParams(ListSessionsUrlParams)
       .addSuccess(ListSessionsResponse)
+      .addError(InternalError, { status: 500 }),
+  )
+  .add(
+    HttpApiEndpoint.get("sessionTokenPublicKey", "/api/v1/access/session-token-public-key")
+      .addSuccess(SessionTokenPublicKeyResponse)
       .addError(InternalError, { status: 500 }),
   );

@@ -28,6 +28,16 @@ export type ApprovalMode = "none" | "single" | "dual";
 /** See docs/spec.md §17. Tier 3 puts Cloudable on the plaintext path — stated, not hidden. */
 export type LoggingTier = 1 | 2 | 3;
 
+/**
+ * Matches `apps/control-plane/src/logging/settings.ts`'s
+ * `DEFAULT_LOGGING_TIER` — used as a UI-only fallback while a query for the
+ * real value is still in flight (e.g. the machine detail page's override
+ * dialog needs *some* `currentTier` before its own query resolves). Every
+ * value actually rendered still comes from the API; this is never a
+ * silent substitute for a real read.
+ */
+export const DEFAULT_LOGGING_TIER: LoggingTier = 2;
+
 /** Matches `logging/settings.ts`'s `RetentionLocation` — the real setting values,
  * not the more verbose names this page's mock previously invented. */
 export type RetentionLocation = "customer" | "cloudable_sweden_central";
@@ -37,8 +47,13 @@ export interface OrgSettings {
   name: string;
   approvalModes: Record<ApprovalActionType, ApprovalMode>;
   loggingTier: LoggingTier;
+  /** How many machines have their own logging-tier override (see machine detail page). */
+  loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
+  /** Default Azure region for a new machine that doesn't specify one (docs/spec.md §5) —
+   * live-resolved server-side, not a client-side prefill. */
+  regionDefault: string;
 }
 
 export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
@@ -71,14 +86,20 @@ export const organisationKeys = {
   settings: () => [...organisationKeys.all, "settings"] as const,
 };
 
-export function useOrgSettings() {
+/** `options.enabled` defaults to always-on (the Organisation page's own use) — pass
+ * `{ enabled: false }` from a caller that only needs this while something else is open
+ * (e.g. a dialog), same convention as any other TanStack Query hook here. */
+export function useOrgSettings(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: organisationKeys.settings(),
     queryFn: () => apiGet<OrgSettings>(`/api/v1/organisation?orgId=${CURRENT_ORG_ID}`),
+    ...options,
   });
 }
 
-export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id">>;
+// `loggingTierOverrideCount` is derived (a count over machines' own
+// settings), never something the org PATCH endpoint accepts.
+export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id" | "loggingTierOverrideCount">>;
 
 export function useUpdateOrgSettings() {
   const queryClient = useQueryClient();
