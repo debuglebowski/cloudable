@@ -21,7 +21,18 @@ export const retentionHonouredCheck: ComplianceCheck = {
   id: CHECK_ID,
   label: "Retention is honoured",
   controlRefs: ["asset-management"],
-  appliesTo: () => Effect.succeed(true),
+
+  // Not applicable to an org with no snapshots at all — an org that has
+  // never archived a machine has nothing a retention window could apply to.
+  appliesTo: ({ orgId }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const rows = yield* Effect.tryPromise(() =>
+        db.select({ id: snapshots.id }).from(snapshots).where(eq(snapshots.orgId, orgId)).limit(1),
+      ).pipe(Effect.orDie);
+      return rows.length > 0;
+    }),
+
   evaluate: ({ orgId }) =>
     Effect.gen(function* () {
       const db = yield* Db;

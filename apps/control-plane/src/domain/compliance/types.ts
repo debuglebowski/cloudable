@@ -16,7 +16,15 @@ export interface ComplianceFinding {
 export interface ComplianceCheck {
   id: string;
   label: string;
-  appliesTo: (ctx: { orgId: string; machineId?: string }) => Effect.Effect<boolean>;
+  /**
+   * Spec §19: "a check is only asked where it makes sense" — a real, data-backed predicate,
+   * not a bare `true`. Requires `Db` (widened from an earlier version of this type that
+   * didn't) precisely so a check can look up whether the org has ever produced the kind of
+   * data this check is about, e.g. "has this org ever used break-glass access at all" —
+   * without that, every check either runs unconditionally or has to fake applicability
+   * inside `evaluate` itself (both real problems this type change closes).
+   */
+  appliesTo: (ctx: { orgId: string }) => Effect.Effect<boolean, never, Db>;
   evaluate: (ctx: { orgId: string }) => Effect.Effect<ComplianceFinding[], never, Db>;
   /** Framework control ids this check evidences. */
   controlRefs: string[];

@@ -54,16 +54,29 @@ function extractUndeclaredPackages(payload: unknown): string[] {
  * Like check #2, this excludes archived machines from producing findings —
  * a machine that drifted and was later archived (with no `drift_resolved`
  * ever recorded, since offboarding doesn't remediate drift) shouldn't
- * surface as an open finding forever. As in `active-owner.ts`, `appliesTo`'s
- * type (`Effect.Effect<boolean>`, no `Db` requirement) can't itself look up
- * a machine's archived state, so the exclusion lives in `evaluate`'s query.
+ * surface as an open finding forever. That per-machine exclusion still lives
+ * in `evaluate`'s query, same as `active-owner.ts`; `appliesTo` below only
+ * gates at the org level.
  */
 export const noUndeclaredSoftwareCheck: ComplianceCheck = {
   id: "no-undeclared-software",
   label: "No undeclared software",
   controlRefs: ["asset-management"],
 
-  appliesTo: () => Effect.succeed(true),
+  // Not applicable to an org with no live machines — nothing to have
+  // undeclared software on.
+  appliesTo: ({ orgId }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const rows = yield* Effect.tryPromise(() =>
+        db
+          .select({ id: machines.id })
+          .from(machines)
+          .where(and(eq(machines.orgId, orgId), notInArray(machines.state, ARCHIVED_STATES)))
+          .limit(1),
+      ).pipe(Effect.orDie);
+      return rows.length > 0;
+    }),
 
   evaluate: ({ orgId }) =>
     Effect.gen(function* () {
