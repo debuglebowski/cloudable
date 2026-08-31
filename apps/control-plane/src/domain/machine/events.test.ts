@@ -14,6 +14,7 @@ const baseline: MachineLastKnownState = {
   packagesHash: "hash-a",
   undeclaredPackages: [],
   externalResourceId: "azure-vm-1",
+  runningAccessMethods: [],
 };
 
 const reportedFromBaseline = (
@@ -23,6 +24,7 @@ const reportedFromBaseline = (
   packagesHash: baseline.packagesHash,
   undeclaredPackages: baseline.undeclaredPackages,
   externalResourceId: baseline.externalResourceId,
+  runningAccessMethods: baseline.runningAccessMethods,
   agentVersion: "1.0.0",
   ...overrides,
 });
@@ -88,6 +90,32 @@ describe("deriveEvents", () => {
         changes: { externalResourceId: { from: "azure-vm-1", to: "azure-vm-2" } },
       },
     });
+  });
+
+  test("runningAccessMethods changed -> state_reported with a changes payload", () => {
+    const reported = reportedFromBaseline({ runningAccessMethods: ["web_terminal"] });
+
+    const events = deriveEvents(baseline, reported, ctx);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "machine.state_reported",
+      payload: {
+        changes: { runningAccessMethods: { from: [], to: ["web_terminal"] } },
+      },
+    });
+  });
+
+  test("runningAccessMethods unchanged (even if reordered) -> zero events", () => {
+    const withMethods: MachineLastKnownState = {
+      ...baseline,
+      runningAccessMethods: ["web_terminal", "ssh"],
+    };
+    const reported = reportedFromBaseline({ runningAccessMethods: ["ssh", "web_terminal"] });
+
+    const events = deriveEvents(withMethods, reported, ctx);
+
+    expect(events).toEqual([]);
   });
 
   test("multiple fields changed -> a single state_reported with all changes", () => {
