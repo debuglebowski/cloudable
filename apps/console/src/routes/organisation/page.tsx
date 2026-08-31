@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { CONTROL_STATUS_LABELS, useControlMap, useSetControlOverride } from "@/api/compliance";
 import {
   APPROVAL_ACTION_LABELS,
   APPROVAL_ACTION_TYPES,
@@ -19,6 +20,7 @@ import { OrgPackageManifestCard } from "./org-package-manifest-card";
 
 import {
   ApprovalModeDialog,
+  ControlOverrideDialog,
   LoggingTierDialog,
   RegionDefaultDialog,
   RetentionDaysDialog,
@@ -32,17 +34,22 @@ function formatMode(mode: string): string {
 export function OrganisationPage() {
   const { data: settings, isLoading } = useOrgSettings();
   const update = useUpdateOrgSettings();
+  const { data: controlMap, isLoading: controlMapLoading } = useControlMap();
+  const setControlOverride = useSetControlOverride();
 
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [editingApproval, setEditingApproval] = useState<ApprovalActionType | null>(null);
   const [editingLoggingTier, setEditingLoggingTier] = useState(false);
   const [editingRetentionDays, setEditingRetentionDays] = useState(false);
   const [editingRetentionLocation, setEditingRetentionLocation] = useState(false);
+  const [editingControlId, setEditingControlId] = useState<string | null>(null);
   const [editingRegionDefault, setEditingRegionDefault] = useState(false);
 
   if (isLoading || !settings) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
+
+  const editingControl = controlMap?.controls.find((control) => control.id === editingControlId);
 
   const displayedName = nameDraft ?? settings.name;
   const trimmedNameDraft = nameDraft?.trim() ?? null;
@@ -188,6 +195,41 @@ export function OrganisationPage() {
 
       <OrgPackageManifestCard />
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Compliance controls</CardTitle>
+          <CardDescription>
+            Cloudable computes a default status per control from its registered compliance checks;
+            override one for your own framework or auditor (docs/spec.md §19).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col">
+          {controlMapLoading || !controlMap ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            controlMap.controls.map((control) => (
+              <SettingRow
+                key={control.id}
+                label={`${control.label} (${control.framework})`}
+                value={
+                  CONTROL_STATUS_LABELS[control.status] + (control.overridden ? " — override" : "")
+                }
+                source="org"
+                // Out-of-scope controls (overridable: false) never show an Override
+                // action — the backend always rejects an override attempt for one, so
+                // offering the button here would just be a guaranteed-to-fail affordance.
+                // Spread rather than `onOverride={... : undefined}`: the prop is optional
+                // under `exactOptionalPropertyTypes`, which means "present or absent", not
+                // "present, possibly with value undefined".
+                {...(control.overridable
+                  ? { onOverride: () => setEditingControlId(control.id) }
+                  : {})}
+              />
+            ))
+          )}
+        </CardContent>
+      </Card>
+
       <ApprovalModeDialog
         actionType={editingApproval}
         currentMode={editingApproval ? settings.approvalModes[editingApproval] : undefined}
@@ -230,6 +272,18 @@ export function OrganisationPage() {
         onOpenChange={setEditingRegionDefault}
         onSave={async (region) => {
           await update.mutateAsync({ regionDefault: region });
+        }}
+      />
+      <ControlOverrideDialog
+        controlId={editingControl ? editingControl.id : null}
+        controlLabel={editingControl?.label ?? ""}
+        currentStatus={editingControl?.status ?? "manual_action_required"}
+        currentlyOverridden={editingControl?.overridden ?? false}
+        onOpenChange={(open) => {
+          if (!open) setEditingControlId(null);
+        }}
+        onSave={async (controlId, status) => {
+          await setControlOverride.mutateAsync({ controlId, status });
         }}
       />
     </div>

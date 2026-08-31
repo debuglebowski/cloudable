@@ -15,6 +15,13 @@
       "when": 1788208152946,
       "tag": "0001_ancient_princess_powerful",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788213867059,
+      "tag": "0002_medical_sally_floyd",
+      "breakpoints": true
     }
   ]
 }
