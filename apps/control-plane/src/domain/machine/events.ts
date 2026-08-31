@@ -45,6 +45,12 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  *   while the same drift persists unchanged.
  * - `machine.drift_resolved` is emitted when `previous.undeclaredPackages`
  *   was non-empty and `reported.undeclaredPackages` is now empty.
+ * - `runningAccessMethods` (the config-state half of spec §8.1, alongside
+ *   `packagesHash`) folds into `machine.state_reported`'s `changes` the
+ *   same way the other snapshot fields do — order-independent, and only
+ *   when the set actually differs from `previous`. No dedicated
+ *   drift/undeclared concept for it yet (no desired-state setting exists
+ *   to diff against) — see `types.ts`'s doc comment on the field.
  *
  * `id` and `recordedAt` on the returned events are placeholders (empty
  * string / `ctx.occurredAt`), present only to satisfy `DomainEvent`'s type.
@@ -105,6 +111,16 @@ export function deriveEvents(
     changes.undeclaredPackages = {
       from: previous.undeclaredPackages,
       to: reported.undeclaredPackages,
+    };
+  }
+  // Config state (spec §8.1), diffed the same way as `undeclaredPackages` above —
+  // an order-independent set — rather than `packagesHash`'s hash-equality, since
+  // this list is small enough that comparing it directly is cheap and, unlike a
+  // hash, keeps the actual before/after values in the `changes` payload below.
+  if (!sameStringSet(previous.runningAccessMethods, reported.runningAccessMethods)) {
+    changes.runningAccessMethods = {
+      from: previous.runningAccessMethods,
+      to: reported.runningAccessMethods,
     };
   }
 

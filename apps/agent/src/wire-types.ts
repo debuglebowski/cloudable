@@ -11,6 +11,7 @@ export type {
   AttestRequest,
   AttestResponse,
   DesiredStateResponse,
+  ConfigState,
   AgentReportRequest,
   AgentReportResponse,
   WakeMessage,

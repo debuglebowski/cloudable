@@ -58,7 +58,11 @@ const makeEvent = <T extends DomainEvent["type"]>(
  */
 const lastObserved = new Map<
   string,
-  { installedPackages: readonly string[]; openPorts: readonly number[] }
+  {
+    installedPackages: readonly string[];
+    openPorts: readonly number[];
+    runningAccessMethods: readonly string[];
+  }
 >();
 
 const arraysEqual = (a: readonly unknown[], b: readonly unknown[]): boolean =>
@@ -66,12 +70,17 @@ const arraysEqual = (a: readonly unknown[], b: readonly unknown[]): boolean =>
 
 const detectChange = (
   machineId: string,
-  report: { installedPackages: readonly string[]; openPorts: readonly number[] },
+  report: {
+    installedPackages: readonly string[];
+    openPorts: readonly number[];
+    runningAccessMethods: readonly string[];
+  },
 ): Record<string, unknown> | null => {
   const previous = lastObserved.get(machineId);
   lastObserved.set(machineId, {
     installedPackages: report.installedPackages,
     openPorts: report.openPorts,
+    runningAccessMethods: report.runningAccessMethods,
   });
   if (!previous) return null;
 
@@ -81,6 +90,15 @@ const detectChange = (
   }
   if (!arraysEqual(previous.openPorts, report.openPorts)) {
     changes.openPorts = { from: previous.openPorts, to: report.openPorts };
+  }
+  // `configState.runningAccessMethods` (spec §8.1's "config state") — diffed the
+  // same way as `installedPackages`/`openPorts` above: report-over-report equality,
+  // surfaced as part of one `machine.state_reported`, never on a no-op report.
+  if (!arraysEqual(previous.runningAccessMethods, report.runningAccessMethods)) {
+    changes.runningAccessMethods = {
+      from: previous.runningAccessMethods,
+      to: report.runningAccessMethods,
+    };
   }
   return Object.keys(changes).length > 0 ? changes : null;
 };
@@ -232,7 +250,11 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
             ])
             .pipe(Effect.orDie);
         } else {
-          const changes = detectChange(identity.machineId, payload);
+          const changes = detectChange(identity.machineId, {
+            installedPackages: payload.installedPackages,
+            openPorts: payload.openPorts,
+            runningAccessMethods: payload.configState.runningAccessMethods,
+          });
           if (changes) {
             yield* eventBus
               .publish([makeEvent("machine.state_reported", identityFields, { changes })])

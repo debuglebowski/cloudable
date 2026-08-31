@@ -289,6 +289,7 @@ describe("agent-protocol handlers (integration)", () => {
           observedAt: new Date().toISOString(),
           installedPackages: [],
           openPorts: [],
+          configState: { runningAccessMethods: [] },
         }),
       }),
     );
