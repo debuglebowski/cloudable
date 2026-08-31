@@ -92,6 +92,43 @@ describe("ApprovalService", () => {
     expect(granted?.payload).toMatchObject({ approverIds: [], actionType: "offboarding" });
   });
 
+  test("requestAutoApproved: ElevationService's 'always'-policy bypass produces the byte-identical row/event shape as mode 'none' — and ignores the org's configured approval_mode", async () => {
+    const orgId = crypto.randomUUID();
+    const personId = crypto.randomUUID();
+    const machineId = crypto.randomUUID();
+    // Configured strictly ("dual") — `requestAutoApproved` must still skip
+    // straight to approved, since it never resolves mode from settings at
+    // all (unlike `request`, which would stay "pending" against this mode).
+    await setApprovalMode(orgId, "admin_access", "dual");
+
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.requestAutoApproved({
+          orgId,
+          actionType: "admin_access",
+          requestedByPersonId: personId,
+          targetMachineId: machineId,
+          reason: "org policy is admin_access_policy: always",
+        });
+      }),
+    );
+
+    expect(result.status).toBe("approved");
+    expect(result.mode).toBe("none");
+    expect(result.requiredApprovals).toBe(0);
+    expect(result.decidedAt).not.toBeNull();
+
+    const emitted = await eventsFor(orgId);
+    expect(emitted.map((e) => e.type).sort()).toEqual(["approval.granted", "approval.requested"]);
+    const requested = emitted.find((e) => e.type === "approval.requested");
+    const granted = emitted.find((e) => e.type === "approval.granted");
+    // Same correlationId ties the pair together, same as the mode-"none" path.
+    expect(requested?.correlationId).toBe(granted?.correlationId);
+    expect(granted?.actorType).toBe("system");
+    expect(granted?.payload).toMatchObject({ approverIds: [], actionType: "admin_access" });
+  });
+
   test("mode 'single' (default policy): pending until one approval, then granted", async () => {
     const orgId = crypto.randomUUID();
     const personId = crypto.randomUUID();
