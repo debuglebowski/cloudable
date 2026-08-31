@@ -15,3 +15,8 @@ export type {
   AgentReportResponse,
   WakeMessage,
 } from "@cloudable/contracts";
+
+// Tunnel-signal channel (CP -> agent, deliberately separate from `wake` — see
+// tunnel/signal-listener.ts and apps/control-plane/src/tunnel/signal.ts for why) — see
+// apps/control-plane/src/http/routes/tunnel-signal.ts for the server side.
+export type { TunnelSignalMessage, TunnelSignalResponse } from "@cloudable/contracts";
