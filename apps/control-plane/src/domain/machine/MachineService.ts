@@ -358,18 +358,37 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         const previousByName = new Map(
           resolveManifest(existingRows, chain).map((entry) => [entry.packageName, entry]),
         );
+        // Falls back to this machine's own existing row (never the resolved
+        // chain value — a first machine-level override must not inherit,
+        // say, the org's `pinned` flag just because it happened to resolve
+        // that way) so an upsert that omits `versionPin`/`pinned` preserves
+        // that field instead of silently resetting it to "any"/unpinned.
+        const existingMachineRowByName = new Map(
+          existingRows
+            .filter((row) => row.scopeType === "machine" && row.scopeId === machine.id)
+            .map((row) => [row.packageName, row]),
+        );
+        const resolvedUpserts = upserts.map((upsert) => {
+          const previous = existingMachineRowByName.get(upsert.packageName);
+          return {
+            packageName: upsert.packageName,
+            versionPin:
+              upsert.versionPin !== undefined ? upsert.versionPin : (previous?.versionPin ?? null),
+            pinned: upsert.pinned !== undefined ? upsert.pinned : (previous?.pinned ?? false),
+          };
+        });
 
         yield* Effect.tryPromise({
           try: async () => {
-            for (const upsert of upserts) {
+            for (const upsert of resolvedUpserts) {
               await db
                 .insert(machinePackages)
                 .values({
                   scopeType: "machine",
                   scopeId: machine.id,
                   packageName: upsert.packageName,
-                  versionPin: upsert.versionPin ?? null,
-                  pinned: upsert.pinned ?? false,
+                  versionPin: upsert.versionPin,
+                  pinned: upsert.pinned,
                   source: "machine",
                 })
                 .onConflictDoUpdate({
@@ -379,8 +398,8 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                     machinePackages.packageName,
                   ],
                   set: {
-                    versionPin: upsert.versionPin ?? null,
-                    pinned: upsert.pinned ?? false,
+                    versionPin: upsert.versionPin,
+                    pinned: upsert.pinned,
                     source: "machine",
                     updatedAt: new Date(),
                   },
