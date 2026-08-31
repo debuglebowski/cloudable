@@ -175,6 +175,19 @@ const writeOrgSettingAndRecord = (
     catch: (cause) => new LoggingSettingsError({ reason: "write_failed", cause }),
   });
 
+/**
+ * NOT the write path behind `PATCH /api/v1/organisation` — that endpoint
+ * (`domain/organisation/settings.ts`'s `updateOrgSettings`) writes this same
+ * key through `applySettingChange` (`domain/config/apply-setting-change.ts`)
+ * instead, to go through the one shared write+event path every other
+ * setting in the product uses (docs/spec.md §16). This setter's own
+ * transactional write+event (`writeOrgSettingAndRecord`, above) is kept
+ * for any lower-level caller that genuinely needs the atomicity guarantee
+ * — none does today outside this file's own test — but a new caller
+ * should reach for `applySettingChange` first unless it specifically needs
+ * that guarantee, so this doesn't quietly become a second, diverging write
+ * path for the same key.
+ */
 export const setOrgLoggingTier = (
   db: DbHandle,
   orgId: string,
@@ -186,6 +199,7 @@ export const setOrgLoggingTier = (
     yield* writeOrgSettingAndRecord(db, orgId, LOGGING_TIER_KEY, previous, tier, actor);
   });
 
+/** See `setOrgLoggingTier`'s doc comment — same caveat, same key-owning endpoint. */
 export const setOrgRetentionLocation = (
   db: DbHandle,
   orgId: string,
