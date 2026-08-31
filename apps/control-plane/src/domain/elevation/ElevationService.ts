@@ -130,19 +130,44 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
     const publishEvents = (batch: Parameters<typeof eventBus.publish>[0]) =>
       eventBus.publish(batch).pipe(Effect.mapError(toInfraError("event_publish_failed")));
 
+    /**
+     * Best-effort: the owner notification is evidence *about* an already-
+     * decided grant, not part of deciding it, so a failure here must never
+     * fail `request()`/`syncApproval()` — the grant (and its `elevation_granted`
+     * event, spec §2 "events are append-only": already durably committed by
+     * the time this runs) has already happened and stands regardless.
+     * Logged instead, so it's still observable. `insertNotification` is
+     * idempotent per elevation (`ElevationRepo.ts`'s doc comment), and
+     * `syncApproval`'s "already granted" branch below retries this exact
+     * call — so a transient failure here is recoverable by re-`sync`ing the
+     * same elevation, rather than the owner silently never being notified.
+     */
     const notifyIfOwned = (
-      machine: Pick<MachineRecord, "id" | "ownerPersonId">,
+      machine: Pick<MachineRecord, "id" | "name" | "ownerPersonId">,
       elevationRow: Elevation,
     ) =>
       machine.ownerPersonId
-        ? notifyOwnerOfElevation(machine.ownerPersonId, machine.id, elevationRow)
+        ? notifyOwnerOfElevation(
+            repo.insertNotification,
+            machine.ownerPersonId,
+            machine.name,
+            elevationRow,
+          ).pipe(
+            Effect.catchAll((error) =>
+              Effect.logError(
+                "owner notification failed — the elevation grant itself still stands; " +
+                  "POST /api/v1/elevations/:id/sync retries just the notification",
+                { elevationId: elevationRow.id, ownerPersonId: machine.ownerPersonId, error },
+              ),
+            ),
+          )
         : Effect.void;
 
     /** Publishes the granted event (plus the requested event too, when this is the same call that created it) and notifies the owner. */
     const finalizeGrant = (
       elevationRow: Elevation,
       ctx: EventContext,
-      machine: Pick<MachineRecord, "id" | "ownerPersonId">,
+      machine: Pick<MachineRecord, "id" | "name" | "ownerPersonId">,
       includeRequestedEvent: boolean,
     ) =>
       Effect.gen(function* () {
@@ -330,14 +355,27 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
     /**
      * Re-checks a `requested` elevation's approval and finalizes it: grants
      * on approval, denies on rejection/expiry, no-ops (returns as-is) while
-     * still pending or already finalized. There is no webhook wiring this
-     * up to `ApprovalService.decide` yet — call it after polling
+     * still pending or already denied/expired. There is no webhook wiring
+     * this up to `ApprovalService.decide` yet — call it after polling
      * `ApprovalService.status` or on whatever cadence unit 5's approvals UI
      * settles on.
+     *
+     * A `granted` elevation is NOT a plain no-op, deliberately: the owner
+     * notification (`notifyIfOwned`) is best-effort and can fail
+     * independently of the grant itself (see that method's doc comment), so
+     * this retries just the notification for an already-granted elevation —
+     * safe to call repeatedly since `insertNotification` is idempotent.
+     * This is the only way to recover from a failed notification, since
+     * there's no background retry queue in this build.
      */
     const syncApproval = (elevationId: string): Effect.Effect<Elevation, SyncApprovalError> =>
       Effect.gen(function* () {
         const elevation = yield* loadElevation(elevationId);
+        if (elevation.status === "granted") {
+          const machine = yield* loadMachine(elevation.machineId);
+          yield* notifyIfOwned(machine, elevation);
+          return elevation;
+        }
         if (elevation.status !== "requested") return elevation;
         if (!elevation.approvalId) {
           return yield* Effect.fail(

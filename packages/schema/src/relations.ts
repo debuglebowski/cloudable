@@ -7,6 +7,7 @@ import { elevations } from "./tables/elevation";
 import { events } from "./tables/events";
 import { integrations } from "./tables/integration";
 import { machines } from "./tables/machine";
+import { notifications } from "./tables/notification";
 import { orgs } from "./tables/org";
 import { people } from "./tables/person";
 import { secretBindings } from "./tables/secret-binding";
@@ -31,6 +32,7 @@ export const orgsRelations = relations(orgs, ({ many }) => ({
   complianceFindingState: many(complianceFindingState),
   secretBindings: many(secretBindings),
   upgradeAttempts: many(upgradeAttempts),
+  notifications: many(notifications),
 }));
 
 export const peopleRelations = relations(people, ({ one, many }) => ({
@@ -42,6 +44,7 @@ export const peopleRelations = relations(people, ({ one, many }) => ({
   sessions: many(sessions),
   elevations: many(elevations),
   certificates: many(certificates),
+  notifications: many(notifications),
 }));
 
 export const machinesRelations = relations(machines, ({ one, many }) => ({
@@ -149,6 +152,21 @@ export const elevationsRelations = relations(elevations, ({ one }) => ({
   approval: one(approvals, {
     fields: [elevations.approvalId],
     references: [approvals.id],
+  }),
+}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  org: one(orgs, {
+    fields: [notifications.orgId],
+    references: [orgs.id],
+  }),
+  owner: one(people, {
+    fields: [notifications.ownerPersonId],
+    references: [people.id],
+  }),
+  elevation: one(elevations, {
+    fields: [notifications.elevationId],
+    references: [elevations.id],
   }),
 }));
 
