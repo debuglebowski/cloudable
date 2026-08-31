@@ -75,6 +75,32 @@ const toInfraError =
     return new ElevationInfraError({ reason: reasonPrefix });
   };
 
+/**
+ * Wraps any `ApprovalService` call failure as `ApprovalServiceCallError` —
+ * same posture as `toInfraError` above: log the real cause server-side,
+ * return a safe reason to the caller.
+ *
+ * `ApprovalService`'s own failures are `ApprovalError` — an Effect
+ * `Data.TaggedError`. That makes it `instanceof Error`, but Effect never
+ * populates the native `Error.message` from a tagged error's fields, so
+ * `.message` is always `""` — reading it (as a plain `Error` mapper would)
+ * silently turns every `ApprovalServiceCallError` into an empty reason with
+ * nothing logged either. The real, safe diagnostic is `ApprovalError`'s own
+ * `.reason` (a small fixed enum — see `services/ApprovalService.ts`), so
+ * read that first and fall back to `.message`/`String(cause)` only for a
+ * genuinely different failure shape.
+ */
+const toApprovalServiceCallError = (cause: unknown): ApprovalServiceCallError => {
+  const reason =
+    cause && typeof cause === "object" && "reason" in cause && typeof cause.reason === "string"
+      ? cause.reason
+      : cause instanceof Error
+        ? cause.message
+        : String(cause);
+  console.error(`[ElevationService] approval_service_call_failed: ${reason}`);
+  return new ApprovalServiceCallError({ reason });
+};
+
 function scopeIdsFor(chain: SettingsChain): ReadonlyArray<string> {
   return chain.templateId
     ? [chain.orgId, chain.machineId, chain.templateId]
@@ -241,15 +267,21 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
           // floor in `requiredApprovalModeFloor` below only governs the
           // `with_approval` branch, which is the only branch that has an
           // approval mode to escalate at all.)
-          const approvalRow = yield* repo
-            .insertAutoApprovedApproval({
+          //
+          // Goes through `ApprovalService.requestAutoApproved` — the exact
+          // same insert+event path `ApprovalService.request()` itself uses
+          // for a *resolved* mode "none" — rather than hand-rolling a
+          // second, parallel raw insert with no approval-level events of
+          // its own.
+          const approvalResult = yield* approvalService
+            .requestAutoApproved({
               orgId: machine.orgId,
-              personId: input.personId,
-              machineId: machine.id,
+              actionType: "admin_access",
+              requestedByPersonId: input.personId,
+              targetMachineId: machine.id,
               reason,
-              now,
             })
-            .pipe(Effect.mapError(toInfraError("auto_approval_insert_failed")));
+            .pipe(Effect.mapError(toApprovalServiceCallError));
 
           const elevationRow = yield* repo
             .insertElevation({
@@ -258,7 +290,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
               machineId: machine.id,
               level: input.level,
               reason,
-              approvalId: approvalRow.id,
+              approvalId: approvalResult.id,
               grantedAt: now,
               expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
               status: "granted",
@@ -303,14 +335,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
             targetMachineId: machine.id,
             reason,
           })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new ApprovalServiceCallError({
-                  reason: cause instanceof Error ? cause.message : String(cause),
-                }),
-            ),
-          );
+          .pipe(Effect.mapError(toApprovalServiceCallError));
 
         const initialStatus: ElevationStatus =
           approvalResult.status === "approved"
@@ -385,14 +410,9 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
           );
         }
 
-        const approvalResult = yield* approvalService.status(elevation.approvalId).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ApprovalServiceCallError({
-                reason: cause instanceof Error ? cause.message : String(cause),
-              }),
-          ),
-        );
+        const approvalResult = yield* approvalService
+          .status(elevation.approvalId)
+          .pipe(Effect.mapError(toApprovalServiceCallError));
 
         if (approvalResult.status === "pending") return elevation;
 
