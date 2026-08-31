@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import net from "node:net";
 import * as schema from "@cloudable/schema";
-import { events, machines, orgs, settingValues } from "@cloudable/schema";
+import { events, machines, orgs, sessions, settingValues } from "@cloudable/schema";
 import { and, eq } from "drizzle-orm";
 import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
@@ -10,6 +10,8 @@ import postgres from "postgres";
 import { Db } from "../../db/layer";
 import { handleImportConfig, handlePatchSetting } from "../../http/handlers/config";
 import { EventBus } from "../../services/EventBus";
+import { TunnelServer } from "../../tunnel/server";
+import { ACCESS_METHODS_ENABLED_KEY } from "../machine/settings";
 import { applySettingChange } from "./apply-setting-change";
 import { PinnedSettingError } from "./errors";
 import { triggerReconcile } from "./trigger-reconcile";
@@ -79,7 +81,7 @@ const postgresReachable =
 describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)", () => {
   let sql: ReturnType<typeof postgres>;
   let db: PostgresJsDatabase<typeof schema>;
-  let envLayer: Layer.Layer<Db | EventBus>;
+  let envLayer: Layer.Layer<Db | EventBus | TunnelServer>;
 
   beforeAll(async () => {
     sql = postgres(databaseUrl);
@@ -87,14 +89,18 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
     await migrate(db, { migrationsFolder: "../../packages/schema/migrations" });
 
     const dbLayer = Layer.succeed(Db, db);
-    envLayer = Layer.mergeAll(dbLayer, Layer.provide(EventBus.Default, dbLayer));
+    const eventBusLayer = EventBus.Default.pipe(Layer.provide(dbLayer));
+    const tunnelLayer = TunnelServer.Default.pipe(
+      Layer.provide(Layer.mergeAll(dbLayer, eventBusLayer)),
+    );
+    envLayer = Layer.mergeAll(dbLayer, eventBusLayer, tunnelLayer);
   });
 
   afterAll(async () => {
     await sql.end();
   });
 
-  const run = <A, E>(effect: Effect.Effect<A, E, Db | EventBus>) =>
+  const run = <A, E>(effect: Effect.Effect<A, E, Db | EventBus | TunnelServer>) =>
     Effect.runPromise(Effect.provide(effect, envLayer));
 
   async function seedOrg() {
@@ -115,10 +121,27 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         region: "eastus",
         sizeSku: "Standard_B2s",
         image: "ubuntu-24.04",
+        state: "running",
       })
       .returning();
     if (!machine) throw new Error("seed failed");
     return machine;
+  }
+
+  /** An open (not-yet-ended) `sessions` row, as if a live web-terminal session were attached. */
+  async function seedOpenSession(orgId: string, machineId: string) {
+    const [session] = await db
+      .insert(sessions)
+      .values({
+        orgId,
+        machineId,
+        personId: crypto.randomUUID(),
+        method: "terminal",
+        osUser: "ubuntu",
+      })
+      .returning();
+    if (!session) throw new Error("seed failed");
+    return session;
   }
 
   describe("applySettingChange", () => {
@@ -279,6 +302,160 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         .from(settingValues)
         .where(and(eq(settingValues.scopeType, "machine"), eq(settingValues.scopeId, machine.id)));
       expect(row?.pinned).toBe(false);
+    });
+
+    // spec.md §11.1: "Disabling terminates live sessions" — not merely refuses
+    // new ones. This is the gap this unit closes: `applySettingChange` (the one
+    // shared write path behind both the PATCH endpoint and Git import) must
+    // itself call `TunnelServer.terminateSessionsForMachine`, not leave it
+    // wired to nothing but its own test.
+    test("disabling web terminal at machine scope ends that machine's open sessions", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+      const session = await seedOpenSession(org.id, machine.id);
+      const correlationId = crypto.randomUUID();
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: false, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId,
+        }),
+      );
+
+      const [refetchedSession] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, session.id));
+      expect(refetchedSession?.endedAt).not.toBeNull();
+
+      const sessionEndedEvents = await db
+        .select()
+        .from(events)
+        .where(and(eq(events.type, "access.session_ended"), eq(events.machineId, machine.id)));
+      expect(sessionEndedEvents).toHaveLength(1);
+    });
+
+    test("re-enabling web terminal never terminates anything", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+      const session = await seedOpenSession(org.id, machine.id);
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: true, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [refetchedSession] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, session.id));
+      expect(refetchedSession?.endedAt).toBeNull();
+    });
+
+    test("disabling web terminal at org scope ends sessions on every machine without its own override, but spares one that overrides it back on", async () => {
+      const org = await seedOrg();
+      const inheritingMachine = await seedMachine(org.id);
+      const overriddenMachine = await seedMachine(org.id);
+
+      // `overriddenMachine` explicitly keeps web terminal on, overriding
+      // whatever the org is about to set — its own row always wins
+      // resolution, so the org-level change below must not touch it.
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: overriddenMachine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: true, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const inheritingSession = await seedOpenSession(org.id, inheritingMachine.id);
+      const overriddenSession = await seedOpenSession(org.id, overriddenMachine.id);
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "org",
+          scopeId: org.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: false, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [refetchedInheriting] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, inheritingSession.id));
+      expect(refetchedInheriting?.endedAt).not.toBeNull();
+
+      const [refetchedOverridden] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, overriddenSession.id));
+      expect(refetchedOverridden?.endedAt).toBeNull();
+    });
+
+    test("re-saving an already-disabled access setting does not re-terminate", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: false, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      // A session that starts only *after* the disable — as if minted through
+      // some other, buggier path — must be untouched by a second, redundant
+      // "disable" write; only a true enabled→disabled transition terminates.
+      const session = await seedOpenSession(org.id, machine.id);
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: false, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [refetchedSession] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, session.id));
+      expect(refetchedSession?.endedAt).toBeNull();
     });
   });
 

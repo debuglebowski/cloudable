@@ -16,6 +16,13 @@ import {
   findPinConflicts,
   resolveManifest,
 } from "./manifest";
+import {
+  type AccessMethodsEnabled,
+  type PersistentPaths,
+  type ResolvedMachineSetting,
+  resolveAccessMethodsEnabled,
+  resolvePersistentPaths,
+} from "./settings";
 
 export class MachineServiceError extends Data.TaggedError("MachineServiceError")<{
   reason: string;
@@ -53,6 +60,8 @@ export interface ListMachinesResult {
 
 export interface MachineDetail extends MachineRow {
   manifest: ResolvedManifestEntry[];
+  persistentPaths: ResolvedMachineSetting<PersistentPaths>;
+  accessMethodsEnabled: ResolvedMachineSetting<AccessMethodsEnabled>;
 }
 
 export interface PackageManifestEdit {
@@ -270,12 +279,21 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       Effect.gen(function* () {
         const machine = yield* fetchMachine(machineId);
         const rows = yield* fetchManifestRows(machine);
-        const manifest = resolveManifest(rows.map(toManifestRow), {
+        const chain = {
           orgId: machine.orgId,
           templateId: machine.templateId,
           machineId: machine.id,
-        });
-        return { ...machine, manifest };
+        };
+        const manifest = resolveManifest(rows.map(toManifestRow), chain);
+        const [persistentPaths, accessMethodsEnabled] = yield* Effect.all([
+          resolvePersistentPaths(db, chain),
+          resolveAccessMethodsEnabled(db, chain),
+        ]).pipe(
+          Effect.mapError(
+            (cause) => new MachineServiceError({ reason: "settings_read_failed", cause }),
+          ),
+        );
+        return { ...machine, manifest, persistentPaths, accessMethodsEnabled };
       });
 
     const updatePackages = (
