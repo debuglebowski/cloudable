@@ -121,9 +121,14 @@ intentionally simple:
 
 - `last_verified_at` was `NULL` → `machine.first_seen`.
 - Otherwise, an **in-memory**, per-process diff of `installedPackages` /
-  `openPorts` against the previous report → `machine.state_reported` if
-  anything changed, nothing if it didn't (a no-op reconcile is not an
-  event — spec §24).
+  `openPorts` / `configState.runningAccessMethods` against the previous
+  report → `machine.state_reported` if anything changed, nothing if it
+  didn't (a no-op reconcile is not an event — spec §24).
+  `configState` is the "config state" half of "installed packages and
+  config state" (spec §8.1): narrow and cheap-to-observe today — just
+  which access methods (spec §11) the agent found an actually-running
+  process for, e.g. a web terminal — see `packages/contracts/src/domains/
+  agent-protocol.ts`'s `ConfigState` doc comment.
 
 That in-memory cache is a deliberate, documented stand-in, not the final
 design: it resets on every control-plane restart (so one spurious

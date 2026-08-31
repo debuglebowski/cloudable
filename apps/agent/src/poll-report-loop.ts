@@ -1,12 +1,23 @@
+import { listRunningAccessMethods } from "./access-methods";
 import { AttestationRejectedError, attest, clearCachedSession } from "./attestation";
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
 import { ApiError } from "./http-client";
+import { listOpenPorts } from "./open-ports";
 import { connectWake } from "./wake";
 import type { AgentReportRequest, AgentReportResponse, DesiredStateResponse } from "./wire-types";
 
-// TODO(build tooling): inject the real build version instead of hardcoding it.
-const AGENT_VERSION = "0.0.0";
+/**
+ * The agent's own build version, reported as part of observed state (spec
+ * §8.1). `bun build`'s `--env 'AGENT_VERSION*'` flag (see package.json's
+ * `build`/`build:arm64` scripts) inlines `process.env.AGENT_VERSION` — set
+ * from this package's own `package.json` `version` field at build time,
+ * see those scripts — as a literal into the compiled binary, so a released
+ * binary reports its real version with no `package.json` alongside it to
+ * read at runtime. `bun run dev` never sets that env var, so the fallback
+ * below is also the honest answer for local development.
+ */
+export const AGENT_VERSION = process.env.AGENT_VERSION ?? "0.0.0-dev";
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -156,12 +167,21 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
           // docs/agents.md and this unit's PR description), so there's nothing to reconcile yet.
         }
 
-        // Observed-state gathering is a stub for the same reason — see docs/agents.md.
+        // Real observed state: installed-package inventory is a stub still (see
+        // docs/agents.md), but `openPorts` and `configState` are now real scans —
+        // `open-ports.ts`/`access-methods.ts` — not hardcoded placeholders. The two
+        // scans are independent `/proc` reads with no data dependency, so they run
+        // concurrently rather than one after the other.
+        const [openPorts, runningAccessMethods] = await Promise.all([
+          listOpenPorts(),
+          listRunningAccessMethods(),
+        ]);
         await reportObservedState(session.bearerToken, {
           agentVersion: AGENT_VERSION,
           observedAt: new Date().toISOString(),
           installedPackages: [],
-          openPorts: [],
+          openPorts,
+          configState: { runningAccessMethods },
         });
 
         attempt = 0;

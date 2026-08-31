@@ -46,11 +46,17 @@ const DesiredState = Schema.Struct({
   settings: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 });
 
+/** Mirrors `ConfigState` in `packages/contracts/src/domains/agent-protocol.ts`. */
+const ConfigState = Schema.Struct({
+  runningAccessMethods: Schema.Array(Schema.String),
+});
+
 const ReportPayload = Schema.Struct({
   agentVersion: Schema.String,
   observedAt: Schema.String,
   installedPackages: Schema.Array(Schema.String),
   openPorts: Schema.Array(Schema.Number),
+  configState: ConfigState,
 });
 
 const ReportSuccess = Schema.Struct({ acknowledged: Schema.Literal(true) });

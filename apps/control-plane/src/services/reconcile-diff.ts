@@ -14,7 +14,15 @@ export class ReconcileDiffError extends Data.TaggedError("ReconcileDiffError")<{
   cause?: unknown;
 }> {}
 
-/** Narrow, structural check — `machines.lastReportedState` is untyped `jsonb`. */
+/**
+ * Narrow, structural check — `machines.lastReportedState` is untyped
+ * `jsonb`. A row persisted before `runningAccessMethods` existed on this
+ * shape fails this check and is treated as `previous: undefined`, so the
+ * next report re-emits one `machine.first_seen` for that machine — the
+ * same accepted, documented false positive `http/handlers/agent-protocol.ts`'s
+ * in-memory diff cache already causes across a control-plane restart,
+ * rather than risking a crash from spreading a missing field.
+ */
 function isMachineLastKnownState(value: unknown): value is MachineLastKnownState {
   return (
     typeof value === "object" &&
@@ -22,7 +30,8 @@ function isMachineLastKnownState(value: unknown): value is MachineLastKnownState
     "state" in value &&
     "packagesHash" in value &&
     "undeclaredPackages" in value &&
-    "externalResourceId" in value
+    "externalResourceId" in value &&
+    "runningAccessMethods" in value
   );
 }
 
