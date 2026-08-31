@@ -39,6 +39,9 @@ export interface OrgSettings {
   loggingTier: LoggingTier;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
+  /** Default Azure region for a new machine that doesn't specify one (docs/spec.md §5) —
+   * live-resolved server-side, not a client-side prefill. */
+  regionDefault: string;
 }
 
 export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
@@ -71,10 +74,14 @@ export const organisationKeys = {
   settings: () => [...organisationKeys.all, "settings"] as const,
 };
 
-export function useOrgSettings() {
+/** `options.enabled` defaults to always-on (the Organisation page's own use) — pass
+ * `{ enabled: false }` from a caller that only needs this while something else is open
+ * (e.g. a dialog), same convention as any other TanStack Query hook here. */
+export function useOrgSettings(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: organisationKeys.settings(),
     queryFn: () => apiGet<OrgSettings>(`/api/v1/organisation?orgId=${CURRENT_ORG_ID}`),
+    ...options,
   });
 }
 

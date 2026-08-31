@@ -1,0 +1,131 @@
+# test/agent-connectivity/docker-compose.yml
+#
+# Brings up Postgres, the control plane, and the control agent as three
+# REAL, SEPARATE containers on their own Docker network, to prove:
+#
+#   1. the agent protocol (attest -> poll -> report) actually works over a
+#      network — every other test of this agent in this repo runs it in
+#      the same process/host as the control plane it's talking to.
+#   2. the CP -> agent tunnel-signal channel (docs/agents.md's own section
+#      on it) delivers a real signal over that same real network, not just
+#      same-process — this is a new wire-protocol surface, so proving it
+#      end to end matters here specifically.
+#
+# Not meant to be started with a bare `docker compose up` — `migrate` and
+# `seed` are one-shot steps (`docker compose run --rm <name>`), and `agent`
+# needs MACHINE_TOKEN (`seed`'s output) before it can start. See run.sh,
+# which sequences all of this and is the actual entry point.
+#
+# Project name and the control-plane host port below are both offset for
+# this unit (N=3, see the unit's own task description) so this stack never
+# collides with another unit's identical harness running concurrently on
+# the same machine — every other port (agent has none exposed; Postgres is
+# only reached over the compose network or via `docker compose exec`) needs
+# no such offset.
+name: cloudable-agent-connectivity-test-u3
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cloudable
+      POSTGRES_PASSWORD: cloudable
+      POSTGRES_DB: cloudable
+    # No volume: this stack starts from a clean database on every run, same
+    # spirit as this repo's own dev workflow (`docker compose down -v`
+    # before every reseed) — a leftover row from a previous run must never
+    # make a broken wire-up look like it's working.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloudable"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: applies packages/schema's migrations against the postgres
+  # service above. Built from the control-plane image since packages/schema
+  # (with its migrations/ folder) already lives inside it — see that
+  # Dockerfile's builder stage.
+  migrate:
+    build:
+      context: ../..
+      dockerfile: apps/control-plane/Dockerfile
+    working_dir: /app/packages/schema
+    entrypoint: ["bun", "run", "src/migrate.ts"]
+    environment:
+      DATABASE_URL: postgres://cloudable:cloudable@postgres:5432/cloudable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # One-shot: seeds one org + one machine and mints a real join token for
+  # it (apps/control-plane/scripts/seed-agent.ts) — a pure DB + local-signing
+  # operation, no running control plane required. run.sh captures its
+  # stdout (orgId=/machineId=/MACHINE_TOKEN=) to configure `agent` below, and
+  # flips the seeded machine to `running` directly via `psql` afterward
+  # (`mintSession` — the tunnel-signal scenario's own trigger — refuses any
+  # machine that isn't `running`; the seed script itself is shared with
+  # other manual/local uses and left at its own default `provisioning`
+  # state on purpose, see its own header comment).
+  seed:
+    build:
+      context: ../..
+      dockerfile: apps/control-plane/Dockerfile
+    working_dir: /app/apps/control-plane
+    entrypoint: ["bun", "run", "scripts/seed-agent.ts"]
+    environment:
+      DATABASE_URL: postgres://cloudable:cloudable@postgres:5432/cloudable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  control-plane:
+    build:
+      context: ../..
+      dockerfile: apps/control-plane/Dockerfile
+    environment:
+      # The only override config.ts actually needs — everything else
+      # (BETTER_AUTH_SECRET, federation URLs, CONSOLE_ORIGIN) has a dev
+      # default that's irrelevant to what this test exercises.
+      DATABASE_URL: postgres://cloudable:cloudable@postgres:5432/cloudable
+    # Exposed to the host purely so run.sh (and a human, for debugging) can
+    # curl in directly — e.g. to mint a session against the seeded machine.
+    # The agent below never uses this mapping — it reaches this service at
+    # `http://control-plane:4780` over the compose network, which is the
+    # actual thing this whole test exists to prove.
+    ports:
+      - "4820:4780"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "process.exit((await fetch('http://localhost:4780/api/v1/health').then(r=>r.ok).catch(()=>false)) ? 0 : 1)",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  agent:
+    build:
+      context: ../..
+      dockerfile: apps/agent/Dockerfile
+    environment:
+      # The service name, not localhost/127.0.0.1 — this is the one line in
+      # the whole stack that only works if Docker's own inter-container DNS
+      # is doing real work, which is the entire point of this test.
+      CONTROL_PLANE_URL: http://control-plane:4780
+      # Not required-interpolation (`:?`) — compose validates every
+      # service's env interpolation even for an unrelated `run`/`up` target
+      # (e.g. `docker compose run --rm migrate`, which runs long before
+      # this value exists), so a hard requirement here would fail runs that
+      # never touch this service at all. run.sh always writes the real
+      # value to .env before actually starting this container; an empty
+      # value here would just fail real attestation, visibly, in its logs.
+      MACHINE_TOKEN: ${MACHINE_TOKEN:-}
+    depends_on:
+      control-plane:
+        condition: service_healthy

@@ -16,6 +16,7 @@ import { DEFAULT_APPROVAL_MODE, settingKeyFor } from "../../services/ApprovalSer
 import type { EventBus } from "../../services/EventBus";
 import { DEFAULT_RETENTION_DAYS, RETENTION_DAYS_KEY } from "../archive/org-policy";
 import { applySettingChange } from "../config/apply-setting-change";
+import { DEFAULT_REGION_KEY, resolveOrgDefaultRegion } from "../machine/region-policy";
 
 /**
  * Aggregate read/write for the Organisation page (spec §20's "Organisation"
@@ -69,6 +70,10 @@ export interface OrgSettingsView {
   loggingTier: LoggingTier;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
+  /** Default Azure region for a new machine that doesn't specify one — spec.md §5.
+   * Resolved through `resolveSetting()` (`../machine/region-policy.ts`), same mechanism
+   * as retention, rather than a client-side prefill. */
+  regionDefault: string;
 }
 
 const dbTry = <A>(thunk: () => Promise<A>, reason: string): Effect.Effect<A, OrgSettingsError> =>
@@ -125,6 +130,7 @@ export const getOrgSettings = (
     const retentionLocation =
       (yield* readOrgScopedSetting<RetentionLocation>(orgId, RETENTION_LOCATION_KEY)) ??
       DEFAULT_RETENTION_LOCATION;
+    const regionDefault = (yield* resolveOrgDefaultRegion(db, orgId)).value;
 
     return {
       id: org.id,
@@ -136,6 +142,7 @@ export const getOrgSettings = (
       loggingTier,
       retentionDefaultDays,
       retentionLocation,
+      regionDefault,
     };
   });
 
@@ -146,6 +153,7 @@ export interface UpdateOrgSettingsInput {
   loggingTier?: LoggingTier | undefined;
   retentionDefaultDays?: number | undefined;
   retentionLocation?: RetentionLocation | undefined;
+  regionDefault?: string | undefined;
   actor: SettingChangeActor;
 }
 
@@ -278,6 +286,14 @@ export const updateOrgSettings = (
         input.actor,
         correlationId,
       );
+    }
+
+    if (input.regionDefault !== undefined) {
+      const trimmed = input.regionDefault.trim();
+      if (trimmed.length === 0) {
+        return yield* Effect.fail(new OrgSettingsError({ reason: "region_default_required" }));
+      }
+      yield* writeOrgSetting(input.orgId, DEFAULT_REGION_KEY, trimmed, input.actor, correlationId);
     }
 
     return yield* getOrgSettings(input.orgId);
