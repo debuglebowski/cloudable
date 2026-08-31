@@ -149,6 +149,71 @@ placeholder integration points on both sides —
 would do. Functionally, this just means a machine always waits out its
 full poll interval to pick up a change; it never gets fed one instantly.
 
+### Tunnel-signal channel (CP → agent, deliberately not `wake`)
+
+A fifth CP → agent surface, separate from the four-operation agent
+protocol above: `GET /api/v1/tunnel/signal`
+(`apps/control-plane/src/tunnel/signal.ts` +
+`http/routes/tunnel-signal.ts` + `http/handlers/tunnel-signal.ts`),
+long-polled continuously by `apps/agent/src/tunnel/signal-listener.ts`.
+Its only job: tell a machine's
+agent *"session `<id>` is waiting, connect now"* or *"session `<id>`,
+stop"* — the minimal signal needed once a browser mints a web-terminal/SSH
+session (`TunnelServer.mintSession`, `docs/access.md` §4) or a policy
+disables access (`TunnelServer.terminateSessionsForMachine`), so that fact
+actually reaches a connected agent instead of only updating the `sessions`
+DB row.
+
+**Why a new channel and not a repurposed `wake`:** spec §8.1 pins `wake` to
+"exactly one message, pull now, with no payload — it cannot carry
+instructions," and its whole purpose is accelerating the control agent's
+*own* desired-state poll cycle above — an unrelated concern to "which
+session is waiting." Spec §23's agent protocol is also pinned to exactly
+four operations; there's no fifth slot in that group for "attach to
+session X." Bolting a session id onto `wake` would violate both. See
+`apps/control-plane/src/tunnel/signal.ts`'s own header comment for the
+full reasoning.
+
+**Design: a long poll, not a second websocket.** `agent-wake.ts`'s stub
+exists specifically because `HttpApiEndpoint`/`HttpApiGroup` can't model a
+websocket upgrade, and wiring one into this skeleton's router was judged
+not worth it for `wake`. The tunnel-signal channel sidesteps that same
+obstacle rather than solving it: a long poll is a plain `GET` held pending
+server-side (`signal.ts`'s `TunnelSignal.next`, a `Deferred` per
+in-flight call, ~25s timeout) until a signal arrives or it times out with
+`signal: null` — no upgrade needed at all, so it fits `HttpApiEndpoint`
+exactly like `/poll`/`/report` do, bearer-authenticated the same way
+(`AgentSessionToken`).
+
+**Re-checks the machine on every call, not just the bearer session.** A
+bearer session can outlive the machine it was minted for (up to its own
+~15 min TTL — no server-side revocation before then), and unlike
+`poll`/`report` — which only ever hand back inert desired-state data or
+acknowledge a report — this channel can actively tell an agent "a session
+exists, connect to it." So `next`'s handler re-looks the machine up
+(`MachineDirectory`, same as `report`'s existence/org check, plus
+`attest`'s stricter archived check) on every call and refuses
+(`machine_not_found`/`machine_archived`) rather than keep handing an
+archived or reassigned machine's agent live tunnel signals for however
+long its stale bearer session happens to still verify.
+
+**What's real:** the control-plane service (in-memory per-machine
+queue + parked-waiter wake-up, unit-tested in `signal.test.ts` including
+the interrupted-long-poll cleanup path), the HTTP long-poll endpoint, and
+the agent's continuous listener loop (`signal-listener.ts`, unit-tested
+for message framing, malformed bodies, and backoff-on-failure). `index.ts`
+runs it concurrently with the poll/report loop, with log-only callbacks —
+proven end to end over a real Docker network in
+`test/agent-connectivity/` (mint a session, confirm the agent's log shows
+it received the signal).
+
+**What's still a stub:** actually *acting* on the signal — opening the
+reverse tunnel and attaching a real PTY session — is
+`apps/agent/src/tunnel/client.ts`, a sibling unit's responsibility. This
+channel only ever hands that client a bare session id; it never carries a
+session token or any other detail, matching `wake`'s own no-payload spirit
+even though it's a different channel.
+
 ### Poll/report loop, backoff, and jitter
 
 `apps/agent/src/poll-report-loop.ts`: attest, poll, (reconcile locally —
