@@ -60,8 +60,34 @@ export interface ResolvedPackageManifestEntry extends PackageManifestEntry {
   resolvedFromScopeId: string;
 }
 
+/**
+ * A resolved org → template → machine setting, lowest level wins (spec.md
+ * §5, §7). Shared wire shape for every single-value machine setting that
+ * isn't a manifest entry — currently `persistentPaths` and
+ * `accessMethodsEnabled` below. Written via the generic
+ * `PATCH /api/v1/config/settings` endpoint (`packages/contracts/src/
+ * domains/config.ts`'s `PatchSettingRequest`), read back here.
+ */
+export interface ResolvedMachineSetting<T> {
+  value: T;
+  source: ManifestScope;
+  resolvedFromScopeId: string;
+}
+
+/** spec.md §7: "disposable — persistent paths survive; the OS does not." A list of
+ * absolute paths on the machine that survive an OS reimage/upgrade. */
+export type PersistentPaths = string[];
+
+/** spec.md §7/§11: which of the two access methods are turned on for a machine. */
+export interface AccessMethodsEnabled {
+  webTerminal: boolean;
+  ssh: boolean;
+}
+
 export interface MachineDetail extends MachineSummary {
   manifest: ResolvedPackageManifestEntry[];
+  persistentPaths: ResolvedMachineSetting<PersistentPaths>;
+  accessMethodsEnabled: ResolvedMachineSetting<AccessMethodsEnabled>;
 }
 
 /**
