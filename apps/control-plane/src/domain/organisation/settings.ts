@@ -1,5 +1,5 @@
-import { orgs, settingValues } from "@cloudable/schema";
-import { and, eq } from "drizzle-orm";
+import { machines, orgs, settingValues } from "@cloudable/schema";
+import { and, count, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
@@ -68,6 +68,8 @@ export interface OrgSettingsView {
   name: string;
   approvalModes: Record<ApprovalActionType, ApprovalMode>;
   loggingTier: LoggingTier;
+  /** How many of this org's machines have their own machine-level logging-tier override (spec §17). Purely informational — the org page has nothing to do about a machine's override besides know it exists; see the machine detail page for the actual override control. */
+  loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
   /** Default Azure region for a new machine that doesn't specify one — spec.md §5.
@@ -125,6 +127,29 @@ export const getOrgSettings = (
 
     const loggingTier =
       (yield* readOrgScopedSetting<LoggingTier>(orgId, LOGGING_TIER_KEY)) ?? DEFAULT_LOGGING_TIER;
+    // A SQL count, not the rows themselves — this page only needs to know
+    // that divergence exists (docs/frontend.md's LineageGutter "N machines
+    // override this"), not which machines, and an org with many machines
+    // shouldn't pull one row per override over the wire just to count
+    // them. Joins through `machines` since a `settingValues` machine-scope
+    // row's `scopeId` is the machine id, not the org id — there's no other
+    // way to constrain it to this org.
+    const loggingTierOverrideRows = yield* dbTry(
+      () =>
+        db
+          .select({ count: count() })
+          .from(settingValues)
+          .innerJoin(machines, eq(machines.id, settingValues.scopeId))
+          .where(
+            and(
+              eq(settingValues.scopeType, "machine"),
+              eq(settingValues.key, LOGGING_TIER_KEY),
+              eq(machines.orgId, orgId),
+            ),
+          ),
+      "read_setting_failed",
+    );
+    const loggingTierOverrideCount = loggingTierOverrideRows[0]?.count ?? 0;
     const retentionDefaultDays =
       (yield* readOrgScopedSetting<number>(orgId, RETENTION_DAYS_KEY)) ?? DEFAULT_RETENTION_DAYS;
     const retentionLocation =
@@ -140,6 +165,7 @@ export const getOrgSettings = (
         ApprovalMode
       >,
       loggingTier,
+      loggingTierOverrideCount,
       retentionDefaultDays,
       retentionLocation,
       regionDefault,
