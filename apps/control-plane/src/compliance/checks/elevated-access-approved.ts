@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
-import { upsertFindingFirstSeen } from "../finding-store";
+import { clearResolvedFindings, upsertFindingFirstSeen } from "../finding-store";
 
 const CHECK_ID = "elevated-access-approved";
 
@@ -34,7 +34,25 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
   // direct governance failure over the most sensitive access tier — high.
   severity: "high",
   controlRefs: ["access-management"],
-  appliesTo: () => Effect.succeed(true),
+
+  // Not applicable to an org that has never granted elevated access at all —
+  // previously `evaluate` handled this by returning zero findings (a `pass`),
+  // which is a false reassurance for a feature the org has simply never used,
+  // exactly the anti-pattern spec §19 warns about (just inverted: `pass`
+  // instead of a noisy `N/A`).
+  appliesTo: ({ orgId }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const rows = yield* Effect.tryPromise(() =>
+        db
+          .select({ id: events.id })
+          .from(events)
+          .where(and(eq(events.orgId, orgId), eq(events.type, "access.elevation_granted")))
+          .limit(1),
+      ).pipe(Effect.orDie);
+      return rows.length > 0;
+    }),
+
   evaluate: ({ orgId }) =>
     Effect.gen(function* () {
       const db = yield* Db;
@@ -46,6 +64,11 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
           .where(and(eq(events.orgId, orgId), eq(events.type, "access.elevation_granted"))),
       ).pipe(Effect.orDie);
 
+      // Defensive, not load-bearing: `appliesTo` above already gates this org out
+      // entirely when there are zero elevation events, so `evaluate` is never
+      // actually called in that case. Left in so this function stays correct on
+      // its own if ever called directly (e.g. from evidence-export.ts's pattern
+      // of calling `evaluate` after its own separate `appliesTo` check).
       if (elevationEvents.length === 0) return [];
 
       const grantedApprovalEvents = yield* Effect.tryPromise(() =>
@@ -76,6 +99,7 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
       }
 
       const findings: ComplianceFinding[] = [];
+      const openEventIds: string[] = [];
       for (const event of elevationEvents) {
         const approvalId = (event.payload as ElevationGrantedPayload).approvalId;
 
@@ -84,6 +108,8 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
         const missingReason = !reason || reason.trim().length === 0;
 
         if (!missingApproval && !missingReason) continue;
+
+        openEventIds.push(event.id);
 
         const firstSeenAt = yield* upsertFindingFirstSeen({
           checkId: CHECK_ID,
@@ -100,6 +126,12 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
           detail: { elevationEventId: event.id, missingReason, missingApproval },
         });
       }
+
+      // Anything previously open for this check+org that isn't among the
+      // elevation events found just now has resolved (an approval with a
+      // reason has since landed) — stop aging it, so the same event id
+      // failing again later is treated as newly opened.
+      yield* clearResolvedFindings(CHECK_ID, orgId, openEventIds).pipe(Effect.orDie);
 
       return findings;
     }),

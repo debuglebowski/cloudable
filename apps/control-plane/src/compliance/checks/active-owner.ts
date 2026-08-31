@@ -3,7 +3,7 @@ import { and, eq, notInArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
-import { upsertFindingFirstSeen } from "../finding-store";
+import { clearResolvedFindings, upsertFindingFirstSeen } from "../finding-store";
 
 /** Live states — everything except the two archived states. */
 const ARCHIVED_STATES: Array<"archived_restorable" | "archived_expired"> = [
@@ -18,13 +18,12 @@ const ARCHIVED_STATES: Array<"archived_restorable" | "archived_expired"> = [
  * deactivated (invariant 3: a machine always has exactly one owner,
  * always a person).
  *
- * `appliesTo`'s type (`Effect.Effect<boolean>`, no `Db` requirement — see
- * `domain/compliance/types.ts`) means it cannot itself look up a specific
- * machine's archived state. So "ownership questions don't apply to an
- * archived machine" is enforced inside `evaluate`'s query instead, via the
- * `notInArray(machines.state, ARCHIVED_STATES)` filter: an archived
- * machine never reaches the loop that produces findings, which is
- * behaviorally equivalent to gating it out via `appliesTo`.
+ * A specific machine's archived state is still filtered inside `evaluate`'s
+ * query (`notInArray(machines.state, ARCHIVED_STATES)`) rather than
+ * `appliesTo` — `appliesTo` gates at the *org* level ("does this org have
+ * any live machine at all to have an owner question about"), not per
+ * machine; `evaluate` still excludes individual archived machines from an
+ * org that also has live ones.
  */
 export const activeOwnerCheck: ComplianceCheck = {
   id: "active-owner",
@@ -34,7 +33,20 @@ export const activeOwnerCheck: ComplianceCheck = {
   severity: "medium",
   controlRefs: ["access-management"],
 
-  appliesTo: () => Effect.succeed(true),
+  // Not applicable to an org with no live machines — nothing to have an
+  // ownership question about.
+  appliesTo: ({ orgId }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const rows = yield* Effect.tryPromise(() =>
+        db
+          .select({ id: machines.id })
+          .from(machines)
+          .where(and(eq(machines.orgId, orgId), notInArray(machines.state, ARCHIVED_STATES)))
+          .limit(1),
+      ).pipe(Effect.orDie);
+      return rows.length > 0;
+    }),
 
   evaluate: ({ orgId }) =>
     Effect.gen(function* () {
@@ -55,6 +67,7 @@ export const activeOwnerCheck: ComplianceCheck = {
       );
 
       const findings: ComplianceFinding[] = [];
+      const openMachineIds: string[] = [];
       for (const row of rows) {
         const reason =
           row.ownerPersonId === null
@@ -63,6 +76,8 @@ export const activeOwnerCheck: ComplianceCheck = {
               ? ("owner_deactivated" as const)
               : null;
         if (reason === null) continue;
+
+        openMachineIds.push(row.machineId);
 
         const firstSeenAt = yield* upsertFindingFirstSeen({
           checkId: "active-owner",
@@ -79,6 +94,13 @@ export const activeOwnerCheck: ComplianceCheck = {
           detail: { ownerPersonId: row.ownerPersonId, reason },
         });
       }
+
+      // Anything previously open for this check+org that isn't among the
+      // machines found just now has resolved (owner assigned/reactivated,
+      // or the machine was archived) — stop aging it, so a later reopen of
+      // the same machine id is treated as newly opened.
+      yield* clearResolvedFindings("active-owner", orgId, openMachineIds).pipe(Effect.orDie);
+
       return findings;
     }),
 };

@@ -180,6 +180,10 @@ function CheckRow({ check }: { check: ControlCheckEvidence }) {
           <span className="text-xs text-muted-foreground">
             {check.findings.length} open · oldest{" "}
             {daysOpen(oldestOpenSince([firstFinding, ...restFindings]))}d
+            {/* An even-sized findings set can median to a half-day (e.g. 2.5)
+                — rounded here so it reads as a whole day like every other
+                age figure on this page. */}
+            {check.medianAgeDays !== null && <> · median {Math.round(check.medianAgeDays)}d</>}
           </span>
         )}
       </div>

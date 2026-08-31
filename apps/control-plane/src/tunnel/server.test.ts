@@ -9,16 +9,24 @@ import { Db, DbLive } from "../db/layer";
 import { EventBus } from "../services/EventBus";
 import { LocalSignerLive } from "../services/Signer.local";
 import { TunnelServer } from "./server";
+import { TunnelSignal } from "./signal";
 
 // `provideMerge`, not `provide`: `TunnelServer.mintSession` calls `mintSessionToken`, which
 // reads `SignerTag` lazily *when invoked*, not only while `TunnelServer.Default` itself is
 // being constructed — `provide` would satisfy construction but then hide `Signer` from the
 // context a caller later runs `mintSession` in, failing at call time despite type-checking
-// cleanly. `provideMerge` keeps `Db`/`EventBus`/`Signer` in the final context alongside
-// `TunnelServer`. See the identical comment in `../layers.ts`.
+// cleanly. `provideMerge` keeps `Db`/`EventBus`/`Signer`/`TunnelSignal` in the final context
+// alongside `TunnelServer` itself — the last of those is also read directly by several tests
+// below, to assert `TunnelServer` actually pushed to it. See the identical comment in
+// `../layers.ts`.
 const TestLayer = TunnelServer.Default.pipe(
   Layer.provideMerge(
-    Layer.mergeAll(EventBus.Default.pipe(Layer.provide(DbLive)), LocalSignerLive, DbLive),
+    Layer.mergeAll(
+      EventBus.Default.pipe(Layer.provide(DbLive)),
+      LocalSignerLive,
+      DbLive,
+      TunnelSignal.Default,
+    ),
   ),
 );
 
@@ -187,6 +195,38 @@ describe("TunnelServer (against local dev Postgres)", () => {
     });
   });
 
+  test("endSession pushes a session_terminate tunnel signal for the ended session", async () => {
+    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      // One `runPromise` for the whole thing (see the mintSession signal test above for why)
+      // — this is the person-initiated end path, the one with a real, already-wired
+      // production HTTP endpoint (`POST /api/v1/access/sessions/end`), so a regression here
+      // would leave a real tunnel client with no way to ever learn to disconnect.
+      const program = Effect.gen(function* () {
+        const tunnel = yield* TunnelServer;
+        const minted = yield* tunnel.mintSession({
+          orgId,
+          personId: crypto.randomUUID(),
+          idpIdentity: "kalle@normain.com",
+          targetMachineId: machineId,
+          targetOsUser: "ubuntu",
+          method: "terminal",
+        });
+
+        const signal = yield* TunnelSignal;
+        // Drain the session_waiting signal `mintSession` just pushed, so the signal read
+        // below is unambiguously the one `endSession` pushes, not that one.
+        yield* signal.next(machineId);
+
+        yield* tunnel.endSession({ orgId, sessionId: minted.sessionId });
+        const delivered = yield* signal.next(machineId);
+        return { sessionId: minted.sessionId, delivered };
+      });
+
+      const { sessionId, delivered } = await Effect.runPromise(Effect.provide(program, TestLayer));
+      expect(delivered).toEqual({ type: "session_terminate", sessionId });
+    });
+  });
+
   test("terminateSessionsForMachine ends every live session and emits one access.session_ended per session", async () => {
     await withOrgAndMachine("running", async ({ orgId, machineId }) => {
       const mint = (personId: string) =>
@@ -230,6 +270,100 @@ describe("TunnelServer (against local dev Postgres)", () => {
       );
       expect(rows.every((r) => r.endedAt !== null)).toBe(true);
       expect(rows.map((r) => r.id).sort()).toEqual([a.sessionId, b.sessionId].sort());
+    });
+  });
+
+  test("mintSession pushes a session_waiting tunnel signal for the target machine", async () => {
+    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      // Everything runs against the one `TestLayer` instance this single `runPromise` builds
+      // — reading the signal back via a *separate* `Effect.provide(..., TestLayer)` call
+      // would build a second, unrelated `TunnelSignal` instance (Effect layers aren't
+      // memoized across independent top-level runs) and never see what was pushed here.
+      const program = Effect.gen(function* () {
+        const tunnel = yield* TunnelServer;
+        const minted = yield* tunnel.mintSession({
+          orgId,
+          personId: crypto.randomUUID(),
+          idpIdentity: "kalle@normain.com",
+          targetMachineId: machineId,
+          targetOsUser: "ubuntu",
+          method: "terminal",
+        });
+        const signal = yield* TunnelSignal;
+        const delivered = yield* signal.next(machineId);
+        return { minted, delivered };
+      });
+
+      const { minted, delivered } = await Effect.runPromise(Effect.provide(program, TestLayer));
+      expect(delivered).toEqual({ type: "session_waiting", sessionId: minted.sessionId });
+    });
+  });
+
+  test("mintSession denied against a non-running machine pushes no tunnel signal", async () => {
+    await withOrgAndMachine("stopped", async ({ orgId, machineId }) => {
+      const program = Effect.gen(function* () {
+        const tunnel = yield* TunnelServer;
+        yield* Effect.either(
+          tunnel.mintSession({
+            orgId,
+            personId: crypto.randomUUID(),
+            idpIdentity: "kalle@normain.com",
+            targetMachineId: machineId,
+            targetOsUser: "ubuntu",
+            method: "terminal",
+          }),
+        );
+        const signal = yield* TunnelSignal;
+        return yield* signal.next(machineId).pipe(Effect.timeout("300 millis"), Effect.either);
+      });
+
+      const result = await Effect.runPromise(Effect.provide(program, TestLayer));
+      expect(result._tag).toBe("Left"); // timed out — nothing was ever pushed to signal
+    });
+  });
+
+  test("terminateSessionsForMachine pushes one session_terminate tunnel signal per session ended", async () => {
+    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      const mint = (personId: string) =>
+        Effect.gen(function* () {
+          const tunnel = yield* TunnelServer;
+          return yield* tunnel.mintSession({
+            orgId,
+            personId,
+            idpIdentity: "kalle@normain.com",
+            targetMachineId: machineId,
+            targetOsUser: "ubuntu",
+            method: "terminal",
+          });
+        });
+
+      const program = Effect.gen(function* () {
+        const a = yield* mint(crypto.randomUUID());
+        const b = yield* mint(crypto.randomUUID());
+
+        const signal = yield* TunnelSignal;
+        // Drain the two `session_waiting` signals the mints above just pushed, so the
+        // terminate signals below are the next ones in queue, not mixed in behind them.
+        yield* signal.next(machineId);
+        yield* signal.next(machineId);
+
+        const tunnel = yield* TunnelServer;
+        yield* tunnel.terminateSessionsForMachine({
+          orgId,
+          machineId,
+          reason: "access disabled by policy",
+        });
+
+        const first = yield* signal.next(machineId);
+        const second = yield* signal.next(machineId);
+        return { sessionIds: [a.sessionId, b.sessionId], delivered: [first, second] };
+      });
+
+      const { sessionIds, delivered } = await Effect.runPromise(Effect.provide(program, TestLayer));
+      expect(delivered.every((d) => d?.type === "session_terminate")).toBe(true);
+      expect(delivered.map((d) => (d as { sessionId: string }).sessionId).sort()).toEqual(
+        [...sessionIds].sort(),
+      );
     });
   });
 });

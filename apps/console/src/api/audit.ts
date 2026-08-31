@@ -58,6 +58,8 @@ export interface ControlCheckEvidence {
   status: ControlCheckStatus;
   detail: string;
   findings: OpenFinding[];
+  /** Median `openSince` age in days across `findings` (§19 "Finding age"). `null` when there are none. */
+  medianAgeDays: number | null;
 }
 
 /** A control and the checks that evidence it — many-to-many in reality, one group per control here. */
@@ -124,6 +126,7 @@ interface ComplianceCheckResultWire {
    */
   severity: FindingSeverity;
   findings: ComplianceFindingWire[];
+  medianAgeDays: number | null;
 }
 
 function summarizeDetail(detail: Record<string, unknown>): string {
@@ -171,6 +174,7 @@ async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
           severity: check.severity,
           openSince: finding.firstSeenAt,
         })),
+        medianAgeDays: check.medianAgeDays,
       }));
 
     // A control with no implemented check evidencing it (spec §19: "most of
@@ -189,6 +193,7 @@ async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
             ? "Not covered by any of the six v1 compliance checks."
             : "Manual action required — no automated check evidences this control yet.",
         findings: [],
+        medianAgeDays: null,
       });
     }
 
