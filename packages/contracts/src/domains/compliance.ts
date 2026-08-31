@@ -7,6 +7,16 @@
 
 export type ComplianceCheckStatus = "pass" | "fail" | "not_applicable";
 
+/**
+ * How much a failure of this check should matter to an auditor. Fixed per
+ * check (the control plane's `ComplianceCheck.severity` — see
+ * `apps/control-plane/src/domain/compliance/types.ts`), not per finding —
+ * every finding under the same check shares it. This is the one source of
+ * truth for severity; consumers (e.g. the console) read it from here rather
+ * than keeping their own classification.
+ */
+export type ComplianceFindingSeverity = "low" | "medium" | "high";
+
 export interface ComplianceFindingDto {
   machineId: string | null;
   /** ISO 8601 — when this finding was first observed as open. */
@@ -20,6 +30,7 @@ export interface ComplianceCheckResult {
   label: string;
   controlRefs: string[];
   status: ComplianceCheckStatus;
+  severity: ComplianceFindingSeverity;
   /** Empty when `status` is `"pass"` or `"not_applicable"`. */
   findings: ComplianceFindingDto[];
   /**

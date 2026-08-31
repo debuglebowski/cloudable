@@ -43,6 +43,7 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
               label: evaluation.check.label,
               controlRefs: [...evaluation.check.controlRefs],
               status: evaluation.status,
+              severity: evaluation.check.severity,
               findings,
               medianAgeDays: medianAgeInDays(firstSeenAts, now),
             };

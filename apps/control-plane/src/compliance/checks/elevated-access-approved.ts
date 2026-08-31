@@ -30,6 +30,9 @@ interface ElevationGrantedPayload {
 export const elevatedAccessApprovedCheck: ComplianceCheck = {
   id: CHECK_ID,
   label: "Elevated access was approved",
+  // Break-glass/admin access with no approval and reason on record is a
+  // direct governance failure over the most sensitive access tier — high.
+  severity: "high",
   controlRefs: ["access-management"],
 
   // Not applicable to an org that has never granted elevated access at all —
