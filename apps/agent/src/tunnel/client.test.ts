@@ -137,6 +137,24 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<voi
   }
 }
 
+/** Re-sends `message` every 100ms until `predicate` observes its effect (or `timeoutMs`
+ * elapses) — used for the real-shell tests instead of a fixed "give the shell a moment to
+ * start" sleep, since re-sending the same command is harmless (it either lands before the
+ * shell is ready and is simply not yet read, or lands again after — both fine here). */
+async function sendUntilObserved(
+  server: MockServer,
+  message: TunnelWireMessage,
+  predicate: () => boolean,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) throw new Error("sendUntilObserved: timed out");
+    server.send(message);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 const activeServers: MockServer[] = [];
 function registerServer(server: MockServer): MockServer {
   activeServers.push(server);
@@ -329,21 +347,46 @@ describe("spawnRealPty — genuine PTY relay (no e2e against a real control plan
     });
 
     const marker = "CLOUDABLE_TUNNEL_TEST_MARKER";
-    // Give the shell a moment to start reading before sending the command.
-    await waitFor(() => server.received.length >= 0, 200).catch(() => undefined);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    server.send({ type: "data", dataBase64: toBase64(`echo ${marker}\n`) });
-
     const outputContains = () =>
       server.received
         .filter((m) => m.type === "data")
         .map((m) => (m.type === "data" ? fromBase64(m.dataBase64) : ""))
         .join("")
         .includes(marker);
-    await waitFor(outputContains, 10_000);
+    // Re-sends the command until the shell has actually started reading and echoes it back —
+    // no fixed "give it a moment" sleep.
+    await sendUntilObserved(
+      server,
+      { type: "data", dataBase64: toBase64(`echo ${marker}\n`) },
+      outputContains,
+    );
 
     server.send({ type: "terminate" });
     await done;
     controller.abort();
+  }, 15_000);
+
+  test("reports the real process exit code, not the PTY stream's own lifecycle status", async () => {
+    // Regression test: `Bun.Terminal`'s own `exit` callback reports a PTY *stream* lifecycle
+    // status (0 = clean EOF, 1 = read error) — NOT the child process's exit code. `spawnRealPty`
+    // must get the real exit code from `Subprocess.exited` instead. A shell exiting `42` would
+    // read back as the PTY's own (typically `0`, clean EOF) status if that bug were still here.
+    const server = registerServer(startMockServer());
+
+    const done = runTunnelSession({
+      url: server.url,
+      sessionToken: validToken(),
+      spawnPty: spawnRealPty,
+    });
+
+    // Re-sends until the shell has actually started reading and exits — no fixed sleep.
+    await sendUntilObserved(server, { type: "data", dataBase64: toBase64("exit 42\n") }, () =>
+      server.received.some((m) => m.type === "exited"),
+    );
+    await done;
+
+    const exited = server.received.find((m) => m.type === "exited");
+    expect(exited?.type).toBe("exited");
+    expect(exited && exited.type === "exited" ? exited.exitCode : undefined).toBe(42);
   }, 15_000);
 });
