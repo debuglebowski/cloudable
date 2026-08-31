@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { PtyHandle, PtySpawnCallbacks, SpawnPty, TunnelWireMessage } from "./client";
+import type {
+  PtyHandle,
+  PtySpawnCallbacks,
+  SessionClaims,
+  SpawnPty,
+  TunnelWireMessage,
+} from "./client";
 import { runTunnelSession, spawnRealPty } from "./client";
 
 // ---------------------------------------------------------------------------
@@ -25,10 +31,37 @@ const CLAIMS_SEGMENT = (overrides: Partial<Record<string, unknown>> = {}): strin
   return Buffer.from(JSON.stringify(claims)).toString("base64url");
 };
 
-/** A well-formed-looking token per this build's `<claims>.<signature>` shape — the stub
- * verifier (`_temp-verify-stub.ts`) never checks the signature bytes, so any value works here. */
+/** A well-formed-looking token per this build's `<claims>.<signature>` shape — paired with
+ * `fakeVerify` below (not the real signature check, which has its own dedicated test file,
+ * `session-token-verify.test.ts`), so `.not-a-real-signature` is never actually checked here. */
 const validToken = (overrides: Partial<Record<string, unknown>> = {}): string =>
   `${CLAIMS_SEGMENT(overrides)}.not-a-real-signature`;
+
+/** Test double for `verifySessionToken`, injected into every `runTunnelSession` call below.
+ * Exercises the SAME shape/expiry control-flow real client.ts code depends on (malformed
+ * shape rejected, expired claims rejected, otherwise resolved) without needing a real signer
+ * key pair or a running control plane — deliberately does not check the signature segment,
+ * since that's `session-token-verify.test.ts`'s job, not this file's. */
+async function fakeVerify(token: string): Promise<SessionClaims> {
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) throw new Error("malformed");
+  const claims = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")) as Record<
+    string,
+    unknown
+  >;
+  const expiresAt = new Date(claims.expiresAt as string);
+  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
+    throw new Error("expired");
+  }
+  return {
+    idpIdentity: claims.idpIdentity as string,
+    targetMachineId: claims.targetMachineId as string,
+    targetOsUser: claims.targetOsUser as string,
+    method: claims.method as SessionClaims["method"],
+    issuedAt: new Date(claims.issuedAt as string),
+    expiresAt,
+  };
+}
 
 interface FakePty {
   spawnPty: SpawnPty;
@@ -174,6 +207,7 @@ describe("runTunnelSession — verification gate", () => {
       url: server.url,
       sessionToken: "not-even-two-segments",
       spawnPty: pty.spawnPty,
+      verifySessionToken: fakeVerify,
     });
 
     expect(pty.callbacks).toBeUndefined();
@@ -188,6 +222,7 @@ describe("runTunnelSession — verification gate", () => {
       url: server.url,
       sessionToken: validToken({ expiresAt: new Date(Date.now() - 1_000).toISOString() }),
       spawnPty: pty.spawnPty,
+      verifySessionToken: fakeVerify,
     });
 
     expect(pty.callbacks).toBeUndefined();
@@ -202,6 +237,7 @@ describe("runTunnelSession — verification gate", () => {
       url: server.url,
       sessionToken: validToken(),
       spawnPty: pty.spawnPty,
+      verifySessionToken: fakeVerify,
       signal: controller.signal,
     });
 
@@ -221,6 +257,7 @@ describe("runTunnelSession — byte relay", () => {
       url: server.url,
       sessionToken: validToken(),
       spawnPty: pty.spawnPty,
+      verifySessionToken: fakeVerify,
       signal: controller.signal,
     });
 
@@ -249,6 +286,7 @@ describe("runTunnelSession — byte relay", () => {
       url: server.url,
       sessionToken: validToken(),
       spawnPty: pty.spawnPty,
+      verifySessionToken: fakeVerify,
       signal: controller.signal,
     });
 
@@ -272,6 +310,7 @@ describe("runTunnelSession — terminate and exit", () => {
       url: server.url,
       sessionToken: validToken(),
       spawnPty: pty.spawnPty,
+      verifySessionToken: fakeVerify,
     });
 
     await waitFor(() => pty.callbacks !== undefined);
@@ -289,6 +328,7 @@ describe("runTunnelSession — terminate and exit", () => {
       url: server.url,
       sessionToken: validToken(),
       spawnPty: pty.spawnPty,
+      verifySessionToken: fakeVerify,
     });
 
     await waitFor(() => pty.callbacks !== undefined);
@@ -318,6 +358,7 @@ describe("runTunnelSession — reconnect with backoff", () => {
       url: server.url,
       sessionToken: validToken(),
       spawnPty: pty.spawnPty,
+      verifySessionToken: fakeVerify,
       signal: controller.signal,
       backoff: { baseMs: 5, capMs: 20 },
     });
@@ -343,6 +384,7 @@ describe("spawnRealPty — genuine PTY relay (no e2e against a real control plan
       url: server.url,
       sessionToken: validToken(),
       spawnPty: spawnRealPty,
+      verifySessionToken: fakeVerify,
       signal: controller.signal,
     });
 
@@ -377,6 +419,7 @@ describe("spawnRealPty — genuine PTY relay (no e2e against a real control plan
       url: server.url,
       sessionToken: validToken(),
       spawnPty: spawnRealPty,
+      verifySessionToken: fakeVerify,
     });
 
     // Re-sends until the shell has actually started reading and exits — no fixed sleep.

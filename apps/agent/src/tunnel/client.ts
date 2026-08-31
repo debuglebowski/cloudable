@@ -17,8 +17,9 @@
 // WHAT THIS DOES:
 //   1. Opens ONE outbound WebSocket (agent is always the client — CLAUDE.md
 //      invariant #7, no inbound access to any machine, ever).
-//   2. On connect, verifies the session token LOCALLY — via a temporary stub,
-//      see `_temp-verify-stub.ts` — before doing anything else. A failed
+//   2. On connect, verifies the session token via the real, tested primitive
+//      in `./session-token-verify.ts` (an exact port of the control plane's
+//      own signature-check logic) before doing anything else. A failed
 //      verification closes the socket immediately; no PTY is ever spawned
 //      (docs/spec.md §11.1: "trusting the tunnel because it is already
 //      authenticated makes a control plane compromise equal to root on every
@@ -39,14 +40,31 @@
 // processes; `client.test.ts` also runs relay tests through the real default.
 // ---------------------------------------------------------------------------
 import { type BackoffOptions, DEFAULT_BACKOFF, fullJitterBackoffMs } from "../backoff";
-// One-line swap IF the sibling unit's real module also exposes a Promise-returning
-// `(token: string) => Promise<SessionClaims>` (this unit's brief's stated target shape, and
-// the only shape apps/agent's zero-Effect convention — docs/spec.md §25 — can consume without
-// pulling in `effect`). If it instead mirrors control-plane's own `verifySessionToken` verbatim
-// (an `Effect.Effect<SessionClaims, SignerError, SignerTag>`), the call site below needs a small
-// adapter (`Effect.runPromise(...)`) too, not just an import swap — see `_temp-verify-stub.ts`'s
-// banner for the same caveat.
-import { verifySessionTokenLocally as verifySessionToken } from "./_temp-verify-stub";
+// The real module's `verifySessionToken` turned out to be synchronous and take an explicit
+// `publicKeyDer` argument (not the `(token) => Promise<SessionClaims>` shape this file's
+// call site was written against) — so the swap needed the small async adapter below, not
+// just a changed import path, exactly as the now-deleted `_temp-verify-stub.ts` warned it might.
+import {
+  type SessionClaims,
+  getSessionTokenPublicKey,
+  verifySessionToken as verifySessionTokenSync,
+} from "./session-token-verify";
+
+export type { SessionClaims };
+
+/** Adapts the real, synchronous `verifySessionToken(token, publicKeyDer)` to the
+ * `(token) => Promise<SessionClaims>` shape this file's call site expects — fetching
+ * (and caching, via `getSessionTokenPublicKey`'s own in-memory cache) the signer's public
+ * key before doing the actual signature check. This is the default; injectable below
+ * (same pattern as `spawnPty`) so `client.test.ts` can exercise the transport/relay/PTY
+ * logic without needing a real signer key pair on every test — the signature-check logic
+ * itself has its own dedicated, thorough test file, `session-token-verify.test.ts`. */
+async function verifySessionTokenDefault(token: string): Promise<SessionClaims> {
+  const publicKeyDer = await getSessionTokenPublicKey();
+  return verifySessionTokenSync(token, publicKeyDer);
+}
+
+type VerifySessionToken = (token: string) => Promise<SessionClaims>;
 
 /** `sleep` that resolves early if `signal` aborts — a plain `setTimeout` sleep would otherwise
  * make an abort during a (~10 min, at the cap) backoff wait sit unnoticed until the timer fires. */
@@ -188,6 +206,11 @@ export interface TunnelSessionOptions {
   readonly signal?: AbortSignal;
   /** Injection point for tests — defaults to `spawnRealPty`. */
   readonly spawnPty?: SpawnPty;
+  /** Injection point for tests — defaults to the real signature check (`verifySessionTokenDefault`).
+   * Only ever override this to test transport/relay behavior in isolation; never in anything
+   * that resembles a real session — see this file's own header comment on why verification
+   * must be real. */
+  readonly verifySessionToken?: VerifySessionToken;
   readonly backoff?: BackoffOptions;
 }
 
@@ -237,7 +260,9 @@ interface ConnectResult {
  * lost unexpectedly and the caller should reconnect.
  */
 function connectAndRelay(
-  options: Required<Pick<TunnelSessionOptions, "url" | "sessionToken" | "spawnPty">> &
+  options: Required<
+    Pick<TunnelSessionOptions, "url" | "sessionToken" | "spawnPty" | "verifySessionToken">
+  > &
     Pick<TunnelSessionOptions, "cols" | "rows" | "signal">,
 ): Promise<ConnectResult> {
   return new Promise<ConnectResult>((resolve) => {
@@ -292,7 +317,7 @@ function connectAndRelay(
     };
 
     ws.addEventListener("open", () => {
-      verifySessionToken(options.sessionToken).then(
+      options.verifySessionToken(options.sessionToken).then(
         (claims) => {
           // The connection may already have ended (aborted, or the socket dropped) while
           // verification was pending — spawning a PTY now would orphan it: nothing would ever
@@ -412,13 +437,14 @@ function connectAndRelay(
  */
 export async function runTunnelSession(options: TunnelSessionOptions): Promise<void> {
   const spawnPty = options.spawnPty ?? spawnRealPty;
+  const verifySessionToken = options.verifySessionToken ?? verifySessionTokenDefault;
   const backoff = options.backoff ?? DEFAULT_BACKOFF;
   let attempt = 0;
 
   for (;;) {
     if (options.signal?.aborted) return;
 
-    const result = await connectAndRelay({ ...options, spawnPty });
+    const result = await connectAndRelay({ ...options, spawnPty, verifySessionToken });
     if (result.doneForGood) return;
     if (options.signal?.aborted) return;
 
@@ -437,11 +463,13 @@ export async function runTunnelSession(options: TunnelSessionOptions): Promise<v
  * `TUNNEL_SESSION_TOKEN`, to actually enable the manual trigger below. Requiring all three
  * (rather than just the two that carry real data) makes it very hard to enable this by
  * accident — e.g. a leaked/templated `TUNNEL_ATTACH_URL` and `TUNNEL_SESSION_TOKEN` reaching a
- * real deployment's environment would otherwise be enough, on its own, to open an
- * unauthenticated PTY session (this unit's verifier — `_temp-verify-stub.ts` — never checks a
- * signature) that bypasses the control plane's `mintSession` policy gate and audit trail
- * entirely. This value is deliberately not a secret; it exists purely as a deliberate,
- * hard-to-fat-finger acknowledgment, not an access control.
+ * real deployment's environment would otherwise be enough, on its own, to open a PTY session.
+ * The signature check itself is real (`./session-token-verify.ts`), so this path can't be used
+ * with a forged token — but it still bypasses the control plane's `mintSession` policy gate and
+ * audit trail: a genuinely-issued token fed in this way attaches without the session ever being
+ * recorded through the normal mint flow, and without the not-yet-built CP→agent signaling
+ * channel deciding when to attach. This value is deliberately not a secret; it exists purely as
+ * a deliberate, hard-to-fat-finger acknowledgment, not an access control.
  */
 export const TUNNEL_MANUAL_TRIGGER_ACK =
   "i-understand-this-bypasses-the-control-plane-session-policy-gate";
