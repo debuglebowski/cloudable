@@ -1,4 +1,5 @@
 import { usePendingApprovalsCount } from "@/api/approvals";
+import { useUnreadNotificationsCount } from "@/api/notifications";
 
 export interface NavItem {
   label: string;
@@ -31,6 +32,14 @@ export type NavBadgeHook = () => number | undefined;
 
 export const NAV_BADGE_HOOKS: Record<string, NavBadgeHook> = {
   "/approvals": usePendingApprovalsCount,
+  // Unread owner notifications (spec §15: "owner notified") — Access is
+  // where elevation grants against a machine you own are visible, so that's
+  // where the unread count surfaces. Same badge mechanism as Approvals
+  // above, not a new one — see apps/console/src/api/notifications.ts.
+  // `AccessPage` itself marks every notification read on mount (there's no
+  // per-notification UI yet), so visiting this page is what clears the
+  // badge rather than it only ever growing.
+  "/access": useUnreadNotificationsCount,
 };
 
 if (import.meta.env.DEV) {

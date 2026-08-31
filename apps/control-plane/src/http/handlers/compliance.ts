@@ -8,7 +8,7 @@ import {
   findingsByControlCsv,
   openFindingsCsv,
 } from "../../compliance/evidence-export";
-import { ageInDays } from "../../compliance/finding-store";
+import { ageInDays, medianAgeInDays } from "../../compliance/finding-store";
 import { DbLive } from "../../db/layer";
 import { Api } from "../api";
 
@@ -22,18 +22,32 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
         return {
           orgId: urlParams.orgId,
           generatedAt: now.toISOString(),
-          checks: evaluations.map((evaluation) => ({
-            checkId: evaluation.check.id,
-            label: evaluation.check.label,
-            controlRefs: [...evaluation.check.controlRefs],
-            status: evaluation.status,
-            findings: evaluation.findings.map((finding) => ({
-              machineId: finding.machineId,
-              firstSeenAt: finding.firstSeenAt.toISOString(),
-              ageDays: ageInDays(finding.firstSeenAt, now),
-              detail: finding.detail,
-            })),
-          })),
+          checks: evaluations.map((evaluation) => {
+            // Collected alongside the findings map below (rather than a
+            // second `.map` over `evaluation.findings`) purely to avoid a
+            // redundant traversal — findings sets here are small, but one
+            // pass is as easy as two.
+            const firstSeenAts: Date[] = [];
+            const findings = evaluation.findings.map((finding) => {
+              firstSeenAts.push(finding.firstSeenAt);
+              return {
+                machineId: finding.machineId,
+                firstSeenAt: finding.firstSeenAt.toISOString(),
+                ageDays: ageInDays(finding.firstSeenAt, now),
+                detail: finding.detail,
+              };
+            });
+
+            return {
+              checkId: evaluation.check.id,
+              label: evaluation.check.label,
+              controlRefs: [...evaluation.check.controlRefs],
+              status: evaluation.status,
+              severity: evaluation.check.severity,
+              findings,
+              medianAgeDays: medianAgeInDays(firstSeenAts, now),
+            };
+          }),
         };
       }),
     )

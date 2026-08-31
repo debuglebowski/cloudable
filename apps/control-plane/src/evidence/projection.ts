@@ -23,6 +23,21 @@ export interface CommandRecordingRef {
 }
 
 /**
+ * Cloud-specific detail, exposed as extensions alongside the normalised
+ * contract (spec §18). Populated only for the `cloud.*` event domain — the
+ * one place Cloudable's Azure-specific vocabulary (subscription ids,
+ * resource ids, OIDC subjects) is allowed to leak past the cloud-agnostic
+ * shape everything else in `EvidenceRecord` sticks to. `summary` still
+ * carries the human-readable line for every event, cloud or not; this is
+ * the machine-readable sibling for the cloud domain specifically, not a
+ * replacement for it.
+ */
+export type EvidenceExtensions =
+  | { cloud: { subscriptionId: string; subject: string } }
+  | { cloud: { subject: string; reason: string } }
+  | { cloud: { resourceId: string; kind: string } };
+
+/**
  * The normalised, cloud-agnostic evidence shape auditors read (spec §18).
  *
  * This is a PURE, STATELESS transform over one raw `events` row — nothing
@@ -41,11 +56,14 @@ export interface EvidenceRecord {
   machineId: string | null;
   correlationId: string;
   summary: string;
+  /** Cloud-domain detail only — `undefined` for every other event type. */
+  extensions?: EvidenceExtensions;
   commandRecording: CommandRecordingRef | null;
 }
 
 /** Projects one raw `events` row into the normalised evidence shape. */
 export function projectEvent(row: RawEventRow, commandRecordingCount = 0): EvidenceRecord {
+  const extensions = extensionsFor(row);
   return {
     id: row.id,
     type: row.type,
@@ -56,6 +74,11 @@ export function projectEvent(row: RawEventRow, commandRecordingCount = 0): Evide
     machineId: row.machineId,
     correlationId: row.correlationId,
     summary: summarize(row),
+    // Spread rather than a plain `extensions: extensions` assignment: with
+    // `exactOptionalPropertyTypes` on, an optional field may be omitted but
+    // never explicitly set to `undefined`, so a non-cloud event must leave
+    // the key out entirely rather than present-with-`undefined`.
+    ...(extensions !== undefined ? { extensions } : {}),
     commandRecording:
       commandRecordingCount > 0
         ? { correlationId: row.correlationId, count: commandRecordingCount }
@@ -191,6 +214,79 @@ function summarize(row: RawEventRow): string {
       return `Control agent attested via ${event.payload.method}.`;
     case "agent.attestation_failed":
       return `Control agent attestation failed via ${event.payload.method}: ${event.payload.reason}.`;
+
+    default:
+      return assertNever(event);
+  }
+}
+
+/**
+ * Cloud-specific detail for `EvidenceRecord.extensions` (spec §18). Written
+ * as its own exhaustive switch — mirroring `summarize`'s — so that adding a
+ * new event type to `@cloudable/events` without teaching this function
+ * what to do with it fails `bun run typecheck`, exactly like `summarize`.
+ * Every non-cloud event type explicitly falls through to `undefined`: they
+ * have nothing cloud-specific to add, so `extensions` stays absent for them
+ * rather than an empty object.
+ */
+function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
+  const event = row as unknown as DomainEvent;
+
+  switch (event.type) {
+    case "cloud.credential_federated":
+      return {
+        cloud: { subscriptionId: event.payload.subscriptionId, subject: event.payload.subject },
+      };
+    case "cloud.credential_rejected":
+      return { cloud: { subject: event.payload.subject, reason: event.payload.reason } };
+    case "cloud.resource_created":
+    case "cloud.resource_deleted":
+      return { cloud: { resourceId: event.payload.resourceId, kind: event.payload.kind } };
+
+    case "org.created":
+    case "org.setting_changed":
+    case "org.integration_connected":
+    case "org.integration_removed":
+    case "person.added":
+    case "person.activated":
+    case "person.deactivated":
+    case "person.role_changed":
+    case "machine.created":
+    case "machine.provisioned":
+    case "machine.provisioning_failed":
+    case "machine.owner_assigned":
+    case "machine.owner_cleared":
+    case "machine.started":
+    case "machine.stopped":
+    case "machine.reimaged":
+    case "machine.setting_changed":
+    case "machine.offboarded":
+    case "machine.archived":
+    case "machine.state_reported":
+    case "machine.drift_detected":
+    case "machine.drift_resolved":
+    case "machine.reconciled":
+    case "machine.first_seen":
+    case "access.certificate_issued":
+    case "access.certificate_revoked":
+    case "access.session_started":
+    case "access.session_ended":
+    case "access.session_denied":
+    case "access.elevation_requested":
+    case "access.elevation_granted":
+    case "access.elevation_expired":
+    case "approval.requested":
+    case "approval.granted":
+    case "approval.denied":
+    case "approval.expired":
+    case "snapshot.created":
+    case "snapshot.restored":
+    case "snapshot.expired":
+    case "snapshot.legal_hold_set":
+    case "snapshot.legal_hold_cleared":
+    case "agent.attested":
+    case "agent.attestation_failed":
+      return undefined;
 
     default:
       return assertNever(event);

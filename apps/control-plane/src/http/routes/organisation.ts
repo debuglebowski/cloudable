@@ -26,8 +26,12 @@ const OrgSettingsResource = Schema.Struct({
   name: Schema.String,
   approvalModes: ApprovalModes,
   loggingTier: LoggingTier,
+  // How many machines in this org have their own logging-tier override —
+  // see `domain/organisation/settings.ts`'s `OrgSettingsView` doc comment.
+  loggingTierOverrideCount: Schema.Number,
   retentionDefaultDays: Schema.Number,
   retentionLocation: RetentionLocation,
+  regionDefault: Schema.String,
 });
 
 const GetOrgSettingsUrlParams = Schema.Struct({ orgId: Schema.String });
@@ -44,6 +48,7 @@ const UpdateOrgSettingsPayload = Schema.Struct({
   loggingTier: Schema.optional(LoggingTier),
   retentionDefaultDays: Schema.optional(Schema.Number),
   retentionLocation: Schema.optional(RetentionLocation),
+  regionDefault: Schema.optional(Schema.String),
   actor: ConfigActor,
 });
 

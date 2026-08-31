@@ -11,9 +11,11 @@ import { ElevationsGroup } from "./routes/elevations";
 import { FederationGroup } from "./routes/federation";
 import { IntegrationsGroup } from "./routes/integrations";
 import { MachinesGroup } from "./routes/machines";
+import { NotificationsGroup } from "./routes/notifications";
 import { OffboardingGroup } from "./routes/offboarding";
 import { OrganisationGroup } from "./routes/organisation";
 import { PeopleGroup } from "./routes/people";
+import { TunnelSignalGroup } from "./routes/tunnel-signal";
 import { UpgradeGroup } from "./routes/upgrade";
 
 const HealthGroup = HttpApiGroup.make("health").add(
@@ -38,6 +40,8 @@ export class Api extends HttpApi.make("cloudable")
   .add(AccessGroup)
   .add(PeopleGroup)
   .add(OrganisationGroup)
-  .add(IntegrationsGroup) {}
+  .add(IntegrationsGroup)
+  .add(TunnelSignalGroup)
+  .add(NotificationsGroup) {}
 // Feature units: import your HttpApiGroup and append `.add(YourGroup)` to the chain above.
 // Never reorder existing `.add()` calls.

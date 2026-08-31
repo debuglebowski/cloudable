@@ -37,6 +37,10 @@ describe("evidence projection (spec §18)", () => {
       summary: 'Machine "dev-box" was declared (eastus, Standard_B2s, ubuntu-24.04).',
       commandRecording: null,
     });
+    // Non-cloud event: the `extensions` key is left out entirely, not
+    // present-with-`undefined` (see the `exactOptionalPropertyTypes` note
+    // in `./projection.ts`).
+    expect(record).not.toHaveProperty("extensions");
   });
 
   test("attaches a commandRecording pointer without embedding raw command data", () => {
@@ -82,6 +86,62 @@ describe("evidence projection (spec §18)", () => {
     expect(projectEvent(row).summary).toContain("p-1, p-2");
   });
 
+  test("extensions carries cloud-specific detail for cloud.* event types", () => {
+    const federated = projectEvent(
+      baseRow({
+        type: "cloud.credential_federated",
+        payload: { subject: "repo:acme/infra:ref:refs/heads/main", subscriptionId: "sub-123" },
+      }),
+    );
+    expect(federated.extensions).toEqual({
+      cloud: { subscriptionId: "sub-123", subject: "repo:acme/infra:ref:refs/heads/main" },
+    });
+
+    const rejected = projectEvent(
+      baseRow({
+        type: "cloud.credential_rejected",
+        payload: { subject: "repo:acme/infra:ref:refs/heads/main", reason: "subject mismatch" },
+      }),
+    );
+    expect(rejected.extensions).toEqual({
+      cloud: { subject: "repo:acme/infra:ref:refs/heads/main", reason: "subject mismatch" },
+    });
+
+    const created = projectEvent(
+      baseRow({
+        type: "cloud.resource_created",
+        payload: { kind: "virtual_machine", resourceId: "vm-1" },
+      }),
+    );
+    expect(created.extensions).toEqual({ cloud: { resourceId: "vm-1", kind: "virtual_machine" } });
+
+    const deleted = projectEvent(
+      baseRow({
+        type: "cloud.resource_deleted",
+        payload: { kind: "disk", resourceId: "disk-1" },
+      }),
+    );
+    expect(deleted.extensions).toEqual({ cloud: { resourceId: "disk-1", kind: "disk" } });
+  });
+
+  test("extensions is absent for non-cloud event types", () => {
+    const machineEvent = projectEvent(
+      baseRow({
+        type: "machine.started",
+        payload: {},
+      }),
+    );
+    expect(machineEvent.extensions).toBeUndefined();
+
+    const approvalEvent = projectEvent(
+      baseRow({
+        type: "approval.expired",
+        payload: { actionType: "offboarding" },
+      }),
+    );
+    expect(approvalEvent.extensions).toBeUndefined();
+  });
+
   test("summarizes at least one representative event from every domain without throwing", () => {
     const samples: ReadonlyArray<[string, unknown]> = [
       ["org.created", { name: "Acme" }],
@@ -102,7 +162,8 @@ describe("evidence projection (spec §18)", () => {
   });
 });
 
-// Note on exhaustiveness: `summarize` in `./projection.ts` is written as a
-// switch over `DomainEvent["type"]` with `assertNever` in its default case,
-// so an event type added to `@cloudable/events` without a matching summary
-// case fails `bun run typecheck` in this package, not a runtime test here.
+// Note on exhaustiveness: `summarize` and `extensionsFor` in `./projection.ts`
+// are each written as a switch over `DomainEvent["type"]` with `assertNever`
+// in their default case, so an event type added to `@cloudable/events`
+// without a matching case in either fails `bun run typecheck` in this
+// package, not a runtime test here.
