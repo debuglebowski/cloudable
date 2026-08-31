@@ -1,4 +1,4 @@
-import { approvals, elevations, machines, people, settingValues } from "@cloudable/schema";
+import { elevations, machines, people, settingValues } from "@cloudable/schema";
 import type { SettingRow } from "@cloudable/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
@@ -81,29 +81,6 @@ export const ElevationRepoLive = Layer.effect(
         ),
       );
 
-    const insertAutoApprovedApproval: ElevationRepo["insertAutoApprovedApproval"] = (args) =>
-      Effect.tryPromise({
-        try: () =>
-          db
-            .insert(approvals)
-            .values({
-              orgId: args.orgId,
-              actionType: "admin_access",
-              mode: "none",
-              status: "approved",
-              requestedByPersonId: args.personId,
-              targetMachineId: args.machineId,
-              reason: args.reason,
-              requiredApprovals: 0,
-              createdAt: args.now,
-              expiresAt: args.now,
-              decidedAt: args.now,
-            })
-            .returning({ id: approvals.id })
-            .then(single),
-        catch: toError,
-      });
-
     const insertElevation: ElevationRepo["insertElevation"] = (values) =>
       Effect.tryPromise({
         try: () => db.insert(elevations).values(values).returning().then(single),
@@ -143,7 +120,6 @@ export const ElevationRepoLive = Layer.effect(
       findPerson,
       findElevation,
       findSettingRows,
-      insertAutoApprovedApproval,
       insertElevation,
       updateElevationGranted,
       updateElevationStatus,
