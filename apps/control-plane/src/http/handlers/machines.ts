@@ -12,7 +12,7 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
           .create({
             orgId: payload.orgId,
             name: payload.name,
-            region: payload.region,
+            region: payload.region ?? null,
             sizeSku: payload.sizeSku,
             image: payload.image,
             ownerPersonId: payload.ownerPersonId,

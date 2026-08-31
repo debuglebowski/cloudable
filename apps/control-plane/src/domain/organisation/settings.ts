@@ -1,20 +1,23 @@
-import { orgs, settingValues } from "@cloudable/schema";
-import { and, eq } from "drizzle-orm";
+import { machines, orgs, settingValues } from "@cloudable/schema";
+import { and, count, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
+import { ulid } from "ulid";
 import { Db } from "../../db/layer";
-import { DEFAULT_RETENTION_DAYS, RETENTION_DAYS_KEY } from "../archive/org-policy";
 import {
   DEFAULT_LOGGING_TIER,
   DEFAULT_RETENTION_LOCATION,
-  type LoggingTier,
   LOGGING_TIER_KEY,
-  type RetentionLocation,
+  type LoggingTier,
   RETENTION_LOCATION_KEY,
-  setOrgLoggingTier,
-  setOrgRetentionLocation,
+  type RetentionLocation,
   type SettingChangeActor,
 } from "../../logging/settings";
 import { DEFAULT_APPROVAL_MODE, settingKeyFor } from "../../services/ApprovalService";
+import type { EventBus } from "../../services/EventBus";
+import type { TunnelServer } from "../../tunnel/server";
+import { DEFAULT_RETENTION_DAYS, RETENTION_DAYS_KEY } from "../archive/org-policy";
+import { applySettingChange } from "../config/apply-setting-change";
+import { DEFAULT_REGION_KEY, resolveOrgDefaultRegion } from "../machine/region-policy";
 
 /**
  * Aggregate read/write for the Organisation page (spec §20's "Organisation"
@@ -23,11 +26,19 @@ import { DEFAULT_APPROVAL_MODE, settingKeyFor } from "../../services/ApprovalSer
  * home — `logging/settings.ts` (tier/residency), `ApprovalService.ts`
  * (per-action-type approval mode), `domain/archive/org-policy.ts` (default
  * retention days) — built by the units that actually consume each value.
- * This module is deliberately thin: it reads/writes the exact same
- * `settingValues` rows those modules do, using their exported key
- * constants, rather than inventing a second, parallel settings store for
- * the console to read from. Only `orgs.name` is a real table column
- * (there's no "org name setting").
+ * This module is deliberately thin: it reads the exact same `settingValues`
+ * rows those modules do, using their exported key constants, rather than
+ * inventing a second, parallel settings store for the console to read from.
+ * Only `orgs.name` is a real table column (there's no "org name setting").
+ *
+ * Writes go through `applySettingChange` (`domain/config/apply-setting-change.ts`)
+ * — the same single code path the UI-facing `PATCH /api/v1/config/settings`
+ * and the Git-sourced `POST /api/v1/config/import` endpoints use (docs/spec.md
+ * §16: "Same path whether the change came from the UI or a Git commit") —
+ * rather than each duplicating its own settingValues upsert + event-emission
+ * logic. `updateOrgSettings` shares one `correlationId` across every key it
+ * changes in a single PATCH, matching the "one PATCH is one logical
+ * operation" convention `http/handlers/config.ts` already uses.
  */
 
 // Schema.TaggedError, not Data.TaggedError — the client-facing validation
@@ -58,8 +69,14 @@ export interface OrgSettingsView {
   name: string;
   approvalModes: Record<ApprovalActionType, ApprovalMode>;
   loggingTier: LoggingTier;
+  /** How many of this org's machines have their own machine-level logging-tier override (spec §17). Purely informational — the org page has nothing to do about a machine's override besides know it exists; see the machine detail page for the actual override control. */
+  loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
+  /** Default Azure region for a new machine that doesn't specify one — spec.md §5.
+   * Resolved through `resolveSetting()` (`../machine/region-policy.ts`), same mechanism
+   * as retention, rather than a client-side prefill. */
+  regionDefault: string;
 }
 
 const dbTry = <A>(thunk: () => Promise<A>, reason: string): Effect.Effect<A, OrgSettingsError> =>
@@ -89,7 +106,9 @@ const readOrgScopedSetting = <T>(
     return rows[0]?.value as T | undefined;
   });
 
-export const getOrgSettings = (orgId: string): Effect.Effect<OrgSettingsView, OrgSettingsError, Db> =>
+export const getOrgSettings = (
+  orgId: string,
+): Effect.Effect<OrgSettingsView, OrgSettingsError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const orgRows = yield* dbTry(
@@ -109,11 +128,35 @@ export const getOrgSettings = (orgId: string): Effect.Effect<OrgSettingsView, Or
 
     const loggingTier =
       (yield* readOrgScopedSetting<LoggingTier>(orgId, LOGGING_TIER_KEY)) ?? DEFAULT_LOGGING_TIER;
+    // A SQL count, not the rows themselves — this page only needs to know
+    // that divergence exists (docs/frontend.md's LineageGutter "N machines
+    // override this"), not which machines, and an org with many machines
+    // shouldn't pull one row per override over the wire just to count
+    // them. Joins through `machines` since a `settingValues` machine-scope
+    // row's `scopeId` is the machine id, not the org id — there's no other
+    // way to constrain it to this org.
+    const loggingTierOverrideRows = yield* dbTry(
+      () =>
+        db
+          .select({ count: count() })
+          .from(settingValues)
+          .innerJoin(machines, eq(machines.id, settingValues.scopeId))
+          .where(
+            and(
+              eq(settingValues.scopeType, "machine"),
+              eq(settingValues.key, LOGGING_TIER_KEY),
+              eq(machines.orgId, orgId),
+            ),
+          ),
+      "read_setting_failed",
+    );
+    const loggingTierOverrideCount = loggingTierOverrideRows[0]?.count ?? 0;
     const retentionDefaultDays =
       (yield* readOrgScopedSetting<number>(orgId, RETENTION_DAYS_KEY)) ?? DEFAULT_RETENTION_DAYS;
     const retentionLocation =
       (yield* readOrgScopedSetting<RetentionLocation>(orgId, RETENTION_LOCATION_KEY)) ??
       DEFAULT_RETENTION_LOCATION;
+    const regionDefault = (yield* resolveOrgDefaultRegion(db, orgId)).value;
 
     return {
       id: org.id,
@@ -123,8 +166,10 @@ export const getOrgSettings = (orgId: string): Effect.Effect<OrgSettingsView, Or
         ApprovalMode
       >,
       loggingTier,
+      loggingTierOverrideCount,
       retentionDefaultDays,
       retentionLocation,
+      regionDefault,
     };
   });
 
@@ -135,35 +180,48 @@ export interface UpdateOrgSettingsInput {
   loggingTier?: LoggingTier | undefined;
   retentionDefaultDays?: number | undefined;
   retentionLocation?: RetentionLocation | undefined;
+  regionDefault?: string | undefined;
   actor: SettingChangeActor;
 }
 
-const writeOrgScopedSetting = (
+/**
+ * Wraps an `applySettingChange` call for one org-scoped key, mapping its
+ * (settingValues-specific) error union onto this module's `OrgSettingsError`
+ * so the HTTP handler's existing `rethrowInfraAsDefect` keeps working
+ * unchanged. In practice only `SettingWriteError` (a DB/event-publish
+ * failure) can occur here: `scopeType` is always `"org"` with `scopeId`
+ * fixed to `orgId`, so `applySettingChange`'s `InvalidScopeError` and its
+ * machine-only `MachineNotFoundError`/`PinnedSettingError` paths never
+ * trigger.
+ */
+const writeOrgSetting = (
   orgId: string,
   key: string,
   value: unknown,
-): Effect.Effect<void, OrgSettingsError, Db> =>
-  Effect.gen(function* () {
-    const db = yield* Db;
-    yield* dbTry(
-      () =>
-        db.transaction(async (tx) => {
-          await tx
-            .delete(settingValues)
-            .where(
-              and(
-                eq(settingValues.scopeType, "org"),
-                eq(settingValues.scopeId, orgId),
-                eq(settingValues.key, key),
-              ),
-            );
-          await tx
-            .insert(settingValues)
-            .values({ scopeType: "org", scopeId: orgId, key, value, source: "org" });
-        }),
-      "write_setting_failed",
-    );
-  });
+  actor: SettingChangeActor,
+  correlationId: string,
+): Effect.Effect<void, OrgSettingsError, Db | EventBus | TunnelServer> =>
+  Effect.asVoid(
+    applySettingChange({
+      orgId,
+      scopeType: "org",
+      scopeId: orgId,
+      key,
+      value,
+      // `SettingChangeActor.actorType` is `DomainEvent["actorType"]`
+      // (`"person" | "system" | "agent" | "idp"`) since `logging/settings.ts`
+      // also serves agent-derived writes; this module's only caller
+      // (`http/handlers/organisation.ts`) builds it from `ConfigActor`,
+      // whose wire schema (`http/routes/organisation.ts`) restricts
+      // `type` to `Schema.Literal("person", "system")` — the narrower
+      // union `applySettingChange` itself accepts.
+      actorType: actor.actorType as "person" | "system",
+      actorId: actor.actorId,
+      correlationId,
+    }).pipe(
+      Effect.mapError((cause) => new OrgSettingsError({ reason: "write_setting_failed", cause })),
+    ),
+  );
 
 /**
  * Every field is independently optional — the page sends one changed field
@@ -174,21 +232,42 @@ const writeOrgScopedSetting = (
  * would need four separate calls for the four approval-mode entries alone,
  * and doesn't touch `orgs.name` at all since that's a table column, not a
  * setting — an aggregate endpoint here is a real simplification, not just
- * a shortcut).
+ * a shortcut). Every changed key in one PATCH shares a single
+ * `correlationId`, same as `handlePatchSetting`'s "one PATCH is one logical
+ * operation" convention.
  */
 export const updateOrgSettings = (
   input: UpdateOrgSettingsInput,
-): Effect.Effect<OrgSettingsView, OrgSettingsError, Db> =>
+): Effect.Effect<OrgSettingsView, OrgSettingsError, Db | EventBus | TunnelServer> =>
   Effect.gen(function* () {
     const db = yield* Db;
+    const correlationId = ulid();
 
-    if (input.name !== undefined) {
-      const trimmed = input.name.trim();
-      if (trimmed.length === 0) {
-        return yield* Effect.fail(new OrgSettingsError({ reason: "org_name_required" }));
-      }
+    // --- validate every field before writing any of them. Each field below
+    // is written (and, now that writes go through `applySettingChange`,
+    // audited via an `org.setting_changed` event) as soon as it's checked —
+    // with N independently-optional fields in one PATCH, validating one
+    // field at a time interleaved with writes would let an earlier field's
+    // write and event permanently commit before a later field's validation
+    // fails the whole request, leaving the client-visible error ("nothing
+    // was applied") inconsistent with what the audit trail actually shows
+    // was applied. Validating everything up front avoids that.
+    const trimmedName = input.name?.trim();
+    if (trimmedName !== undefined && trimmedName.length === 0) {
+      return yield* Effect.fail(new OrgSettingsError({ reason: "org_name_required" }));
+    }
+    if (
+      input.retentionDefaultDays !== undefined &&
+      (!Number.isInteger(input.retentionDefaultDays) || input.retentionDefaultDays < 1)
+    ) {
+      return yield* Effect.fail(
+        new OrgSettingsError({ reason: "retention_days_must_be_a_positive_integer" }),
+      );
+    }
+
+    if (trimmedName !== undefined) {
       yield* dbTry(
-        () => db.update(orgs).set({ name: trimmed }).where(eq(orgs.id, input.orgId)),
+        () => db.update(orgs).set({ name: trimmedName }).where(eq(orgs.id, input.orgId)),
         "write_org_name_failed",
       );
     }
@@ -196,33 +275,52 @@ export const updateOrgSettings = (
     if (input.approvalModes) {
       for (const [actionType, mode] of Object.entries(input.approvalModes)) {
         if (!mode) continue;
-        yield* writeOrgScopedSetting(
+        yield* writeOrgSetting(
           input.orgId,
           settingKeyFor(actionType as ApprovalActionType),
           mode,
+          input.actor,
+          correlationId,
         );
       }
     }
 
     if (input.loggingTier !== undefined) {
-      yield* setOrgLoggingTier(db, input.orgId, input.loggingTier, input.actor).pipe(
-        Effect.mapError((e) => new OrgSettingsError({ reason: e.reason, cause: e.cause })),
+      yield* writeOrgSetting(
+        input.orgId,
+        LOGGING_TIER_KEY,
+        input.loggingTier,
+        input.actor,
+        correlationId,
       );
     }
 
     if (input.retentionDefaultDays !== undefined) {
-      if (!Number.isInteger(input.retentionDefaultDays) || input.retentionDefaultDays < 1) {
-        return yield* Effect.fail(
-          new OrgSettingsError({ reason: "retention_days_must_be_a_positive_integer" }),
-        );
-      }
-      yield* writeOrgScopedSetting(input.orgId, RETENTION_DAYS_KEY, input.retentionDefaultDays);
+      yield* writeOrgSetting(
+        input.orgId,
+        RETENTION_DAYS_KEY,
+        input.retentionDefaultDays,
+        input.actor,
+        correlationId,
+      );
     }
 
     if (input.retentionLocation !== undefined) {
-      yield* setOrgRetentionLocation(db, input.orgId, input.retentionLocation, input.actor).pipe(
-        Effect.mapError((e) => new OrgSettingsError({ reason: e.reason, cause: e.cause })),
+      yield* writeOrgSetting(
+        input.orgId,
+        RETENTION_LOCATION_KEY,
+        input.retentionLocation,
+        input.actor,
+        correlationId,
       );
+    }
+
+    if (input.regionDefault !== undefined) {
+      const trimmed = input.regionDefault.trim();
+      if (trimmed.length === 0) {
+        return yield* Effect.fail(new OrgSettingsError({ reason: "region_default_required" }));
+      }
+      yield* writeOrgSetting(input.orgId, DEFAULT_REGION_KEY, trimmed, input.actor, correlationId);
     }
 
     return yield* getOrgSettings(input.orgId);

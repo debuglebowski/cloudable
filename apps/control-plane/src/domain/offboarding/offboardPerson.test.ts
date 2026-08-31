@@ -125,6 +125,7 @@ function buildTestLayers(opts: {
     decide: () => Effect.die("not used in this test"),
     status: () => Effect.die("not used in this test"),
     list: () => Effect.die("not used in this test"),
+    requestAutoApproved: () => Effect.die("not used in this test"),
   };
 
   const eventBusImpl = {

@@ -23,8 +23,9 @@ export interface CheckRef {
 /**
  * Cloudable's own default control taxonomy (docs/spec.md §19: "Cloudable
  * ships defaults for the controls it is itself audited against — access
- * management and asset management clauses"). Org-level override of this
- * mapping is future work; v1 ships one global default.
+ * management and asset management clauses"). This is the DEFAULT only —
+ * an org can override a specific control's status on top of it (see
+ * `applyControlOverrides` below); it never replaces this computation.
  *
  * `id` is exactly the string feature-unit checks put in
  * `ComplianceCheck.controlRefs` — see `registry.ts` for what's actually
@@ -86,4 +87,81 @@ export const computeControlMap = (
   );
 
   return [...inScope, ...outOfScope];
+};
+
+/**
+ * Control ids an org is allowed to override — in-scope controls only.
+ * Deliberately excludes `OUT_OF_SCOPE_CONTROLS`: docs/compliance.md is explicit that a
+ * structurally-out-of-scope control (physical security, HR screening, supplier
+ * contracts — "has no bearing on the product") "must not be claimed as evidenced,
+ * however many checks get registered." An org-level override setting one to
+ * `"implemented"` would read identically to Cloudable claiming automated evidence for
+ * it, which the product must never do — so unlike the two in-scope controls, these
+ * aren't overridable at all, not even by an org's own explicit choice. Used by
+ * `control-overrides-store.ts` to reject an override attempt for a control id that
+ * either doesn't exist or isn't eligible.
+ */
+export const OVERRIDABLE_CONTROL_IDS: ReadonlySet<string> = new Set(
+  IN_SCOPE_CONTROLS.map((control) => control.id),
+);
+
+/** One org's explicit choice for a single control, loaded from the `control_overrides`
+ * table (see `control-overrides-store.ts`). */
+export interface ControlOverride {
+  readonly controlId: string;
+  readonly status: ControlStatus;
+}
+
+export interface ControlMapEntryWithOverride extends ControlMapEntry {
+  /** True when `status` came from an org's explicit override rather than the computed default. */
+  readonly overridden: boolean;
+  /** True when this control is eligible for an org override at all (`OVERRIDABLE_CONTROL_IDS`
+   * above) — always false for a structurally out-of-scope control. Callers (the console's
+   * override UI) use this to avoid offering an action that `control-overrides-store.ts`
+   * will always reject. */
+  readonly overridable: boolean;
+}
+
+/**
+ * Layers an org's explicit overrides on top of the computed default map
+ * (docs/spec.md §19: "organisation-level configuration, overridable per
+ * control... customers adjust for their own framework or auditor"). A
+ * control with no override for this org keeps exactly the status
+ * `computeControlMap` gave it — this never replaces that computation, it
+ * only decorates its output. Pure: the caller loads `overrides` from the DB
+ * for the current org (`loadControlOverrides` in `control-overrides-store.ts`).
+ *
+ * `evidencedByCheckIds` is cleared whenever an override moves a control away
+ * from `"implemented"` — per this same file's `ControlMapEntry` contract
+ * (mirrored in `packages/contracts/src/domains/compliance.ts`:
+ * "Empty unless `status` is `implemented`"), that field means "registered
+ * checks that back the CURRENT status", not "checks that happened to back
+ * the computed default." Leaving the original list in place would have an
+ * org's own "not covered"/"manual action required" override still showing
+ * live automated-check evidence underneath it (the console's
+ * `fetchControlEvidence` renders that list as evidence rows) — silently
+ * contradicting the override the org just set. An override landing back on
+ * `"implemented"` re-derives its own `evidencedByCheckIds` from the same
+ * computed default entry, since only Cloudable's registered checks are a
+ * legitimate source of automated evidence, override or not.
+ */
+export const applyControlOverrides = (
+  map: readonly ControlMapEntry[],
+  overrides: readonly ControlOverride[],
+): ControlMapEntryWithOverride[] => {
+  const statusByControlId = new Map(overrides.map((o) => [o.controlId, o.status] as const));
+  return map.map((entry) => {
+    const overridable = OVERRIDABLE_CONTROL_IDS.has(entry.id);
+    const overrideStatus = statusByControlId.get(entry.id);
+    if (overrideStatus === undefined) {
+      return { ...entry, overridden: false, overridable };
+    }
+    return {
+      ...entry,
+      status: overrideStatus,
+      evidencedByCheckIds: overrideStatus === "implemented" ? entry.evidencedByCheckIds : [],
+      overridden: true,
+      overridable,
+    };
+  });
 };

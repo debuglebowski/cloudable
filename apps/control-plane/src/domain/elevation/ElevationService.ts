@@ -75,6 +75,32 @@ const toInfraError =
     return new ElevationInfraError({ reason: reasonPrefix });
   };
 
+/**
+ * Wraps any `ApprovalService` call failure as `ApprovalServiceCallError` —
+ * same posture as `toInfraError` above: log the real cause server-side,
+ * return a safe reason to the caller.
+ *
+ * `ApprovalService`'s own failures are `ApprovalError` — an Effect
+ * `Data.TaggedError`. That makes it `instanceof Error`, but Effect never
+ * populates the native `Error.message` from a tagged error's fields, so
+ * `.message` is always `""` — reading it (as a plain `Error` mapper would)
+ * silently turns every `ApprovalServiceCallError` into an empty reason with
+ * nothing logged either. The real, safe diagnostic is `ApprovalError`'s own
+ * `.reason` (a small fixed enum — see `services/ApprovalService.ts`), so
+ * read that first and fall back to `.message`/`String(cause)` only for a
+ * genuinely different failure shape.
+ */
+const toApprovalServiceCallError = (cause: unknown): ApprovalServiceCallError => {
+  const reason =
+    cause && typeof cause === "object" && "reason" in cause && typeof cause.reason === "string"
+      ? cause.reason
+      : cause instanceof Error
+        ? cause.message
+        : String(cause);
+  console.error(`[ElevationService] approval_service_call_failed: ${reason}`);
+  return new ApprovalServiceCallError({ reason });
+};
+
 function scopeIdsFor(chain: SettingsChain): ReadonlyArray<string> {
   return chain.templateId
     ? [chain.orgId, chain.machineId, chain.templateId]
@@ -130,19 +156,44 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
     const publishEvents = (batch: Parameters<typeof eventBus.publish>[0]) =>
       eventBus.publish(batch).pipe(Effect.mapError(toInfraError("event_publish_failed")));
 
+    /**
+     * Best-effort: the owner notification is evidence *about* an already-
+     * decided grant, not part of deciding it, so a failure here must never
+     * fail `request()`/`syncApproval()` — the grant (and its `elevation_granted`
+     * event, spec §2 "events are append-only": already durably committed by
+     * the time this runs) has already happened and stands regardless.
+     * Logged instead, so it's still observable. `insertNotification` is
+     * idempotent per elevation (`ElevationRepo.ts`'s doc comment), and
+     * `syncApproval`'s "already granted" branch below retries this exact
+     * call — so a transient failure here is recoverable by re-`sync`ing the
+     * same elevation, rather than the owner silently never being notified.
+     */
     const notifyIfOwned = (
-      machine: Pick<MachineRecord, "id" | "ownerPersonId">,
+      machine: Pick<MachineRecord, "id" | "name" | "ownerPersonId">,
       elevationRow: Elevation,
     ) =>
       machine.ownerPersonId
-        ? notifyOwnerOfElevation(machine.ownerPersonId, machine.id, elevationRow)
+        ? notifyOwnerOfElevation(
+            repo.insertNotification,
+            machine.ownerPersonId,
+            machine.name,
+            elevationRow,
+          ).pipe(
+            Effect.catchAll((error) =>
+              Effect.logError(
+                "owner notification failed — the elevation grant itself still stands; " +
+                  "POST /api/v1/elevations/:id/sync retries just the notification",
+                { elevationId: elevationRow.id, ownerPersonId: machine.ownerPersonId, error },
+              ),
+            ),
+          )
         : Effect.void;
 
     /** Publishes the granted event (plus the requested event too, when this is the same call that created it) and notifies the owner. */
     const finalizeGrant = (
       elevationRow: Elevation,
       ctx: EventContext,
-      machine: Pick<MachineRecord, "id" | "ownerPersonId">,
+      machine: Pick<MachineRecord, "id" | "name" | "ownerPersonId">,
       includeRequestedEvent: boolean,
     ) =>
       Effect.gen(function* () {
@@ -216,15 +267,21 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
           // floor in `requiredApprovalModeFloor` below only governs the
           // `with_approval` branch, which is the only branch that has an
           // approval mode to escalate at all.)
-          const approvalRow = yield* repo
-            .insertAutoApprovedApproval({
+          //
+          // Goes through `ApprovalService.requestAutoApproved` — the exact
+          // same insert+event path `ApprovalService.request()` itself uses
+          // for a *resolved* mode "none" — rather than hand-rolling a
+          // second, parallel raw insert with no approval-level events of
+          // its own.
+          const approvalResult = yield* approvalService
+            .requestAutoApproved({
               orgId: machine.orgId,
-              personId: input.personId,
-              machineId: machine.id,
+              actionType: "admin_access",
+              requestedByPersonId: input.personId,
+              targetMachineId: machine.id,
               reason,
-              now,
             })
-            .pipe(Effect.mapError(toInfraError("auto_approval_insert_failed")));
+            .pipe(Effect.mapError(toApprovalServiceCallError));
 
           const elevationRow = yield* repo
             .insertElevation({
@@ -233,7 +290,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
               machineId: machine.id,
               level: input.level,
               reason,
-              approvalId: approvalRow.id,
+              approvalId: approvalResult.id,
               grantedAt: now,
               expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
               status: "granted",
@@ -278,14 +335,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
             targetMachineId: machine.id,
             reason,
           })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new ApprovalServiceCallError({
-                  reason: cause instanceof Error ? cause.message : String(cause),
-                }),
-            ),
-          );
+          .pipe(Effect.mapError(toApprovalServiceCallError));
 
         const initialStatus: ElevationStatus =
           approvalResult.status === "approved"
@@ -330,14 +380,27 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
     /**
      * Re-checks a `requested` elevation's approval and finalizes it: grants
      * on approval, denies on rejection/expiry, no-ops (returns as-is) while
-     * still pending or already finalized. There is no webhook wiring this
-     * up to `ApprovalService.decide` yet — call it after polling
+     * still pending or already denied/expired. There is no webhook wiring
+     * this up to `ApprovalService.decide` yet — call it after polling
      * `ApprovalService.status` or on whatever cadence unit 5's approvals UI
      * settles on.
+     *
+     * A `granted` elevation is NOT a plain no-op, deliberately: the owner
+     * notification (`notifyIfOwned`) is best-effort and can fail
+     * independently of the grant itself (see that method's doc comment), so
+     * this retries just the notification for an already-granted elevation —
+     * safe to call repeatedly since `insertNotification` is idempotent.
+     * This is the only way to recover from a failed notification, since
+     * there's no background retry queue in this build.
      */
     const syncApproval = (elevationId: string): Effect.Effect<Elevation, SyncApprovalError> =>
       Effect.gen(function* () {
         const elevation = yield* loadElevation(elevationId);
+        if (elevation.status === "granted") {
+          const machine = yield* loadMachine(elevation.machineId);
+          yield* notifyIfOwned(machine, elevation);
+          return elevation;
+        }
         if (elevation.status !== "requested") return elevation;
         if (!elevation.approvalId) {
           return yield* Effect.fail(
@@ -347,14 +410,9 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
           );
         }
 
-        const approvalResult = yield* approvalService.status(elevation.approvalId).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ApprovalServiceCallError({
-                reason: cause instanceof Error ? cause.message : String(cause),
-              }),
-          ),
-        );
+        const approvalResult = yield* approvalService
+          .status(elevation.approvalId)
+          .pipe(Effect.mapError(toApprovalServiceCallError));
 
         if (approvalResult.status === "pending") return elevation;
 

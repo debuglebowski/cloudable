@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { machines, orgs, people } from "@cloudable/schema";
+import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { startTestDb } from "../../../test/testcontainers";
 import { Db } from "../../db/layer";
@@ -114,5 +115,34 @@ describe("activeOwnerCheck", () => {
     expect(secondFinding).toBeDefined();
 
     expect(secondFinding?.firstSeenAt.getTime()).toBe(firstFinding?.firstSeenAt.getTime());
+  });
+
+  // Regression test for the finding-age reopen bug (docs/compliance.md,
+  // "a finding that closes and later reopens is treated as newly opened"):
+  // without `clearResolvedFindings`, the state row from the first opening
+  // survives the resolution and the reopened finding reports the ORIGINAL,
+  // stale `firstSeenAt` instead of a fresh one.
+  test("closes and reopens -> firstSeenAt resets, not the stale original", async () => {
+    const machine = await makeMachine({ ownerPersonId: null });
+
+    const opened = await evaluate();
+    const openedFinding = opened.find((f) => f.machineId === machine.id);
+    expect(openedFinding).toBeDefined();
+    const firstSeenAt = openedFinding?.firstSeenAt;
+
+    // Resolve: assign an active owner.
+    const owner = await makePerson(true);
+    await db.update(machines).set({ ownerPersonId: owner.id }).where(eq(machines.id, machine.id));
+    const resolved = await evaluate();
+    expect(resolved.find((f) => f.machineId === machine.id)).toBeUndefined();
+
+    // Reopen the same underlying machine: clear the owner again.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await db.update(machines).set({ ownerPersonId: null }).where(eq(machines.id, machine.id));
+    const reopened = await evaluate();
+    const reopenedFinding = reopened.find((f) => f.machineId === machine.id);
+    expect(reopenedFinding).toBeDefined();
+    expect(reopenedFinding?.firstSeenAt.getTime()).not.toBe(firstSeenAt?.getTime());
+    expect(reopenedFinding?.firstSeenAt.getTime()).toBeGreaterThan(firstSeenAt?.getTime() ?? 0);
   });
 });

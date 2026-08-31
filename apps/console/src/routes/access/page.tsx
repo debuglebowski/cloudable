@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import {
   type ActiveSession,
@@ -11,6 +11,7 @@ import {
   useElevations,
   useLiveCertificates,
 } from "@/api/access";
+import { useMarkNotificationsReadMutation } from "@/api/notifications";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -68,6 +69,19 @@ export function AccessPage() {
 
   const [certificateToRevoke, setCertificateToRevoke] = useState<LiveCertificate | null>(null);
   const [sessionToTerminate, setSessionToTerminate] = useState<ActiveSession | null>(null);
+
+  // The nav badge for unread owner notifications (spec §15: "owner
+  // notified") points here (see src/nav-config.ts) — there's no
+  // per-notification UI yet, so simply visiting this page is what clears
+  // it, mirroring "you saw the elevation activity" rather than requiring a
+  // dedicated inbox. Fire-and-forget: a failure here just leaves the badge
+  // as it was, no error worth surfacing on this page.
+  const markNotificationsRead = useMarkNotificationsReadMutation();
+  const markNotificationsReadRef = useRef(markNotificationsRead.mutate);
+  markNotificationsReadRef.current = markNotificationsRead.mutate;
+  useEffect(() => {
+    markNotificationsReadRef.current();
+  }, []);
 
   return (
     <div className="flex flex-col gap-8">

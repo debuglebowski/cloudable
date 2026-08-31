@@ -42,6 +42,9 @@ const thresholdCutoff = (now: Date): Date =>
 export const machinesReportingCheck: ComplianceCheck = {
   id: CHECK_ID,
   label: "Machines are reporting",
+  // A machine that has stopped checking in is a visibility gap worth
+  // investigating, but the lowest-stakes of the six on its own — low.
+  severity: "low",
   controlRefs: ["asset-management"],
 
   // Always applicable: any org with a live fleet expects it to check in,

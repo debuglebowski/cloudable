@@ -31,3 +31,8 @@ export class CurrentUserTag extends Context.Tag("CurrentUser")<CurrentUserTag, C
 // mismatched `orgId` param) rather than trusting the query string:
 // - `/api/v1/compliance/*` (`http/routes/compliance.ts`, unit 10)
 // - `GET /api/v1/evidence` (`../../evidence/`, unit 14)
+// - `/api/v1/notifications*` (`http/routes/notifications.ts`) — worse than
+//   most: this data is person-private (an owner's own notifications), not
+//   just org-scoped, so it also takes an unauthenticated `personId` query/
+//   payload param the caller can set to any value. Wiring this middleware
+//   must scope these to `CurrentUserTag.personId` too, not just `.orgId`.

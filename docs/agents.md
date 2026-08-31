@@ -100,7 +100,7 @@ One `HttpApiGroup` (`agent-protocol`, `/api/v1/agent/*`, spec §23):
 | Attest | `POST /attest` | Credential → machine identity → bearer token. Rejects with 401 + `agent.attestation_failed`, never a crash. |
 | Poll | `GET /poll` | Desired state. `If-None-Match` / `ETag`; `304` when unchanged. |
 | Report | `POST /report` | Observed state, submitted after the agent reconciles locally. |
-| Wake | `GET /wake` (websocket) | Optional fast path, CP → agent. **Stub in this build — see below.** |
+| Wake | `GET /wake` (websocket) | Optional fast path, CP → agent. See below. |
 
 **Poll** returns a minimal stub shape today
 (`{version, packages, settings}`) — unit 2's package manifest isn't merged
@@ -140,19 +140,120 @@ doesn't own. Unit 6 replaces this with its proper `deriveEvents` pattern;
 this unit only had to make the two event types real enough to be useful in
 the meantime.
 
-**Wake** is a stub. `HttpApiEndpoint`/`HttpApiGroup` model HTTP verbs, not
-a websocket upgrade, and wiring a full upgrade path through this
-skeleton's router (`@effect/platform`'s `Socket`, `platform-bun`'s
-`BunSocket`) was more than this slice's time budget justified for an
-operation the spec itself calls optional (spec §8.1: "optional fast
-path"). What's real: the wire contract both sides agree on
-(`WakeMessage` in `packages/contracts/src/domains/agent-protocol.ts`,
-`{type: "pull_now"}`, no payload, and it cannot carry instructions), plus
-placeholder integration points on both sides —
-`apps/control-plane/src/http/routes/agent-wake.ts` and
-`apps/agent/src/wake.ts` — documenting exactly what a real implementation
-would do. Functionally, this just means a machine always waits out its
-full poll interval to pick up a change; it never gets fed one instantly.
+**Wake** is real. `HttpApiEndpoint`/`HttpApiGroup` model HTTP verbs, not a
+websocket upgrade, so it isn't part of `AgentProtocolGroup` — instead
+`apps/control-plane/src/http/routes/agent-wake.ts` mounts a raw route
+directly on the shared `HttpApiBuilder.Router` (the same `HttpRouter`
+instance `HttpApiBuilder.serve()` turns into the one running `HttpApp`),
+using `@effect/platform-bun`'s `HttpServerRequest.upgrade` getter to
+perform the upgrade against that same `Bun.serve` instance — no second
+port, no raw `Bun.serve({websocket})` alongside the Effect router.
+
+The route bearer-authenticates the upgrade the same way as `/poll`/`/report`
+(but only once, at the upgrade — this channel never carries another message
+from the agent to re-verify against), then registers the socket in an
+in-memory `WakeRegistry` keyed by `machineId` and blocks that route's own
+fiber until the connection closes, at which point it unregisters. A second
+connection for the same machine (a reconnect) replaces the first and
+actively closes the one it displaces, rather than leaking it.
+`WakeRegistry.wake(machineId)` sends exactly `{"type":"pull_now"}` — the
+wire contract in `WakeMessage`
+(`packages/contracts/src/domains/agent-protocol.ts`) — to whichever socket
+is currently registered for that machine, and reports back whether one was
+found; nothing in this build calls it yet (poll's own desired state is
+still a stub, so there's nothing yet to notify a machine about), so the
+channel is wired end-to-end but currently idle.
+
+`apps/agent/src/wake.ts`'s `connectWake` is the agent side: it dials out
+(invariant #7 — the control plane only ever sends on a connection the
+agent already opened) with the cached bearer token, and reconnects with
+the same full-jitter backoff as the poll/report loop on any drop.
+`poll-report-loop.ts` wires its `onPullNow` callback into the sleep
+between cycles, so a wake short-circuits the wait instead of the machine
+sitting out its full ~30s interval — the agent still finds out *what*
+changed via the next `poll`, same as before.
+
+**In-memory, per-process, single-replica only** — like `AgentSessionToken`'s
+signing secret and `agent-protocol.ts`'s `lastObserved` diff cache,
+`WakeRegistry` lives in one control-plane process. A machine's wake socket
+only exists on whichever replica it happened to connect to; a `wake()` call
+handled by a *different* replica finds nothing registered and reports "not
+delivered," even though the machine is connected — to a sibling. This is a
+real gap against `infra/bicep/control-plane.bicep` and
+`infra/terraform/control-plane/variables.tf`'s default multi-replica
+autoscaling, not just a theoretical one, and there's no metric today that
+distinguishes "machine not connected anywhere" from "connected to the wrong
+replica." Tolerable only because nothing calls `wake()` yet and the whole
+channel is spec-optional (a missed wake just means the machine waits out
+its normal poll interval, same as if this channel didn't exist at all) —
+revisit before wiring a real caller in a multi-replica deployment: either
+pin the control plane to one replica, or replace this in-memory map with
+something shared across replicas (e.g. Postgres `LISTEN`/`NOTIFY`).
+
+### Tunnel-signal channel (CP → agent, deliberately not `wake`)
+
+A fifth CP → agent surface, separate from the four-operation agent
+protocol above: `GET /api/v1/tunnel/signal`
+(`apps/control-plane/src/tunnel/signal.ts` +
+`http/routes/tunnel-signal.ts` + `http/handlers/tunnel-signal.ts`),
+long-polled continuously by `apps/agent/src/tunnel/signal-listener.ts`.
+Its only job: tell a machine's
+agent *"session `<id>` is waiting, connect now"* or *"session `<id>`,
+stop"* — the minimal signal needed once a browser mints a web-terminal/SSH
+session (`TunnelServer.mintSession`, `docs/access.md` §4) or a policy
+disables access (`TunnelServer.terminateSessionsForMachine`), so that fact
+actually reaches a connected agent instead of only updating the `sessions`
+DB row.
+
+**Why a new channel and not a repurposed `wake`:** spec §8.1 pins `wake` to
+"exactly one message, pull now, with no payload — it cannot carry
+instructions," and its whole purpose is accelerating the control agent's
+*own* desired-state poll cycle above — an unrelated concern to "which
+session is waiting." Spec §23's agent protocol is also pinned to exactly
+four operations; there's no fifth slot in that group for "attach to
+session X." Bolting a session id onto `wake` would violate both. See
+`apps/control-plane/src/tunnel/signal.ts`'s own header comment for the
+full reasoning.
+
+**Design: a long poll, not a second websocket.** `agent-wake.ts`'s stub
+exists specifically because `HttpApiEndpoint`/`HttpApiGroup` can't model a
+websocket upgrade, and wiring one into this skeleton's router was judged
+not worth it for `wake`. The tunnel-signal channel sidesteps that same
+obstacle rather than solving it: a long poll is a plain `GET` held pending
+server-side (`signal.ts`'s `TunnelSignal.next`, a `Deferred` per
+in-flight call, ~25s timeout) until a signal arrives or it times out with
+`signal: null` — no upgrade needed at all, so it fits `HttpApiEndpoint`
+exactly like `/poll`/`/report` do, bearer-authenticated the same way
+(`AgentSessionToken`).
+
+**Re-checks the machine on every call, not just the bearer session.** A
+bearer session can outlive the machine it was minted for (up to its own
+~15 min TTL — no server-side revocation before then), and unlike
+`poll`/`report` — which only ever hand back inert desired-state data or
+acknowledge a report — this channel can actively tell an agent "a session
+exists, connect to it." So `next`'s handler re-looks the machine up
+(`MachineDirectory`, same as `report`'s existence/org check, plus
+`attest`'s stricter archived check) on every call and refuses
+(`machine_not_found`/`machine_archived`) rather than keep handing an
+archived or reassigned machine's agent live tunnel signals for however
+long its stale bearer session happens to still verify.
+
+**What's real:** the control-plane service (in-memory per-machine
+queue + parked-waiter wake-up, unit-tested in `signal.test.ts` including
+the interrupted-long-poll cleanup path), the HTTP long-poll endpoint, and
+the agent's continuous listener loop (`signal-listener.ts`, unit-tested
+for message framing, malformed bodies, and backoff-on-failure). `index.ts`
+runs it concurrently with the poll/report loop, with log-only callbacks —
+proven end to end over a real Docker network in
+`test/agent-connectivity/` (mint a session, confirm the agent's log shows
+it received the signal).
+
+**What's still a stub:** actually *acting* on the signal — opening the
+reverse tunnel and attaching a real PTY session — is
+`apps/agent/src/tunnel/client.ts`, a sibling unit's responsibility. This
+channel only ever hands that client a bare session id; it never carries a
+session token or any other detail, matching `wake`'s own no-payload spirit
+even though it's a different channel.
 
 ### Poll/report loop, backoff, and jitter
 

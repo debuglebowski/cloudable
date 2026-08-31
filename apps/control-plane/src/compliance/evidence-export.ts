@@ -2,18 +2,12 @@ import { machines, people } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../db/layer";
+import type { ComplianceSeverity } from "../domain/compliance/types";
 import { computeControlMap } from "./control-map";
 import { toCsv } from "./csv";
 import { evaluateAllChecks } from "./evaluate-all";
 import { ageInDays } from "./finding-store";
 import { COMPLIANCE_CHECKS } from "./registry";
-
-/**
- * `ComplianceFinding` has no severity field yet — every export stamps this
- * fixed default rather than inventing a per-check severity scheme. Revisit
- * once a real severity model exists.
- */
-const DEFAULT_SEVERITY = "medium";
 
 export interface ControlFindingRow {
   readonly controlId: string;
@@ -24,7 +18,13 @@ export interface ControlFindingRow {
   readonly machineId: string | null;
   readonly firstSeenAt: Date;
   readonly ageDays: number;
-  readonly severity: string;
+  /**
+   * Sourced from the check that produced the finding
+   * (`ComplianceCheck.severity` — see `domain/compliance/types.ts`), the one
+   * place severity is defined. Every finding under the same check shares
+   * it; there is no finer-grained per-finding score.
+   */
+  readonly severity: ComplianceSeverity;
   readonly detail: Record<string, unknown>;
 }
 
@@ -59,7 +59,7 @@ export const collectOpenFindingsByControl = (
             machineId: finding.machineId,
             firstSeenAt: finding.firstSeenAt,
             ageDays: ageInDays(finding.firstSeenAt, now),
-            severity: DEFAULT_SEVERITY,
+            severity: evaluation.check.severity,
             detail: finding.detail,
           });
         }
@@ -112,10 +112,12 @@ export const openFindingsCsv = (rows: readonly ControlFindingRow[]): string =>
 
 /**
  * The named "asset inventory" export (docs/spec.md §19: "Asset inventory
- * CSV (owner, encryption, drift, patch status)"). Encryption and patch
- * status have no tracked source yet, so both are stubbed; drift status
- * comes from the "no undeclared software" check (unit 8) when it's
- * registered, else reports "unknown" rather than guessing.
+ * CSV (owner, encryption, drift, patch status)"). Drift status comes from
+ * the "no undeclared software" check (unit 8) when it's registered, else
+ * reports "unknown" rather than guessing. Encryption and patch status have
+ * no tracked source anywhere in the system yet — see the inline comments
+ * on those two columns below for why they stay fixed placeholders rather
+ * than a guessed or fabricated signal.
  */
 export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, Db> =>
   Effect.gen(function* () {
@@ -159,13 +161,21 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
         machine.name,
         machine.ownerEmail ?? "unowned",
         machine.state,
-        true, // stub: encryption status is not tracked yet.
+        // Placeholder, not a real signal: no encryption-status source
+        // exists anywhere in the system yet (no disk-encryption event, no
+        // column on `machines`) — this column intentionally reports a
+        // fixed value until one does, rather than guessing.
+        true,
         driftedMachineIds === null
           ? "unknown"
           : driftedMachineIds.has(machine.id)
             ? "drifted"
             : "clean",
-        "unknown", // stub: patch status is not tracked yet.
+        // Placeholder, not a real signal: no patch-status source exists
+        // anywhere in the system yet (no OS-patch event, no column on
+        // `machines`) — this column intentionally reports a fixed value
+        // until one does, rather than guessing.
+        "unknown",
       ]),
     );
   });

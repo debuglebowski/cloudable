@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import net from "node:net";
 import * as schema from "@cloudable/schema";
-import { events, machines, orgs, settingValues } from "@cloudable/schema";
+import { events, machines, orgs, sessions, settingValues } from "@cloudable/schema";
 import { and, eq } from "drizzle-orm";
 import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
@@ -10,6 +10,11 @@ import postgres from "postgres";
 import { Db } from "../../db/layer";
 import { handleImportConfig, handlePatchSetting } from "../../http/handlers/config";
 import { EventBus } from "../../services/EventBus";
+import { TunnelServer } from "../../tunnel/server";
+import { TunnelSignal } from "../../tunnel/signal";
+import { MachineService } from "../machine/MachineService";
+import { ACCESS_METHODS_ENABLED_KEY } from "../machine/settings";
+import { updateOrgSettings } from "../organisation/settings";
 import { applySettingChange } from "./apply-setting-change";
 import { PinnedSettingError } from "./errors";
 import { triggerReconcile } from "./trigger-reconcile";
@@ -79,7 +84,8 @@ const postgresReachable =
 describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)", () => {
   let sql: ReturnType<typeof postgres>;
   let db: PostgresJsDatabase<typeof schema>;
-  let envLayer: Layer.Layer<Db | EventBus>;
+  let envLayer: Layer.Layer<Db | EventBus | TunnelServer>;
+  let machineLayer: Layer.Layer<MachineService>;
 
   beforeAll(async () => {
     sql = postgres(databaseUrl);
@@ -87,15 +93,24 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
     await migrate(db, { migrationsFolder: "../../packages/schema/migrations" });
 
     const dbLayer = Layer.succeed(Db, db);
-    envLayer = Layer.mergeAll(dbLayer, Layer.provide(EventBus.Default, dbLayer));
+    const eventBusLayer = EventBus.Default.pipe(Layer.provide(dbLayer));
+    const tunnelSignalLayer = TunnelSignal.Default;
+    const tunnelLayer = TunnelServer.Default.pipe(
+      Layer.provide(Layer.mergeAll(dbLayer, eventBusLayer, tunnelSignalLayer)),
+    );
+    envLayer = Layer.mergeAll(dbLayer, eventBusLayer, tunnelLayer);
+    machineLayer = Layer.provide(MachineService.Default, dbLayer);
   });
 
   afterAll(async () => {
     await sql.end();
   });
 
-  const run = <A, E>(effect: Effect.Effect<A, E, Db | EventBus>) =>
+  const run = <A, E>(effect: Effect.Effect<A, E, Db | EventBus | TunnelServer>) =>
     Effect.runPromise(Effect.provide(effect, envLayer));
+
+  const runMachineService = <A, E>(effect: Effect.Effect<A, E, MachineService>) =>
+    Effect.runPromise(Effect.provide(effect, machineLayer));
 
   async function seedOrg() {
     const [org] = await db
@@ -115,10 +130,27 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         region: "eastus",
         sizeSku: "Standard_B2s",
         image: "ubuntu-24.04",
+        state: "running",
       })
       .returning();
     if (!machine) throw new Error("seed failed");
     return machine;
+  }
+
+  /** An open (not-yet-ended) `sessions` row, as if a live web-terminal session were attached. */
+  async function seedOpenSession(orgId: string, machineId: string) {
+    const [session] = await db
+      .insert(sessions)
+      .values({
+        orgId,
+        machineId,
+        personId: crypto.randomUUID(),
+        method: "terminal",
+        osUser: "ubuntu",
+      })
+      .returning();
+    if (!session) throw new Error("seed failed");
+    return session;
   }
 
   describe("applySettingChange", () => {
@@ -280,6 +312,160 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         .where(and(eq(settingValues.scopeType, "machine"), eq(settingValues.scopeId, machine.id)));
       expect(row?.pinned).toBe(false);
     });
+
+    // spec.md §11.1: "Disabling terminates live sessions" — not merely refuses
+    // new ones. This is the gap this unit closes: `applySettingChange` (the one
+    // shared write path behind both the PATCH endpoint and Git import) must
+    // itself call `TunnelServer.terminateSessionsForMachine`, not leave it
+    // wired to nothing but its own test.
+    test("disabling web terminal at machine scope ends that machine's open sessions", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+      const session = await seedOpenSession(org.id, machine.id);
+      const correlationId = crypto.randomUUID();
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: false, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId,
+        }),
+      );
+
+      const [refetchedSession] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, session.id));
+      expect(refetchedSession?.endedAt).not.toBeNull();
+
+      const sessionEndedEvents = await db
+        .select()
+        .from(events)
+        .where(and(eq(events.type, "access.session_ended"), eq(events.machineId, machine.id)));
+      expect(sessionEndedEvents).toHaveLength(1);
+    });
+
+    test("re-enabling web terminal never terminates anything", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+      const session = await seedOpenSession(org.id, machine.id);
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: true, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [refetchedSession] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, session.id));
+      expect(refetchedSession?.endedAt).toBeNull();
+    });
+
+    test("disabling web terminal at org scope ends sessions on every machine without its own override, but spares one that overrides it back on", async () => {
+      const org = await seedOrg();
+      const inheritingMachine = await seedMachine(org.id);
+      const overriddenMachine = await seedMachine(org.id);
+
+      // `overriddenMachine` explicitly keeps web terminal on, overriding
+      // whatever the org is about to set — its own row always wins
+      // resolution, so the org-level change below must not touch it.
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: overriddenMachine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: true, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const inheritingSession = await seedOpenSession(org.id, inheritingMachine.id);
+      const overriddenSession = await seedOpenSession(org.id, overriddenMachine.id);
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "org",
+          scopeId: org.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: false, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [refetchedInheriting] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, inheritingSession.id));
+      expect(refetchedInheriting?.endedAt).not.toBeNull();
+
+      const [refetchedOverridden] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, overriddenSession.id));
+      expect(refetchedOverridden?.endedAt).toBeNull();
+    });
+
+    test("re-saving an already-disabled access setting does not re-terminate", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: false, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      // A session that starts only *after* the disable — as if minted through
+      // some other, buggier path — must be untouched by a second, redundant
+      // "disable" write; only a true enabled→disabled transition terminates.
+      const session = await seedOpenSession(org.id, machine.id);
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machine.id,
+          key: ACCESS_METHODS_ENABLED_KEY,
+          value: { webTerminal: false, ssh: true },
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [refetchedSession] = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.id, session.id));
+      expect(refetchedSession?.endedAt).toBeNull();
+    });
   });
 
   describe("triggerReconcile", () => {
@@ -384,6 +570,183 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         key: "example_key",
         previous: null,
         current: { foo: "bar" },
+        overridesLevel: "org",
+      });
+    });
+  });
+
+  describe("updateOrgSettings", () => {
+    test("routes org-scoped writes through applySettingChange: same event a direct call would produce", async () => {
+      const orgA = await seedOrg();
+      const orgB = await seedOrg();
+
+      await run(
+        updateOrgSettings({
+          orgId: orgA.id,
+          loggingTier: 3,
+          actor: { actorType: "person", actorId: "person-1" },
+        }),
+      );
+
+      // The exact same call `updateOrgSettings` now makes internally,
+      // issued directly against a second org.
+      await run(
+        applySettingChange({
+          orgId: orgB.id,
+          scopeType: "org",
+          scopeId: orgB.id,
+          key: "logging_tier",
+          value: 3,
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [eventA] = await db.select().from(events).where(eq(events.orgId, orgA.id));
+      const [eventB] = await db.select().from(events).where(eq(events.orgId, orgB.id));
+
+      expect(eventA?.type).toBe("org.setting_changed");
+      expect(eventA?.payload).toEqual(eventB?.payload);
+      expect(eventA?.payload).toEqual({
+        key: "logging_tier",
+        previous: null,
+        current: 3,
+        level: "org",
+      });
+    });
+
+    test("a PATCH touching multiple keys shares one correlationId across their events, same as one PATCH /config/settings call", async () => {
+      const org = await seedOrg();
+
+      await run(
+        updateOrgSettings({
+          orgId: org.id,
+          loggingTier: 1,
+          retentionDefaultDays: 90,
+          actor: { actorType: "system", actorId: "system" },
+        }),
+      );
+
+      const rows = await db.select().from(events).where(eq(events.orgId, org.id));
+      expect(rows).toHaveLength(2);
+      expect(new Set(rows.map((r) => r.correlationId)).size).toBe(1);
+      expect(rows.every((r) => r.type === "org.setting_changed")).toBe(true);
+    });
+
+    test("rejects the whole PATCH before writing anything when one field fails validation, even if an earlier field would have succeeded", async () => {
+      const org = await seedOrg();
+
+      const error = await run(
+        updateOrgSettings({
+          orgId: org.id,
+          approvalModes: { break_glass: "dual" },
+          retentionDefaultDays: -5,
+          actor: { actorType: "person", actorId: "person-1" },
+        }).pipe(Effect.flip),
+      );
+
+      expect(error).toMatchObject({ reason: "retention_days_must_be_a_positive_integer" });
+
+      // Nothing committed — not the settingValues row, and no event either.
+      const [row] = await db
+        .select()
+        .from(settingValues)
+        .where(
+          and(
+            eq(settingValues.scopeId, org.id),
+            eq(settingValues.key, "approval_mode:break_glass"),
+          ),
+        );
+      expect(row).toBeUndefined();
+      const rows = await db.select().from(events).where(eq(events.orgId, org.id));
+      expect(rows).toHaveLength(0);
+    });
+
+    test("previously-silent approval-mode and retention-days writes now emit org.setting_changed (the gap this unit closes)", async () => {
+      const org = await seedOrg();
+
+      await run(
+        updateOrgSettings({
+          orgId: org.id,
+          approvalModes: { break_glass: "dual" },
+          retentionDefaultDays: 45,
+          actor: { actorType: "person", actorId: "person-1" },
+        }),
+      );
+
+      const rows = await db.select().from(events).where(eq(events.orgId, org.id));
+      const keys = rows.map((r) => (r.payload as { key: string }).key).sort();
+      expect(keys).toEqual(["approval_mode:break_glass", "archive.retentionDays"]);
+    });
+  });
+
+  describe("MachineService.updatePackages", () => {
+    test("emits machine.setting_changed built from the exact same shape applySettingChange uses for a machine-scope change", async () => {
+      const org = await seedOrg();
+      const machineA = await seedMachine(org.id);
+      const machineB = await seedMachine(org.id);
+
+      // The real machine package-manifest write path (PATCH
+      // /api/v1/machines/:id/packages) — package-manifest entries live in
+      // their own `machinePackages` table, not `settingValues` (see
+      // docs/inheritance.md: "packageName IS the setting key" but the
+      // storage is scope-generic and set-shaped, deliberately not a row
+      // inside settingValues), so this cannot literally call
+      // `applySettingChange` without either corrupting that table's role
+      // as the single source of truth for `resolveManifest`/reconcile/
+      // compliance, or writing a second, drifting settingValues row nothing
+      // reads. What IS shared, and asserted here, is the event: both this
+      // and `applySettingChange`'s machine branch build their
+      // `machine.setting_changed` event via the one `machineSettingChangedEvent`
+      // helper (`domain/machine/events.ts`), so the audit trail shape can
+      // never drift apart between the two.
+      await runMachineService(
+        Effect.gen(function* () {
+          const machineService = yield* MachineService;
+          yield* machineService.updatePackages({
+            machineId: machineA.id,
+            upserts: [{ packageName: "docker", versionPin: "24", pinned: false }],
+            actorPersonId: null,
+          });
+        }),
+      );
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machineB.id,
+          key: "docker",
+          value: { versionPin: "24", pinned: false },
+          actorType: "system",
+          actorId: "system",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [eventA] = await db.select().from(events).where(eq(events.machineId, machineA.id));
+      const [eventB] = await db.select().from(events).where(eq(events.machineId, machineB.id));
+
+      expect(eventA?.type).toBe("machine.setting_changed");
+      expect(eventB?.type).toBe("machine.setting_changed");
+      // Same fields, same key/current value. `overridesLevel` differs by
+      // one pre-existing convention (MachineService reports "none" when no
+      // prior resolved value exists anywhere in the chain; applySettingChange
+      // defaults to "org") — not something this unit changes.
+      expect(Object.keys(eventA?.payload as object).sort()).toEqual(
+        Object.keys(eventB?.payload as object).sort(),
+      );
+      expect(eventA?.payload).toEqual({
+        key: "docker",
+        previous: null,
+        current: { versionPin: "24", pinned: false },
+        overridesLevel: "none",
+      });
+      expect(eventB?.payload).toEqual({
+        key: "docker",
+        previous: null,
+        current: { versionPin: "24", pinned: false },
         overridesLevel: "org",
       });
     });
