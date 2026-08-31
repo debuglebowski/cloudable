@@ -176,6 +176,77 @@ describe("ApprovalService", () => {
     );
   });
 
+  test("requiredModeFloor clamps a weaker configured mode UP — 'none' configured, 'dual' required, resolves to 'dual'", async () => {
+    const orgId = crypto.randomUUID();
+    const personId = crypto.randomUUID();
+    await setApprovalMode(orgId, "snapshot_restore", "none");
+
+    const requested = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.request({
+          orgId,
+          actionType: "snapshot_restore",
+          requestedByPersonId: personId,
+          targetMachineId: null,
+          reason: "full restore under a none-mode org policy",
+          requiredModeFloor: "dual",
+        });
+      }),
+    );
+
+    // The regression this closes: without the floor, "none" configured would mean
+    // `requiredApprovals: 0` and instant auto-approval — zero human review.
+    expect(requested.mode).toBe("dual");
+    expect(requested.requiredApprovals).toBe(2);
+    expect(requested.status).toBe("pending");
+  });
+
+  test("requiredModeFloor never lowers a configured mode that already satisfies it", async () => {
+    const orgId = crypto.randomUUID();
+    const personId = crypto.randomUUID();
+    await setApprovalMode(orgId, "snapshot_restore", "dual");
+
+    const requested = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.request({
+          orgId,
+          actionType: "snapshot_restore",
+          requestedByPersonId: personId,
+          targetMachineId: null,
+          reason: "config restore under an already-dual org policy",
+          requiredModeFloor: "single",
+        });
+      }),
+    );
+
+    expect(requested.mode).toBe("dual");
+    expect(requested.requiredApprovals).toBe(2);
+  });
+
+  test("omitting requiredModeFloor leaves the org's configured mode untouched, including 'none'", async () => {
+    const orgId = crypto.randomUUID();
+    const personId = crypto.randomUUID();
+    await setApprovalMode(orgId, "snapshot_restore", "none");
+
+    const requested = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.request({
+          orgId,
+          actionType: "snapshot_restore",
+          requestedByPersonId: personId,
+          targetMachineId: null,
+          reason: "data restore, no floor",
+        });
+      }),
+    );
+
+    expect(requested.mode).toBe("none");
+    expect(requested.status).toBe("approved");
+  });
+
   test("a rejection requires a reason, and once given is recorded as evidence on approval.denied", async () => {
     const orgId = crypto.randomUUID();
     const personId = crypto.randomUUID();
