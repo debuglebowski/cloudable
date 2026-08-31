@@ -10,7 +10,7 @@ The left nav is grouped under three fixed headers, per spec:
 
 | Group     | Contains          |
 | :-------- | :---------------- |
-| Operate   | Machines, People   |
+| Operate   | Machines, People, Access |
 | Govern    | Approvals, Audit, Archive |
 | Configure | Integrations, Organisation |
 
