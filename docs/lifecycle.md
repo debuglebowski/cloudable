@@ -115,22 +115,34 @@ has no parameter for *which* restore mode is being requested, so the generic ser
 cannot by itself make a full restore harder to approve than a data-only one.
 
 **The rule this unit implements** (`domain/archive/approval-escalation.ts`,
-`resolveRestoreApprovalFloor`) sits in front of that generic gate:
+`resolveRestoreApprovalFloor`) sits in front of that generic gate, expressed as a MINIMUM
+mode per restore mode:
 
 | Restore mode | Approval floor | Rule |
 |---|---|---|
-| `"data"` | the org's own policy (`archive.restoreApprovalMode`, resolved via `resolveSetting()`, default `"none"`) | Lowest bar, unmodified — spec explicitly allows `"none"` here |
-| `"config"` | org policy, floored at `"single"` | At least one approver even if the org configured `"none"` for data restores |
+| `"data"` | `"none"` (no floor) | The org's own policy (`approval_mode:snapshot_restore`, `ApprovalService`'s own setting, default `"single"`) applies unmodified — spec explicitly allows this to resolve as low as `"none"` if the org configures it that way |
+| `"config"` | `"single"` | At least one approver even if the org configured `"none"` for `approval_mode:snapshot_restore` |
 | `"full"` | **always `"dual"`, hardcoded** | Deliberately ignores org policy entirely — reattaching secret bindings is meant to be the hardest restore to reach, independent of whatever the org has configured for the other two modes. This satisfies the spec's "never resolves below `single`" floor trivially, by never resolving below `dual`. |
 
-Because `ApprovalService.request()`'s payload can't carry this resolved floor
-structurally, it is written into the approval's `reason` text (e.g. `"[snapshot restore |
-mode=full | approval-floor=dual] <caller's reason>"`) for reviewer/audit visibility. This
-is a known interface gap, not a design preference: if unit 5 (or a later revision of
-`ApprovalService`) grows a way to parametrize `request()` by sub-action, the escalation
-rule here should move to a real, structured parameter instead of a reason-text
-convention. Until then, the floor described above is enforced independently of whatever
-`ApprovalService` itself resolves for the bare `"snapshot_restore"` action type.
+The resolved floor is passed to `ApprovalService.request()` as `requiredModeFloor` and
+enforced there structurally: the org's configured mode is clamped UP to this floor,
+never down, so `"full"` always resolves to `"dual"` — and `"config"` always to at least
+`"single"` — no matter how permissively the org has configured
+`approval_mode:snapshot_restore`. An earlier revision of this unit could only stuff the
+resolved floor into the approval's `reason` text for audit visibility, since
+`ApprovalService.request()`'s payload had no way to carry it structurally — that gap is
+closed; `requiredModeFloor` is a real, enforced parameter now. It's the same FLOOR
+concept `domain/elevation/policy.ts`'s `requiredApprovalModeFloor` uses for
+`admin_access`'s `shell` level, but enforced differently: that unit pre-checks the org's
+configured mode and hard-refuses the request outright if it doesn't already satisfy the
+floor, while `requiredModeFloor` here clamps the mode up automatically so the request
+always proceeds at (at least) the floor rather than being rejected.
+
+Restore also no longer resolves its own, separate copy of "the org's
+policy" via `archive.restoreApprovalMode` — that setting was dead (read but never
+written, and its own default disagreed with `ApprovalService`'s) and has been removed;
+`approval_mode:snapshot_restore` (resolved inside `ApprovalService.request()` itself) is
+the only real gate.
 
 **`mode: "full"` never reattaches secret bindings as a byproduct.** Independent of the
 approval gate above, `restoreSnapshot()` requires the caller to pass

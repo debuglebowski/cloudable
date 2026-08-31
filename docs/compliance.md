@@ -59,9 +59,9 @@ Per-check status is exactly one of: `pass` (applies, zero open findings), `fail`
 
 Each open finding needs a stable "first seen" timestamp so the UI can show "open 14d" instead of "just now" on every poll — but "computed live, not stored" (above) means nothing about the finding itself persists between requests.
 
-`apps/control-plane/src/compliance/finding-store.ts` is the minimal bridge: a process-lifetime `Map` keyed by `(checkId, orgId, machineId)`, holding only a first-seen `Date` per identity. `firstSeenAt(identity, observedAt)` returns the recorded timestamp on repeat calls, or records `observedAt` (default: now) the first time an identity appears. `pruneClosed(checkId, orgId, stillOpenIds)` drops identities that stopped appearing, so a finding that closes and later reopens is treated as newly opened rather than carrying its old age. `ageInDays(firstSeen, now)` derives the whole-day age for display.
+`apps/control-plane/src/compliance/finding-store.ts` is the durable bridge, backed by a real table (`complianceFindingState`, `packages/schema/src/tables/compliance-finding-state.ts`) — **it survives a control-plane restart.** `upsertFindingFirstSeen(key)` does a single atomic `INSERT ... ON CONFLICT DO UPDATE` keyed on `(checkId, orgId, machineId, detailKey)`: the first time a finding is seen the row is inserted stamped `now`; on every repeat sighting only `lastSeenAt` refreshes — `firstSeenAt` is deliberately absent from the update `set`, so a finding that keeps recurring across evaluations keeps its ORIGINAL detection time, never "now". Being one atomic upsert rather than a select-then-insert means two overlapping evaluations of the same finding can't race each other into duplicate rows or a `firstSeenAt` read that isn't really the first. `machineId: null` maps to a reserved constant (`NO_MACHINE_SENTINEL`) so the column stays real `NOT NULL` and can back a genuine unique index. `clearResolvedFindings(checkId, orgId, stillOpenDetailKeys)` deletes rows whose `detailKey` is no longer in the still-open set, so a finding that closes and later reopens is treated as newly opened rather than carrying its old age. `ageInDays(firstSeen, now)` derives the whole-day age for display.
 
-**This is explicitly a stopgap.** It does not survive a control-plane restart — every open finding resets to "just opened" on the next evaluation after a restart. A durable version (a DB-backed table, e.g. from unit 7) should supersede it; at that point `machines-reporting.ts`'s two calls into `finding-store.ts` are the only call sites that need to move.
+This table is bookkeeping only, not evidence — it never substitutes for re-running a check against `events`/current state (compliance is still "computed live", above), and writes/deletes to it never touch `events` itself, which stays append-only (invariant #2).
 
 ## Control map
 
@@ -87,13 +87,13 @@ Status, computed purely from `COMPLIANCE_CHECKS` (no DB access needed for this e
 
 `GET /api/v1/compliance/findings/export` — CSV, **grouped by control, not by time** (`docs/spec.md` §19). For every in-scope control with at least one evidencing check, lists that check's current open findings. Columns: `control, control_label, framework, check, check_label, machine_id, first_seen_at, open_days, severity, detail`.
 
-`severity` is a fixed stub (`"medium"`) for every row — `ComplianceFinding` has no severity field yet.
+`severity` is real, sourced from `ComplianceCheck.severity` (`apps/control-plane/src/domain/compliance/types.ts`) — a fixed, per-check editorial classification (which of the six v1 checks tends to matter more if it fails: `access-revoked-on-offboarding` and `elevated-access-approved` are `high`; `active-owner`, `no-undeclared-software`, and `retention-honoured` are `medium`; `machines-reporting` is `low`). Every finding under the same check shares its check's severity — there is no finer-grained per-finding score. This is the one place severity is defined: both evidence CSVs and `GET /api/v1/compliance/findings` (as `ComplianceCheckResult.severity`) read it from here, rather than each keeping an independent classification.
 
 Two named exports (`docs/spec.md` §19, "Exports"):
 
 - `GET /api/v1/compliance/exports/findings.csv` — same underlying open-findings data as the main export, narrower columns: `control, check, machine_id, severity, open_since`.
 - `GET /api/v1/compliance/exports/asset-inventory.csv` — one row per machine in the org: `machine_id, machine_name, owner, state, encryption_status, drift_status, patch_status`.
-  - `encryption_status` and `patch_status` are stubs (`true` / `"unknown"`) — neither is tracked yet.
+  - `encryption_status` and `patch_status` are explicit fixed placeholders (`true` / `"unknown"`) — no encryption-status or patch-status signal exists anywhere in the system yet (no event, no column on `machines`), so these columns intentionally report a fixed value rather than guessing one.
   - `drift_status` comes from the `no-undeclared-software` check (unit 8) when it's registered in `COMPLIANCE_CHECKS`: `"drifted"` if that check has an open finding for the machine, `"clean"` otherwise. Reports `"unknown"` for every machine if that check isn't registered yet, rather than guessing.
 
 All three exports guard against CSV/formula injection (`apps/control-plane/src/compliance/csv.ts`): a field starting with `=`, `+`, `-`, `@`, or a tab is prefixed with `'` before quoting, since machine names and finding detail are free text that flows straight into a file auditors typically open in Excel or Sheets.

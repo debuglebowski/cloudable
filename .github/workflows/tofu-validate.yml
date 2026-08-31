@@ -1,0 +1,81 @@
+name: OpenTofu validate
+
+# docs/spec.md §25: "Terraform is the primary format; Bicep is the one-click
+# alternative... Use OpenTofu in Cloudable's own CI to stay licence-clean;
+# publish HCL that works with either." This runs the OpenTofu CLI (never
+# plain Terraform, per that licensing rationale) against every HCL module
+# under infra/terraform/.
+#
+# `infra/terraform/control-plane` gets both `validate` and an offline `plan`
+# against its committed `dummy.tfvars` (see that module's README — never
+# `apply`, no real Azure account exists for this posture). `plan` isn't run
+# for `infra/terraform/federated-credential`: it has no dummy tfvars, and
+# `validate` is the meaningful, environment-independent check for a module a
+# BYOC customer runs once in their own tenant, under their own credentials.
+#
+# `tofu validate` is a hard gate for both modules — it never contacts Azure
+# (invariant #1: no cloud credential is ever stored here, so none is
+# available to it anyway). `tofu plan`, even against all-new resources with
+# no data source lookups, still has the azurerm provider authenticate to
+# Azure AD as part of `Configure()` — confirmed locally: it fails identically
+# whether no credential is present or a syntactically-valid-but-fake one is
+# (a live AADSTS rejection from Azure AD either way). That plan step is kept
+# here anyway, matching this repo's own README note that its success is
+# "not a signal this module is safe to apply anywhere" — but is
+# `continue-on-error`, the same non-blocking pattern trivy-scan.yml already
+# uses, so this workflow doesn't go permanently red over the one check that
+# structurally cannot pass without the client secret invariant #1 forbids
+# ever storing here.
+
+on:
+  push:
+    branches: [main]
+    paths: &tofu-paths
+      - "infra/terraform/**"
+      - ".github/workflows/tofu-validate.yml"
+  pull_request:
+    paths: *tofu-paths
+
+concurrency:
+  group: tofu-validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: tofu validate / plan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.12.6"
+
+      - name: control-plane — init
+        working-directory: infra/terraform/control-plane
+        run: tofu init -backend=false -input=false
+
+      - name: control-plane — validate
+        working-directory: infra/terraform/control-plane
+        run: tofu validate
+
+      # Offline plan against the committed dummy.tfvars only — never apply,
+      # never real Azure credentials (see this module's README, and the note
+      # above on why this step is continue-on-error).
+      - name: control-plane — plan (dummy.tfvars)
+        working-directory: infra/terraform/control-plane
+        continue-on-error: true
+        run: tofu plan -input=false -var-file=dummy.tfvars
+
+      - name: federated-credential — init
+        working-directory: infra/terraform/federated-credential
+        run: tofu init -backend=false -input=false
+
+      - name: federated-credential — validate
+        working-directory: infra/terraform/federated-credential
+        run: tofu validate

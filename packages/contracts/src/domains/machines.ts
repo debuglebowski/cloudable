@@ -28,7 +28,9 @@ export interface MachineSummary {
 export interface CreateMachineRequest {
   orgId: string;
   name: string;
-  region: string;
+  /** Optional — omitted, the control plane resolves the org's configured default region
+   * instead of the caller always supplying one (docs/inheritance.md, spec.md §5). */
+  region?: string;
   sizeSku: string;
   image: string;
   /** A machine always has exactly one owner, always a person (CLAUDE.md invariant #3). */

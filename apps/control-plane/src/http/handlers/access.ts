@@ -1,8 +1,10 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
+import { SignerTag } from "../../services/Signer";
 import { SshCaService } from "../../services/ssh-ca/SshCaService";
-import { TunnelServer } from "../../tunnel/server";
 import { listActiveSessionsByOrg } from "../../tunnel/queries";
+import { TunnelServer } from "../../tunnel/server";
+import { SESSION_TOKEN_KEY_ID } from "../../tunnel/session-token";
 import { Api } from "../api";
 
 type AccessErrorBody =
@@ -121,6 +123,35 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
         })),
         Effect.catchTag("SessionQueryError", (e) =>
           Effect.fail({ code: "internal_error" as const, message: e.reason }),
+        ),
+      ),
+    )
+    .handle("sessionTokenPublicKey", () =>
+      Effect.gen(function* () {
+        const signer = yield* SignerTag;
+        const publicKeyDer = yield* signer.publicKey(SESSION_TOKEN_KEY_ID);
+        return {
+          keyId: SESSION_TOKEN_KEY_ID,
+          publicKeyDerBase64: Buffer.from(publicKeyDer).toString("base64"),
+        };
+      }).pipe(
+        // Only `InternalError` is declared on this endpoint (see routes/access.ts) — unlike
+        // `asAccessError`, which maps the full `SignerError` reason space onto all four access
+        // error codes, `Signer.publicKey` for a fixed, well-known `keyId` never plausibly fails
+        // with `not_found`/`denied`/`bad_request`, so this narrows explicitly instead.
+        //
+        // Deliberately a fixed, generic message rather than `e.cause`/`e.reason` verbatim: this
+        // endpoint takes no `orgId`/auth at all (by design — see routes/access.ts's comment on
+        // why the public key needs none), so unlike every other access handler here, its error
+        // body is reachable by literally anyone. `Signer.azure.ts`'s stub failure message
+        // ("no Azure Key Vault account configured in this build") is harmless today only because
+        // `LocalSignerLive` is always wired in this build — it must not leak infra detail once a
+        // real Azure-backed `Signer` is live.
+        Effect.catchTag("SignerError", () =>
+          Effect.fail({
+            code: "internal_error" as const,
+            message: "failed to retrieve the session-token public key",
+          }),
         ),
       ),
     ),

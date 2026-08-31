@@ -11,7 +11,6 @@ import {
   SnapshotExpiredError,
 } from "./errors";
 import { makeEnvelope } from "./events";
-import { resolveOrgRestoreApprovalMode } from "./org-policy";
 import { fetchMachine, fetchSnapshot } from "./queries";
 import { getSnapshotSubState, restoreUnavailableReason } from "./sub-state";
 
@@ -80,6 +79,12 @@ const publishOrDie = <A>(
  * completing the restore once a human later decides the approval is a follow-up concern
  * for whichever unit wires `ApprovalService.decide()` to a callback; it is not built
  * here.
+ *
+ * The escalation floor from `resolveRestoreApprovalFloor` is passed to
+ * `ApprovalService.request()` as `requiredModeFloor` — enforced there structurally
+ * (clamped up, never satisfiable by a weaker org-configured mode), not just recorded in
+ * the approval's `reason` text. See `approval-escalation.ts`'s doc comment for exactly
+ * what each restore mode's floor is and why.
  */
 export const restoreSnapshot = (input: RestoreSnapshotInput) =>
   Effect.gen(function* () {
@@ -108,8 +113,7 @@ export const restoreSnapshot = (input: RestoreSnapshotInput) =>
       return yield* Effect.fail(new FullRestoreNotAcknowledgedError({ snapshotId: snapshot.id }));
     }
 
-    const orgPolicy = yield* resolveOrgRestoreApprovalMode(snapshot.orgId, input.targetMachineId);
-    const approvalFloor = resolveRestoreApprovalFloor(input.mode, orgPolicy);
+    const approvalFloor = resolveRestoreApprovalFloor(input.mode);
 
     const correlationId = ulid();
     const annotatedReason = `[snapshot restore | mode=${input.mode} | approval-floor=${approvalFloor}] ${input.reason}`;
@@ -121,6 +125,7 @@ export const restoreSnapshot = (input: RestoreSnapshotInput) =>
         requestedByPersonId: input.requestedByPersonId,
         targetMachineId: input.targetMachineId,
         reason: annotatedReason,
+        requiredModeFloor: approvalFloor,
       })
       .pipe(
         Effect.mapError(
