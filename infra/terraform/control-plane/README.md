@@ -25,30 +25,22 @@ The equivalent one-click template is `infra/bicep/control-plane.bicep`.
   the `azurerm` provider — see the [azurerm provider auth docs][azurerm-auth])
 - Terraform >= 1.5, or [OpenTofu](https://opentofu.org/) (this HCL works with either)
 - A published control-plane container image. Until Cloudable publishes one to GHCR,
-  build and push your own — see the Dockerfile note below
+  build and push your own from `apps/control-plane/Dockerfile` — see the Dockerfile
+  note below
 - A generated `BETTER_AUTH_SECRET` (e.g. `openssl rand -base64 32`)
 
 [azurerm-auth]: https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/guides/service_principal_client_secret
 
 ### On the control-plane image
 
-No `Dockerfile` exists yet in this build of the monorepo (a separate, not-yet-merged
-unit adds `apps/control-plane/Dockerfile`). Once that lands, build and push it, e.g.:
+`apps/control-plane/Dockerfile` is a multi-stage `oven/bun` build (build the
+workspace's TypeScript packages it depends on, then copy only the production
+`node_modules` and built output into a slim, non-root runtime image). Build and push
+it, e.g.:
 
 ```bash
-docker build -t ghcr.io/<you>/cloudable-control-plane:latest apps/control-plane
+docker build -t ghcr.io/<you>/cloudable-control-plane:latest -f apps/control-plane/Dockerfile .
 docker push ghcr.io/<you>/cloudable-control-plane:latest
-```
-
-For reference, a minimal Dockerfile for this app looks roughly like:
-
-```dockerfile
-# FROM oven/bun:1 AS base
-# WORKDIR /app
-# COPY . .
-# RUN bun install --frozen-lockfile
-# ENV NODE_ENV=production
-# CMD ["bun", "run", "apps/control-plane/src/server.ts"]
 ```
 
 Point `control_plane_image` / `control_plane_image_tag` (see `variables.tf`) at
