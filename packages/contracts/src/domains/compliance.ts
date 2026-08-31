@@ -53,13 +53,25 @@ export type ControlStatus = "implemented" | "manual_action_required" | "not_cove
 export interface ControlMapEntry {
   id: string;
   label: string;
-  /** Framework clause this control maps to (e.g. "ISO 27001 A.9"). Placeholder mapping, org-overridable in a future release. */
+  /** Framework clause this control maps to (e.g. "ISO 27001 A.9"). Placeholder mapping. */
   framework: string;
   status: ControlStatus;
   /** Ids of registered checks (see `COMPLIANCE_CHECKS`) that evidence this control. Empty unless `status` is `"implemented"`. */
   evidencedByCheckIds: string[];
+  /** True when `status` came from this org's explicit override (`PATCH .../control-map/:controlId/override`) rather than the computed default. */
+  overridden: boolean;
+  /** True when this control is eligible for an override at all — false for a structurally
+   * out-of-scope control, which `PATCH .../override` always rejects. */
+  overridable: boolean;
 }
 
 export interface ControlMapResponse {
   controls: ControlMapEntry[];
+}
+
+/** `PATCH /api/v1/compliance/control-map/:controlId/override` payload. `status: null` clears
+ * this org's override, reverting the control to its computed default. */
+export interface SetControlOverridePayload {
+  orgId: string;
+  status: ControlStatus | null;
 }

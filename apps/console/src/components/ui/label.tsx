@@ -1,23 +1,21 @@
-import type * as React from "react";
+"use client";
+
+import * as LabelPrimitive from "@radix-ui/react-label";
+import { type VariantProps, cva } from "class-variance-authority";
+import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-export type LabelProps = React.LabelHTMLAttributes<HTMLLabelElement>;
+const labelVariants = cva(
+  "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
+);
 
-/**
- * Plain native `<label>`, not a Radix `@radix-ui/react-label` wrapper — that package isn't a
- * console dependency yet, and a form label has no accessibility behavior beyond the native
- * element's own `htmlFor` association. `setting-dialogs.tsx` already imported this path before
- * this file existed (a pre-existing gap, not introduced by the region unit).
- */
-function Label({ className, ...props }: LabelProps) {
-  return (
-    // biome-ignore lint/a11y/noLabelWithoutControl: every call site passes htmlFor/children through ...props
-    <label
-      className={cn("text-sm font-medium leading-none peer-disabled:opacity-70", className)}
-      {...props}
-    />
-  );
-}
+const Label = React.forwardRef<
+  React.ElementRef<typeof LabelPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root> & VariantProps<typeof labelVariants>
+>(({ className, ...props }, ref) => (
+  <LabelPrimitive.Root ref={ref} className={cn(labelVariants(), className)} {...props} />
+));
+Label.displayName = LabelPrimitive.Root.displayName;
 
 export { Label };
