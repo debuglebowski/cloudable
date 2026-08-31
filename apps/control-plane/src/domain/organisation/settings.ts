@@ -1,20 +1,20 @@
-import { orgs, settingValues } from "@cloudable/schema";
-import { and, eq } from "drizzle-orm";
+import { machines, orgs, settingValues } from "@cloudable/schema";
+import { and, count, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { Db } from "../../db/layer";
-import { DEFAULT_RETENTION_DAYS, RETENTION_DAYS_KEY } from "../archive/org-policy";
 import {
   DEFAULT_LOGGING_TIER,
   DEFAULT_RETENTION_LOCATION,
-  type LoggingTier,
   LOGGING_TIER_KEY,
-  type RetentionLocation,
+  type LoggingTier,
   RETENTION_LOCATION_KEY,
+  type RetentionLocation,
+  type SettingChangeActor,
   setOrgLoggingTier,
   setOrgRetentionLocation,
-  type SettingChangeActor,
 } from "../../logging/settings";
 import { DEFAULT_APPROVAL_MODE, settingKeyFor } from "../../services/ApprovalService";
+import { DEFAULT_RETENTION_DAYS, RETENTION_DAYS_KEY } from "../archive/org-policy";
 
 /**
  * Aggregate read/write for the Organisation page (spec §20's "Organisation"
@@ -58,6 +58,8 @@ export interface OrgSettingsView {
   name: string;
   approvalModes: Record<ApprovalActionType, ApprovalMode>;
   loggingTier: LoggingTier;
+  /** How many of this org's machines have their own machine-level logging-tier override (spec §17). Purely informational — the org page has nothing to do about a machine's override besides know it exists; see the machine detail page for the actual override control. */
+  loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
 }
@@ -89,7 +91,9 @@ const readOrgScopedSetting = <T>(
     return rows[0]?.value as T | undefined;
   });
 
-export const getOrgSettings = (orgId: string): Effect.Effect<OrgSettingsView, OrgSettingsError, Db> =>
+export const getOrgSettings = (
+  orgId: string,
+): Effect.Effect<OrgSettingsView, OrgSettingsError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const orgRows = yield* dbTry(
@@ -109,6 +113,29 @@ export const getOrgSettings = (orgId: string): Effect.Effect<OrgSettingsView, Or
 
     const loggingTier =
       (yield* readOrgScopedSetting<LoggingTier>(orgId, LOGGING_TIER_KEY)) ?? DEFAULT_LOGGING_TIER;
+    // A SQL count, not the rows themselves — this page only needs to know
+    // that divergence exists (docs/frontend.md's LineageGutter "N machines
+    // override this"), not which machines, and an org with many machines
+    // shouldn't pull one row per override over the wire just to count
+    // them. Joins through `machines` since a `settingValues` machine-scope
+    // row's `scopeId` is the machine id, not the org id — there's no other
+    // way to constrain it to this org.
+    const loggingTierOverrideRows = yield* dbTry(
+      () =>
+        db
+          .select({ count: count() })
+          .from(settingValues)
+          .innerJoin(machines, eq(machines.id, settingValues.scopeId))
+          .where(
+            and(
+              eq(settingValues.scopeType, "machine"),
+              eq(settingValues.key, LOGGING_TIER_KEY),
+              eq(machines.orgId, orgId),
+            ),
+          ),
+      "read_setting_failed",
+    );
+    const loggingTierOverrideCount = loggingTierOverrideRows[0]?.count ?? 0;
     const retentionDefaultDays =
       (yield* readOrgScopedSetting<number>(orgId, RETENTION_DAYS_KEY)) ?? DEFAULT_RETENTION_DAYS;
     const retentionLocation =
@@ -123,6 +150,7 @@ export const getOrgSettings = (orgId: string): Effect.Effect<OrgSettingsView, Or
         ApprovalMode
       >,
       loggingTier,
+      loggingTierOverrideCount,
       retentionDefaultDays,
       retentionLocation,
     };
