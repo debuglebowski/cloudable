@@ -5,7 +5,9 @@ import { Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
+import { TunnelServer } from "../../tunnel/server";
 import { machineSettingChangedEvent } from "../machine/events";
+import { ACCESS_METHODS_ENABLED_KEY, webTerminalEnabledOf } from "../machine/settings";
 import {
   InvalidScopeError,
   MachineNotFoundError,
@@ -49,16 +51,29 @@ export type ApplySettingChangeError =
  * docs/spec.md §16: "Same path whether the change came from the UI or a
  * Git commit."
  *
- * Purely inert (invariant #10 / docs/spec.md §16): it only ever touches
- * `setting_values` and the append-only `events` table. It never reads or
- * writes `machines.desiredStateVersion` and never triggers reconcile — the
- * agent picks up the new resolved value on its own next poll. See
- * `trigger-reconcile.ts` for the only operation allowed to mutate a
- * machine, which is confirmation-gated.
+ * Inert with respect to a machine's *desired state* (invariant #10 /
+ * docs/spec.md §16): it never reads or writes `machines.desiredStateVersion`
+ * and never triggers reconcile — the agent picks up the new resolved value
+ * on its own next poll. See `trigger-reconcile.ts` for the only operation
+ * allowed to mutate a machine's desired-state version, which is
+ * confirmation-gated.
+ *
+ * One deliberate exception to "only ever touches `setting_values` and the
+ * append-only `events` table": a write to `machine.accessMethodsEnabled`
+ * that disables web terminal also ends every affected machine's open
+ * `sessions` rows via `TunnelServer.terminateSessionsForMachine` — spec.md
+ * §11.1's "disabling terminates live sessions, not merely refuses new
+ * ones." This is a *live session*, not a desired-state mutation, so it
+ * doesn't touch `machines.desiredStateVersion` either and doesn't violate
+ * the paragraph above — but it is real DB/event activity beyond
+ * `setting_values`/`events`, and runs after this function's own
+ * `*.setting_changed` event is durably published (see below) so that a
+ * termination failure never hides the fact that the setting itself did
+ * change.
  */
 export const applySettingChange = (
   input: ApplySettingChangeInput,
-): Effect.Effect<ApplySettingChangeResult, ApplySettingChangeError, Db | EventBus> =>
+): Effect.Effect<ApplySettingChangeResult, ApplySettingChangeError, Db | EventBus | TunnelServer> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const eventBus = yield* EventBus;
@@ -270,6 +285,81 @@ export const applySettingChange = (
           (cause) => new SettingWriteError({ message: `publishing event: ${cause.reason}` }),
         ),
       );
+
+    // --- spec.md §11.1: "disabling terminates live sessions", not merely
+    // refuses new ones. Only a webTerminal:true → false transition matters
+    // here — enabling, or a no-op re-save of an already-disabled value,
+    // never needs to end anything. `terminateSessionsForMachine` itself is
+    // idempotent (ends only currently-open sessions), so an imprecise
+    // "previous" read (see below) can at worst cause a harmless extra call,
+    // never a missed one. Runs after the `*.setting_changed` event above is
+    // durably published, not before: if this step fails, the setting
+    // change itself is still fully recorded rather than silently lost
+    // behind the resulting error.
+    if (input.key === ACCESS_METHODS_ENABLED_KEY) {
+      const wasEnabled = webTerminalEnabledOf(previous);
+      const nowEnabled = webTerminalEnabledOf(input.value);
+      if (wasEnabled && !nowEnabled) {
+        const tunnelServer = yield* TunnelServer;
+        const terminate = (targetMachineId: string) =>
+          tunnelServer
+            .terminateSessionsForMachine({
+              orgId: input.orgId,
+              machineId: targetMachineId,
+              reason: "access.web_terminal_disabled",
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new SettingWriteError({ message: `terminating sessions: ${cause.reason}` }),
+              ),
+            );
+
+        if (input.scopeType === "machine") {
+          yield* terminate(input.scopeId);
+        } else {
+          // Org-scope edit: every machine in the org WITHOUT its own
+          // machine-level override for this key inherits the new org
+          // default (the template layer is inert in v1 — see
+          // docs/inheritance.md — so for an unoverridden machine the
+          // effective value is exactly the org's own value). A machine
+          // that has its own override is unaffected by this write: its own
+          // row still wins resolution regardless of what the org default
+          // just changed to.
+          const orgMachines = yield* Effect.tryPromise({
+            try: () =>
+              db.select({ id: machines.id }).from(machines).where(eq(machines.orgId, input.orgId)),
+            catch: (cause) =>
+              new SettingWriteError({ message: `listing org machines: ${String(cause)}` }),
+          });
+
+          if (orgMachines.length > 0) {
+            const overrideRows = yield* Effect.tryPromise({
+              try: () =>
+                db
+                  .select({ scopeId: settingValues.scopeId })
+                  .from(settingValues)
+                  .where(
+                    and(
+                      eq(settingValues.scopeType, "machine"),
+                      eq(settingValues.key, input.key),
+                      inArray(
+                        settingValues.scopeId,
+                        orgMachines.map((m) => m.id),
+                      ),
+                    ),
+                  ),
+              catch: (cause) =>
+                new SettingWriteError({ message: `listing machine overrides: ${String(cause)}` }),
+            });
+            const overridden = new Set(overrideRows.map((r) => r.scopeId));
+            const affected = orgMachines.filter((m) => !overridden.has(m.id));
+
+            yield* Effect.forEach(affected, (m) => terminate(m.id), { concurrency: 5 });
+          }
+        }
+      }
+    }
 
     return { previous, current: input.value, event };
   });

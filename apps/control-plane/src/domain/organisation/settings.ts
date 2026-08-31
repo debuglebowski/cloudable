@@ -14,6 +14,7 @@ import {
 } from "../../logging/settings";
 import { DEFAULT_APPROVAL_MODE, settingKeyFor } from "../../services/ApprovalService";
 import type { EventBus } from "../../services/EventBus";
+import type { TunnelServer } from "../../tunnel/server";
 import { DEFAULT_RETENTION_DAYS, RETENTION_DAYS_KEY } from "../archive/org-policy";
 import { applySettingChange } from "../config/apply-setting-change";
 import { DEFAULT_REGION_KEY, resolveOrgDefaultRegion } from "../machine/region-policy";
@@ -199,7 +200,7 @@ const writeOrgSetting = (
   value: unknown,
   actor: SettingChangeActor,
   correlationId: string,
-): Effect.Effect<void, OrgSettingsError, Db | EventBus> =>
+): Effect.Effect<void, OrgSettingsError, Db | EventBus | TunnelServer> =>
   Effect.asVoid(
     applySettingChange({
       orgId,
@@ -237,7 +238,7 @@ const writeOrgSetting = (
  */
 export const updateOrgSettings = (
   input: UpdateOrgSettingsInput,
-): Effect.Effect<OrgSettingsView, OrgSettingsError, Db | EventBus> =>
+): Effect.Effect<OrgSettingsView, OrgSettingsError, Db | EventBus | TunnelServer> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const correlationId = ulid();

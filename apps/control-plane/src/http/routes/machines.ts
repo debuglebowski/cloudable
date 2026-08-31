@@ -25,6 +25,18 @@ const resolvedManifestEntrySchema = Schema.Struct({
   resolvedFromScopeId: Schema.String,
 });
 
+const resolvedPersistentPathsSchema = Schema.Struct({
+  value: Schema.Array(Schema.String),
+  source: manifestScopeSchema,
+  resolvedFromScopeId: Schema.String,
+});
+
+const resolvedAccessMethodsEnabledSchema = Schema.Struct({
+  value: Schema.Struct({ webTerminal: Schema.Boolean, ssh: Schema.Boolean }),
+  source: manifestScopeSchema,
+  resolvedFromScopeId: Schema.String,
+});
+
 const machineSummaryFields = {
   id: Schema.UUID,
   orgId: Schema.UUID,
@@ -52,6 +64,8 @@ const effectiveLoggingTierSchema = Schema.Struct({
 const machineDetailSchema = Schema.Struct({
   ...machineSummaryFields,
   manifest: Schema.Array(resolvedManifestEntrySchema),
+  persistentPaths: resolvedPersistentPathsSchema,
+  accessMethodsEnabled: resolvedAccessMethodsEnabledSchema,
   loggingTier: effectiveLoggingTierSchema,
 });
 

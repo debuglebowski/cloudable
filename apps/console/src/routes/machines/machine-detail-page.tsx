@@ -3,15 +3,20 @@ import { Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 
 import {
+  type AccessMethodsEnabled,
   type ManifestEntry,
   ManifestOverrideError,
   getMachine,
+  getMachineAccessMethodsEnabled,
   getMachineDrift,
   getMachineLoggingTier,
   getMachineManifest,
+  getMachinePersistentPaths,
   machinesKeys,
+  overrideAccessMethodsEnabled,
   overrideMachineLoggingTier,
   overrideManifestEntry,
+  overridePersistentPaths,
 } from "@/api/machines";
 import {
   DEFAULT_LOGGING_TIER,
@@ -29,6 +34,13 @@ import { Input } from "@/components/ui/input";
 
 import { LoggingTierDialog } from "../organisation/setting-dialogs";
 import { MACHINE_STATE_BADGE_VARIANT, MACHINE_STATE_LABEL } from "./machine-state";
+
+function formatAccessMethods(methods: AccessMethodsEnabled | null | undefined): string {
+  const enabled: string[] = [];
+  if (methods?.webTerminal) enabled.push("web terminal");
+  if (methods?.ssh) enabled.push("ssh");
+  return enabled.length > 0 ? enabled.join(", ") : "none";
+}
 
 /**
  * Detail is a sub-route (`/machines/$machineId`), not an expandable row: the manifest and
@@ -51,6 +63,14 @@ export function MachineDetailPage() {
   const driftQuery = useQuery({
     queryKey: machinesKeys.drift(machineId),
     queryFn: () => getMachineDrift(machineId),
+  });
+  const persistentPathsQuery = useQuery({
+    queryKey: machinesKeys.persistentPaths(machineId),
+    queryFn: () => getMachinePersistentPaths(machineId),
+  });
+  const accessMethodsQuery = useQuery({
+    queryKey: machinesKeys.accessMethodsEnabled(machineId),
+    queryFn: () => getMachineAccessMethodsEnabled(machineId),
   });
   const loggingTierQuery = useQuery({
     queryKey: machinesKeys.loggingTier(machineId),
@@ -76,6 +96,43 @@ export function MachineDetailPage() {
     },
     onError: (err) => {
       setLoggingTierError(err instanceof Error ? err.message : "Override failed.");
+    },
+  });
+
+  const [editingPersistentPaths, setEditingPersistentPaths] = useState(false);
+  const [draftPaths, setDraftPaths] = useState("");
+  const [persistentPathsError, setPersistentPathsError] = useState<string | null>(null);
+
+  const persistentPathsMutation = useMutation({
+    mutationFn: (paths: string[]) => overridePersistentPaths(machineId, paths),
+    onSuccess: () => {
+      setEditingPersistentPaths(false);
+      setPersistentPathsError(null);
+      void queryClient.invalidateQueries({ queryKey: machinesKeys.persistentPaths(machineId) });
+    },
+    onError: (err) => {
+      setPersistentPathsError(err instanceof Error ? err.message : "Override failed.");
+    },
+  });
+
+  const [editingAccessMethods, setEditingAccessMethods] = useState(false);
+  const [draftAccessMethods, setDraftAccessMethods] = useState<AccessMethodsEnabled>({
+    webTerminal: true,
+    ssh: true,
+  });
+  const [accessMethodsError, setAccessMethodsError] = useState<string | null>(null);
+
+  const accessMethodsMutation = useMutation({
+    mutationFn: (next: AccessMethodsEnabled) => overrideAccessMethodsEnabled(machineId, next),
+    onSuccess: () => {
+      setEditingAccessMethods(false);
+      setAccessMethodsError(null);
+      void queryClient.invalidateQueries({
+        queryKey: machinesKeys.accessMethodsEnabled(machineId),
+      });
+    },
+    onError: (err) => {
+      setAccessMethodsError(err instanceof Error ? err.message : "Override failed.");
     },
   });
 
@@ -214,6 +271,155 @@ export function MachineDetailPage() {
               </div>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Persistent paths</CardTitle>
+          <CardDescription>
+            Disposable — these paths survive an OS reimage/upgrade; the OS does not (spec §7).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {persistentPathsQuery.isPending && (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          )}
+          {persistentPathsQuery.isError && (
+            <p className="text-sm text-destructive">Failed to load persistent paths.</p>
+          )}
+          {persistentPathsQuery.data && (
+            <>
+              <SettingRow
+                label="Paths"
+                value={
+                  persistentPathsQuery.data.value.length > 0
+                    ? persistentPathsQuery.data.value.join(", ")
+                    : "none"
+                }
+                source={persistentPathsQuery.data.source}
+                onOverride={() => {
+                  setDraftPaths(persistentPathsQuery.data?.value.join(", ") ?? "");
+                  setEditingPersistentPaths(true);
+                }}
+              />
+              <LineageGutter source={persistentPathsQuery.data.source} viewing="machine" />
+              {editingPersistentPaths && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={draftPaths}
+                      onChange={(event) => setDraftPaths(event.target.value)}
+                      placeholder="/data, /etc/myapp"
+                      aria-label="Persistent paths, comma-separated"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        persistentPathsMutation.mutate(
+                          draftPaths
+                            .split(",")
+                            .map((path) => path.trim())
+                            .filter((path) => path.length > 0),
+                        )
+                      }
+                      disabled={persistentPathsMutation.isPending}
+                    >
+                      Save override
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setEditingPersistentPaths(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                  {persistentPathsError && (
+                    <p className="text-xs text-destructive">{persistentPathsError}</p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Access methods</CardTitle>
+          <CardDescription>
+            Admin-disablable at any level; disabling web terminal ends live sessions immediately,
+            not merely new ones (spec §11.1).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {accessMethodsQuery.isPending && (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          )}
+          {accessMethodsQuery.isError && (
+            <p className="text-sm text-destructive">Failed to load access methods.</p>
+          )}
+          {accessMethodsQuery.data && (
+            <>
+              <SettingRow
+                label="Enabled methods"
+                value={formatAccessMethods(accessMethodsQuery.data.value)}
+                source={accessMethodsQuery.data.source}
+                onOverride={() => {
+                  if (accessMethodsQuery.data) setDraftAccessMethods(accessMethodsQuery.data.value);
+                  setEditingAccessMethods(true);
+                }}
+              />
+              <LineageGutter source={accessMethodsQuery.data.source} viewing="machine" />
+              {editingAccessMethods && (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={draftAccessMethods.webTerminal}
+                        onChange={(event) =>
+                          setDraftAccessMethods((prev) => ({
+                            ...prev,
+                            webTerminal: event.target.checked,
+                          }))
+                        }
+                      />
+                      Web terminal
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={draftAccessMethods.ssh}
+                        onChange={(event) =>
+                          setDraftAccessMethods((prev) => ({ ...prev, ssh: event.target.checked }))
+                        }
+                      />
+                      SSH
+                    </label>
+                    <Button
+                      size="sm"
+                      onClick={() => accessMethodsMutation.mutate(draftAccessMethods)}
+                      disabled={accessMethodsMutation.isPending}
+                    >
+                      Save override
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setEditingAccessMethods(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                  {accessMethodsError && (
+                    <p className="text-xs text-destructive">{accessMethodsError}</p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 

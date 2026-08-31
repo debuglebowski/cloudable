@@ -26,6 +26,7 @@ import { machines, sessions } from "@cloudable/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { Db } from "../db/layer";
+import { resolveAccessMethodsEnabled } from "../domain/machine/settings";
 import { EventBus } from "../services/EventBus";
 import type { SignerTag } from "../services/Signer";
 import { type SessionMethod, mintSessionToken } from "./session-token";
@@ -89,11 +90,30 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
         });
         const machine = found[0];
 
-        const denialReason = !machine
+        let denialReason: string | null = !machine
           ? "machine_not_found"
           : machine.state !== "running"
             ? `machine_${machine.state}`
             : null;
+
+        // spec.md §11.1/§11: "Admin-disablable at any level" — refusing new
+        // sessions once a method is disabled is the other half of the gap
+        // alongside `applySettingChange`'s termination of already-live ones
+        // (docs/access.md's "disabling terminates live sessions, not
+        // merely refuses new ones"). Checked only once the machine is known
+        // to exist and be running, above.
+        if (!denialReason && machine) {
+          const accessMethods = yield* resolveAccessMethodsEnabled(db, {
+            orgId: machine.orgId,
+            templateId: machine.templateId,
+            machineId: machine.id,
+          }).pipe(Effect.mapError((cause) => new TunnelError({ reason: "lookup_failed", cause })));
+          const methodEnabled =
+            input.method === "terminal" ? accessMethods.value.webTerminal : accessMethods.value.ssh;
+          if (!methodEnabled) {
+            denialReason = input.method === "terminal" ? "web_terminal_disabled" : "ssh_disabled";
+          }
+        }
 
         if (denialReason) {
           yield* eventBus
