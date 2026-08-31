@@ -3,6 +3,7 @@ import { and, asc, eq, gt, or } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
+import { type EffectiveLoggingTier, getEffectiveLoggingTier } from "../../logging/settings";
 import { EventBus } from "../../services/EventBus";
 import { InvalidCursorError, MachineNotFoundError, PackagePinConflictError } from "./errors";
 import {
@@ -16,6 +17,14 @@ import {
   findPinConflicts,
   resolveManifest,
 } from "./manifest";
+import { resolveOrgDefaultRegion } from "./region-policy";
+import {
+  type AccessMethodsEnabled,
+  type PersistentPaths,
+  type ResolvedMachineSetting,
+  resolveAccessMethodsEnabled,
+  resolvePersistentPaths,
+} from "./settings";
 
 export class MachineServiceError extends Data.TaggedError("MachineServiceError")<{
   reason: string;
@@ -28,7 +37,17 @@ type MachinePackageTableRow = typeof machinePackages.$inferSelect;
 export interface CreateMachineInput {
   orgId: string;
   name: string;
-  region: string;
+  // Optional (and nullable, same convention as `templateId`/`actorPersonId`
+  // below — `exactOptionalPropertyTypes` needs a real "not provided" value
+  // callers can pass through explicitly): spec.md §5 lists region among
+  // every setting that must flow org → machine through `resolveSetting()`,
+  // not a caller-supplied value. Omitted/null/blank, `create` resolves the
+  // org's configured default region (`region-policy.ts`) rather than
+  // requiring the caller to always supply one. An explicit value is still
+  // honored as-is — this is a one-time resolution at creation, not a live
+  // override channel (see `region-policy.ts`'s doc comment for why region
+  // differs from retention).
+  region?: string | null;
   sizeSku: string;
   image: string;
   // Required, never null: CLAUDE.md invariant #3 — a machine always has
@@ -53,6 +72,10 @@ export interface ListMachinesResult {
 
 export interface MachineDetail extends MachineRow {
   manifest: ResolvedManifestEntry[];
+  persistentPaths: ResolvedMachineSetting<PersistentPaths>;
+  accessMethodsEnabled: ResolvedMachineSetting<AccessMethodsEnabled>;
+  /** The tier actually in effect for this machine — its own override if it has one, else the org default (spec §17, docs/inheritance.md). */
+  loggingTier: EffectiveLoggingTier;
 }
 
 export interface PackageManifestEdit {
@@ -162,6 +185,11 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
 
     const create = (input: CreateMachineInput): Effect.Effect<MachineRow, MachineServiceError> =>
       Effect.gen(function* () {
+        const region =
+          input.region && input.region.trim().length > 0
+            ? input.region
+            : (yield* resolveOrgDefaultRegion(db, input.orgId)).value;
+
         const rows = yield* Effect.tryPromise({
           try: () =>
             db
@@ -171,7 +199,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                 templateId: input.templateId ?? null,
                 ownerPersonId: input.ownerPersonId,
                 name: input.name,
-                region: input.region,
+                region,
                 sizeSku: input.sizeSku,
                 image: input.image,
               })
@@ -270,12 +298,26 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       Effect.gen(function* () {
         const machine = yield* fetchMachine(machineId);
         const rows = yield* fetchManifestRows(machine);
-        const manifest = resolveManifest(rows.map(toManifestRow), {
+        const chain = {
           orgId: machine.orgId,
           templateId: machine.templateId,
           machineId: machine.id,
-        });
-        return { ...machine, manifest };
+        };
+        const manifest = resolveManifest(rows.map(toManifestRow), chain);
+        const [persistentPaths, accessMethodsEnabled] = yield* Effect.all([
+          resolvePersistentPaths(db, chain),
+          resolveAccessMethodsEnabled(db, chain),
+        ]).pipe(
+          Effect.mapError(
+            (cause) => new MachineServiceError({ reason: "settings_read_failed", cause }),
+          ),
+        );
+        const loggingTier = yield* getEffectiveLoggingTier(db, chain).pipe(
+          Effect.mapError(
+            (cause) => new MachineServiceError({ reason: "logging_tier_read_failed", cause }),
+          ),
+        );
+        return { ...machine, manifest, persistentPaths, accessMethodsEnabled, loggingTier };
       });
 
     const updatePackages = (

@@ -30,14 +30,6 @@ export interface InsertElevationValues {
   status: ElevationStatus;
 }
 
-export interface InsertAutoApprovedApprovalArgs {
-  orgId: string;
-  personId: string;
-  machineId: string;
-  reason: string;
-  now: Date;
-}
-
 export interface InsertNotificationArgs {
   orgId: string;
   ownerPersonId: string;
@@ -67,9 +59,6 @@ export interface ElevationRepo {
     keys: ReadonlyArray<string>,
     scopeIds: ReadonlyArray<string>,
   ): Effect.Effect<ReadonlyArray<SettingRow<unknown>>, Error>;
-  insertAutoApprovedApproval(
-    args: InsertAutoApprovedApprovalArgs,
-  ): Effect.Effect<{ id: string }, Error>;
   insertElevation(values: InsertElevationValues): Effect.Effect<Elevation, Error>;
   updateElevationGranted(
     elevationId: string,

@@ -12,7 +12,6 @@ import { EventBus, type EventBusError } from "../../services/EventBus";
 import {
   type ElevationRepo,
   ElevationRepoTag,
-  type InsertAutoApprovedApprovalArgs,
   type InsertElevationValues,
   type InsertNotificationArgs,
   type MachineRecord,
@@ -87,7 +86,6 @@ function makeFakeRepo(s: Seed) {
   ]);
   const settingRows: SettingRow<unknown>[] = [];
   const elevationsById = new Map<string, Elevation>();
-  const approvalIds = new Set<string>();
   const notifications: Array<InsertNotificationArgs & { id: string }> = [];
   // Lets a test simulate a transient `insertNotification` failure (e.g. a
   // dropped connection) without touching the real repo/DB — see the "owner
@@ -107,11 +105,6 @@ function makeFakeRepo(s: Seed) {
     // construction; `resolveSetting`'s own org/template/machine precedence
     // is covered separately by `policy.test.ts`.
     findSettingRows: () => Effect.succeed(settingRows),
-    insertAutoApprovedApproval: (_args: InsertAutoApprovedApprovalArgs) => {
-      const id = nextId("approval");
-      approvalIds.add(id);
-      return Effect.succeed({ id });
-    },
     insertElevation: (values: InsertElevationValues) => {
       const elevation: Elevation = { id: nextId("elevation"), ...values };
       elevationsById.set(elevation.id, elevation);
@@ -192,6 +185,19 @@ function makeFakeApprovalService() {
       return toResult(id, "pending");
     });
 
+  // Mirrors the real `ApprovalService.requestAutoApproved` — always
+  // "approved" immediately, unlike `request` above which the real service
+  // only auto-approves when the org's own settings resolve to mode "none".
+  // `ElevationService`'s "always"-policy branch calls this one directly.
+  const requestAutoApproved = (
+    _req: ApprovalRequest,
+  ): Effect.Effect<ApprovalResult, ApprovalError> =>
+    Effect.sync(() => {
+      const id = nextId("fake-auto-approval");
+      statuses.set(id, "approved");
+      return toResult(id, "approved");
+    });
+
   const status = (approvalId: string): Effect.Effect<ApprovalResult, ApprovalError> =>
     Effect.sync(() => toResult(approvalId, statuses.get(approvalId) ?? "pending"));
 
@@ -207,6 +213,7 @@ function makeFakeApprovalService() {
       decide,
       status,
       list,
+      requestAutoApproved,
     }),
     setStatus: (approvalId: string, next: ApprovalResult["status"]) =>
       statuses.set(approvalId, next),
