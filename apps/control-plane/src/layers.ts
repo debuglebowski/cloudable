@@ -16,6 +16,7 @@ import { AttestationRegistryLive } from "./services/attestation/registry";
 import { FederationService } from "./services/federation/FederationService";
 import { SshCaService } from "./services/ssh-ca/SshCaService";
 import { TunnelServer } from "./tunnel/server";
+import { TunnelSignal } from "./tunnel/signal";
 
 /**
  * `attestation` is deliberately NOT one of the swappable `adapters` below,
@@ -49,8 +50,16 @@ export const buildAppLive = (adapters: {
   const sshCa = SshCaService.Default.pipe(
     Layer.provideMerge(Layer.mergeAll(eventBus, adapters.signer, infra)),
   );
+  // `TunnelServer.mintSession`/`terminateSessionsForMachine` push to `TunnelSignal` (the
+  // CP -> agent tunnel-signal channel, tunnel/signal.ts) lazily, the same "called later, not
+  // only at layer-build time" shape `EventBus`/`Signer` already have here — see the
+  // `provideMerge` comment below. `tunnelSignal` is also exposed standalone in the outer
+  // `Layer.mergeAll(...)` further down (same reference, memoized — see `DbLive`'s own note
+  // there) so `TunnelSignalLive` (the long-poll HTTP handler) can resolve it too, independent
+  // of `TunnelServer`.
+  const tunnelSignal = TunnelSignal.Default;
   const tunnel = TunnelServer.Default.pipe(
-    Layer.provideMerge(Layer.mergeAll(eventBus, adapters.signer, infra)),
+    Layer.provideMerge(Layer.mergeAll(eventBus, adapters.signer, infra, tunnelSignal)),
   );
 
   return Layer.mergeAll(
@@ -107,6 +116,12 @@ export const buildAppLive = (adapters: {
     ),
     sshCa,
     tunnel,
+    // Same reference as the one `tunnel` above provides itself via `provideMerge` — Effect's
+    // layer memoization means this shares that single built instance rather than constructing
+    // a second one (same note `DbLive` above makes about itself). Exposed standalone here so
+    // `TunnelSignalLive` (the tunnel-signal long-poll HTTP handler) can depend on `TunnelSignal`
+    // directly, without going through `TunnelServer` at all.
+    tunnelSignal,
     // Feature units: append your service's `.Default` (or Layer) to the Layer.mergeAll(...) argument
     // list above. Never reorder existing entries.
     //

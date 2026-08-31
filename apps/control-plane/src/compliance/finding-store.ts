@@ -110,3 +110,38 @@ export const clearResolvedFindings = (
 /** Age in whole days between `firstSeen` and `now` (default: the current time), floored at 0. */
 export const ageInDays = (firstSeen: Date, now: Date = new Date()): number =>
   Math.max(0, Math.floor((now.getTime() - firstSeen.getTime()) / 86_400_000));
+
+/**
+ * Median age in whole days across a set of open findings' `firstSeenAt`
+ * timestamps (spec §19 "Finding age": "surface median age and trend across
+ * the audit window, not just the current count") — the "N open · oldest
+ * Nd" line callers already compute only shows one end of the distribution;
+ * this is the other one.
+ *
+ * A pure function over already-fetched timestamps rather than its own DB
+ * read: every check's `evaluate()` now calls `clearResolvedFindings` right
+ * after upserting (this unit's fix), so by the time `evaluateAllChecks`
+ * returns, a check's `findings` are exactly the rows it currently holds in
+ * `compliance_finding_state` — re-querying the table would just re-fetch
+ * the same timestamps this call already has.
+ *
+ * `null` for an empty set, mirroring how callers already treat "oldest
+ * open" as absent rather than zero when there are no open findings.
+ */
+export const medianAgeInDays = (
+  firstSeenAts: ReadonlyArray<Date>,
+  now: Date = new Date(),
+): number | null => {
+  if (firstSeenAts.length === 0) return null;
+
+  const ages = firstSeenAts.map((firstSeenAt) => ageInDays(firstSeenAt, now)).sort((a, b) => a - b);
+  const mid = Math.floor(ages.length / 2);
+  const midAge = ages[mid];
+  // `mid` is always a valid index into non-empty `ages` — this is here to
+  // satisfy `noUncheckedIndexedAccess` without a non-null assertion.
+  if (midAge === undefined) return null;
+  if (ages.length % 2 !== 0) return midAge;
+
+  const lowerMidAge = ages[mid - 1];
+  return lowerMidAge === undefined ? midAge : (lowerMidAge + midAge) / 2;
+};
