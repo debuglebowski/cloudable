@@ -1,5 +1,6 @@
 import { useId } from "react";
 
+import { CONTROL_STATUSES, CONTROL_STATUS_LABELS, type ControlStatus } from "@/api/compliance";
 import {
   APPROVAL_ACTION_LABELS,
   type ApprovalActionType,
@@ -212,6 +213,79 @@ export function RetentionLocationDialog({
                 onChange={() => setLocation(candidate)}
               />
               {RETENTION_LOCATION_LABELS[candidate]}
+            </label>
+          ))}
+        </fieldset>
+      )}
+    </ValueEditDialog>
+  );
+}
+
+/** Sentinel for "no explicit override — use Cloudable's computed default", the one choice
+ * that isn't a real `ControlStatus`. Saved as `status: null` (see `useSetControlOverride`). */
+const USE_COMPUTED_DEFAULT = "default" as const;
+type ControlOverrideChoice = ControlStatus | typeof USE_COMPUTED_DEFAULT;
+
+export interface ControlOverrideDialogProps {
+  controlId: string | null;
+  controlLabel: string;
+  /** The control's current status as returned by the control map — already reflects any
+   * existing override. */
+  currentStatus: ControlStatus;
+  currentlyOverridden: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (controlId: string, status: ControlStatus | null) => void | Promise<void>;
+}
+
+/**
+ * A control's status is computed by default (docs/spec.md §19) — this only lets an org
+ * flip a specific control to its own explicit choice, never edits the computation itself.
+ * "Use Cloudable's computed default" clears any existing override for this control.
+ */
+export function ControlOverrideDialog({
+  controlId,
+  controlLabel,
+  currentStatus,
+  currentlyOverridden,
+  onOpenChange,
+  onSave,
+}: ControlOverrideDialogProps) {
+  const name = useId();
+
+  return (
+    <ValueEditDialog<ControlOverrideChoice>
+      open={controlId != null}
+      currentValue={currentlyOverridden ? currentStatus : USE_COMPUTED_DEFAULT}
+      title={`${controlLabel} — status override`}
+      description="Cloudable computes a default status from its registered compliance checks. Override it for your own framework or auditor (docs/spec.md §19) — this never changes the computation itself, only what this org reports."
+      onOpenChange={onOpenChange}
+      onSave={(choice) => {
+        if (controlId) return onSave(controlId, choice === USE_COMPUTED_DEFAULT ? null : choice);
+      }}
+    >
+      {(choice, setChoice) => (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="sr-only">Control status</legend>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name={name}
+              value={USE_COMPUTED_DEFAULT}
+              checked={choice === USE_COMPUTED_DEFAULT}
+              onChange={() => setChoice(USE_COMPUTED_DEFAULT)}
+            />
+            Use Cloudable's computed default
+          </label>
+          {CONTROL_STATUSES.map((candidate) => (
+            <label key={candidate} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name={name}
+                value={candidate}
+                checked={choice === candidate}
+                onChange={() => setChoice(candidate)}
+              />
+              {CONTROL_STATUS_LABELS[candidate]}
             </label>
           ))}
         </fieldset>

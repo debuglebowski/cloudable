@@ -16,6 +16,7 @@ export * from "./tables/snapshot";
 export * from "./tables/integration";
 export * from "./tables/elevation";
 export * from "./tables/compliance-finding-state";
+export * from "./tables/control-override";
 export * from "./tables/secret-binding";
 export * from "./tables/upgrade-attempt";
 
