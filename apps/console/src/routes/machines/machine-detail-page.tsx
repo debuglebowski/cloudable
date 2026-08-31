@@ -9,13 +9,21 @@ import {
   getMachine,
   getMachineAccessMethodsEnabled,
   getMachineDrift,
+  getMachineLoggingTier,
   getMachineManifest,
   getMachinePersistentPaths,
   machinesKeys,
   overrideAccessMethodsEnabled,
+  overrideMachineLoggingTier,
   overrideManifestEntry,
   overridePersistentPaths,
 } from "@/api/machines";
+import {
+  DEFAULT_LOGGING_TIER,
+  LOGGING_TIER_LABELS,
+  type LoggingTier,
+  organisationKeys,
+} from "@/api/organisation";
 import { Freshness } from "@/components/freshness";
 import { LineageGutter } from "@/components/lineage-gutter";
 import { SettingRow } from "@/components/setting-row";
@@ -24,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
+import { LoggingTierDialog } from "../organisation/setting-dialogs";
 import { MACHINE_STATE_BADGE_VARIANT, MACHINE_STATE_LABEL } from "./machine-state";
 
 function formatAccessMethods(methods: AccessMethodsEnabled | null | undefined): string {
@@ -63,10 +72,32 @@ export function MachineDetailPage() {
     queryKey: machinesKeys.accessMethodsEnabled(machineId),
     queryFn: () => getMachineAccessMethodsEnabled(machineId),
   });
+  const loggingTierQuery = useQuery({
+    queryKey: machinesKeys.loggingTier(machineId),
+    queryFn: () => getMachineLoggingTier(machineId),
+  });
 
   const [editingPackage, setEditingPackage] = useState<string | null>(null);
   const [draftVersion, setDraftVersion] = useState("");
   const [overrideErrors, setOverrideErrors] = useState<Record<string, string>>({});
+  const [editingLoggingTier, setEditingLoggingTier] = useState(false);
+  const [loggingTierError, setLoggingTierError] = useState<string | null>(null);
+
+  const loggingTierMutation = useMutation({
+    mutationFn: (tier: LoggingTier) => overrideMachineLoggingTier(machineId, tier),
+    onSuccess: () => {
+      setLoggingTierError(null);
+      void queryClient.invalidateQueries({ queryKey: machinesKeys.loggingTier(machineId) });
+      // The Organisation page's "N machines override this" count
+      // (`loggingTierOverrideCount`) is derived from this same write, so it
+      // goes stale unless invalidated here too — it has no query of its own
+      // running on this page to pick the change up otherwise.
+      void queryClient.invalidateQueries({ queryKey: organisationKeys.all });
+    },
+    onError: (err) => {
+      setLoggingTierError(err instanceof Error ? err.message : "Override failed.");
+    },
+  });
 
   const [editingPersistentPaths, setEditingPersistentPaths] = useState(false);
   const [draftPaths, setDraftPaths] = useState("");
@@ -439,6 +470,43 @@ export function MachineDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Logging</CardTitle>
+          <CardDescription>
+            Effective tier for this machine — its own override if set, otherwise the org default
+            (docs/spec.md §17).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          {loggingTierQuery.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {loggingTierQuery.isError && (
+            <p className="text-sm text-destructive">Failed to load logging tier.</p>
+          )}
+          {loggingTierQuery.data && (
+            <>
+              <SettingRow
+                label="Logging tier"
+                value={LOGGING_TIER_LABELS[loggingTierQuery.data.tier]}
+                source={loggingTierQuery.data.source}
+                onOverride={() => setEditingLoggingTier(true)}
+              />
+              <LineageGutter source={loggingTierQuery.data.source} viewing="machine" />
+            </>
+          )}
+          {loggingTierError && <p className="text-xs text-destructive">{loggingTierError}</p>}
+        </CardContent>
+      </Card>
+
+      <LoggingTierDialog
+        open={editingLoggingTier}
+        currentTier={loggingTierQuery.data?.tier ?? DEFAULT_LOGGING_TIER}
+        onOpenChange={setEditingLoggingTier}
+        onSave={async (tier) => {
+          await loggingTierMutation.mutateAsync(tier);
+        }}
+      />
     </div>
   );
 }

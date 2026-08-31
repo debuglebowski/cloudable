@@ -9,6 +9,17 @@
 export type SettingScopeType = "org" | "machine";
 
 /**
+ * The generic settings key for logging tier (spec §17) — the one literal
+ * key string a non-Effect consumer needs to know to write a
+ * `PatchSettingRequest`/`ImportConfigEntry` targeting it. Defined here
+ * (rather than only in `apps/control-plane/src/logging/settings.ts`,
+ * which re-exports it as `LOGGING_TIER_KEY` for its own internal callers)
+ * so the console has one shared constant to import instead of a second,
+ * independently-typed copy of the same string literal.
+ */
+export const LOGGING_TIER_SETTING_KEY = "logging_tier";
+
+/**
  * Who made the change. "person" is a UI-driven admin edit; "system" is a
  * Git-sourced (or otherwise automated) change applied via `/config/import`.
  * Once real auth (`CurrentUserTag`) is wired to the PATCH endpoint, this can

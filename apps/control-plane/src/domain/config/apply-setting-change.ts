@@ -1,4 +1,4 @@
-import type { DomainEvent, MachineEvent, OrgEvent } from "@cloudable/events";
+import type { DomainEvent, OrgEvent } from "@cloudable/events";
 import { type SettingRow, machines, resolveSetting, settingValues } from "@cloudable/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
@@ -6,6 +6,7 @@ import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import { TunnelServer } from "../../tunnel/server";
+import { machineSettingChangedEvent } from "../machine/events";
 import { ACCESS_METHODS_ENABLED_KEY, webTerminalEnabledOf } from "../machine/settings";
 import {
   InvalidScopeError,
@@ -222,24 +223,36 @@ export const applySettingChange = (
     const occurredAt = input.occurredAt ?? new Date();
     let event: DomainEvent;
     if (input.scopeType === "machine") {
+      // Shared with `MachineService.updatePackages` (the machine
+      // package-manifest editor's own real write path — see
+      // docs/inheritance.md for why package-manifest entries live in their
+      // own `machinePackages` table rather than as `settingValues` rows)
+      // so both places that ever emit `machine.setting_changed` build it
+      // from the exact same shape and cannot drift apart.
+      //
+      // `machineSettingChangedEvent` sets `id`/`recordedAt` to placeholders
+      // (real values are stamped by `EventBus.publish`'s `toEventRows` right
+      // before insert — see that function's own doc comment), so they're
+      // overridden here too to keep `ApplySettingChangeResult.event` — the
+      // value handed back to this function's own caller, before it ever
+      // reaches `publish` — populated the same way the org-scope branch
+      // below populates it.
       event = {
-        id: ulid(),
-        occurredAt,
-        recordedAt: occurredAt,
-        orgId: input.orgId,
-        actorType: input.actorType,
-        actorId: input.actorId,
-        machineId: input.scopeId,
-        correlationId: input.correlationId,
-        schemaVersion: 1,
-        type: "machine.setting_changed",
-        payload: {
+        ...machineSettingChangedEvent({
+          machineId: input.scopeId,
+          orgId: input.orgId,
+          correlationId: input.correlationId,
+          actorType: input.actorType,
+          actorId: input.actorId,
           key: input.key,
           previous,
           current: input.value,
           overridesLevel,
-        },
-      } satisfies MachineEvent;
+          occurredAt,
+        }),
+        id: ulid(),
+        recordedAt: occurredAt,
+      };
     } else {
       event = {
         id: ulid(),

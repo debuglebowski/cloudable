@@ -2,22 +2,23 @@ import { type SettingRow, resolveSetting, settingValues } from "@cloudable/schem
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
-import type { ApprovalMode } from "./approval-escalation";
 import { dbTry } from "./queries";
 
 /**
  * Org-configurable archive policy, resolved through `resolveSetting()` (org → machine —
  * there is no template layer in v1, and no per-machine override is written by any
  * feature unit yet, but the chain supports one for free the day it's needed).
+ *
+ * Restore-approval policy is NOT resolved here — despite once having its own dead
+ * `archive.restoreApprovalMode` key (removed; it was read but never written anywhere,
+ * and its own default disagreed with the setting that actually gates restores). The
+ * real gate is `ApprovalService`'s own `approval_mode:snapshot_restore` setting,
+ * resolved inside `ApprovalService.request()` and escalated per restore mode via
+ * `approval-escalation.ts`'s `resolveRestoreApprovalFloor` — see `restore.ts`.
  */
 
 export const RETENTION_DAYS_KEY = "archive.retentionDays";
 export const DEFAULT_RETENTION_DAYS = 30;
-
-/** Base restore-approval policy for `mode: "data"` — the org's own choice, org-configurable,
- * default "none". `mode: "config"`/`"full"` escalate above this — see `approval-escalation.ts`. */
-export const RESTORE_APPROVAL_MODE_KEY = "archive.restoreApprovalMode";
-export const DEFAULT_RESTORE_APPROVAL_MODE: ApprovalMode = "none";
 
 const loadSettingRows = <T>(
   orgId: string,
@@ -59,17 +60,4 @@ export const resolveRetentionDays = (
     const rows = yield* loadSettingRows<number>(orgId, machineId, RETENTION_DAYS_KEY);
     const resolved = resolveSetting<number>(RETENTION_DAYS_KEY, rows, { orgId, machineId });
     return resolved?.value ?? DEFAULT_RETENTION_DAYS;
-  });
-
-export const resolveOrgRestoreApprovalMode = (
-  orgId: string,
-  machineId: string,
-): Effect.Effect<ApprovalMode, never, Db> =>
-  Effect.gen(function* () {
-    const rows = yield* loadSettingRows<ApprovalMode>(orgId, machineId, RESTORE_APPROVAL_MODE_KEY);
-    const resolved = resolveSetting<ApprovalMode>(RESTORE_APPROVAL_MODE_KEY, rows, {
-      orgId,
-      machineId,
-    });
-    return resolved?.value ?? DEFAULT_RESTORE_APPROVAL_MODE;
   });

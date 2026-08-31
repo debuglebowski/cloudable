@@ -11,7 +11,10 @@ import { Db } from "../../db/layer";
 import { handleImportConfig, handlePatchSetting } from "../../http/handlers/config";
 import { EventBus } from "../../services/EventBus";
 import { TunnelServer } from "../../tunnel/server";
+import { TunnelSignal } from "../../tunnel/signal";
+import { MachineService } from "../machine/MachineService";
 import { ACCESS_METHODS_ENABLED_KEY } from "../machine/settings";
+import { updateOrgSettings } from "../organisation/settings";
 import { applySettingChange } from "./apply-setting-change";
 import { PinnedSettingError } from "./errors";
 import { triggerReconcile } from "./trigger-reconcile";
@@ -82,6 +85,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
   let sql: ReturnType<typeof postgres>;
   let db: PostgresJsDatabase<typeof schema>;
   let envLayer: Layer.Layer<Db | EventBus | TunnelServer>;
+  let machineLayer: Layer.Layer<MachineService>;
 
   beforeAll(async () => {
     sql = postgres(databaseUrl);
@@ -90,10 +94,12 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
 
     const dbLayer = Layer.succeed(Db, db);
     const eventBusLayer = EventBus.Default.pipe(Layer.provide(dbLayer));
+    const tunnelSignalLayer = TunnelSignal.Default;
     const tunnelLayer = TunnelServer.Default.pipe(
-      Layer.provide(Layer.mergeAll(dbLayer, eventBusLayer)),
+      Layer.provide(Layer.mergeAll(dbLayer, eventBusLayer, tunnelSignalLayer)),
     );
     envLayer = Layer.mergeAll(dbLayer, eventBusLayer, tunnelLayer);
+    machineLayer = Layer.provide(MachineService.Default, dbLayer);
   });
 
   afterAll(async () => {
@@ -102,6 +108,9 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
 
   const run = <A, E>(effect: Effect.Effect<A, E, Db | EventBus | TunnelServer>) =>
     Effect.runPromise(Effect.provide(effect, envLayer));
+
+  const runMachineService = <A, E>(effect: Effect.Effect<A, E, MachineService>) =>
+    Effect.runPromise(Effect.provide(effect, machineLayer));
 
   async function seedOrg() {
     const [org] = await db
@@ -561,6 +570,183 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         key: "example_key",
         previous: null,
         current: { foo: "bar" },
+        overridesLevel: "org",
+      });
+    });
+  });
+
+  describe("updateOrgSettings", () => {
+    test("routes org-scoped writes through applySettingChange: same event a direct call would produce", async () => {
+      const orgA = await seedOrg();
+      const orgB = await seedOrg();
+
+      await run(
+        updateOrgSettings({
+          orgId: orgA.id,
+          loggingTier: 3,
+          actor: { actorType: "person", actorId: "person-1" },
+        }),
+      );
+
+      // The exact same call `updateOrgSettings` now makes internally,
+      // issued directly against a second org.
+      await run(
+        applySettingChange({
+          orgId: orgB.id,
+          scopeType: "org",
+          scopeId: orgB.id,
+          key: "logging_tier",
+          value: 3,
+          actorType: "person",
+          actorId: "person-1",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [eventA] = await db.select().from(events).where(eq(events.orgId, orgA.id));
+      const [eventB] = await db.select().from(events).where(eq(events.orgId, orgB.id));
+
+      expect(eventA?.type).toBe("org.setting_changed");
+      expect(eventA?.payload).toEqual(eventB?.payload);
+      expect(eventA?.payload).toEqual({
+        key: "logging_tier",
+        previous: null,
+        current: 3,
+        level: "org",
+      });
+    });
+
+    test("a PATCH touching multiple keys shares one correlationId across their events, same as one PATCH /config/settings call", async () => {
+      const org = await seedOrg();
+
+      await run(
+        updateOrgSettings({
+          orgId: org.id,
+          loggingTier: 1,
+          retentionDefaultDays: 90,
+          actor: { actorType: "system", actorId: "system" },
+        }),
+      );
+
+      const rows = await db.select().from(events).where(eq(events.orgId, org.id));
+      expect(rows).toHaveLength(2);
+      expect(new Set(rows.map((r) => r.correlationId)).size).toBe(1);
+      expect(rows.every((r) => r.type === "org.setting_changed")).toBe(true);
+    });
+
+    test("rejects the whole PATCH before writing anything when one field fails validation, even if an earlier field would have succeeded", async () => {
+      const org = await seedOrg();
+
+      const error = await run(
+        updateOrgSettings({
+          orgId: org.id,
+          approvalModes: { break_glass: "dual" },
+          retentionDefaultDays: -5,
+          actor: { actorType: "person", actorId: "person-1" },
+        }).pipe(Effect.flip),
+      );
+
+      expect(error).toMatchObject({ reason: "retention_days_must_be_a_positive_integer" });
+
+      // Nothing committed — not the settingValues row, and no event either.
+      const [row] = await db
+        .select()
+        .from(settingValues)
+        .where(
+          and(
+            eq(settingValues.scopeId, org.id),
+            eq(settingValues.key, "approval_mode:break_glass"),
+          ),
+        );
+      expect(row).toBeUndefined();
+      const rows = await db.select().from(events).where(eq(events.orgId, org.id));
+      expect(rows).toHaveLength(0);
+    });
+
+    test("previously-silent approval-mode and retention-days writes now emit org.setting_changed (the gap this unit closes)", async () => {
+      const org = await seedOrg();
+
+      await run(
+        updateOrgSettings({
+          orgId: org.id,
+          approvalModes: { break_glass: "dual" },
+          retentionDefaultDays: 45,
+          actor: { actorType: "person", actorId: "person-1" },
+        }),
+      );
+
+      const rows = await db.select().from(events).where(eq(events.orgId, org.id));
+      const keys = rows.map((r) => (r.payload as { key: string }).key).sort();
+      expect(keys).toEqual(["approval_mode:break_glass", "archive.retentionDays"]);
+    });
+  });
+
+  describe("MachineService.updatePackages", () => {
+    test("emits machine.setting_changed built from the exact same shape applySettingChange uses for a machine-scope change", async () => {
+      const org = await seedOrg();
+      const machineA = await seedMachine(org.id);
+      const machineB = await seedMachine(org.id);
+
+      // The real machine package-manifest write path (PATCH
+      // /api/v1/machines/:id/packages) — package-manifest entries live in
+      // their own `machinePackages` table, not `settingValues` (see
+      // docs/inheritance.md: "packageName IS the setting key" but the
+      // storage is scope-generic and set-shaped, deliberately not a row
+      // inside settingValues), so this cannot literally call
+      // `applySettingChange` without either corrupting that table's role
+      // as the single source of truth for `resolveManifest`/reconcile/
+      // compliance, or writing a second, drifting settingValues row nothing
+      // reads. What IS shared, and asserted here, is the event: both this
+      // and `applySettingChange`'s machine branch build their
+      // `machine.setting_changed` event via the one `machineSettingChangedEvent`
+      // helper (`domain/machine/events.ts`), so the audit trail shape can
+      // never drift apart between the two.
+      await runMachineService(
+        Effect.gen(function* () {
+          const machineService = yield* MachineService;
+          yield* machineService.updatePackages({
+            machineId: machineA.id,
+            upserts: [{ packageName: "docker", versionPin: "24", pinned: false }],
+            actorPersonId: null,
+          });
+        }),
+      );
+
+      await run(
+        applySettingChange({
+          orgId: org.id,
+          scopeType: "machine",
+          scopeId: machineB.id,
+          key: "docker",
+          value: { versionPin: "24", pinned: false },
+          actorType: "system",
+          actorId: "system",
+          correlationId: crypto.randomUUID(),
+        }),
+      );
+
+      const [eventA] = await db.select().from(events).where(eq(events.machineId, machineA.id));
+      const [eventB] = await db.select().from(events).where(eq(events.machineId, machineB.id));
+
+      expect(eventA?.type).toBe("machine.setting_changed");
+      expect(eventB?.type).toBe("machine.setting_changed");
+      // Same fields, same key/current value. `overridesLevel` differs by
+      // one pre-existing convention (MachineService reports "none" when no
+      // prior resolved value exists anywhere in the chain; applySettingChange
+      // defaults to "org") — not something this unit changes.
+      expect(Object.keys(eventA?.payload as object).sort()).toEqual(
+        Object.keys(eventB?.payload as object).sort(),
+      );
+      expect(eventA?.payload).toEqual({
+        key: "docker",
+        previous: null,
+        current: { versionPin: "24", pinned: false },
+        overridesLevel: "none",
+      });
+      expect(eventB?.payload).toEqual({
+        key: "docker",
+        previous: null,
+        current: { versionPin: "24", pinned: false },
         overridesLevel: "org",
       });
     });
