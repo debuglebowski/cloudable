@@ -54,7 +54,10 @@ const pageInfoSchema = Schema.Struct({
 const createMachinePayloadSchema = Schema.Struct({
   orgId: Schema.UUID,
   name: Schema.String.pipe(Schema.minLength(1)),
-  region: Schema.String.pipe(Schema.minLength(1)),
+  // Optional — omitted, `MachineService.create` resolves the org's
+  // configured default region instead of requiring the caller to always
+  // supply one (docs/inheritance.md, spec.md §5).
+  region: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   sizeSku: Schema.String.pipe(Schema.minLength(1)),
   image: Schema.String.pipe(Schema.minLength(1)),
   // Required, never omitted: CLAUDE.md invariant #3 — a machine always has
