@@ -20,9 +20,9 @@ import { ConfigLive } from "../src/http/handlers/config";
 import { ElevationsLive } from "../src/http/handlers/elevations";
 import { FederationLive } from "../src/http/handlers/federation";
 import { HealthLive } from "../src/http/handlers/health";
+import { IntegrationsLive } from "../src/http/handlers/integrations";
 import { MachinesLive } from "../src/http/handlers/machines";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
-import { IntegrationsLive } from "../src/http/handlers/integrations";
 import { OrganisationLive } from "../src/http/handlers/organisation";
 import { PeopleLive } from "../src/http/handlers/people";
 import { UpgradeLive } from "../src/http/handlers/upgrade";
@@ -275,6 +275,7 @@ describe("agent-protocol handlers (integration)", () => {
           observedAt: new Date().toISOString(),
           installedPackages: [],
           openPorts: [],
+          configState: { runningAccessMethods: [] },
         }),
       }),
     );

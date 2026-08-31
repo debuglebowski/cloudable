@@ -38,6 +38,14 @@ interface MachineStateSnapshot {
   undeclaredPackages: string[];
   /** The cloud provider's resource id for the machine, once provisioned. Mirrors `machines.externalResourceId`. Null before provisioning completes. */
   externalResourceId: string | null;
+  /**
+   * Which access methods (spec §11) the agent found an actually-running
+   * process for as of this report — the "config state" half of "installed
+   * packages and config state" (spec §8.1), alongside `packagesHash`.
+   * Order-independent: `deriveEvents` compares this as a set, the same way
+   * it compares `undeclaredPackages`, not by array order.
+   */
+  runningAccessMethods: string[];
 }
 
 /**

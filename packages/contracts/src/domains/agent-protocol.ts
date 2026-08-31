@@ -44,6 +44,20 @@ export interface DesiredStateResponse {
   readonly settings: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * Config state observed alongside installed packages (spec §8.1: "report
+ * installed packages and config state"). Deliberately narrow, not full
+ * configuration coverage: which access methods (spec §11 — e.g. the web
+ * terminal) the agent found an actually-running process for at observation
+ * time. Cheap to observe and directly checkable against the corresponding
+ * desired-state setting the same way `installedPackages` is checked
+ * against the declared manifest, once one exists. Additive fields only,
+ * same reasoning as `DesiredStateResponse`.
+ */
+export interface ConfigState {
+  readonly runningAccessMethods: readonly string[];
+}
+
 /** `POST /api/v1/agent/report` request: observed state, submitted after the agent reconciles locally. */
 export interface AgentReportRequest {
   readonly agentVersion: string;
@@ -51,6 +65,7 @@ export interface AgentReportRequest {
   readonly observedAt: string;
   readonly installedPackages: readonly string[];
   readonly openPorts: readonly number[];
+  readonly configState: ConfigState;
 }
 
 export interface AgentReportResponse {

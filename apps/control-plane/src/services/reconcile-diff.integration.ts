@@ -51,6 +51,7 @@ describe("runDiffAndPublish (integration)", () => {
       packagesHash: "hash-1",
       undeclaredPackages: [] as string[],
       externalResourceId: null as string | null,
+      runningAccessMethods: [] as string[],
     };
 
     const [machine] = await db
@@ -73,6 +74,7 @@ describe("runDiffAndPublish (integration)", () => {
         packagesHash: "hash-2",
         undeclaredPackages: ["nginx"],
         externalResourceId: "azure-vm-abc123",
+        runningAccessMethods: ["web_terminal"],
         agentVersion: "1.2.3",
       };
 
@@ -127,6 +129,7 @@ describe("runDiffAndPublish (integration)", () => {
           packagesHash: { from: "hash-1", to: "hash-2" },
           externalResourceId: { from: null, to: "azure-vm-abc123" },
           undeclaredPackages: { from: [], to: ["nginx"] },
+          runningAccessMethods: { from: [], to: ["web_terminal"] },
         },
       });
 
@@ -152,6 +155,7 @@ describe("runDiffAndPublish (integration)", () => {
       packagesHash: "hash-1",
       undeclaredPackages: [],
       externalResourceId: null,
+      runningAccessMethods: [],
       agentVersion: "1.2.3",
     };
 
