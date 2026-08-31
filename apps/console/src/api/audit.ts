@@ -114,25 +114,17 @@ interface ComplianceCheckResultWire {
   label: string;
   controlRefs: string[];
   status: "pass" | "fail" | "not_applicable";
+  /**
+   * Fixed per check (which of the six v1 checks tends to matter more if it
+   * fails), not a fabricated per-finding value — every finding under the
+   * same check shares it. Sourced from the backend's
+   * `ComplianceCheck.severity` (the one place severity is defined — see
+   * `apps/control-plane/src/domain/compliance/types.ts`), not a second,
+   * independently-maintained classification here.
+   */
+  severity: FindingSeverity;
   findings: ComplianceFindingWire[];
 }
-
-/**
- * The real backend has no per-finding severity — findings are a fact
- * ("this machine diverges from its manifest"), not a graded risk score.
- * This is a fixed, check-level editorial classification (which of the six
- * v1 checks tends to matter more if it fails), not a fabricated per-finding
- * value — every finding under the same check gets the same severity.
- * Unlisted/future checks default to "medium".
- */
-const CHECK_SEVERITY: Record<string, FindingSeverity> = {
-  "elevated-access-approved": "high",
-  "access-revoked-on-offboarding": "high",
-  "retention-honoured": "medium",
-  "no-undeclared-software": "medium",
-  "active-owner": "medium",
-  "machines-reporting": "low",
-};
 
 function summarizeDetail(detail: Record<string, unknown>): string {
   const entries = Object.entries(detail).map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
@@ -176,7 +168,7 @@ async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
           summary: finding.machineId
             ? `${finding.machineId}: ${summarizeDetail(finding.detail)}`
             : summarizeDetail(finding.detail),
-          severity: CHECK_SEVERITY[check.checkId] ?? "medium",
+          severity: check.severity,
           openSince: finding.firstSeenAt,
         })),
       }));

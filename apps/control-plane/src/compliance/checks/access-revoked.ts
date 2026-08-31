@@ -49,6 +49,9 @@ const resolveMachineId = (machineScope: unknown): string | null => {
 export const accessRevokedOnOffboardingCheck: ComplianceCheck = {
   id: CHECK_ID,
   label: "Access revoked on offboarding",
+  // Live, unrevoked SSH access surviving an offboarding is a direct
+  // unauthorised-access risk — the highest severity among the six checks.
+  severity: "high",
   controlRefs: ["access-management"],
 
   // Org-level check: it doesn't gate on machine type today. Kept as a real
