@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { machinesKeys } from "@/api/machines";
 import { apiGet, apiPatch } from "@/lib/api-client";
 import { CURRENT_ORG_ID } from "@/lib/current-org";
 
@@ -69,6 +70,7 @@ export const RETENTION_LOCATION_LABELS: Record<RetentionLocation, string> = {
 export const organisationKeys = {
   all: ["organisation"] as const,
   settings: () => [...organisationKeys.all, "settings"] as const,
+  packages: () => [...organisationKeys.all, "packages"] as const,
 };
 
 export function useOrgSettings() {
@@ -98,6 +100,92 @@ export function useUpdateOrgSettings() {
     },
     onError: (error) => {
       toast.error("Couldn't update settings", { description: error.message });
+    },
+  });
+}
+
+/**
+ * Org-scope package manifest entries — `PATCH /api/v1/organisation/packages`
+ * (`apps/control-plane/src/http/routes/organisation.ts`), the org-scope
+ * sibling of `overrideManifestEntry` (`@/api/machines`), which only ever
+ * writes machine-scoped rows. These are the entries that become the
+ * resolved default on any machine with neither its own entry nor an
+ * override for that package name (docs/inheritance.md, spec.md §6).
+ */
+export interface OrgPackageEntry {
+  packageName: string;
+  /** `null` means "any" version — no pin. */
+  versionPin: string | null;
+  /** Cannot be overridden below the org scope (spec §6) once set. */
+  pinned: boolean;
+}
+
+export interface OrgPackageEdit {
+  packageName: string;
+  versionPin?: string | null;
+  pinned?: boolean;
+}
+
+// No auth/identity system yet — same system-actor gap as `useUpdateOrgSettings` above.
+const CONSOLE_ACTOR = { type: "system" as const, id: "console" };
+
+export function useOrgPackages() {
+  return useQuery({
+    queryKey: organisationKeys.packages(),
+    queryFn: () =>
+      apiGet<{ items: OrgPackageEntry[] }>(
+        `/api/v1/organisation/packages?orgId=${CURRENT_ORG_ID}`,
+      ).then((res) => res.items),
+  });
+}
+
+/**
+ * An org-scope package edit changes what every machine without its own
+ * entry/override resolves to (docs/inheritance.md), so a machine detail
+ * page's already-cached resolved manifest (`machinesKeys.manifest`) is
+ * invalidated alongside the org's own package list — otherwise a machine
+ * detail page opened before this edit would keep showing the stale
+ * org-level default for up to the query client's `staleTime`.
+ */
+function invalidateOrgPackages(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: organisationKeys.packages() });
+  queryClient.invalidateQueries({ queryKey: machinesKeys.all });
+}
+
+export function useAddOrgPackage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (edit: OrgPackageEdit) =>
+      apiPatch<{ items: OrgPackageEntry[] }>("/api/v1/organisation/packages", {
+        orgId: CURRENT_ORG_ID,
+        upserts: [edit],
+        actor: CONSOLE_ACTOR,
+      }),
+    onSuccess: () => {
+      invalidateOrgPackages(queryClient);
+      toast.success("Package added to the org default manifest");
+    },
+    onError: (error) => {
+      toast.error("Couldn't add package", { description: error.message });
+    },
+  });
+}
+
+export function useRemoveOrgPackage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (packageName: string) =>
+      apiPatch<{ items: OrgPackageEntry[] }>("/api/v1/organisation/packages", {
+        orgId: CURRENT_ORG_ID,
+        removals: [packageName],
+        actor: CONSOLE_ACTOR,
+      }),
+    onSuccess: () => {
+      invalidateOrgPackages(queryClient);
+      toast.success("Package removed from the org default manifest");
+    },
+    onError: (error) => {
+      toast.error("Couldn't remove package", { description: error.message });
     },
   });
 }
