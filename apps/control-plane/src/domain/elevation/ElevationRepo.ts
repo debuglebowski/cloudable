@@ -28,14 +28,6 @@ export interface InsertElevationValues {
   status: ElevationStatus;
 }
 
-export interface InsertAutoApprovedApprovalArgs {
-  orgId: string;
-  personId: string;
-  machineId: string;
-  reason: string;
-  now: Date;
-}
-
 /**
  * Persistence port for the elevation domain — everything `ElevationService`
  * needs from Postgres, behind a narrow interface so this domain's own unit
@@ -57,9 +49,6 @@ export interface ElevationRepo {
     keys: ReadonlyArray<string>,
     scopeIds: ReadonlyArray<string>,
   ): Effect.Effect<ReadonlyArray<SettingRow<unknown>>, Error>;
-  insertAutoApprovedApproval(
-    args: InsertAutoApprovedApprovalArgs,
-  ): Effect.Effect<{ id: string }, Error>;
   insertElevation(values: InsertElevationValues): Effect.Effect<Elevation, Error>;
   updateElevationGranted(
     elevationId: string,
