@@ -18,20 +18,32 @@ const ARCHIVED_STATES: Array<"archived_restorable" | "archived_expired"> = [
  * deactivated (invariant 3: a machine always has exactly one owner,
  * always a person).
  *
- * `appliesTo`'s type (`Effect.Effect<boolean>`, no `Db` requirement — see
- * `domain/compliance/types.ts`) means it cannot itself look up a specific
- * machine's archived state. So "ownership questions don't apply to an
- * archived machine" is enforced inside `evaluate`'s query instead, via the
- * `notInArray(machines.state, ARCHIVED_STATES)` filter: an archived
- * machine never reaches the loop that produces findings, which is
- * behaviorally equivalent to gating it out via `appliesTo`.
+ * A specific machine's archived state is still filtered inside `evaluate`'s
+ * query (`notInArray(machines.state, ARCHIVED_STATES)`) rather than
+ * `appliesTo` — `appliesTo` gates at the *org* level ("does this org have
+ * any live machine at all to have an owner question about"), not per
+ * machine; `evaluate` still excludes individual archived machines from an
+ * org that also has live ones.
  */
 export const activeOwnerCheck: ComplianceCheck = {
   id: "active-owner",
   label: "Machine has an active owner",
   controlRefs: ["access-management"],
 
-  appliesTo: () => Effect.succeed(true),
+  // Not applicable to an org with no live machines — nothing to have an
+  // ownership question about.
+  appliesTo: ({ orgId }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const rows = yield* Effect.tryPromise(() =>
+        db
+          .select({ id: machines.id })
+          .from(machines)
+          .where(and(eq(machines.orgId, orgId), notInArray(machines.state, ARCHIVED_STATES)))
+          .limit(1),
+      ).pipe(Effect.orDie);
+      return rows.length > 0;
+    }),
 
   evaluate: ({ orgId }) =>
     Effect.gen(function* () {

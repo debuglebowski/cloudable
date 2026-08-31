@@ -31,7 +31,25 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
   id: CHECK_ID,
   label: "Elevated access was approved",
   controlRefs: ["access-management"],
-  appliesTo: () => Effect.succeed(true),
+
+  // Not applicable to an org that has never granted elevated access at all —
+  // previously `evaluate` handled this by returning zero findings (a `pass`),
+  // which is a false reassurance for a feature the org has simply never used,
+  // exactly the anti-pattern spec §19 warns about (just inverted: `pass`
+  // instead of a noisy `N/A`).
+  appliesTo: ({ orgId }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const rows = yield* Effect.tryPromise(() =>
+        db
+          .select({ id: events.id })
+          .from(events)
+          .where(and(eq(events.orgId, orgId), eq(events.type, "access.elevation_granted")))
+          .limit(1),
+      ).pipe(Effect.orDie);
+      return rows.length > 0;
+    }),
+
   evaluate: ({ orgId }) =>
     Effect.gen(function* () {
       const db = yield* Db;
@@ -43,6 +61,11 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
           .where(and(eq(events.orgId, orgId), eq(events.type, "access.elevation_granted"))),
       ).pipe(Effect.orDie);
 
+      // Defensive, not load-bearing: `appliesTo` above already gates this org out
+      // entirely when there are zero elevation events, so `evaluate` is never
+      // actually called in that case. Left in so this function stays correct on
+      // its own if ever called directly (e.g. from evidence-export.ts's pattern
+      // of calling `evaluate` after its own separate `appliesTo` check).
       if (elevationEvents.length === 0) return [];
 
       const grantedApprovalEvents = yield* Effect.tryPromise(() =>
