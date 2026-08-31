@@ -46,6 +46,17 @@ export function clearCachedSession(): void {
 }
 
 /**
+ * Dedups concurrent re-attestation: this process now runs two independent loops
+ * (`poll-report-loop.ts`'s ~30s cycle and `tunnel/signal-listener.ts`'s continuous long poll),
+ * both calling `attest()` on their own schedule. Without this, both could see the cached
+ * session as stale at nearly the same moment and each fire off their own `POST /attest` —
+ * harmless (either resulting bearer token is individually valid), but a needless doubled
+ * request and event (`agent.attested`) every time it happens. A second caller arriving while
+ * one is already in flight awaits that same request instead of starting its own.
+ */
+let inFlight: Promise<CachedSession> | undefined;
+
+/**
  * Exchanges `MACHINE_TOKEN` (a join token, today — see docs/agents.md) for
  * a short-lived bearer token, caching it in-process and reusing it until
  * it's close to expiry. Callers just call `attest()` every cycle; whether
@@ -53,30 +64,38 @@ export function clearCachedSession(): void {
  */
 export async function attest(): Promise<CachedSession> {
   if (cached && isFresh(cached)) return cached;
+  if (inFlight) return inFlight;
 
-  const request: AttestRequest = {
-    method: config.attestationMethod,
-    credential: await acquireCredential(),
-  };
-  let response: AttestResponse;
-  try {
-    response = await apiRequest<AttestResponse>("/api/v1/agent/attest", {
-      method: "POST",
-      body: JSON.stringify(request),
-    });
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      const body = error.body as { reason?: string } | undefined;
-      throw new AttestationRejectedError(body?.reason ?? "rejected");
+  const doAttest = async (): Promise<CachedSession> => {
+    const request: AttestRequest = {
+      method: config.attestationMethod,
+      credential: await acquireCredential(),
+    };
+    let response: AttestResponse;
+    try {
+      response = await apiRequest<AttestResponse>("/api/v1/agent/attest", {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        const body = error.body as { reason?: string } | undefined;
+        throw new AttestationRejectedError(body?.reason ?? "rejected");
+      }
+      throw error;
     }
-    throw error;
-  }
 
-  cached = {
-    bearerToken: response.bearerToken,
-    expiresAt: new Date(response.expiresAt),
-    orgId: response.orgId,
-    machineId: response.machineId,
+    cached = {
+      bearerToken: response.bearerToken,
+      expiresAt: new Date(response.expiresAt),
+      orgId: response.orgId,
+      machineId: response.machineId,
+    };
+    return cached;
   };
-  return cached;
+
+  inFlight = doAttest().finally(() => {
+    inFlight = undefined;
+  });
+  return inFlight;
 }

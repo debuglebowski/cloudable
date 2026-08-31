@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
-import { upsertFindingFirstSeen } from "../finding-store";
+import { clearResolvedFindings, upsertFindingFirstSeen } from "../finding-store";
 
 const DRIFT_EVENT_TYPES = ["machine.drift_detected", "machine.drift_resolved"] as const;
 
@@ -54,9 +54,9 @@ function extractUndeclaredPackages(payload: unknown): string[] {
  * Like check #2, this excludes archived machines from producing findings —
  * a machine that drifted and was later archived (with no `drift_resolved`
  * ever recorded, since offboarding doesn't remediate drift) shouldn't
- * surface as an open finding forever. As in `active-owner.ts`, `appliesTo`'s
- * type (`Effect.Effect<boolean>`, no `Db` requirement) can't itself look up
- * a machine's archived state, so the exclusion lives in `evaluate`'s query.
+ * surface as an open finding forever. That per-machine exclusion still lives
+ * in `evaluate`'s query, same as `active-owner.ts`; `appliesTo` below only
+ * gates at the org level.
  */
 export const noUndeclaredSoftwareCheck: ComplianceCheck = {
   id: "no-undeclared-software",
@@ -66,7 +66,20 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
   severity: "medium",
   controlRefs: ["asset-management"],
 
-  appliesTo: () => Effect.succeed(true),
+  // Not applicable to an org with no live machines — nothing to have
+  // undeclared software on.
+  appliesTo: ({ orgId }) =>
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const rows = yield* Effect.tryPromise(() =>
+        db
+          .select({ id: machines.id })
+          .from(machines)
+          .where(and(eq(machines.orgId, orgId), notInArray(machines.state, ARCHIVED_STATES)))
+          .limit(1),
+      ).pipe(Effect.orDie);
+      return rows.length > 0;
+    }),
 
   evaluate: ({ orgId }) =>
     Effect.gen(function* () {
@@ -106,9 +119,12 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
       }
 
       const findings: ComplianceFinding[] = [];
+      const openMachineIds: string[] = [];
       for (const [machineId, latest] of latestByMachine) {
         if (latest.type !== "machine.drift_detected") continue;
         if (!liveMachineIds.has(machineId)) continue;
+
+        openMachineIds.push(machineId);
 
         const firstSeenAt = yield* upsertFindingFirstSeen({
           checkId: "no-undeclared-software",
@@ -125,6 +141,15 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
           detail: { undeclaredPackages: extractUndeclaredPackages(latest.payload) },
         });
       }
+
+      // Anything previously open for this check+org that isn't among the
+      // machines found just now has resolved (a `drift_resolved` landed, or
+      // the machine was archived) — stop aging it, so a later re-drift of
+      // the same machine is treated as newly opened.
+      yield* clearResolvedFindings("no-undeclared-software", orgId, openMachineIds).pipe(
+        Effect.orDie,
+      );
+
       return findings;
     }),
 };
