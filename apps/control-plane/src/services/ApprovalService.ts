@@ -234,20 +234,33 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
         catch: (cause) => new ApprovalError({ reason: "query_failed", cause }),
       });
 
-    const request = (req: ApprovalRequest): Effect.Effect<ApprovalResult, ApprovalError> =>
+    /**
+     * Inserts a `pending` row, immediately flips it to `approved`, and
+     * emits `approval.requested` -> `approval.granted` in one transaction —
+     * mode `"none"`'s behavior (even auto-approval is evidence). The single
+     * shared path behind BOTH `request()`'s own mode-resolution below (when
+     * it resolves to `"none"`) AND `requestAutoApproved()` — the org-policy
+     * bypass `ElevationService` uses for its `"always"` admin-access policy
+     * (spec §15), which forces this same outcome unconditionally, without
+     * resolving mode from settings at all. Before this, that `"always"`
+     * path hand-rolled its own raw `approvals` insert directly against
+     * `ElevationRepo`, with no approval-level events of its own — this is
+     * the one code path both callers now share.
+     */
+    const autoApprove = (req: ApprovalRequest): Effect.Effect<ApprovalResult, ApprovalError> =>
       Effect.gen(function* () {
         if (!req.reason.trim()) {
           return yield* Effect.fail(new ApprovalError({ reason: "reason_required" }));
         }
 
-        const mode = yield* resolveApprovalMode(db, req.orgId, req.targetMachineId, req.actionType);
+        const mode: ApprovalMode = "none";
         const requiredApprovals = REQUIRED_APPROVALS_BY_MODE[mode];
         const expiresAt = new Date(Date.now() + APPROVAL_TTL_MS);
 
-        // The state change and its event(s) are written in one transaction —
-        // a request row committing with no matching `approval.requested`
-        // event (or vice versa) would silently break the evidence trail.
-        const { requested, granted } = yield* Effect.tryPromise({
+        // The state change and its events are written in one transaction —
+        // a request row committing with no matching `approval.requested`/
+        // `approval.granted` events would silently break the evidence trail.
+        const granted = yield* Effect.tryPromise({
           try: () =>
             db.transaction(async (tx) => {
               const [requested] = await tx
@@ -267,6 +280,16 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
               if (!requested) throw new Error("approvals insert returned no row");
 
               const correlationId = ulid();
+
+              // Still creates a record and emits requested -> granted
+              // immediately, since even auto-approval is evidence.
+              const [granted] = await tx
+                .update(approvals)
+                .set({ status: "approved", decidedAt: new Date() })
+                .where(eq(approvals.id, requested.id))
+                .returning();
+              if (!granted) throw new Error("approvals update returned no row");
+
               const eventsToInsert: DomainEvent[] = [
                 {
                   ...baseEnvelope(requested, "person", req.requestedByPersonId, correlationId),
@@ -278,35 +301,88 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
                     mode,
                   },
                 },
+                {
+                  ...baseEnvelope(granted, "system", SYSTEM_ACTOR_ID, correlationId),
+                  type: "approval.granted",
+                  payload: { approverIds: [], actionType: req.actionType },
+                },
               ];
-
-              if (mode !== "none") {
-                await tx.insert(events).values(toEventRows(eventsToInsert));
-                return { requested, granted: null as ApprovalRow | null };
-              }
-
-              // "none" mode: still creates a record and emits requested ->
-              // granted immediately, since even auto-approval is evidence.
-              const [granted] = await tx
-                .update(approvals)
-                .set({ status: "approved", decidedAt: new Date() })
-                .where(eq(approvals.id, requested.id))
-                .returning();
-              if (!granted) throw new Error("approvals update returned no row");
-
-              eventsToInsert.push({
-                ...baseEnvelope(granted, "system", SYSTEM_ACTOR_ID, correlationId),
-                type: "approval.granted",
-                payload: { approverIds: [], actionType: req.actionType },
-              });
               await tx.insert(events).values(toEventRows(eventsToInsert));
-              return { requested, granted };
+              return granted;
             }),
           catch: (cause) => new ApprovalError({ reason: "insert_failed", cause }),
         });
 
-        return toResult(granted ?? requested, 0);
+        return toResult(granted, 0);
       });
+
+    const request = (req: ApprovalRequest): Effect.Effect<ApprovalResult, ApprovalError> =>
+      Effect.gen(function* () {
+        if (!req.reason.trim()) {
+          return yield* Effect.fail(new ApprovalError({ reason: "reason_required" }));
+        }
+
+        const mode = yield* resolveApprovalMode(db, req.orgId, req.targetMachineId, req.actionType);
+        if (mode === "none") {
+          return yield* autoApprove(req);
+        }
+
+        const requiredApprovals = REQUIRED_APPROVALS_BY_MODE[mode];
+        const expiresAt = new Date(Date.now() + APPROVAL_TTL_MS);
+
+        // The state change and its event are written in one transaction —
+        // a request row committing with no matching `approval.requested`
+        // event would silently break the evidence trail.
+        const requested = yield* Effect.tryPromise({
+          try: () =>
+            db.transaction(async (tx) => {
+              const [requested] = await tx
+                .insert(approvals)
+                .values({
+                  orgId: req.orgId,
+                  actionType: req.actionType,
+                  mode,
+                  status: "pending",
+                  requestedByPersonId: req.requestedByPersonId,
+                  targetMachineId: req.targetMachineId,
+                  reason: req.reason,
+                  requiredApprovals,
+                  expiresAt,
+                })
+                .returning();
+              if (!requested) throw new Error("approvals insert returned no row");
+
+              const eventToInsert: DomainEvent = {
+                ...baseEnvelope(requested, "person", req.requestedByPersonId, ulid()),
+                type: "approval.requested",
+                payload: {
+                  actionType: req.actionType,
+                  actionRef: req.targetMachineId ?? req.requestedByPersonId,
+                  reason: req.reason,
+                  mode,
+                },
+              };
+              await tx.insert(events).values(toEventRows([eventToInsert]));
+              return requested;
+            }),
+          catch: (cause) => new ApprovalError({ reason: "insert_failed", cause }),
+        });
+
+        return toResult(requested, 0);
+      });
+
+    /**
+     * The org-policy `"always"` bypass for admin access to a machine the
+     * requester doesn't own (spec §15, `ElevationService`'s `adminAccessPolicy
+     * === "always"` branch) — a deliberate skip of approval entirely,
+     * independent of whatever `approval_mode:admin_access` happens to be
+     * configured to. Forces the exact insert+event shape `request()` produces
+     * for a *resolved* mode `"none"`, rather than resolving mode from
+     * settings at all — see `autoApprove` above, which both share.
+     */
+    const requestAutoApproved = (
+      req: ApprovalRequest,
+    ): Effect.Effect<ApprovalResult, ApprovalError> => autoApprove(req);
 
     const decide = (
       approvalId: string,
@@ -523,7 +599,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
         return { items, nextCursor, hasMore };
       });
 
-    return { request, decide, status, list } as const;
+    return { request, decide, status, list, requestAutoApproved } as const;
   }),
 }) {}
 
