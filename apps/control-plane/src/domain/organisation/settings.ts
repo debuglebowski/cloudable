@@ -2,19 +2,20 @@ import { orgs, settingValues } from "@cloudable/schema";
 import { and, eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { Db } from "../../db/layer";
-import { DEFAULT_RETENTION_DAYS, RETENTION_DAYS_KEY } from "../archive/org-policy";
 import {
   DEFAULT_LOGGING_TIER,
   DEFAULT_RETENTION_LOCATION,
-  type LoggingTier,
   LOGGING_TIER_KEY,
-  type RetentionLocation,
+  type LoggingTier,
   RETENTION_LOCATION_KEY,
+  type RetentionLocation,
+  type SettingChangeActor,
   setOrgLoggingTier,
   setOrgRetentionLocation,
-  type SettingChangeActor,
 } from "../../logging/settings";
 import { DEFAULT_APPROVAL_MODE, settingKeyFor } from "../../services/ApprovalService";
+import { DEFAULT_RETENTION_DAYS, RETENTION_DAYS_KEY } from "../archive/org-policy";
+import { DEFAULT_REGION_KEY, resolveOrgDefaultRegion } from "../machine/region-policy";
 
 /**
  * Aggregate read/write for the Organisation page (spec §20's "Organisation"
@@ -60,6 +61,10 @@ export interface OrgSettingsView {
   loggingTier: LoggingTier;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
+  /** Default Azure region for a new machine that doesn't specify one — spec.md §5.
+   * Resolved through `resolveSetting()` (`../machine/region-policy.ts`), same mechanism
+   * as retention, rather than a client-side prefill. */
+  regionDefault: string;
 }
 
 const dbTry = <A>(thunk: () => Promise<A>, reason: string): Effect.Effect<A, OrgSettingsError> =>
@@ -89,7 +94,9 @@ const readOrgScopedSetting = <T>(
     return rows[0]?.value as T | undefined;
   });
 
-export const getOrgSettings = (orgId: string): Effect.Effect<OrgSettingsView, OrgSettingsError, Db> =>
+export const getOrgSettings = (
+  orgId: string,
+): Effect.Effect<OrgSettingsView, OrgSettingsError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const orgRows = yield* dbTry(
@@ -114,6 +121,7 @@ export const getOrgSettings = (orgId: string): Effect.Effect<OrgSettingsView, Or
     const retentionLocation =
       (yield* readOrgScopedSetting<RetentionLocation>(orgId, RETENTION_LOCATION_KEY)) ??
       DEFAULT_RETENTION_LOCATION;
+    const regionDefault = (yield* resolveOrgDefaultRegion(db, orgId)).value;
 
     return {
       id: org.id,
@@ -125,6 +133,7 @@ export const getOrgSettings = (orgId: string): Effect.Effect<OrgSettingsView, Or
       loggingTier,
       retentionDefaultDays,
       retentionLocation,
+      regionDefault,
     };
   });
 
@@ -135,6 +144,7 @@ export interface UpdateOrgSettingsInput {
   loggingTier?: LoggingTier | undefined;
   retentionDefaultDays?: number | undefined;
   retentionLocation?: RetentionLocation | undefined;
+  regionDefault?: string | undefined;
   actor: SettingChangeActor;
 }
 
@@ -223,6 +233,14 @@ export const updateOrgSettings = (
       yield* setOrgRetentionLocation(db, input.orgId, input.retentionLocation, input.actor).pipe(
         Effect.mapError((e) => new OrgSettingsError({ reason: e.reason, cause: e.cause })),
       );
+    }
+
+    if (input.regionDefault !== undefined) {
+      const trimmed = input.regionDefault.trim();
+      if (trimmed.length === 0) {
+        return yield* Effect.fail(new OrgSettingsError({ reason: "region_default_required" }));
+      }
+      yield* writeOrgScopedSetting(input.orgId, DEFAULT_REGION_KEY, trimmed);
     }
 
     return yield* getOrgSettings(input.orgId);

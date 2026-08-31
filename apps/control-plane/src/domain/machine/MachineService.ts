@@ -16,6 +16,7 @@ import {
   findPinConflicts,
   resolveManifest,
 } from "./manifest";
+import { resolveOrgDefaultRegion } from "./region-policy";
 
 export class MachineServiceError extends Data.TaggedError("MachineServiceError")<{
   reason: string;
@@ -28,7 +29,17 @@ type MachinePackageTableRow = typeof machinePackages.$inferSelect;
 export interface CreateMachineInput {
   orgId: string;
   name: string;
-  region: string;
+  // Optional (and nullable, same convention as `templateId`/`actorPersonId`
+  // below — `exactOptionalPropertyTypes` needs a real "not provided" value
+  // callers can pass through explicitly): spec.md §5 lists region among
+  // every setting that must flow org → machine through `resolveSetting()`,
+  // not a caller-supplied value. Omitted/null/blank, `create` resolves the
+  // org's configured default region (`region-policy.ts`) rather than
+  // requiring the caller to always supply one. An explicit value is still
+  // honored as-is — this is a one-time resolution at creation, not a live
+  // override channel (see `region-policy.ts`'s doc comment for why region
+  // differs from retention).
+  region?: string | null;
   sizeSku: string;
   image: string;
   // Required, never null: CLAUDE.md invariant #3 — a machine always has
@@ -162,6 +173,11 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
 
     const create = (input: CreateMachineInput): Effect.Effect<MachineRow, MachineServiceError> =>
       Effect.gen(function* () {
+        const region =
+          input.region && input.region.trim().length > 0
+            ? input.region
+            : (yield* resolveOrgDefaultRegion(db, input.orgId)).value;
+
         const rows = yield* Effect.tryPromise({
           try: () =>
             db
@@ -171,7 +187,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                 templateId: input.templateId ?? null,
                 ownerPersonId: input.ownerPersonId,
                 name: input.name,
-                region: input.region,
+                region,
                 sizeSku: input.sizeSku,
                 image: input.image,
               })
