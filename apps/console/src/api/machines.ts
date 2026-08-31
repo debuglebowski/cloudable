@@ -43,6 +43,32 @@ export interface ManifestEntry {
   overriddenBelow?: number;
 }
 
+/** spec.md §7/§11: which of the two access methods are turned on for a machine. */
+export interface AccessMethodsEnabled {
+  webTerminal: boolean;
+  ssh: boolean;
+}
+
+/** A resolved org → machine setting, lowest level wins — the shared shape `persistentPaths`
+ * and `accessMethodsEnabled` both come back as (see `@cloudable/contracts`'s `MachineDetail`). */
+export interface ResolvedMachineSetting<T> {
+  value: T;
+  source: SettingLevel;
+}
+
+/**
+ * Written via the generic `PATCH /api/v1/config/settings` endpoint
+ * (`apps/control-plane/src/http/routes/config.ts`) rather than a
+ * dedicated machines endpoint — same shared write path as the Git-sourced
+ * config import (docs/spec.md §16), which is also what lets disabling web
+ * terminal terminate live sessions no matter which UI/API entry point the
+ * change came through (spec §11.1). Keep these two literals in sync with
+ * `PERSISTENT_PATHS_KEY`/`ACCESS_METHODS_ENABLED_KEY` in
+ * `apps/control-plane/src/domain/machine/settings.ts`.
+ */
+const PERSISTENT_PATHS_SETTING_KEY = "machine.persistentPaths";
+const ACCESS_METHODS_ENABLED_SETTING_KEY = "machine.accessMethodsEnabled";
+
 /**
  * The logging tier resolved for one specific machine — its own machine-
  * scoped override if it has one, else the org default (spec §17,
@@ -93,6 +119,10 @@ export const machinesKeys = {
   detail: (machineId: string) => [...machinesKeys.details(), machineId] as const,
   manifest: (machineId: string) => [...machinesKeys.all, "manifest", machineId] as const,
   drift: (machineId: string) => [...machinesKeys.all, "drift", machineId] as const,
+  persistentPaths: (machineId: string) =>
+    [...machinesKeys.all, "persistentPaths", machineId] as const,
+  accessMethodsEnabled: (machineId: string) =>
+    [...machinesKeys.all, "accessMethodsEnabled", machineId] as const,
   loggingTier: (machineId: string) => [...machinesKeys.all, "loggingTier", machineId] as const,
 };
 
@@ -137,8 +167,16 @@ interface ResolvedManifestEntryWire {
   resolvedFromScopeId: string;
 }
 
+interface ResolvedMachineSettingWire<T> {
+  value: T;
+  source: SettingLevel;
+  resolvedFromScopeId: string;
+}
+
 interface MachineDetailWire extends MachineSummaryWire {
   manifest: ResolvedManifestEntryWire[];
+  persistentPaths: ResolvedMachineSettingWire<string[]>;
+  accessMethodsEnabled: ResolvedMachineSettingWire<AccessMethodsEnabled>;
   loggingTier: MachineLoggingTier;
 }
 
@@ -220,6 +258,60 @@ export async function overrideMachineLoggingTier(
 export async function getMachineDrift(_machineId: string): Promise<DriftInfo> {
   // See the DriftInfo doc comment above — there is no real endpoint for this yet.
   return { status: "unknown" };
+}
+
+export async function getMachinePersistentPaths(
+  machineId: string,
+): Promise<ResolvedMachineSetting<string[]>> {
+  const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`);
+  return { value: wire.persistentPaths.value, source: wire.persistentPaths.source };
+}
+
+export async function getMachineAccessMethodsEnabled(
+  machineId: string,
+): Promise<ResolvedMachineSetting<AccessMethodsEnabled>> {
+  const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`);
+  return { value: wire.accessMethodsEnabled.value, source: wire.accessMethodsEnabled.source };
+}
+
+/**
+ * `PATCH /api/v1/config/settings` at `scopeType: "machine"` — always writes (and always
+ * resolves to) a machine-level override, so the result's `source` is trivially "machine"
+ * without needing to re-fetch and re-resolve the chain.
+ */
+export async function overridePersistentPaths(
+  machineId: string,
+  paths: string[],
+): Promise<ResolvedMachineSetting<string[]>> {
+  const res = await apiPatch<{ setting: { current: string[] } }>("/api/v1/config/settings", {
+    orgId: CURRENT_ORG_ID,
+    scopeType: "machine",
+    scopeId: machineId,
+    key: PERSISTENT_PATHS_SETTING_KEY,
+    value: paths,
+    // No auth/identity system yet — same gap as Approvals/Archive/Organisation (see
+    // `api/organisation.ts`'s identical comment) — recorded as a system actor.
+    actor: { type: "system", id: "console" },
+  });
+  return { value: res.setting.current, source: "machine" };
+}
+
+export async function overrideAccessMethodsEnabled(
+  machineId: string,
+  next: AccessMethodsEnabled,
+): Promise<ResolvedMachineSetting<AccessMethodsEnabled>> {
+  const res = await apiPatch<{ setting: { current: AccessMethodsEnabled } }>(
+    "/api/v1/config/settings",
+    {
+      orgId: CURRENT_ORG_ID,
+      scopeType: "machine",
+      scopeId: machineId,
+      key: ACCESS_METHODS_ENABLED_SETTING_KEY,
+      value: next,
+      actor: { type: "system", id: "console" },
+    },
+  );
+  return { value: res.setting.current, source: "machine" };
 }
 
 /**

@@ -18,6 +18,13 @@ import {
   resolveManifest,
 } from "./manifest";
 import { resolveOrgDefaultRegion } from "./region-policy";
+import {
+  type AccessMethodsEnabled,
+  type PersistentPaths,
+  type ResolvedMachineSetting,
+  resolveAccessMethodsEnabled,
+  resolvePersistentPaths,
+} from "./settings";
 
 export class MachineServiceError extends Data.TaggedError("MachineServiceError")<{
   reason: string;
@@ -65,6 +72,8 @@ export interface ListMachinesResult {
 
 export interface MachineDetail extends MachineRow {
   manifest: ResolvedManifestEntry[];
+  persistentPaths: ResolvedMachineSetting<PersistentPaths>;
+  accessMethodsEnabled: ResolvedMachineSetting<AccessMethodsEnabled>;
   /** The tier actually in effect for this machine — its own override if it has one, else the org default (spec §17, docs/inheritance.md). */
   loggingTier: EffectiveLoggingTier;
 }
@@ -289,21 +298,26 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       Effect.gen(function* () {
         const machine = yield* fetchMachine(machineId);
         const rows = yield* fetchManifestRows(machine);
-        const manifest = resolveManifest(rows.map(toManifestRow), {
+        const chain = {
           orgId: machine.orgId,
           templateId: machine.templateId,
           machineId: machine.id,
-        });
-        const loggingTier = yield* getEffectiveLoggingTier(db, {
-          orgId: machine.orgId,
-          templateId: machine.templateId,
-          machineId: machine.id,
-        }).pipe(
+        };
+        const manifest = resolveManifest(rows.map(toManifestRow), chain);
+        const [persistentPaths, accessMethodsEnabled] = yield* Effect.all([
+          resolvePersistentPaths(db, chain),
+          resolveAccessMethodsEnabled(db, chain),
+        ]).pipe(
+          Effect.mapError(
+            (cause) => new MachineServiceError({ reason: "settings_read_failed", cause }),
+          ),
+        );
+        const loggingTier = yield* getEffectiveLoggingTier(db, chain).pipe(
           Effect.mapError(
             (cause) => new MachineServiceError({ reason: "logging_tier_read_failed", cause }),
           ),
         );
-        return { ...machine, manifest, loggingTier };
+        return { ...machine, manifest, persistentPaths, accessMethodsEnabled, loggingTier };
       });
 
     const updatePackages = (
