@@ -1,6 +1,11 @@
-import { ApiError, apiGet, apiPatch } from "@/lib/api-client";
+import type { LoggingTier } from "@/api/organisation";
+import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
 import { CURRENT_ORG_ID } from "@/lib/current-org";
-import type { ApiErrorBody } from "@cloudable/contracts";
+import {
+  type ApiErrorBody,
+  LOGGING_TIER_SETTING_KEY,
+  type PatchSettingResponse,
+} from "@cloudable/contracts";
 
 export type MachineState =
   | "provisioning"
@@ -64,6 +69,17 @@ export interface ResolvedMachineSetting<T> {
 const PERSISTENT_PATHS_SETTING_KEY = "machine.persistentPaths";
 const ACCESS_METHODS_ENABLED_SETTING_KEY = "machine.accessMethodsEnabled";
 
+/**
+ * The logging tier resolved for one specific machine — its own machine-
+ * scoped override if it has one, else the org default (spec §17,
+ * `resolveSetting()`'s org → machine chain — see
+ * `apps/control-plane/src/logging/settings.ts`'s `getEffectiveLoggingTier`).
+ */
+export interface MachineLoggingTier {
+  tier: LoggingTier;
+  source: SettingLevel;
+}
+
 export type DriftStatus = "clean" | "detected" | "unknown";
 
 /**
@@ -107,6 +123,7 @@ export const machinesKeys = {
     [...machinesKeys.all, "persistentPaths", machineId] as const,
   accessMethodsEnabled: (machineId: string) =>
     [...machinesKeys.all, "accessMethodsEnabled", machineId] as const,
+  loggingTier: (machineId: string) => [...machinesKeys.all, "loggingTier", machineId] as const,
 };
 
 interface MachineSummaryWire {
@@ -160,6 +177,7 @@ interface MachineDetailWire extends MachineSummaryWire {
   manifest: ResolvedManifestEntryWire[];
   persistentPaths: ResolvedMachineSettingWire<string[]>;
   accessMethodsEnabled: ResolvedMachineSettingWire<AccessMethodsEnabled>;
+  loggingTier: MachineLoggingTier;
 }
 
 function toManifestEntry(wire: ResolvedManifestEntryWire): ManifestEntry {
@@ -178,6 +196,25 @@ export async function listMachines(): Promise<Machine[]> {
   return res.items.map(toMachine);
 }
 
+export interface CreateMachineInput {
+  name: string;
+  /** Omitted — the control plane resolves the org's configured default region
+   * (docs/spec.md §5) instead of the console prefilling one. */
+  region?: string;
+  sizeSku: string;
+  image: string;
+  /** A machine always has exactly one owner, always a person (CLAUDE.md invariant #3). */
+  ownerPersonId: string;
+}
+
+export async function createMachine(input: CreateMachineInput): Promise<Machine> {
+  const wire = await apiPost<MachineSummaryWire>("/api/v1/machines", {
+    orgId: CURRENT_ORG_ID,
+    ...input,
+  });
+  return toMachine(wire);
+}
+
 export async function getMachine(machineId: string): Promise<Machine | undefined> {
   const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`).catch(
     () => undefined,
@@ -188,6 +225,34 @@ export async function getMachine(machineId: string): Promise<Machine | undefined
 export async function getMachineManifest(machineId: string): Promise<ManifestEntry[]> {
   const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`);
   return wire.manifest.map(toManifestEntry);
+}
+
+export async function getMachineLoggingTier(machineId: string): Promise<MachineLoggingTier> {
+  const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`);
+  return wire.loggingTier;
+}
+
+/**
+ * Writes a machine-scoped `logging_tier` override through the generic
+ * config editor endpoint (`PATCH /api/v1/config/settings`,
+ * `apps/control-plane/src/domain/config/apply-setting-change.ts`) — the
+ * same "same path whether UI or Git" mechanism every other chain-resolved
+ * setting uses (docs/spec.md §16), not a dedicated logging-tier endpoint.
+ */
+export async function overrideMachineLoggingTier(
+  machineId: string,
+  tier: LoggingTier,
+): Promise<void> {
+  await apiPatch<PatchSettingResponse>("/api/v1/config/settings", {
+    orgId: CURRENT_ORG_ID,
+    scopeType: "machine",
+    scopeId: machineId,
+    key: LOGGING_TIER_SETTING_KEY,
+    value: tier,
+    // No auth/identity system yet — same gap as Organisation settings (see
+    // `api/organisation.ts`'s `useUpdateOrgSettings`).
+    actor: { type: "system", id: "console" },
+  });
 }
 
 export async function getMachineDrift(_machineId: string): Promise<DriftInfo> {

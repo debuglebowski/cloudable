@@ -81,3 +81,19 @@ export interface AccessApiErrorBody {
   code: "not_found" | "denied" | "bad_request" | "internal_error";
   message: string;
 }
+
+/**
+ * `GET /api/v1/access/session-token-public-key` response. Wraps
+ * `Signer.publicKey(SESSION_TOKEN_KEY_ID)` — see
+ * `apps/control-plane/src/tunnel/session-token.ts`. Not secret: this is the
+ * PUBLIC half of the session-token signing key, which is exactly what the
+ * agent needs to validate a session token's signature before attaching
+ * (spec §11.1) — CLAUDE.md invariant #9 is about the private key, never
+ * entering the control plane beyond the `Signer` port; this response never
+ * carries private key material at all.
+ */
+export interface SessionTokenPublicKeyResponse {
+  keyId: string;
+  /** Base64 of the SPKI DER-encoded Ed25519 public key. */
+  publicKeyDerBase64: string;
+}

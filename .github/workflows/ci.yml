@@ -16,6 +16,27 @@ jobs:
   ci:
     name: typecheck, unit tests, integration tests, lint
     runs-on: ubuntu-latest
+    # `apps/control-plane`'s `test:integration` connects directly to this
+    # Postgres (see the comment on that script, and on the "Integration
+    # tests" step below) — mirrors root `docker-compose.yml`'s service
+    # exactly (same user/pass/db/port) so its default `DATABASE_URL`
+    # fallback resolves without any extra config.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cloudable
+          POSTGRES_PASSWORD: cloudable
+          POSTGRES_DB: cloudable
+        ports:
+          - 5442:5432
+        options: >-
+          --health-cmd "pg_isready -U cloudable"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://cloudable:cloudable@localhost:5442/cloudable
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -26,16 +47,35 @@ jobs:
       - name: Typecheck (all workspaces)
         run: bun run --filter '*' typecheck
 
+      # Ahead of the unit tests below: a few of `apps/control-plane`'s own
+      # `test:unit` files (e.g. `EventBus.test.ts`, `config.test.ts`) also
+      # exercise the `postgres` service above directly, so the schema needs
+      # to exist before either step runs.
+      - name: Apply database migrations
+        run: bun run --cwd packages/schema db:migrate
+
       - name: Unit tests (all workspaces)
         run: bun run --filter '*' test:unit
 
-      # Placeholder `exit 0` everywhere today, but docs/spec.md is explicit
-      # that some invariants (tenant-subject binding, signature validation)
-      # are only ever caught by a negative-path integration test — wiring
-      # this in now means a real test:integration script starts running in
-      # CI the moment it's written, not silently ignored.
+      # `apps/control-plane`'s `test:integration` script runs a real
+      # integration test (`reconcile-diff.integration.ts`) against the
+      # `postgres` service above — every other workspace's `test:integration`
+      # is still a placeholder `exit 0`, wired in now so a real script starts
+      # running in CI the moment it's written, not silently ignored. docs/spec.md
+      # is explicit that some invariants (tenant-subject binding, signature
+      # validation) are only ever caught by a negative-path integration test.
       - name: Integration tests (all workspaces)
         run: bun run --filter '*' test:integration
+
+      # The `*.integration-check.ts` files (five of the six compliance
+      # checks — every one except `machines-reporting`, which has no such
+      # file — plus the agent protocol) don't match the `.test.`/`.spec.`
+      # glob that `test:unit`/`test:integration` use, so nothing ever ran
+      # them. Each spins up its own throwaway Postgres via testcontainers —
+      # independent of the `postgres` service above — so they only need
+      # Docker, which this runner already provides.
+      - name: Integration-check tests (control-plane)
+        run: bun run --cwd apps/control-plane test:integration-check
 
       - name: Lint (Biome)
         run: bun run lint

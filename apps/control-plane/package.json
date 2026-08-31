@@ -10,7 +10,8 @@
     "build": "exit 0",
     "typecheck": "tsc -b",
     "test:unit": "bun test",
-    "test:integration": "bun test ./src/services/reconcile-diff.integration.ts"
+    "test:integration": "bun test ./src/services/reconcile-diff.integration.ts",
+    "test:integration-check": "bun test $(find . -path './node_modules/*' -prune -o -name '*.integration-check.ts' -print)"
   },
   "dependencies": {
     "@cloudable/contracts": "workspace:*",
