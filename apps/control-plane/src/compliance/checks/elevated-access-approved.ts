@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
-import { upsertFindingFirstSeen } from "../finding-store";
+import { clearResolvedFindings, upsertFindingFirstSeen } from "../finding-store";
 
 const CHECK_ID = "elevated-access-approved";
 
@@ -73,6 +73,7 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
       }
 
       const findings: ComplianceFinding[] = [];
+      const openEventIds: string[] = [];
       for (const event of elevationEvents) {
         const approvalId = (event.payload as ElevationGrantedPayload).approvalId;
 
@@ -81,6 +82,8 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
         const missingReason = !reason || reason.trim().length === 0;
 
         if (!missingApproval && !missingReason) continue;
+
+        openEventIds.push(event.id);
 
         const firstSeenAt = yield* upsertFindingFirstSeen({
           checkId: CHECK_ID,
@@ -97,6 +100,12 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
           detail: { elevationEventId: event.id, missingReason, missingApproval },
         });
       }
+
+      // Anything previously open for this check+org that isn't among the
+      // elevation events found just now has resolved (an approval with a
+      // reason has since landed) — stop aging it, so the same event id
+      // failing again later is treated as newly opened.
+      yield* clearResolvedFindings(CHECK_ID, orgId, openEventIds).pipe(Effect.orDie);
 
       return findings;
     }),

@@ -3,7 +3,7 @@ import { and, eq, notInArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
-import { upsertFindingFirstSeen } from "../finding-store";
+import { clearResolvedFindings, upsertFindingFirstSeen } from "../finding-store";
 
 /** Live states — everything except the two archived states. */
 const ARCHIVED_STATES: Array<"archived_restorable" | "archived_expired"> = [
@@ -52,6 +52,7 @@ export const activeOwnerCheck: ComplianceCheck = {
       );
 
       const findings: ComplianceFinding[] = [];
+      const openMachineIds: string[] = [];
       for (const row of rows) {
         const reason =
           row.ownerPersonId === null
@@ -60,6 +61,8 @@ export const activeOwnerCheck: ComplianceCheck = {
               ? ("owner_deactivated" as const)
               : null;
         if (reason === null) continue;
+
+        openMachineIds.push(row.machineId);
 
         const firstSeenAt = yield* upsertFindingFirstSeen({
           checkId: "active-owner",
@@ -76,6 +79,13 @@ export const activeOwnerCheck: ComplianceCheck = {
           detail: { ownerPersonId: row.ownerPersonId, reason },
         });
       }
+
+      // Anything previously open for this check+org that isn't among the
+      // machines found just now has resolved (owner assigned/reactivated,
+      // or the machine was archived) — stop aging it, so a later reopen of
+      // the same machine id is treated as newly opened.
+      yield* clearResolvedFindings("active-owner", orgId, openMachineIds).pipe(Effect.orDie);
+
       return findings;
     }),
 };
