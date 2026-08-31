@@ -9,6 +9,7 @@ import {
   useOrgSettings,
   useUpdateOrgSettings,
 } from "@/api/organisation";
+import { LineageGutter } from "@/components/lineage-gutter";
 import { SettingRow } from "@/components/setting-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +20,7 @@ import { OrgPackageManifestCard } from "./org-package-manifest-card";
 import {
   ApprovalModeDialog,
   LoggingTierDialog,
+  RegionDefaultDialog,
   RetentionDaysDialog,
   RetentionLocationDialog,
 } from "./setting-dialogs";
@@ -36,6 +38,7 @@ export function OrganisationPage() {
   const [editingLoggingTier, setEditingLoggingTier] = useState(false);
   const [editingRetentionDays, setEditingRetentionDays] = useState(false);
   const [editingRetentionLocation, setEditingRetentionLocation] = useState(false);
+  const [editingRegionDefault, setEditingRegionDefault] = useState(false);
 
   if (isLoading || !settings) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -119,6 +122,13 @@ export function OrganisationPage() {
             source="org"
             onOverride={() => setEditingLoggingTier(true)}
           />
+          {settings.loggingTierOverrideCount > 0 && (
+            <LineageGutter
+              source="org"
+              viewing="org"
+              overriddenBelow={settings.loggingTierOverrideCount}
+            />
+          )}
           <ul className="flex flex-col gap-1 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
             <li>Tier 1 — metadata only: provisioning, auth, lifecycle.</li>
             <li>Tier 2 — session-level: connections, elevations, config changes.</li>
@@ -154,6 +164,25 @@ export function OrganisationPage() {
             Single org-wide value — no per-machine variant. Residency changes are a DPA matter, not
             a toggle (docs/spec.md §17).
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Region</CardTitle>
+          <CardDescription>
+            Default Azure region for a new machine that doesn't specify one (docs/spec.md §5).
+            Resolved live at creation time through the same org → template → machine chain as every
+            other setting — never copied onto the machine as a wizard prefill.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col">
+          <SettingRow
+            label="Default region"
+            value={settings.regionDefault}
+            source="org"
+            onOverride={() => setEditingRegionDefault(true)}
+          />
         </CardContent>
       </Card>
 
@@ -193,6 +222,14 @@ export function OrganisationPage() {
         onOpenChange={setEditingRetentionLocation}
         onSave={async (location) => {
           await update.mutateAsync({ retentionLocation: location });
+        }}
+      />
+      <RegionDefaultDialog
+        open={editingRegionDefault}
+        currentRegion={settings.regionDefault}
+        onOpenChange={setEditingRegionDefault}
+        onSave={async (region) => {
+          await update.mutateAsync({ regionDefault: region });
         }}
       />
     </div>

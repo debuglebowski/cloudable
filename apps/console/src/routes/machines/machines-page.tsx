@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+import { AddMachineDialog } from "./add-machine-dialog";
 import {
   ARCHIVED_MACHINE_STATES,
   MACHINE_STATE_BADGE_VARIANT,
@@ -23,6 +24,7 @@ import {
 
 export function MachinesPage() {
   const [showArchived, setShowArchived] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: machinesKeys.list(),
@@ -43,9 +45,14 @@ export function MachinesPage() {
             filter — Archive owns retention.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setShowArchived((value) => !value)}>
-          {showArchived ? "Hide archived" : "Show archived"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowArchived((value) => !value)}>
+            {showArchived ? "Hide archived" : "Show archived"}
+          </Button>
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            Add machine
+          </Button>
+        </div>
       </div>
 
       {isPending && <p className="text-sm text-muted-foreground">Loading machines…</p>}
@@ -112,6 +119,8 @@ export function MachinesPage() {
           </TableBody>
         </Table>
       )}
+
+      <AddMachineDialog open={addOpen} onOpenChange={setAddOpen} />
     </div>
   );
 }

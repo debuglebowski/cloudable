@@ -12,8 +12,8 @@ import { EventBus, type EventBusError } from "../../services/EventBus";
 import {
   type ElevationRepo,
   ElevationRepoTag,
-  type InsertAutoApprovedApprovalArgs,
   type InsertElevationValues,
+  type InsertNotificationArgs,
   type MachineRecord,
   type PersonRecord,
 } from "./ElevationRepo";
@@ -69,7 +69,13 @@ function makeFakeRepo(s: Seed) {
   const machinesById = new Map<string, MachineRecord>([
     [
       s.machineId,
-      { id: s.machineId, orgId: s.orgId, templateId: null, ownerPersonId: s.ownerPersonId },
+      {
+        id: s.machineId,
+        orgId: s.orgId,
+        templateId: null,
+        ownerPersonId: s.ownerPersonId,
+        name: "owned-machine",
+      },
     ],
   ]);
   const peopleById = new Map<string, PersonRecord>([
@@ -80,7 +86,11 @@ function makeFakeRepo(s: Seed) {
   ]);
   const settingRows: SettingRow<unknown>[] = [];
   const elevationsById = new Map<string, Elevation>();
-  const approvalIds = new Set<string>();
+  const notifications: Array<InsertNotificationArgs & { id: string }> = [];
+  // Lets a test simulate a transient `insertNotification` failure (e.g. a
+  // dropped connection) without touching the real repo/DB — see the "owner
+  // notification" describe block below.
+  let notificationFailureCountdown = 0;
 
   function setSetting(key: string, value: unknown) {
     settingRows.push({ scopeType: "org", scopeId: s.orgId, key, value, source: "org" });
@@ -95,11 +105,6 @@ function makeFakeRepo(s: Seed) {
     // construction; `resolveSetting`'s own org/template/machine precedence
     // is covered separately by `policy.test.ts`.
     findSettingRows: () => Effect.succeed(settingRows),
-    insertAutoApprovedApproval: (_args: InsertAutoApprovedApprovalArgs) => {
-      const id = nextId("approval");
-      approvalIds.add(id);
-      return Effect.succeed({ id });
-    },
     insertElevation: (values: InsertElevationValues) => {
       const elevation: Elevation = { id: nextId("elevation"), ...values };
       elevationsById.set(elevation.id, elevation);
@@ -119,9 +124,32 @@ function makeFakeRepo(s: Seed) {
       elevationsById.set(elevationId, updated);
       return Effect.succeed(updated);
     },
+    insertNotification: (args: InsertNotificationArgs) => {
+      if (notificationFailureCountdown > 0) {
+        notificationFailureCountdown -= 1;
+        return Effect.fail(new Error("simulated notification failure"));
+      }
+      // Idempotent per `elevationId`, mirroring the real `notifications`
+      // table's unique constraint (`packages/schema/src/tables/
+      // notification.ts`) and `ElevationRepoLive`'s `onConflictDoNothing` —
+      // a retried/concurrent call for the same elevation must not duplicate.
+      const existing = notifications.find((n) => n.elevationId === args.elevationId);
+      if (existing) return Effect.succeed({ id: existing.id });
+      const id = nextId("notification");
+      notifications.push({ ...args, id });
+      return Effect.succeed({ id });
+    },
   };
 
-  return { layer: Layer.succeed(ElevationRepoTag, repo), setSetting, elevationsById };
+  return {
+    layer: Layer.succeed(ElevationRepoTag, repo),
+    setSetting,
+    elevationsById,
+    notifications,
+    failNextNotification: () => {
+      notificationFailureCountdown += 1;
+    },
+  };
 }
 
 /**
@@ -157,6 +185,19 @@ function makeFakeApprovalService() {
       return toResult(id, "pending");
     });
 
+  // Mirrors the real `ApprovalService.requestAutoApproved` — always
+  // "approved" immediately, unlike `request` above which the real service
+  // only auto-approves when the org's own settings resolve to mode "none".
+  // `ElevationService`'s "always"-policy branch calls this one directly.
+  const requestAutoApproved = (
+    _req: ApprovalRequest,
+  ): Effect.Effect<ApprovalResult, ApprovalError> =>
+    Effect.sync(() => {
+      const id = nextId("fake-auto-approval");
+      statuses.set(id, "approved");
+      return toResult(id, "approved");
+    });
+
   const status = (approvalId: string): Effect.Effect<ApprovalResult, ApprovalError> =>
     Effect.sync(() => toResult(approvalId, statuses.get(approvalId) ?? "pending"));
 
@@ -172,6 +213,7 @@ function makeFakeApprovalService() {
       decide,
       status,
       list,
+      requestAutoApproved,
     }),
     setStatus: (approvalId: string, next: ApprovalResult["status"]) =>
       statuses.set(approvalId, next),
@@ -323,6 +365,7 @@ describe("ElevationService", () => {
       expect(error).toBeInstanceOf(ElevationPolicyDeniedError);
       expect(eventBus.published).toEqual([]);
       expect(repo.elevationsById.size).toBe(0);
+      expect(repo.notifications).toHaveLength(0);
     });
   });
 
@@ -351,6 +394,106 @@ describe("ElevationService", () => {
       expect(elevation.grantedAt).not.toBeNull();
       expect(elevation.expiresAt).not.toBeNull();
       expect(elevation.approvalId).not.toBeNull();
+      expect(eventBus.published.map((e) => e.type)).toEqual([
+        "access.elevation_requested",
+        "access.elevation_granted",
+      ]);
+
+      // spec §15 "owner notified" — a grant persists exactly one in-app
+      // notification for the machine's owner (see ../notify.ts).
+      expect(repo.notifications).toHaveLength(1);
+      expect(repo.notifications[0]).toMatchObject({
+        orgId: s.orgId,
+        ownerPersonId: s.ownerPersonId,
+        elevationId: elevation.id,
+      });
+      expect(repo.notifications[0]?.message).toContain(s.adminPersonId);
+    });
+  });
+
+  describe("owner notification: best-effort and idempotent", () => {
+    test("a failed owner notification does not fail the grant itself", async () => {
+      const s = seed();
+      const repo = makeFakeRepo(s);
+      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      repo.failNextNotification();
+      const approval = makeFakeApprovalService();
+      const eventBus = makeFakeEventBus();
+
+      const elevation = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* svc.request({
+            personId: s.adminPersonId,
+            machineId: s.machineId,
+            level: "file_recovery",
+            reason: "need it",
+          });
+        }),
+        { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer },
+      );
+
+      // The grant (and its events) already stand — a notification failure
+      // must not turn a successful grant into a failed request.
+      expect(elevation.status).toBe("granted");
+      expect(eventBus.published.map((e) => e.type)).toEqual([
+        "access.elevation_requested",
+        "access.elevation_granted",
+      ]);
+      expect(repo.notifications).toHaveLength(0);
+    });
+
+    test("syncApproval retries a previously-failed notification on an already-granted elevation, then stays idempotent", async () => {
+      const s = seed();
+      const repo = makeFakeRepo(s);
+      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      repo.failNextNotification();
+      const approval = makeFakeApprovalService();
+      const eventBus = makeFakeEventBus();
+      const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
+
+      const elevation = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* svc.request({
+            personId: s.adminPersonId,
+            machineId: s.machineId,
+            level: "file_recovery",
+            reason: "need it",
+          });
+        }),
+        layers,
+      );
+      expect(elevation.status).toBe("granted");
+      expect(repo.notifications).toHaveLength(0); // the simulated failure above
+
+      // Recovery: re-`sync`ing an already-granted elevation must retry just
+      // the notification, not silently no-op forever.
+      const firstRetry = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* svc.syncApproval(elevation.id);
+        }),
+        layers,
+      );
+      expect(firstRetry.status).toBe("granted");
+      expect(repo.notifications).toHaveLength(1);
+      expect(repo.notifications[0]).toMatchObject({
+        orgId: s.orgId,
+        ownerPersonId: s.ownerPersonId,
+        elevationId: elevation.id,
+      });
+
+      // A further retry (e.g. a concurrently-raced or repeated call) must
+      // not duplicate the notification, nor re-publish the grant event.
+      await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* svc.syncApproval(elevation.id);
+        }),
+        layers,
+      );
+      expect(repo.notifications).toHaveLength(1);
       expect(eventBus.published.map((e) => e.type)).toEqual([
         "access.elevation_requested",
         "access.elevation_granted",
@@ -484,6 +627,16 @@ describe("ElevationService", () => {
       const [requestedEvent, grantedEvent] = eventBus.published;
       expect(requestedEvent?.correlationId).toBe(requested.id);
       expect(grantedEvent?.correlationId).toBe(requested.id);
+
+      // spec §15 "owner notified" — the notification fires once the
+      // elevation actually finalizes as granted (syncApproval), not at the
+      // earlier "requested" state.
+      expect(repo.notifications).toHaveLength(1);
+      expect(repo.notifications[0]).toMatchObject({
+        orgId: s.orgId,
+        ownerPersonId: s.ownerPersonId,
+        elevationId: requested.id,
+      });
     });
 
     test("syncApproval denies once the approval is rejected", async () => {
@@ -520,6 +673,8 @@ describe("ElevationService", () => {
       expect(synced.status).toBe("denied");
       // No granted event — approval.denied is unit 5's event to emit, not ours.
       expect(eventBus.published.map((e) => e.type)).toEqual(["access.elevation_requested"]);
+      // A denial never notifies the owner — there is nothing to notify about.
+      expect(repo.notifications).toHaveLength(0);
     });
 
     test("syncApproval no-ops while the approval is still pending", async () => {

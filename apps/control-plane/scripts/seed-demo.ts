@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { generateKeyPairSync } from "node:crypto";
 /**
  * Dev-only demo seed: populates a coherent, realistic dataset across every
  * domain that has a real backend today (machines, approvals, SSH
@@ -19,7 +20,6 @@
  * then from the repo root: bun run --cwd apps/control-plane seed:demo
  */
 import * as schema from "@cloudable/schema";
-import { generateKeyPairSync } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -57,6 +57,9 @@ const db = drizzle(sql, { schema });
 // CURRENT_ORG_ID, so the console needs zero configuration to find this
 // org's data after a reseed.
 const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
+// Matches `apps/console/src/lib/current-person.ts`'s CURRENT_PERSON_ID —
+// see that file's doc comment. Assigned to Jordan below.
+const CURRENT_PERSON_ID = "00000000-0000-0000-0000-000000000002";
 
 async function main() {
   console.log(`Seeding demo data against ${API_BASE} ...`);
@@ -68,8 +71,7 @@ async function main() {
     .limit(1);
   if (existing) {
     throw new Error(
-      `Demo org ${DEMO_ORG_ID} already exists — this script is not idempotent (fixed id, ` +
-        "real business-logic side effects). Truncate every table before re-running.",
+      `Demo org ${DEMO_ORG_ID} already exists — this script is not idempotent (fixed id, real business-logic side effects). Truncate every table before re-running.`,
     );
   }
 
@@ -84,13 +86,19 @@ async function main() {
     { email: "priya.natarajan@acme.com", role: "owner" as const },
     { email: "marcus.webb@acme.com", role: "member" as const },
     { email: "elena.ruiz@acme.com", role: "member" as const },
-    { email: "jordan.blake@acme.com", role: "member" as const },
+    // Fixed id — matches `apps/console/src/lib/current-person.ts`'s
+    // CURRENT_PERSON_ID, the same "no auth yet" stopgap CURRENT_ORG_ID
+    // above stands in for. Jordan owns staging-07, the machine the demo
+    // elevation below targets, so a reseed leaves Jordan with one real
+    // unread owner notification (spec §15) with zero further configuration.
+    { id: CURRENT_PERSON_ID, email: "jordan.blake@acme.com", role: "member" as const },
     { email: "sam.okafor@acme.com", role: "member" as const },
   ];
   const people = await db
     .insert(schema.people)
     .values(
       peopleInput.map((p) => ({
+        ...("id" in p ? { id: p.id } : {}),
         orgId: org.id,
         email: p.email,
         source: "manual" as const,
@@ -105,11 +113,41 @@ async function main() {
 
   // --- Machines (real POST /api/v1/machines) -------------------------------
   const machineDefs = [
-    { name: "db-prod-03", region: "eastus", sizeSku: "Standard_D4s_v5", image: "ubuntu-22.04", owner: priya },
-    { name: "build-runner-11", region: "eastus", sizeSku: "Standard_D2s_v5", image: "ubuntu-22.04", owner: marcus },
-    { name: "analytics-02", region: "westeurope", sizeSku: "Standard_D8s_v5", image: "ubuntu-22.04", owner: elena },
-    { name: "staging-07", region: "westeurope", sizeSku: "Standard_D2s_v5", image: "ubuntu-22.04", owner: jordan },
-    { name: "worker-04", region: "eastus", sizeSku: "Standard_D4s_v5", image: "ubuntu-22.04", owner: sam },
+    {
+      name: "db-prod-03",
+      region: "eastus",
+      sizeSku: "Standard_D4s_v5",
+      image: "ubuntu-22.04",
+      owner: priya,
+    },
+    {
+      name: "build-runner-11",
+      region: "eastus",
+      sizeSku: "Standard_D2s_v5",
+      image: "ubuntu-22.04",
+      owner: marcus,
+    },
+    {
+      name: "analytics-02",
+      region: "westeurope",
+      sizeSku: "Standard_D8s_v5",
+      image: "ubuntu-22.04",
+      owner: elena,
+    },
+    {
+      name: "staging-07",
+      region: "westeurope",
+      sizeSku: "Standard_D2s_v5",
+      image: "ubuntu-22.04",
+      owner: jordan,
+    },
+    {
+      name: "worker-04",
+      region: "eastus",
+      sizeSku: "Standard_D4s_v5",
+      image: "ubuntu-22.04",
+      owner: sam,
+    },
   ];
   const machines: { id: string; name: string; ownerPersonId: string }[] = [];
   for (const m of machineDefs) {
@@ -213,13 +251,28 @@ async function main() {
   // Elevation is specifically for admin access to a machine the requester does
   // NOT own (spec §15) — a self-owned target is rejected with
   // SelfOwnedMachineError, so this has to be someone other than staging's owner.
-  await api("POST", "/api/v1/elevations", {
-    personId: priya.id,
-    machineId: staging.id,
-    level: "file_recovery",
-    reason: "Pulling a log file for the SOC2 auditor's sample request while Jordan is out.",
+  const elevation = await api<{ id: string; approvalId: string | null }>(
+    "POST",
+    "/api/v1/elevations",
+    {
+      personId: priya.id,
+      machineId: staging.id,
+      level: "file_recovery",
+      reason: "Pulling a log file for the SOC2 auditor's sample request while Jordan is out.",
+    },
+  );
+  // Decided and synced to granted (rather than left pending) so the demo
+  // also exercises the real owner-notification flow (spec §15: "owner
+  // notified") — Jordan (staging's owner, and this build's fixed
+  // CURRENT_PERSON_ID — see apps/console/src/lib/current-person.ts) has one
+  // real unread notification after this reseed.
+  if (!elevation.approvalId) throw new Error("expected the elevation to have an approvalId");
+  await api("POST", `/api/v1/approvals/${elevation.approvalId}/decide`, {
+    personId: jordan.id,
+    decision: "approved",
   });
-  console.log("elevations: 1 requested");
+  await api("POST", `/api/v1/elevations/${elevation.id}/sync`);
+  console.log("elevations: 1 requested, approved, and granted (owner notified)");
 
   // --- Archive one machine ---------------------------------------------------
   // NOT going through the real POST .../archive endpoint here: it calls

@@ -25,6 +25,18 @@ const resolvedManifestEntrySchema = Schema.Struct({
   resolvedFromScopeId: Schema.String,
 });
 
+const resolvedPersistentPathsSchema = Schema.Struct({
+  value: Schema.Array(Schema.String),
+  source: manifestScopeSchema,
+  resolvedFromScopeId: Schema.String,
+});
+
+const resolvedAccessMethodsEnabledSchema = Schema.Struct({
+  value: Schema.Struct({ webTerminal: Schema.Boolean, ssh: Schema.Boolean }),
+  source: manifestScopeSchema,
+  resolvedFromScopeId: Schema.String,
+});
+
 const machineSummaryFields = {
   id: Schema.UUID,
   orgId: Schema.UUID,
@@ -41,9 +53,20 @@ const machineSummaryFields = {
 
 const machineSummarySchema = Schema.Struct(machineSummaryFields);
 
+// spec §17: logging tier resolves org → machine, same chain as everything
+// else — `source` is "org" when the machine has no override of its own,
+// "machine" when it does (never "template" in v1 — the layer is inert).
+const effectiveLoggingTierSchema = Schema.Struct({
+  tier: Schema.Literal(1, 2, 3),
+  source: manifestScopeSchema,
+});
+
 const machineDetailSchema = Schema.Struct({
   ...machineSummaryFields,
   manifest: Schema.Array(resolvedManifestEntrySchema),
+  persistentPaths: resolvedPersistentPathsSchema,
+  accessMethodsEnabled: resolvedAccessMethodsEnabledSchema,
+  loggingTier: effectiveLoggingTierSchema,
 });
 
 const pageInfoSchema = Schema.Struct({
@@ -54,7 +77,10 @@ const pageInfoSchema = Schema.Struct({
 const createMachinePayloadSchema = Schema.Struct({
   orgId: Schema.UUID,
   name: Schema.String.pipe(Schema.minLength(1)),
-  region: Schema.String.pipe(Schema.minLength(1)),
+  // Optional — omitted, `MachineService.create` resolves the org's
+  // configured default region instead of requiring the caller to always
+  // supply one (docs/inheritance.md, spec.md §5).
+  region: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   sizeSku: Schema.String.pipe(Schema.minLength(1)),
   image: Schema.String.pipe(Schema.minLength(1)),
   // Required, never omitted: CLAUDE.md invariant #3 — a machine always has
