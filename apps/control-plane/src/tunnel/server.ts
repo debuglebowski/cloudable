@@ -13,13 +13,24 @@ import { machines, sessions } from "@cloudable/schema";
 // the policy check, the signed token (session-token.ts, fully tested
 // including the tamper failure path), the `sessions` row lifecycle, and
 // every emitted event.
+//
+// One piece of the transport IS real now, though: `signal.ts`'s
+// tunnel-signal channel, pushed to on `mintSession` success and on every
+// session `endSession`/`terminateSessionsForMachine` end. It never carries
+// bytes, only "session <id> is waiting, connect now" / "session <id>, stop"
+// — the minimal thing a machine's agent needs to know to start (or stop)
+// using the still-stubbed byte-relay transport, once a sibling unit builds
+// it (`apps/agent/src/tunnel/client.ts`). See `signal.ts`'s own header
+// comment for why this is a new channel rather than a repurposed `wake`.
 // ---------------------------------------------------------------------------
 import { and, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { Db } from "../db/layer";
+import { resolveAccessMethodsEnabled } from "../domain/machine/settings";
 import { EventBus } from "../services/EventBus";
 import type { SignerTag } from "../services/Signer";
 import { type SessionMethod, mintSessionToken } from "./session-token";
+import { TunnelSignal } from "./signal";
 
 export class TunnelError extends Data.TaggedError("TunnelError")<{
   reason: "denied" | "not_found" | "lookup_failed" | "persist_failed" | "sign_failed";
@@ -64,6 +75,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
   effect: Effect.gen(function* () {
     const db = yield* Db;
     const eventBus = yield* EventBus;
+    const tunnelSignal = yield* TunnelSignal;
 
     const mintSession = (
       input: MintSessionInput,
@@ -78,11 +90,30 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
         });
         const machine = found[0];
 
-        const denialReason = !machine
+        let denialReason: string | null = !machine
           ? "machine_not_found"
           : machine.state !== "running"
             ? `machine_${machine.state}`
             : null;
+
+        // spec.md §11.1/§11: "Admin-disablable at any level" — refusing new
+        // sessions once a method is disabled is the other half of the gap
+        // alongside `applySettingChange`'s termination of already-live ones
+        // (docs/access.md's "disabling terminates live sessions, not
+        // merely refuses new ones"). Checked only once the machine is known
+        // to exist and be running, above.
+        if (!denialReason && machine) {
+          const accessMethods = yield* resolveAccessMethodsEnabled(db, {
+            orgId: machine.orgId,
+            templateId: machine.templateId,
+            machineId: machine.id,
+          }).pipe(Effect.mapError((cause) => new TunnelError({ reason: "lookup_failed", cause })));
+          const methodEnabled =
+            input.method === "terminal" ? accessMethods.value.webTerminal : accessMethods.value.ssh;
+          if (!methodEnabled) {
+            denialReason = input.method === "terminal" ? "web_terminal_disabled" : "ssh_disabled";
+          }
+        }
 
         if (denialReason) {
           yield* eventBus
@@ -150,9 +181,31 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
           ])
           .pipe(Effect.mapError((cause) => new TunnelError({ reason: "persist_failed", cause })));
 
+        // Tell the target machine's agent "session <id> is waiting, connect now" — the
+        // tunnel-signal channel (tunnel/signal.ts), deliberately separate from `wake`. Pushed
+        // only after the `sessions` row and `access.session_started` event are both durably
+        // written, same ordering `EndSessionInput`'s own callers rely on elsewhere in this
+        // file: a session that isn't real yet in the database must never be signaled as real
+        // to the agent. Best-effort and cannot fail this call — if no agent is currently
+        // long-polling for this machine (or ever connects), the signal is queued for the next
+        // one, and the person minting the session simply sees no live tunnel, same as today.
+        yield* tunnelSignal.push(input.targetMachineId, {
+          type: "session_waiting",
+          sessionId,
+        });
+
         return { sessionId, token: minted.token, expiresAt: minted.expiresAt };
       });
 
+    /**
+     * Person-initiated session end — the one production path that already has a real,
+     * wired HTTP endpoint (`POST /api/v1/access/sessions/end`, unlike
+     * `terminateSessionsForMachine` below, which nothing calls yet). Pushes a
+     * `session_terminate` tunnel signal for the same reason `mintSession` pushes
+     * `session_waiting`: without it, ending a session here only ever updates the `sessions`
+     * row — a real tunnel client (once built) would have no way to learn its session should
+     * disconnect, and would keep the reverse tunnel open indefinitely.
+     */
     const endSession = (input: EndSessionInput): Effect.Effect<void, TunnelError> =>
       Effect.gen(function* () {
         const now = new Date();
@@ -202,6 +255,11 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
             },
           ])
           .pipe(Effect.mapError((cause) => new TunnelError({ reason: "persist_failed", cause })));
+
+        yield* tunnelSignal.push(row.machineId, {
+          type: "session_terminate",
+          sessionId: row.id,
+        });
       });
 
     /**
@@ -213,6 +271,15 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
      * `sessions` nor the `access.session_ended` payload (both already
      * built by an earlier unit) carry a termination-reason field; see
      * docs/access.md for this tradeoff.
+     *
+     * Also pushes one `session_terminate` tunnel signal per session ended,
+     * down the exact same channel `mintSession` uses — this is the piece
+     * that makes a policy-disable action actually reach a *connected*
+     * agent, not just flip the `sessions` DB row. Before this, a caller of
+     * this function (still none in production — see docs/access.md) closed
+     * the database's idea of the session while any live tunnel connection
+     * for it kept running until the agent's own side noticed some other
+     * way (or never did).
      */
     const terminateSessionsForMachine = (input: {
       orgId: string;
@@ -264,6 +331,11 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
               },
             ])
             .pipe(Effect.mapError((cause) => new TunnelError({ reason: "persist_failed", cause })));
+
+          yield* tunnelSignal.push(input.machineId, {
+            type: "session_terminate",
+            sessionId: row.id,
+          });
         }
 
         return active.length;

@@ -28,6 +28,18 @@ export interface ApprovalRequest {
   requestedByPersonId: string;
   targetMachineId: string | null;
   reason: string;
+  /**
+   * A minimum mode a caller can require ON TOP OF whatever the org has configured for
+   * `actionType` — e.g. `domain/archive/approval-escalation.ts`'s `resolveRestoreApprovalFloor`
+   * escalating `"full"`-mode snapshot restores to always be at least `"dual"`, regardless of
+   * the org's own `approval_mode:snapshot_restore` setting. Same concept as
+   * `domain/elevation/policy.ts`'s `requiredApprovalModeFloor`, but enforced structurally
+   * here rather than as a pre-check the caller has to run itself: the org's configured mode
+   * is clamped UP to this floor, never down, so a weaker org configuration (e.g. `"none"`)
+   * can never satisfy less than what the caller requires. Omitted (the common case) means no
+   * floor beyond the org's own configured mode.
+   */
+  requiredModeFloor?: ApprovalMode | undefined;
 }
 
 export interface ApprovalResult {
@@ -69,6 +81,17 @@ const REQUIRED_APPROVALS_BY_MODE: Record<ApprovalMode, number> = {
   single: 1,
   dual: 2,
 };
+
+// Same rank table as `domain/elevation/policy.ts`'s `APPROVAL_MODE_RANK` — used below to
+// clamp a resolved org mode UP to a caller-required floor, never down.
+const APPROVAL_MODE_RANK: Record<ApprovalMode, number> = { none: 0, single: 1, dual: 2 };
+
+/** The stricter of `configured` (the org's own policy) and `floor` (a caller's minimum
+ * requirement) — never weaker than either. */
+const applyModeFloor = (configured: ApprovalMode, floor: ApprovalMode | undefined): ApprovalMode =>
+  floor !== undefined && APPROVAL_MODE_RANK[floor] > APPROVAL_MODE_RANK[configured]
+    ? floor
+    : configured;
 
 // Approval requests are time-boxed — an undecided request doesn't linger
 // forever (see `expireOverdueApprovals`).
@@ -196,7 +219,11 @@ const decodeCursor = (cursor: string): Cursor | null => {
  * The generic approval object (spec §13): single/dual-control gate for
  * sensitive actions (snapshot restore, break-glass, admin access,
  * offboarding). Approval mode is policy, resolved per action type through
- * the org -> machine chain (`resolveSetting`, template inert in v1).
+ * the org -> machine chain (`resolveSetting`, template inert in v1), then
+ * clamped up to `ApprovalRequest.requiredModeFloor` when the caller passes
+ * one — a caller-side escalation (see `domain/archive/approval-escalation.ts`)
+ * always wins over a weaker org configuration; the org's own mode can never
+ * be used to satisfy less than a caller's required floor.
  *
  * Every decision writes an event, granted or denied — denials are evidence
  * and are never silently dropped. Even a "none"-mode auto-approval still
@@ -239,21 +266,32 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
      * emits `approval.requested` -> `approval.granted` in one transaction —
      * mode `"none"`'s behavior (even auto-approval is evidence). The single
      * shared path behind BOTH `request()`'s own mode-resolution below (when
-     * it resolves to `"none"`) AND `requestAutoApproved()` — the org-policy
-     * bypass `ElevationService` uses for its `"always"` admin-access policy
-     * (spec §15), which forces this same outcome unconditionally, without
-     * resolving mode from settings at all. Before this, that `"always"`
-     * path hand-rolled its own raw `approvals` insert directly against
-     * `ElevationRepo`, with no approval-level events of its own — this is
-     * the one code path both callers now share.
+     * the *floor-clamped* mode is `"none"`) AND `requestAutoApproved()` — the
+     * org-policy bypass `ElevationService` uses for its `"always"`
+     * admin-access policy (spec §15), which forces this same outcome
+     * unconditionally, without resolving mode from settings at all. Before
+     * this, that `"always"` path hand-rolled its own raw `approvals` insert
+     * directly against `ElevationRepo`, with no approval-level events of its
+     * own — this is the one code path both callers now share.
+     *
+     * `mode` is passed in, never resolved here: `requestAutoApproved`'s whole
+     * point is to grant regardless of configured settings (`"none"`,
+     * unconditionally), while `request()`'s own "none" branch must resolve
+     * AND floor-clamp *before* deciding whether auto-approval even applies —
+     * doing that resolution inside this function would auto-grant an action
+     * whose floor requires real sign-off just because the org's own setting
+     * happens to be `"none"` (exactly the bug `requiredModeFloor` exists to
+     * prevent).
      */
-    const autoApprove = (req: ApprovalRequest): Effect.Effect<ApprovalResult, ApprovalError> =>
+    const autoApprove = (
+      req: ApprovalRequest,
+      mode: ApprovalMode,
+    ): Effect.Effect<ApprovalResult, ApprovalError> =>
       Effect.gen(function* () {
         if (!req.reason.trim()) {
           return yield* Effect.fail(new ApprovalError({ reason: "reason_required" }));
         }
 
-        const mode: ApprovalMode = "none";
         const requiredApprovals = REQUIRED_APPROVALS_BY_MODE[mode];
         const expiresAt = new Date(Date.now() + APPROVAL_TTL_MS);
 
@@ -322,9 +360,19 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
           return yield* Effect.fail(new ApprovalError({ reason: "reason_required" }));
         }
 
-        const mode = yield* resolveApprovalMode(db, req.orgId, req.targetMachineId, req.actionType);
+        const configuredMode = yield* resolveApprovalMode(
+          db,
+          req.orgId,
+          req.targetMachineId,
+          req.actionType,
+        );
+        // Clamped up to the caller's floor (never down) *before* deciding whether this
+        // resolves to auto-approval — resolving the raw configured mode first would let an
+        // org's own `"none"` setting silently skip approval for an action whose caller
+        // required at least `"dual"`, which is exactly the gap `requiredModeFloor` closes.
+        const mode = applyModeFloor(configuredMode, req.requiredModeFloor);
         if (mode === "none") {
-          return yield* autoApprove(req);
+          return yield* autoApprove(req, mode);
         }
 
         const requiredApprovals = REQUIRED_APPROVALS_BY_MODE[mode];
@@ -382,7 +430,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
      */
     const requestAutoApproved = (
       req: ApprovalRequest,
-    ): Effect.Effect<ApprovalResult, ApprovalError> => autoApprove(req);
+    ): Effect.Effect<ApprovalResult, ApprovalError> => autoApprove(req, "none");
 
     const decide = (
       approvalId: string,

@@ -8,6 +8,7 @@ export * from "./domains/approvals";
 export * from "./domains/archive";
 export * from "./domains/elevations";
 export * from "./domains/config";
+export * from "./domains/tunnel-signal";
 
 // Domain files (e.g. ./domains/machines) are added additively by feature units as
 // each domain lands, and re-exported here with their own `export * from "./domains/<name>";`
