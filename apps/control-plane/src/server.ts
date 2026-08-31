@@ -20,6 +20,7 @@ import { OffboardingHttpLive } from "./http/handlers/offboarding";
 import { OrganisationLive } from "./http/handlers/organisation";
 import { PeopleLive } from "./http/handlers/people";
 import { UpgradeLive } from "./http/handlers/upgrade";
+import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
 import { buildAppLive } from "./layers";
 import { FakeProvisioningServiceLive } from "./services/ProvisioningService.fake";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
@@ -65,8 +66,15 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
   Layer.provide(DbLive),
 );
 
+// Not part of `Api`/`ApiLive` above — `wake` is a raw route on the same shared
+// `HttpApiBuilder.Router`, not an `HttpApiEndpoint` (see agent-wake.ts) — but it needs the
+// same `AgentSessionToken`/`MachineDirectory` singletons `AgentProtocolLive` uses, which
+// `AppLive` (provided to `ServerLive` below) already supplies.
+const AgentWakeLive = AgentWakeRouteLive.pipe(Layer.provide(WakeRegistry.Default));
+
 const ServerLive = HttpApiBuilder.serve().pipe(
   Layer.provide(ApiLive),
+  Layer.provide(AgentWakeLive),
   Layer.provide(AppLive),
   Layer.provide(BunHttpServer.layer({ port: config.port })),
 );
