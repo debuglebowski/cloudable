@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import {
   ApprovalModeDialog,
   LoggingTierDialog,
+  RegionDefaultDialog,
   RetentionDaysDialog,
   RetentionLocationDialog,
 } from "./setting-dialogs";
@@ -35,6 +36,7 @@ export function OrganisationPage() {
   const [editingLoggingTier, setEditingLoggingTier] = useState(false);
   const [editingRetentionDays, setEditingRetentionDays] = useState(false);
   const [editingRetentionLocation, setEditingRetentionLocation] = useState(false);
+  const [editingRegionDefault, setEditingRegionDefault] = useState(false);
 
   if (isLoading || !settings) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -163,6 +165,25 @@ export function OrganisationPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Region</CardTitle>
+          <CardDescription>
+            Default Azure region for a new machine that doesn't specify one (docs/spec.md §5).
+            Resolved live at creation time through the same org → template → machine chain as every
+            other setting — never copied onto the machine as a wizard prefill.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col">
+          <SettingRow
+            label="Default region"
+            value={settings.regionDefault}
+            source="org"
+            onOverride={() => setEditingRegionDefault(true)}
+          />
+        </CardContent>
+      </Card>
+
       <ApprovalModeDialog
         actionType={editingApproval}
         currentMode={editingApproval ? settings.approvalModes[editingApproval] : undefined}
@@ -197,6 +218,14 @@ export function OrganisationPage() {
         onOpenChange={setEditingRetentionLocation}
         onSave={async (location) => {
           await update.mutateAsync({ retentionLocation: location });
+        }}
+      />
+      <RegionDefaultDialog
+        open={editingRegionDefault}
+        currentRegion={settings.regionDefault}
+        onOpenChange={setEditingRegionDefault}
+        onSave={async (region) => {
+          await update.mutateAsync({ regionDefault: region });
         }}
       />
     </div>

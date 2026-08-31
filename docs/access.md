@@ -218,20 +218,29 @@ terminal) can be trusted to gate on this token at all.
     field. Adding one would mean modifying `packages/schema`/`packages/events`, both explicitly
     handed to this unit as complete. Documented here as a known gap rather than worked around by
     quietly changing frozen files.
+- **The tunnel-signal channel** (`tunnel/signal.ts`, see `docs/agents.md`'s own section on it for
+  the full design/agent-side half): `mintSession`, `endSession`, and `terminateSessionsForMachine`
+  all now push to it — `{type: "session_waiting", sessionId}` on a successful mint,
+  `{type: "session_terminate", sessionId}` for every session `endSession`/`terminateSessionsForMachine`
+  ends. This is the piece that makes any of the three actually reach a *connected* agent, not just
+  flip a database row — the first real (if minimal) slice of the CP → agent half of the transport
+  described as fully stubbed below.
 
 ### What's stubbed, and why that's acceptable for this batch
 
-**The actual reverse-tunnel network transport is not implemented.** There is no code here that
-opens an outbound connection from a machine, multiplexes bytes for an interactive session, or
+**The actual reverse-tunnel byte-relay transport is still not implemented.** There is no code here
+that opens an outbound connection from a machine, multiplexes bytes for an interactive session, or
 relays a browser's terminal keystrokes anywhere — `tunnel/server.ts` is described in its own file
 banner as "the control-plane side of session brokering," full stop. This matches the cross-unit
 brief precisely: *"the actual reverse-tunnel network transport can be a documented
 stub/simplification if time is tight [...] since there's no real fleet of machines to tunnel to
 [...] the SIGNATURE VALIDATION logic is what must be real and tested, the transport mechanics are
 secondary."* Token minting, verification, the policy gate, and the session lifecycle (`sessions`
-rows + events) are all real and tested against a real local Postgres (§5); wiring an actual
-tunnel daemon process into `apps/agent` and a byte-relay protocol is future work for whichever
-unit builds the agent's tunnel half.
+rows + events) are all real and tested against a real local Postgres (§5). One piece of the CP →
+agent direction *is* real now, though (see above): the tunnel-signal channel that tells a
+connected agent a session exists at all. What's still missing is everything downstream of that —
+an actual reverse-tunnel process on the machine (`apps/agent/src/tunnel/client.ts`) and a
+byte-relay protocol — future work for whichever unit builds the agent's tunnel half.
 
 ### TLS terminates at the control plane, by construction
 
@@ -255,6 +264,8 @@ structural fact stated two ways, not two different claims to keep consistent by 
 | `POST` | `/api/v1/access/certificates/revoke` | Revoke a certificate (org-scoped) |
 | `POST` | `/api/v1/access/sessions` | Mint a session (web terminal / SSH session start) |
 | `POST` | `/api/v1/access/sessions/end` | End a session |
+
+Not part of this group (bearer-authenticated like the agent protocol, not `orgId`/`personId`-in-body like the table above) — `GET /api/v1/tunnel/signal`, the tunnel-signal long poll, `apps/control-plane/src/http/routes/tunnel-signal.ts` + `handlers/tunnel-signal.ts`. See `docs/agents.md`'s own section on it.
 
 **No path parameters** — certificate/session ids travel in the JSON body rather than `/:id`
 segments. This is a deliberate simplification: no `CurrentUserTag` auth middleware exists yet

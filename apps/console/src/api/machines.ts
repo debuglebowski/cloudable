@@ -1,5 +1,5 @@
 import type { LoggingTier } from "@/api/organisation";
-import { ApiError, apiGet, apiPatch } from "@/lib/api-client";
+import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
 import { CURRENT_ORG_ID } from "@/lib/current-org";
 import {
   type ApiErrorBody,
@@ -156,6 +156,25 @@ export async function listMachines(): Promise<Machine[]> {
     `/api/v1/machines?orgId=${CURRENT_ORG_ID}`,
   );
   return res.items.map(toMachine);
+}
+
+export interface CreateMachineInput {
+  name: string;
+  /** Omitted — the control plane resolves the org's configured default region
+   * (docs/spec.md §5) instead of the console prefilling one. */
+  region?: string;
+  sizeSku: string;
+  image: string;
+  /** A machine always has exactly one owner, always a person (CLAUDE.md invariant #3). */
+  ownerPersonId: string;
+}
+
+export async function createMachine(input: CreateMachineInput): Promise<Machine> {
+  const wire = await apiPost<MachineSummaryWire>("/api/v1/machines", {
+    orgId: CURRENT_ORG_ID,
+    ...input,
+  });
+  return toMachine(wire);
 }
 
 export async function getMachine(machineId: string): Promise<Machine | undefined> {

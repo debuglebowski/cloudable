@@ -5,11 +5,11 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
 import {
   DEFAULT_LOGGING_TIER,
-  getEffectiveLoggingTier,
-  getOrgLoggingTier,
   LOGGING_TIER_KEY,
   type LoggingSettingsError,
   type LoggingTier,
+  getEffectiveLoggingTier,
+  getOrgLoggingTier,
 } from "./settings";
 
 type DbHandle = PostgresJsDatabase<typeof schema>;
