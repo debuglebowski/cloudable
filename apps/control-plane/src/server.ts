@@ -19,6 +19,7 @@ import { MachinesLive } from "./http/handlers/machines";
 import { OffboardingHttpLive } from "./http/handlers/offboarding";
 import { OrganisationLive } from "./http/handlers/organisation";
 import { PeopleLive } from "./http/handlers/people";
+import { TunnelSignalLive } from "./http/handlers/tunnel-signal";
 import { UpgradeLive } from "./http/handlers/upgrade";
 import { buildAppLive } from "./layers";
 import { FakeProvisioningServiceLive } from "./services/ProvisioningService.fake";
@@ -60,6 +61,7 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       PeopleLive,
       OrganisationLive,
       IntegrationsLive,
+      TunnelSignalLive,
     ),
   ),
   Layer.provide(DbLive),
