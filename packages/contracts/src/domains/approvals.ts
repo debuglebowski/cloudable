@@ -18,11 +18,17 @@ export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 
 export type ApprovalDecisionValue = "approved" | "rejected";
 
+// `orgId`/`requestedByPersonId`/`personId` are gone from every request
+// below: the server derives both from the caller's session
+// (`CurrentUserTag`), not the wire — see
+// `apps/control-plane/src/http/middleware/auth.ts`. A confirmation dialog
+// is self-approval and is not an approval (spec §13) — deriving the
+// deciding person from the real session, not a client-supplied id, is
+// what actually enforces that.
+
 /** Request body for `POST /api/v1/approvals`. */
 export interface CreateApprovalRequest {
-  orgId: string;
   actionType: ApprovalActionType;
-  requestedByPersonId: string;
   /** Null for actions that do not target a specific machine. */
   targetMachineId: string | null;
   /** Required free text — never optional (spec §13). */
@@ -31,12 +37,6 @@ export interface CreateApprovalRequest {
 
 /** Request body for `POST /api/v1/approvals/:id/decide`. */
 export interface DecideApprovalRequest {
-  /**
-   * The identified person recording this decision. A confirmation dialog is
-   * self-approval and is not an approval — this must be a real person, not
-   * an implicit UI confirmation (spec §13).
-   */
-  personId: string;
   decision: ApprovalDecisionValue;
   /** Required when `decision` is "rejected" — denials are evidence. */
   reason?: string;
@@ -63,7 +63,6 @@ export interface ApprovalResource {
 
 export interface ListApprovalsQuery extends PaginatedRequest {
   status?: ApprovalStatus;
-  orgId?: string;
 }
 
 export interface ListApprovalsResponse {

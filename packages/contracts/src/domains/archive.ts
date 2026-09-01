@@ -26,7 +26,6 @@ export interface ArchiveMachineResponse {
 export interface RestoreSnapshotRequest {
   mode: RestoreMode;
   targetMachineId: string;
-  requestedByPersonId: string;
   reason: string;
   /** Required, and must be `true`, when `mode` is `"full"` — an explicit
    * acknowledgement that secret bindings will be reattached. Never defaulted. */

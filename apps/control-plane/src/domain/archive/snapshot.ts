@@ -1,5 +1,5 @@
 import { snapshots } from "@cloudable/schema";
-import { and, eq, isNull, lt } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt } from "drizzle-orm";
 import { Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
@@ -124,13 +124,13 @@ const requireNonEmptyReason = (reason: string, message: string) =>
  * (`computeExpirySweepCandidates`) regardless of `expiresAt`. Renders as a documented
  * exception, never an error (spec §14). Emits `snapshot.legal_hold_set`.
  */
-export const setLegalHold = (snapshotId: string, reason: string) =>
+export const setLegalHold = (snapshotId: string, orgId: string, reason: string) =>
   Effect.gen(function* () {
     yield* requireNonEmptyReason(reason, "A legal hold requires a reason.");
 
     const db = yield* Db;
     const eventBus = yield* EventBus;
-    const snapshot = yield* fetchSnapshot(snapshotId);
+    const snapshot = yield* fetchSnapshot(snapshotId, orgId);
 
     yield* dbTry(
       () =>
@@ -161,13 +161,13 @@ export const setLegalHold = (snapshotId: string, reason: string) =>
 
 /** Clears a previously-set legal hold. The retention clock resumes against the
  * snapshot's existing `expiresAt` (never recomputed). Emits `snapshot.legal_hold_cleared`. */
-export const clearLegalHold = (snapshotId: string, reason: string) =>
+export const clearLegalHold = (snapshotId: string, orgId: string, reason: string) =>
   Effect.gen(function* () {
     yield* requireNonEmptyReason(reason, "Clearing a legal hold requires a reason.");
 
     const db = yield* Db;
     const eventBus = yield* EventBus;
-    const snapshot = yield* fetchSnapshot(snapshotId);
+    const snapshot = yield* fetchSnapshot(snapshotId, orgId);
 
     yield* dbTry(
       () =>
@@ -198,11 +198,12 @@ export const clearLegalHold = (snapshotId: string, reason: string) =>
 
 /**
  * Snapshots eligible for the expiry sweep: past `expiresAt`, not already expired, and
- * not under legal hold. A full expiry cron isn't built in this unit — this query is the
- * primitive both a future scheduler and unit 9's "retention is honoured" compliance
- * check read from.
+ * not under legal hold. This query is the shared primitive both `expireOverdueSnapshots`
+ * (the actual sweep, below) and the "retention is honoured" compliance check read from —
+ * `orgId` is optional so the fleet-wide sweep can call it unscoped while the org-scoped
+ * compliance check narrows it, without either maintaining its own copy of this filter.
  */
-export const computeExpirySweepCandidates = (now: Date = new Date()) =>
+export const computeExpirySweepCandidates = (now: Date = new Date(), orgId?: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
     return yield* dbTry(
@@ -215,8 +216,61 @@ export const computeExpirySweepCandidates = (now: Date = new Date()) =>
               lt(snapshots.expiresAt, now),
               isNull(snapshots.expiredAt),
               eq(snapshots.legalHold, false),
+              ...(orgId !== undefined ? [eq(snapshots.orgId, orgId)] : []),
             ),
           ),
       "compute_expiry_sweep_candidates",
     );
+  });
+
+/**
+ * The actual expiry sweep (spec §14 "Archived, expired — clock elapsed, volume data
+ * hard-deleted"): flips `expiredAt` on every overdue, non-legal-hold snapshot and
+ * publishes `snapshot.expired` for each. Before this, `computeExpirySweepCandidates`
+ * was a real, tested query with no caller anywhere — nothing ever actually set
+ * `expiredAt`, so "Archived, expired" never happened and every snapshot past its
+ * retention window just sat there indefinitely as "restorable".
+ *
+ * This build has no real disk to hard-delete (no live Azure account — see
+ * `services/ProvisioningService.azure.ts`); `getSnapshotSubState`/`restoreUnavailableReason`
+ * (sub-state.ts) already derive restore-availability purely from `expiredAt`, so setting
+ * it is the whole state transition this domain needs to make restore correctly
+ * unavailable. The record itself (id, machine, timestamps) is never touched beyond that —
+ * "the record and full audit history persist permanently" per spec.
+ */
+export const expireOverdueSnapshots = (
+  now: Date = new Date(),
+): Effect.Effect<number, ArchiveDbError, Db | EventBus> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const eventBus = yield* EventBus;
+
+    const candidates = yield* computeExpirySweepCandidates(now);
+    if (candidates.length === 0) return 0;
+
+    const ids = candidates.map((snapshot) => snapshot.id);
+    yield* dbTry(
+      () => db.update(snapshots).set({ expiredAt: now }).where(inArray(snapshots.id, ids)),
+      "expire_overdue_snapshots",
+    );
+
+    yield* publishOrDie(
+      eventBus.publish(
+        candidates.map((snapshot) => ({
+          ...makeEnvelope({
+            orgId: snapshot.orgId,
+            machineId: snapshot.machineId,
+            correlationId: ulid(),
+            ...SYSTEM_ACTOR,
+          }),
+          type: "snapshot.expired" as const,
+          payload: {
+            createdAt: snapshot.createdAt.toISOString(),
+            retentionDays: snapshot.retentionDays,
+          },
+        })),
+      ),
+    );
+
+    return candidates.length;
   });

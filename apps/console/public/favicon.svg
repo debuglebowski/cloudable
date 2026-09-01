@@ -1,11 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect width="100" height="100" rx="22" fill="#2d4c7c" />
-  <path
-    d="M31 66h34a13 13 0 0 0 2-25.8 18 18 0 0 0-34.8-6A15 15 0 0 0 31 66Z"
-    fill="none"
-    stroke="#fff"
-    stroke-width="5.5"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+  <!-- Same brand mark as the sidebar/login-page square (rounded-lg bg-primary
+       plus lucide-react's Cloud path, stroke-only), not a separate icon design.
+       The background adapts to prefers-color-scheme using the same two
+       values as the primary token in index.css (light 216 47% 33%, dark
+       213 70% 62%), so the favicon matches whichever theme the OS is in
+       rather than only ever the light one. Note for future edits: this file
+       is parsed as strict XML (opening it directly, not just linking it as a
+       favicon, proves that) — an XML comment may not contain a literal
+       double hyphen anywhere in its body, so avoid writing raw CSS
+       custom-property syntax inside this comment block. -->
+  <style>
+    :root { --bg: #2d4c7c; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #5a97e2; }
+    }
+  </style>
+  <rect width="100" height="100" rx="22" fill="var(--bg)" />
+  <g transform="translate(22.5, 22.5) scale(2.29)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+  </g>
 </svg>

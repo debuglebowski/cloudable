@@ -1,3 +1,4 @@
+import { authAccount, authSession, authUser, authVerification } from "@cloudable/schema";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -16,19 +17,34 @@ import { config } from "./config";
 // `DATABASE_URL` instead — same database, different client instance. A
 // future feature unit may thread the Effect-managed connection through the
 // layer graph instead, if that turns out to matter.
-//
-// BetterAuth also owns its own tables (user/session/account/verification),
-// which do not exist yet in `@cloudable/schema`'s migrations. Until a
-// future feature unit adds them (e.g. via the BetterAuth CLI's schema
-// generation), any BetterAuth endpoint that actually touches the database
-// will fail at request time — this file only guarantees construction, not
-// a working auth flow end to end.
 const authSql = postgres(config.databaseUrl);
 const authDb = drizzle(authSql);
 
 export const auth = betterAuth({
-  database: drizzleAdapter(authDb, { provider: "pg" }),
+  // The drizzle adapter's own model names (`user`/`session`/`account`/
+  // `verification`) are mapped explicitly to this build's `auth_`-prefixed
+  // tables (`packages/schema/src/tables/auth-*.ts`) — those are named with
+  // the prefix specifically to avoid colliding with the pre-existing
+  // `sessions` table (SSH/terminal access) and the generic term "session"
+  // being heavily overloaded elsewhere in this codebase, so the adapter
+  // can't infer the mapping from `db._.fullSchema` by bare model name alone.
+  database: drizzleAdapter(authDb, {
+    provider: "pg",
+    schema: {
+      user: authUser,
+      session: authSession,
+      account: authAccount,
+      verification: authVerification,
+    },
+  }),
   secret: config.betterAuthSecret,
   baseURL: config.betterAuthUrl,
+  // BetterAuth's own CSRF/origin check (separate from `HttpMiddleware.cors`
+  // in server.ts) rejects any request that carries a session cookie unless
+  // its `Origin` is in this list — every request after the very first
+  // sign-in click, in practice. Without this, real browser sessions break
+  // immediately after login (sign-out, and any later `/sign-in` retry,
+  // all 403 "Invalid origin" the moment a cookie is already set).
+  trustedOrigins: [config.consoleOrigin],
   emailAndPassword: { enabled: true },
 });

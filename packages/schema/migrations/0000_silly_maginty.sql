@@ -14,7 +14,8 @@ CREATE TABLE "people" (
 	"active" boolean DEFAULT true NOT NULL,
 	"role" text DEFAULT 'member' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"deactivated_at" timestamp with time zone
+	"deactivated_at" timestamp with time zone,
+	CONSTRAINT "people_email_unique" UNIQUE("email")
 );
 --> statement-breakpoint
 CREATE TABLE "machines" (
@@ -207,16 +208,68 @@ CREATE TABLE "upgrade_attempts" (
 	"next_eligible_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "auth_user" (
+	"id" text PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"email" text NOT NULL,
+	"email_verified" boolean NOT NULL,
+	"image" text,
+	"created_at" timestamp with time zone NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL,
+	CONSTRAINT "auth_user_email_unique" UNIQUE("email")
+);
+--> statement-breakpoint
+CREATE TABLE "auth_session" (
+	"id" text PRIMARY KEY NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"token" text NOT NULL,
+	"created_at" timestamp with time zone NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL,
+	"ip_address" text,
+	"user_agent" text,
+	"user_id" text NOT NULL,
+	CONSTRAINT "auth_session_token_unique" UNIQUE("token")
+);
+--> statement-breakpoint
+CREATE TABLE "auth_account" (
+	"id" text PRIMARY KEY NOT NULL,
+	"issuer" text NOT NULL,
+	"account_id" text NOT NULL,
+	"provider_id" text NOT NULL,
+	"user_id" text NOT NULL,
+	"access_token" text,
+	"refresh_token" text,
+	"id_token" text,
+	"access_token_expires_at" timestamp with time zone,
+	"refresh_token_expires_at" timestamp with time zone,
+	"scope" text,
+	"password" text,
+	"created_at" timestamp with time zone NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "auth_verification" (
+	"id" text PRIMARY KEY NOT NULL,
+	"identifier" text NOT NULL,
+	"value" text NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone NOT NULL,
+	"updated_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
 ALTER TABLE "people" ADD CONSTRAINT "people_org_id_orgs_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."orgs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "machines" ADD CONSTRAINT "machines_org_id_orgs_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."orgs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "machines" ADD CONSTRAINT "machines_owner_person_id_people_id_fk" FOREIGN KEY ("owner_person_id") REFERENCES "public"."people"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "approval_decisions" ADD CONSTRAINT "approval_decisions_approval_id_approvals_id_fk" FOREIGN KEY ("approval_id") REFERENCES "public"."approvals"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "secret_bindings" ADD CONSTRAINT "secret_bindings_org_id_orgs_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."orgs"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "upgrade_attempts" ADD CONSTRAINT "upgrade_attempts_machine_id_machines_id_fk" FOREIGN KEY ("machine_id") REFERENCES "public"."machines"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "auth_session" ADD CONSTRAINT "auth_session_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "auth_account" ADD CONSTRAINT "auth_account_user_id_auth_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."auth_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "setting_values_scope_key_idx" ON "setting_values" USING btree ("scope_type","scope_id","key");--> statement-breakpoint
 CREATE UNIQUE INDEX "machine_packages_scope_package_idx" ON "machine_packages" USING btree ("scope_type","scope_id","package_name");--> statement-breakpoint
 CREATE INDEX "events_org_type_occurred_idx" ON "events" USING btree ("org_id","type","occurred_at");--> statement-breakpoint
 CREATE INDEX "access_command_recorded_machine_occurred_idx" ON "access_command_recorded" USING btree ("machine_id","occurred_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "compliance_finding_state_key_idx" ON "compliance_finding_state" USING btree ("check_id","org_id","machine_id","detail_key");--> statement-breakpoint
 CREATE INDEX "secret_bindings_scope_idx" ON "secret_bindings" USING btree ("scope_type","scope_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "secret_bindings_scope_key_idx" ON "secret_bindings" USING btree ("scope_type","scope_id","key") WHERE "secret_bindings"."removed_at" is null;
+CREATE UNIQUE INDEX "secret_bindings_scope_key_idx" ON "secret_bindings" USING btree ("scope_type","scope_id","key") WHERE "secret_bindings"."removed_at" is null;--> statement-breakpoint
+CREATE UNIQUE INDEX "account_issuer_account_id_uidx" ON "auth_account" USING btree ("issuer","account_id");

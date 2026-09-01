@@ -3,6 +3,7 @@ import { AttestationRejectedError, attest, clearCachedSession } from "./attestat
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
 import { ApiError } from "./http-client";
+import { listInstalledPackages } from "./installed-packages";
 import { listOpenPorts } from "./open-ports";
 import { connectWake } from "./wake";
 import type { AgentReportRequest, AgentReportResponse, DesiredStateResponse } from "./wire-types";
@@ -167,19 +168,20 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
           // docs/agents.md and this unit's PR description), so there's nothing to reconcile yet.
         }
 
-        // Real observed state: installed-package inventory is a stub still (see
-        // docs/agents.md), but `openPorts` and `configState` are now real scans —
-        // `open-ports.ts`/`access-methods.ts` — not hardcoded placeholders. The two
-        // scans are independent `/proc` reads with no data dependency, so they run
-        // concurrently rather than one after the other.
-        const [openPorts, runningAccessMethods] = await Promise.all([
+        // Real observed state: `installedPackages`, `openPorts`, and `configState`
+        // are all real scans now — `installed-packages.ts`/`open-ports.ts`/
+        // `access-methods.ts` — not hardcoded placeholders. The three scans have
+        // no data dependency on each other, so they run concurrently rather than
+        // one after another.
+        const [installedPackages, openPorts, runningAccessMethods] = await Promise.all([
+          listInstalledPackages(),
           listOpenPorts(),
           listRunningAccessMethods(),
         ]);
         await reportObservedState(session.bearerToken, {
           agentVersion: AGENT_VERSION,
           observedAt: new Date().toISOString(),
-          installedPackages: [],
+          installedPackages,
           openPorts,
           configState: { runningAccessMethods },
         });

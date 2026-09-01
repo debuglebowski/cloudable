@@ -1,0 +1,1 @@
+ALTER TABLE "approvals" ADD COLUMN "target_person_id" uuid;

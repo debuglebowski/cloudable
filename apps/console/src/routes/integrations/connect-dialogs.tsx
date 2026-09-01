@@ -13,6 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -59,9 +60,7 @@ export function IdpConnectDialog() {
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
           <div className="flex flex-col gap-1">
-            <label htmlFor={providerId} className="text-sm font-medium">
-              Provider name
-            </label>
+            <Label htmlFor={providerId}>Provider name</Label>
             <Input
               id={providerId}
               required
@@ -71,9 +70,7 @@ export function IdpConnectDialog() {
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label htmlFor={metadataId} className="text-sm font-medium">
-              Federation metadata / discovery URL
-            </label>
+            <Label htmlFor={metadataId}>Federation metadata / discovery URL</Label>
             <Input
               id={metadataId}
               required
@@ -144,9 +141,7 @@ export function CloudConnectDialog() {
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
           <div className="flex flex-col gap-1">
-            <label htmlFor={tenantIdId} className="text-sm font-medium">
-              Tenant ID
-            </label>
+            <Label htmlFor={tenantIdId}>Tenant ID</Label>
             <Input
               id={tenantIdId}
               required
@@ -156,9 +151,7 @@ export function CloudConnectDialog() {
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label htmlFor={applicationIdId} className="text-sm font-medium">
-              Application (client) ID
-            </label>
+            <Label htmlFor={applicationIdId}>Application (client) ID</Label>
             <Input
               id={applicationIdId}
               required
@@ -168,9 +161,7 @@ export function CloudConnectDialog() {
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label htmlFor={subscriptionIdId} className="text-sm font-medium">
-              Subscription ID
-            </label>
+            <Label htmlFor={subscriptionIdId}>Subscription ID</Label>
             <Input
               id={subscriptionIdId}
               required
@@ -237,9 +228,7 @@ export function SecretStoreConnectDialog() {
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
           <div className="flex flex-col gap-1">
-            <label htmlFor={providerId} className="text-sm font-medium">
-              Store
-            </label>
+            <Label htmlFor={providerId}>Store</Label>
             <Select
               value={provider}
               onValueChange={(value) => setProvider(value as SecretStoreConfig["provider"])}
@@ -254,9 +243,7 @@ export function SecretStoreConnectDialog() {
             </Select>
           </div>
           <div className="flex flex-col gap-1">
-            <label htmlFor={vaultUrlId} className="text-sm font-medium">
-              Vault URL
-            </label>
+            <Label htmlFor={vaultUrlId}>Vault URL</Label>
             <Input
               id={vaultUrlId}
               required

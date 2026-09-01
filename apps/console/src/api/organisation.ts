@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { machinesKeys } from "@/api/machines";
 import { apiGet, apiPatch } from "@/lib/api-client";
 import { CURRENT_ORG_ID } from "@/lib/current-org";
+import { CURRENT_PERSON_ID } from "@/lib/current-person";
 
 /**
  * Organisation settings — wired to the real `apps/control-plane/src/http/
@@ -29,16 +29,6 @@ export type ApprovalMode = "none" | "single" | "dual";
 /** See docs/spec.md §17. Tier 3 puts Cloudable on the plaintext path — stated, not hidden. */
 export type LoggingTier = 1 | 2 | 3;
 
-/**
- * Matches `apps/control-plane/src/logging/settings.ts`'s
- * `DEFAULT_LOGGING_TIER` — used as a UI-only fallback while a query for the
- * real value is still in flight (e.g. the machine detail page's override
- * dialog needs *some* `currentTier` before its own query resolves). Every
- * value actually rendered still comes from the API; this is never a
- * silent substitute for a real read.
- */
-export const DEFAULT_LOGGING_TIER: LoggingTier = 2;
-
 /** Matches `logging/settings.ts`'s `RetentionLocation` — the real setting values,
  * not the more verbose names this page's mock previously invented. */
 export type RetentionLocation = "customer" | "cloudable_sweden_central";
@@ -47,14 +37,12 @@ export interface OrgSettings {
   id: string;
   name: string;
   approvalModes: Record<ApprovalActionType, ApprovalMode>;
+  /** Count of this org's machines with their own override, per action type — read-only,
+   * feeds `LineageGutter`'s "N machines override this" badge. Not sent on update. */
+  approvalOverrides: Record<ApprovalActionType, number>;
   loggingTier: LoggingTier;
-  /** How many machines have their own logging-tier override (see machine detail page). */
-  loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
-  /** Default Azure region for a new machine that doesn't specify one (docs/spec.md §5) —
-   * live-resolved server-side, not a client-side prefill. */
-  regionDefault: string;
 }
 
 export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
@@ -88,33 +76,37 @@ export const organisationKeys = {
   packages: () => [...organisationKeys.all, "packages"] as const,
 };
 
-/** `options.enabled` defaults to always-on (the Organisation page's own use) — pass
- * `{ enabled: false }` from a caller that only needs this while something else is open
- * (e.g. a dialog), same convention as any other TanStack Query hook here. */
-export function useOrgSettings(options?: { enabled?: boolean }) {
+/** Matches `domain/organisation/packages.ts`'s `OrgPackageEntry` on the control-plane. */
+export interface OrgPackageEntry {
+  packageName: string;
+  versionPin: string | null;
+  pinned: boolean;
+}
+
+export interface OrgPackageEdit {
+  packageName: string;
+  versionPin?: string | null;
+  pinned?: boolean;
+}
+
+interface OrgPackagesResponse {
+  items: OrgPackageEntry[];
+}
+
+export function useOrgSettings() {
   return useQuery({
     queryKey: organisationKeys.settings(),
-    queryFn: () => apiGet<OrgSettings>(`/api/v1/organisation?orgId=${CURRENT_ORG_ID}`),
-    ...options,
+    queryFn: () => apiGet<OrgSettings>("/api/v1/organisation"),
   });
 }
 
-// `loggingTierOverrideCount` is derived (a count over machines' own
-// settings), never something the org PATCH endpoint accepts.
-export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id" | "loggingTierOverrideCount">>;
+export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id" | "approvalOverrides">>;
 
 export function useUpdateOrgSettings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: UpdateOrgSettingsInput) =>
-      apiPatch<OrgSettings>("/api/v1/organisation", {
-        orgId: CURRENT_ORG_ID,
-        ...input,
-        // No auth/identity system yet — same gap as Approvals/Archive. Recorded as
-        // a system actor rather than inventing a fake person, since no real one
-        // is selected anywhere in this settings UI.
-        actor: { type: "system", id: "console" },
-      }),
+      apiPatch<OrgSettings>("/api/v1/organisation", input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: organisationKeys.all });
       toast.success("Organisation settings updated");
@@ -126,87 +118,54 @@ export function useUpdateOrgSettings() {
 }
 
 /**
- * Org-scope package manifest entries — `PATCH /api/v1/organisation/packages`
- * (`apps/control-plane/src/http/routes/organisation.ts`), the org-scope
- * sibling of `overrideManifestEntry` (`@/api/machines`), which only ever
- * writes machine-scoped rows. These are the entries that become the
- * resolved default on any machine with neither its own entry nor an
- * override for that package name (docs/inheritance.md, spec.md §6).
+ * Org-scope package manifest — wired to `PATCH /api/v1/organisation/packages`
+ * (`http/routes/organisation.ts`), the sibling of the machine-detail page's
+ * manifest editor but for `org`-scoped rows: the only place that creates or
+ * removes an org-scoped entry, rather than only overriding an
+ * already-resolved one (see `domain/organisation/packages.ts`).
  */
-export interface OrgPackageEntry {
-  packageName: string;
-  /** `null` means "any" version — no pin. */
-  versionPin: string | null;
-  /** Cannot be overridden below the org scope (spec §6) once set. */
-  pinned: boolean;
-}
-
-export interface OrgPackageEdit {
-  packageName: string;
-  versionPin?: string | null;
-  pinned?: boolean;
-}
-
-// No auth/identity system yet — same system-actor gap as `useUpdateOrgSettings` above.
-const CONSOLE_ACTOR = { type: "system" as const, id: "console" };
-
 export function useOrgPackages() {
   return useQuery({
     queryKey: organisationKeys.packages(),
     queryFn: () =>
-      apiGet<{ items: OrgPackageEntry[] }>(
-        `/api/v1/organisation/packages?orgId=${CURRENT_ORG_ID}`,
-      ).then((res) => res.items),
+      apiGet<OrgPackagesResponse>(`/api/v1/organisation/packages?orgId=${CURRENT_ORG_ID}`).then(
+        (res) => res.items,
+      ),
   });
 }
 
-/**
- * An org-scope package edit changes what every machine without its own
- * entry/override resolves to (docs/inheritance.md), so a machine detail
- * page's already-cached resolved manifest (`machinesKeys.manifest`) is
- * invalidated alongside the org's own package list — otherwise a machine
- * detail page opened before this edit would keep showing the stale
- * org-level default for up to the query client's `staleTime`.
- */
-function invalidateOrgPackages(queryClient: ReturnType<typeof useQueryClient>) {
-  queryClient.invalidateQueries({ queryKey: organisationKeys.packages() });
-  queryClient.invalidateQueries({ queryKey: machinesKeys.all });
+function useUpdateOrgPackages() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { upserts?: OrgPackageEdit[]; removals?: string[] }) =>
+      apiPatch<OrgPackagesResponse>("/api/v1/organisation/packages", {
+        orgId: CURRENT_ORG_ID,
+        actor: { type: "person", id: CURRENT_PERSON_ID },
+        ...input,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: organisationKeys.packages() });
+    },
+    onError: (error) => {
+      toast.error("Couldn't update the org package manifest", { description: error.message });
+    },
+  });
 }
 
 export function useAddOrgPackage() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (edit: OrgPackageEdit) =>
-      apiPatch<{ items: OrgPackageEntry[] }>("/api/v1/organisation/packages", {
-        orgId: CURRENT_ORG_ID,
-        upserts: [edit],
-        actor: CONSOLE_ACTOR,
-      }),
-    onSuccess: () => {
-      invalidateOrgPackages(queryClient);
-      toast.success("Package added to the org default manifest");
-    },
-    onError: (error) => {
-      toast.error("Couldn't add package", { description: error.message });
-    },
-  });
+  const update = useUpdateOrgPackages();
+  return {
+    ...update,
+    mutate: (entry: OrgPackageEdit, options?: Parameters<typeof update.mutate>[1]) =>
+      update.mutate({ upserts: [entry] }, options),
+  };
 }
 
 export function useRemoveOrgPackage() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (packageName: string) =>
-      apiPatch<{ items: OrgPackageEntry[] }>("/api/v1/organisation/packages", {
-        orgId: CURRENT_ORG_ID,
-        removals: [packageName],
-        actor: CONSOLE_ACTOR,
-      }),
-    onSuccess: () => {
-      invalidateOrgPackages(queryClient);
-      toast.success("Package removed from the org default manifest");
-    },
-    onError: (error) => {
-      toast.error("Couldn't remove package", { description: error.message });
-    },
-  });
+  const update = useUpdateOrgPackages();
+  return {
+    ...update,
+    mutate: (packageName: string, options?: Parameters<typeof update.mutate>[1]) =>
+      update.mutate({ removals: [packageName] }, options),
+  };
 }

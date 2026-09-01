@@ -7,14 +7,18 @@ import {
   clearLegalHold,
   estimateSnapshotCost,
   fetchLatestSnapshotForMachine,
+  fetchMachine,
   fetchSnapshot,
   getSnapshotSubState,
   listSnapshotsByOrg,
   restoreSnapshot,
   restoreUnavailableReason,
+  resumeRestore,
   setLegalHold,
 } from "../../domain/archive";
+import { TunnelRelay } from "../../tunnel/relay";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 const toSnapshotView = (snapshot: SnapshotRow) => ({
   id: snapshot.id,
@@ -44,32 +48,57 @@ const toLegalHoldResponse = (snapshot: SnapshotRow) => ({
 export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
   handlers
     .handle("archiveMachine", ({ path, payload }) =>
-      archiveMachine(path.machineId, payload.approvalId).pipe(
-        // `ProvisioningError`/`ArchiveDbError` are our own infra breaking, not a
-        // meaningful outcome for an API caller — only `MachineNotFoundError` (declared
-        // via `.addError` in ../routes/archive.ts) is a real 4xx here.
-        Effect.catchTags({
-          ProvisioningError: (e) => Effect.die(e),
-          ArchiveDbError: (e) => Effect.die(e),
-        }),
-        Effect.flatMap(() => fetchLatestSnapshotForMachine(path.machineId, "archive")),
-        Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
-        Effect.map((snapshot) => ({
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        // `archiveMachine`'s own signature is exact and load-bearing (see
+        // `domain/archive/archive.ts`) and doesn't take an `orgId` — this
+        // scoped fetch is the tenant-ownership gate in front of it.
+        yield* fetchMachine(path.machineId, currentUser.orgId);
+        yield* archiveMachine(path.machineId, payload.approvalId);
+        // Spec §8.2/§11.1: archiving a machine directly (not via offboarding) must also kill
+        // any live terminal/SSH session on it, not just block new ones — same requirement
+        // `domain/offboarding/offboardPerson.ts`'s own archive step now honors.
+        const tunnelRelay = yield* TunnelRelay;
+        yield* tunnelRelay.terminateSessionsForMachine({
+          orgId: currentUser.orgId,
+          machineId: path.machineId,
+          reason: "policy_terminated",
+        });
+        const snapshot = yield* fetchLatestSnapshotForMachine(path.machineId, "archive");
+        return {
           machineId: path.machineId,
           state: "archived_restorable" as const,
           snapshotId: snapshot.id,
           retentionExpiresAt: snapshot.expiresAt.toISOString(),
-        })),
+        };
+      }).pipe(
+        // `ProvisioningError`/`ArchiveDbError`/`TunnelError` are our own infra breaking, not a
+        // meaningful outcome for an API caller — only `MachineNotFoundError` (declared
+        // via `.addError` in ../routes/archive.ts) is a real 4xx here. A `TunnelError` here
+        // would be unusual (the machine we just successfully archived has no sessions to
+        // fail to terminate, in the common case), not a condition the caller could act on
+        // differently than any other infra failure.
+        Effect.catchTags({
+          ProvisioningError: (e) => Effect.die(e),
+          ArchiveDbError: (e) => Effect.die(e),
+          TunnelError: (e) => Effect.die(e),
+        }),
       ),
     )
     .handle("restoreSnapshot", ({ path, payload }) =>
-      restoreSnapshot({
-        snapshotId: path.snapshotId,
-        mode: payload.mode,
-        targetMachineId: payload.targetMachineId,
-        requestedByPersonId: payload.requestedByPersonId,
-        reason: payload.reason,
-        confirmSecretBindings: payload.confirmSecretBindings,
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        // Same scoped-fetch-then-act pattern as `archiveMachine` above —
+        // `restoreSnapshot`'s own signature doesn't take an `orgId`.
+        yield* fetchSnapshot(path.snapshotId, currentUser.orgId);
+        return yield* restoreSnapshot({
+          snapshotId: path.snapshotId,
+          mode: payload.mode,
+          targetMachineId: payload.targetMachineId,
+          requestedByPersonId: currentUser.personId,
+          reason: payload.reason,
+          confirmSecretBindings: payload.confirmSecretBindings,
+        });
       }).pipe(
         Effect.catchTags({
           ArchiveDbError: (e) => Effect.die(e),
@@ -77,23 +106,42 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
         }),
       ),
     )
+    .handle("resumeRestore", ({ path }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        // `resumeRestore` scopes its own approval lookup to `orgId` — a
+        // foreign or non-restore approval id comes back as
+        // `InvalidRestoreApprovalError`, the same non-leaking shape used
+        // everywhere else.
+        return yield* resumeRestore(path.approvalId, currentUser.orgId);
+      }).pipe(Effect.catchTag("ArchiveDbError", (e) => Effect.die(e))),
+    )
     .handle("setLegalHold", ({ path, payload }) =>
-      setLegalHold(path.snapshotId, payload.reason).pipe(
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* setLegalHold(path.snapshotId, currentUser.orgId, payload.reason);
+      }).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
         Effect.map(toLegalHoldResponse),
       ),
     )
     .handle("clearLegalHold", ({ path, payload }) =>
-      clearLegalHold(path.snapshotId, payload.reason).pipe(
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* clearLegalHold(path.snapshotId, currentUser.orgId, payload.reason);
+      }).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
         Effect.map(toLegalHoldResponse),
       ),
     )
     .handle("listSnapshots", ({ urlParams }) =>
-      listSnapshotsByOrg({
-        orgId: urlParams.orgId,
-        cursor: urlParams.cursor,
-        limit: urlParams.limit,
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* listSnapshotsByOrg({
+          orgId: currentUser.orgId,
+          cursor: urlParams.cursor,
+          limit: urlParams.limit,
+        });
       }).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
         Effect.map((result) => ({
@@ -103,13 +151,19 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
       ),
     )
     .handle("getSnapshot", ({ path }) =>
-      fetchSnapshot(path.snapshotId).pipe(
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* fetchSnapshot(path.snapshotId, currentUser.orgId);
+      }).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
         Effect.map(toSnapshotView),
       ),
     )
     .handle("getSnapshotCostEstimate", ({ path }) =>
-      fetchSnapshot(path.snapshotId).pipe(
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* fetchSnapshot(path.snapshotId, currentUser.orgId);
+      }).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
         Effect.map((snapshot) => ({
           snapshotId: snapshot.id,

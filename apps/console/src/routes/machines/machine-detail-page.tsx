@@ -1,45 +1,61 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { Clock, Cpu, Disc, type LucideIcon, MapPin, User } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import {
-  type AccessMethodsEnabled,
   type ManifestEntry,
   ManifestOverrideError,
   getMachine,
-  getMachineAccessMethodsEnabled,
   getMachineDrift,
-  getMachineLoggingTier,
   getMachineManifest,
-  getMachinePersistentPaths,
   machinesKeys,
-  overrideAccessMethodsEnabled,
-  overrideMachineLoggingTier,
   overrideManifestEntry,
-  overridePersistentPaths,
 } from "@/api/machines";
-import {
-  DEFAULT_LOGGING_TIER,
-  LOGGING_TIER_LABELS,
-  type LoggingTier,
-  organisationKeys,
-} from "@/api/organisation";
+import { listPeople as listPeopleDirectory } from "@/api/people-directory";
+import { CollapsibleSection } from "@/components/collapsible-section";
 import { Freshness } from "@/components/freshness";
 import { LineageGutter } from "@/components/lineage-gutter";
+import { OsIcon } from "@/components/os-icon";
 import { SettingRow } from "@/components/setting-row";
+import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-import { LoggingTierDialog } from "../organisation/setting-dialogs";
+import { ConnectTerminalDialog } from "./connect-terminal-dialog";
 import { MACHINE_STATE_BADGE_VARIANT, MACHINE_STATE_LABEL } from "./machine-state";
+import { ReconcileMachineDialog } from "./reconcile-machine-dialog";
+import { UpgradeMachineDialog } from "./upgrade-machine-dialog";
 
-function formatAccessMethods(methods: AccessMethodsEnabled | null | undefined): string {
-  const enabled: string[] = [];
-  if (methods?.webTerminal) enabled.push("web terminal");
-  if (methods?.ssh) enabled.push("ssh");
-  return enabled.length > 0 ? enabled.join(", ") : "none";
+/** Right-rail key/value line — this page's only detail view today, so this stays a
+ * local helper rather than a shared component (see collapsible-section.tsx's own
+ * comment on the same tradeoff). Extract if a second detail page needs it.
+ *
+ * `icon` names the field's kind, same convention as `TableHeaderIcon` on the list
+ * pages' column headers (company.png's rail rows each carry the same small muted
+ * glyph before "Parent company"/"Invoices"/"Website Domain") — and reuses the exact
+ * same icon per field as the Machines table header (Region/Size/Image/Last
+ * verified), so the two views of the same data stay visually paired. */
+function PropertyRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <TableHeaderIcon icon={icon} />
+        {label}
+      </dt>
+      <dd className="text-sm">{value}</dd>
+    </div>
+  );
 }
 
 /**
@@ -64,77 +80,19 @@ export function MachineDetailPage() {
     queryKey: machinesKeys.drift(machineId),
     queryFn: () => getMachineDrift(machineId),
   });
-  const persistentPathsQuery = useQuery({
-    queryKey: machinesKeys.persistentPaths(machineId),
-    queryFn: () => getMachinePersistentPaths(machineId),
-  });
-  const accessMethodsQuery = useQuery({
-    queryKey: machinesKeys.accessMethodsEnabled(machineId),
-    queryFn: () => getMachineAccessMethodsEnabled(machineId),
-  });
-  const loggingTierQuery = useQuery({
-    queryKey: machinesKeys.loggingTier(machineId),
-    queryFn: () => getMachineLoggingTier(machineId),
+  // Same query key `add-machine-dialog.tsx` already uses for this exact directory lookup —
+  // shares its cache entry rather than fetching the same list twice under two keys.
+  const peopleQuery = useQuery({
+    queryKey: ["people-directory"],
+    queryFn: listPeopleDirectory,
   });
 
   const [editingPackage, setEditingPackage] = useState<string | null>(null);
   const [draftVersion, setDraftVersion] = useState("");
   const [overrideErrors, setOverrideErrors] = useState<Record<string, string>>({});
-  const [editingLoggingTier, setEditingLoggingTier] = useState(false);
-  const [loggingTierError, setLoggingTierError] = useState<string | null>(null);
-
-  const loggingTierMutation = useMutation({
-    mutationFn: (tier: LoggingTier) => overrideMachineLoggingTier(machineId, tier),
-    onSuccess: () => {
-      setLoggingTierError(null);
-      void queryClient.invalidateQueries({ queryKey: machinesKeys.loggingTier(machineId) });
-      // The Organisation page's "N machines override this" count
-      // (`loggingTierOverrideCount`) is derived from this same write, so it
-      // goes stale unless invalidated here too — it has no query of its own
-      // running on this page to pick the change up otherwise.
-      void queryClient.invalidateQueries({ queryKey: organisationKeys.all });
-    },
-    onError: (err) => {
-      setLoggingTierError(err instanceof Error ? err.message : "Override failed.");
-    },
-  });
-
-  const [editingPersistentPaths, setEditingPersistentPaths] = useState(false);
-  const [draftPaths, setDraftPaths] = useState("");
-  const [persistentPathsError, setPersistentPathsError] = useState<string | null>(null);
-
-  const persistentPathsMutation = useMutation({
-    mutationFn: (paths: string[]) => overridePersistentPaths(machineId, paths),
-    onSuccess: () => {
-      setEditingPersistentPaths(false);
-      setPersistentPathsError(null);
-      void queryClient.invalidateQueries({ queryKey: machinesKeys.persistentPaths(machineId) });
-    },
-    onError: (err) => {
-      setPersistentPathsError(err instanceof Error ? err.message : "Override failed.");
-    },
-  });
-
-  const [editingAccessMethods, setEditingAccessMethods] = useState(false);
-  const [draftAccessMethods, setDraftAccessMethods] = useState<AccessMethodsEnabled>({
-    webTerminal: true,
-    ssh: true,
-  });
-  const [accessMethodsError, setAccessMethodsError] = useState<string | null>(null);
-
-  const accessMethodsMutation = useMutation({
-    mutationFn: (next: AccessMethodsEnabled) => overrideAccessMethodsEnabled(machineId, next),
-    onSuccess: () => {
-      setEditingAccessMethods(false);
-      setAccessMethodsError(null);
-      void queryClient.invalidateQueries({
-        queryKey: machinesKeys.accessMethodsEnabled(machineId),
-      });
-    },
-    onError: (err) => {
-      setAccessMethodsError(err instanceof Error ? err.message : "Override failed.");
-    },
-  });
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [reconcileOpen, setReconcileOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   const overrideMutation = useMutation({
     mutationFn: (vars: { packageName: string; nextVersion: string | null }) =>
@@ -147,6 +105,7 @@ export function MachineDetailPage() {
       });
       setEditingPackage(null);
       void queryClient.invalidateQueries({ queryKey: machinesKeys.manifest(machineId) });
+      toast.success(`"${vars.packageName}" overridden`);
     },
     onError: (err, vars) => {
       const message =
@@ -177,53 +136,72 @@ export function MachineDetailPage() {
 
   const machine = machineQuery.data;
   const drift = driftQuery.data;
+  // Owner is required at creation (invariant #3: "a machine has exactly one owner, always a
+  // person") but never shown again after that — not `activePeople`-filtered like the create
+  // dialog's picker, since a machine's *existing* owner isn't re-validated as still active here.
+  const owner = peopleQuery.data?.find((person) => person.id === machine?.ownerPersonId);
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <Link to="/machines" className="text-sm text-muted-foreground hover:underline">
-          ← Machines
+      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <Link to="/machines" className="hover:text-foreground hover:underline">
+          Machines
         </Link>
-        <div className="mt-1 flex items-center gap-3">
-          <h1 className="text-xl font-semibold">{machine.name}</h1>
-          <Badge variant={MACHINE_STATE_BADGE_VARIANT[machine.state]}>
-            {MACHINE_STATE_LABEL[machine.state]}
-          </Badge>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {machine.region} · {machine.sizeSku} · {machine.image}
-        </p>
-        <div className="mt-1">
-          {machine.lastVerifiedAt ? (
-            // Same single-timestamp simplification as the list page — see its comment.
-            <Freshness occurredAt={machine.lastVerifiedAt} recordedAt={machine.lastVerifiedAt} />
-          ) : (
-            <span className="text-xs text-muted-foreground">not yet verified</span>
-          )}
+        <span aria-hidden="true">/</span>
+        <span className="text-foreground">{machine.name}</span>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
+          <OsIcon image={machine.image} className="size-4" />
+        </span>
+        <h1 className="text-xl font-semibold">{machine.name}</h1>
+        <Badge
+          variant={MACHINE_STATE_BADGE_VARIANT[machine.state]}
+          dot={machine.state === "stopped"}
+        >
+          {MACHINE_STATE_LABEL[machine.state]}
+        </Badge>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={machine.state !== "running"}
+            title={
+              machine.state !== "running"
+                ? "Only a running machine has a live tunnel daemon connection to attach to."
+                : undefined
+            }
+            onClick={() => setConnectOpen(true)}
+          >
+            Connect
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setReconcileOpen(true)}>
+            Reconcile
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setUpgradeOpen(true)}>
+            Upgrade
+          </Button>
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Package manifest</CardTitle>
-          <CardDescription>
-            Effective packages after org → template → machine resolution. Lowest level wins; an
-            org-pinned entry cannot be overridden below (spec §6).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col p-0">
-          {manifestQuery.isPending && (
-            <p className="p-4 text-sm text-muted-foreground">Loading manifest…</p>
-          )}
-          {manifestQuery.isError && (
-            <p className="p-4 text-sm text-destructive">Failed to load package manifest.</p>
-          )}
-          {manifestQuery.data?.length === 0 && (
-            <p className="p-4 text-sm text-muted-foreground">No packages declared.</p>
-          )}
-          <div className="px-4">
+      <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <CollapsibleSection
+            label="Package manifest"
+            description="Effective packages after org → template → machine resolution. Lowest level wins; an org-pinned entry cannot be overridden below (spec §6)."
+          >
+            {manifestQuery.isPending && (
+              <p className="text-sm text-muted-foreground">Loading manifest…</p>
+            )}
+            {manifestQuery.isError && (
+              <p className="text-sm text-destructive">Failed to load package manifest.</p>
+            )}
+            {manifestQuery.data?.length === 0 && (
+              <p className="text-sm text-muted-foreground">No packages declared.</p>
+            )}
             {manifestQuery.data?.map((entry) => (
-              <div key={entry.package} className="border-b border-border last:border-b-0">
+              <div key={entry.package} className="border-b border-border/60 py-2 last:border-b-0">
                 <SettingRow
                   label={entry.package}
                   value={entry.version ?? "any"}
@@ -243,7 +221,7 @@ export function MachineDetailPage() {
                   )}
                 </div>
                 {editingPackage === entry.package && (
-                  <div className="flex flex-col gap-1.5 pb-3">
+                  <div className="flex flex-col gap-1.5 pb-1">
                     <div className="flex items-center gap-2">
                       <Input
                         value={draftVersion}
@@ -270,243 +248,121 @@ export function MachineDetailPage() {
                 )}
               </div>
             ))}
-          </div>
-        </CardContent>
-      </Card>
+          </CollapsibleSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Persistent paths</CardTitle>
-          <CardDescription>
-            Disposable — these paths survive an OS reimage/upgrade; the OS does not (spec §7).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {persistentPathsQuery.isPending && (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          )}
-          {persistentPathsQuery.isError && (
-            <p className="text-sm text-destructive">Failed to load persistent paths.</p>
-          )}
-          {persistentPathsQuery.data && (
-            <>
-              <SettingRow
-                label="Paths"
-                value={
-                  persistentPathsQuery.data.value.length > 0
-                    ? persistentPathsQuery.data.value.join(", ")
-                    : "none"
-                }
-                source={persistentPathsQuery.data.source}
-                onOverride={() => {
-                  setDraftPaths(persistentPathsQuery.data?.value.join(", ") ?? "");
-                  setEditingPersistentPaths(true);
-                }}
-              />
-              <LineageGutter source={persistentPathsQuery.data.source} viewing="machine" />
-              {editingPersistentPaths && (
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={draftPaths}
-                      onChange={(event) => setDraftPaths(event.target.value)}
-                      placeholder="/data, /etc/myapp"
-                      aria-label="Persistent paths, comma-separated"
-                    />
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        persistentPathsMutation.mutate(
-                          draftPaths
-                            .split(",")
-                            .map((path) => path.trim())
-                            .filter((path) => path.length > 0),
-                        )
-                      }
-                      disabled={persistentPathsMutation.isPending}
-                    >
-                      Save override
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setEditingPersistentPaths(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                  {persistentPathsError && (
-                    <p className="text-xs text-destructive">{persistentPathsError}</p>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Access methods</CardTitle>
-          <CardDescription>
-            Admin-disablable at any level; disabling web terminal ends live sessions immediately,
-            not merely new ones (spec §11.1).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {accessMethodsQuery.isPending && (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          )}
-          {accessMethodsQuery.isError && (
-            <p className="text-sm text-destructive">Failed to load access methods.</p>
-          )}
-          {accessMethodsQuery.data && (
-            <>
-              <SettingRow
-                label="Enabled methods"
-                value={formatAccessMethods(accessMethodsQuery.data.value)}
-                source={accessMethodsQuery.data.source}
-                onOverride={() => {
-                  if (accessMethodsQuery.data) setDraftAccessMethods(accessMethodsQuery.data.value);
-                  setEditingAccessMethods(true);
-                }}
-              />
-              <LineageGutter source={accessMethodsQuery.data.source} viewing="machine" />
-              {editingAccessMethods && (
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-4">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={draftAccessMethods.webTerminal}
-                        onChange={(event) =>
-                          setDraftAccessMethods((prev) => ({
-                            ...prev,
-                            webTerminal: event.target.checked,
-                          }))
-                        }
-                      />
-                      Web terminal
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={draftAccessMethods.ssh}
-                        onChange={(event) =>
-                          setDraftAccessMethods((prev) => ({ ...prev, ssh: event.target.checked }))
-                        }
-                      />
-                      SSH
-                    </label>
-                    <Button
-                      size="sm"
-                      onClick={() => accessMethodsMutation.mutate(draftAccessMethods)}
-                      disabled={accessMethodsMutation.isPending}
-                    >
-                      Save override
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setEditingAccessMethods(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                  {accessMethodsError && (
-                    <p className="text-xs text-destructive">{accessMethodsError}</p>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Drift</CardTitle>
-          <CardDescription>
-            Anything installed outside the manifest, surfaced on reconcile — never auto-corrected
-            (spec §7 allowlist, invariant 5).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {driftQuery.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {driftQuery.isError && (
-            <p className="text-sm text-destructive">Failed to load drift status.</p>
-          )}
-          {drift?.status === "clean" && (
-            <p className="text-sm text-muted-foreground">
-              No drift — matches the declared manifest.
-            </p>
-          )}
-          {drift?.status === "unknown" && (
-            <p className="text-sm text-muted-foreground">
-              No drift data available yet — this machine hasn't reported a reconcile pass.
-            </p>
-          )}
-          {drift?.status === "detected" && (
-            <div className="flex flex-col gap-2 text-sm">
-              <p className="font-medium text-drift">
-                Undeclared software found outside the manifest.
+          <CollapsibleSection
+            label="Drift"
+            description="Anything installed outside the manifest, surfaced on reconcile — never auto-corrected (spec §7 allowlist, invariant 5)."
+          >
+            {driftQuery.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
+            {driftQuery.isError && (
+              <p className="text-sm text-destructive">Failed to load drift status.</p>
+            )}
+            {drift?.status === "clean" && (
+              <p className="text-sm text-muted-foreground">
+                No drift — matches the declared manifest.
               </p>
-              {drift.undeclaredPackages && drift.undeclaredPackages.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Undeclared packages</p>
-                  <p className="font-mono text-sm">{drift.undeclaredPackages.join(", ")}</p>
-                </div>
-              )}
-              {drift.undeclaredPorts && drift.undeclaredPorts.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Undeclared open ports</p>
-                  <p className="font-mono text-sm">{drift.undeclaredPorts.join(", ")}</p>
-                </div>
-              )}
-              {drift.detectedAt && (
-                <Freshness occurredAt={drift.detectedAt} recordedAt={drift.detectedAt} />
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            )}
+            {drift?.status === "unknown" && (
+              <p className="text-sm text-muted-foreground">
+                No drift data available yet — this machine hasn't reported a reconcile pass.
+              </p>
+            )}
+            {drift?.status === "detected" && (
+              <div className="flex flex-col gap-2 text-sm">
+                <p className="font-medium text-drift">
+                  Undeclared software found outside the manifest.
+                </p>
+                {drift.undeclaredPackages && drift.undeclaredPackages.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">Undeclared packages</p>
+                    <p className="font-mono text-sm">{drift.undeclaredPackages.join(", ")}</p>
+                  </div>
+                )}
+                {drift.undeclaredPorts && drift.undeclaredPorts.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Undeclared open ports
+                    </p>
+                    <p className="font-mono text-sm">{drift.undeclaredPorts.join(", ")}</p>
+                  </div>
+                )}
+                {drift.detectedAt && (
+                  <Freshness occurredAt={drift.detectedAt} recordedAt={drift.detectedAt} />
+                )}
+              </div>
+            )}
+          </CollapsibleSection>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Logging</CardTitle>
-          <CardDescription>
-            Effective tier for this machine — its own override if set, otherwise the org default
-            (docs/spec.md §17).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {loggingTierQuery.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {loggingTierQuery.isError && (
-            <p className="text-sm text-destructive">Failed to load logging tier.</p>
-          )}
-          {loggingTierQuery.data && (
-            <>
-              <SettingRow
-                label="Logging tier"
-                value={LOGGING_TIER_LABELS[loggingTierQuery.data.tier]}
-                source={loggingTierQuery.data.source}
-                onOverride={() => setEditingLoggingTier(true)}
+        {/* Same elevation treatment as Card (see its own comment — shadow +
+            dark-mode-only border, this exact surface is the one the live DOM
+            was inspected on for the light-mode shadow value): this rail floats
+            over the page the same way the reference product's own detail-page
+            rail does. Its own "Properties" heading is a CollapsibleSection too
+            (count included) — the reference product's rail sections
+            (Touchpoints, Properties) are each individually collapsible via the
+            same chevron affordance as the main column, not a plain static
+            heading, so this rail now speaks the same interaction language as
+            the "Package manifest"/"Drift" sections beside it rather than a
+            one-off. */}
+        <aside className="flex w-full shrink-0 flex-col rounded-2xl bg-card p-4 shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35 lg:w-64">
+          <CollapsibleSection label="Properties" count={5}>
+            <dl className="flex flex-col gap-3">
+              {/* Every machine has exactly one owner, always a person, never omitted or shared
+                  (invariant #3) — required at creation (add-machine-dialog.tsx) but, until now,
+                  never surfaced again anywhere in the Machines UI. First in the list: who's
+                  accountable outranks the infrastructure specifics below it. */}
+              <PropertyRow
+                icon={User}
+                label="Owner"
+                value={
+                  peopleQuery.isPending ? (
+                    <span className="text-xs text-muted-foreground">loading…</span>
+                  ) : (
+                    (owner?.email ?? machine.ownerPersonId ?? "—")
+                  )
+                }
               />
-              <LineageGutter source={loggingTierQuery.data.source} viewing="machine" />
-            </>
-          )}
-          {loggingTierError && <p className="text-xs text-destructive">{loggingTierError}</p>}
-        </CardContent>
-      </Card>
+              <PropertyRow icon={MapPin} label="Region" value={machine.region} />
+              <PropertyRow icon={Cpu} label="Size" value={machine.sizeSku} />
+              <PropertyRow
+                icon={Disc}
+                label="Image"
+                value={
+                  <span className="flex items-center gap-1.5">
+                    <OsIcon image={machine.image} className="size-3.5 shrink-0" />
+                    {machine.image}
+                  </span>
+                }
+              />
+              <PropertyRow
+                icon={Clock}
+                label="Last verified"
+                value={
+                  machine.lastVerifiedAt ? (
+                    // Same single-timestamp simplification as the list page — see its comment.
+                    <Freshness
+                      occurredAt={machine.lastVerifiedAt}
+                      recordedAt={machine.lastVerifiedAt}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">not yet verified</span>
+                  )
+                }
+              />
+            </dl>
+          </CollapsibleSection>
+        </aside>
+      </div>
 
-      <LoggingTierDialog
-        open={editingLoggingTier}
-        currentTier={loggingTierQuery.data?.tier ?? DEFAULT_LOGGING_TIER}
-        onOpenChange={setEditingLoggingTier}
-        onSave={async (tier) => {
-          await loggingTierMutation.mutateAsync(tier);
-        }}
+      <UpgradeMachineDialog machine={machine} open={upgradeOpen} onOpenChange={setUpgradeOpen} />
+      <ReconcileMachineDialog
+        machine={machine}
+        open={reconcileOpen}
+        onOpenChange={setReconcileOpen}
       />
+      <ConnectTerminalDialog machine={machine} open={connectOpen} onOpenChange={setConnectOpen} />
     </div>
   );
 }

@@ -535,31 +535,34 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       const org = await seedOrg();
       const machineA = await seedMachine(org.id);
       const machineB = await seedMachine(org.id);
+      const currentUser = { orgId: org.id, personId: "person-1", email: "person-1@example.com" };
 
       await run(
-        handlePatchSetting({
-          orgId: org.id,
-          scopeType: "machine",
-          scopeId: machineA.id,
-          key: "example_key",
-          value: { foo: "bar" },
-          actor: { type: "person", id: "person-1" },
-        }),
+        handlePatchSetting(
+          {
+            scopeType: "machine",
+            scopeId: machineA.id,
+            key: "example_key",
+            value: { foo: "bar" },
+          },
+          currentUser,
+        ),
       );
 
       await run(
-        handleImportConfig({
-          orgId: org.id,
-          actor: { type: "system", id: "git-ci" },
-          entries: [
-            {
-              scopeType: "machine",
-              scopeId: machineB.id,
-              key: "example_key",
-              value: { foo: "bar" },
-            },
-          ],
-        }),
+        handleImportConfig(
+          {
+            entries: [
+              {
+                scopeType: "machine",
+                scopeId: machineB.id,
+                key: "example_key",
+                value: { foo: "bar" },
+              },
+            ],
+          },
+          currentUser,
+        ),
       );
 
       const [eventA] = await db.select().from(events).where(eq(events.machineId, machineA.id));
@@ -710,6 +713,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
           const machineService = yield* MachineService;
           yield* machineService.updatePackages({
             machineId: machineA.id,
+            orgId: org.id,
             upserts: [{ packageName: "docker", versionPin: "24", pinned: false }],
             actorPersonId: null,
           });

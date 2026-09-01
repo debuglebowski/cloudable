@@ -1,11 +1,12 @@
 import { createRootRoute, createRoute } from "@tanstack/react-router";
 
-import { accessRoute } from "./access/route";
+import { accessRoute, accessSessionTerminalRoute } from "./access/route";
 import { approvalsRoute } from "./approvals/route";
 import { archiveRoute } from "./archive/route";
 import { auditRoute } from "./audit/route";
 import { IndexPage } from "./index";
 import { integrationsRoute } from "./integrations/route";
+import { loginRoute } from "./login/route";
 import { machinesDetailRoute, machinesListRoute } from "./machines/route";
 import { organisationRoute } from "./organisation/route";
 import { peopleRoute } from "./people/route";
@@ -49,6 +50,8 @@ export const routeTree = rootRoute.addChildren([
   auditRoute,
   archiveRoute,
   accessRoute,
+  accessSessionTerminalRoute,
   integrationsRoute,
   organisationRoute,
+  loginRoute,
 ]);

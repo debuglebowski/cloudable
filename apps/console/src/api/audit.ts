@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { BASE_URL, apiGet } from "@/lib/api-client";
-import { CURRENT_ORG_ID } from "@/lib/current-org";
 
 /**
  * Audit domain: timeline (raw event feed) and evidence export (events →
@@ -12,10 +11,10 @@ import { CURRENT_ORG_ID } from "@/lib/current-org";
  */
 
 export const AUDIT_EXPORT_URLS = {
-  assetInventoryCsv: `${BASE_URL}/api/v1/compliance/exports/asset-inventory.csv?orgId=${CURRENT_ORG_ID}`,
+  assetInventoryCsv: `${BASE_URL}/api/v1/compliance/exports/asset-inventory.csv`,
   // Real path is exports/findings.csv, not open-findings.csv — the mock's
   // guessed name never got corrected against the real endpoint unit 10 shipped.
-  openFindingsCsv: `${BASE_URL}/api/v1/compliance/exports/findings.csv?orgId=${CURRENT_ORG_ID}`,
+  openFindingsCsv: `${BASE_URL}/api/v1/compliance/exports/findings.csv`,
 } as const;
 
 /** Domain-first query key tuples. */
@@ -58,7 +57,7 @@ export interface ControlCheckEvidence {
   status: ControlCheckStatus;
   detail: string;
   findings: OpenFinding[];
-  /** Median `openSince` age in days across `findings` (§19 "Finding age"). `null` when there are none. */
+  /** Median age (in days) of this check's currently-open findings — `null` when there are none. */
   medianAgeDays: number | null;
 }
 
@@ -81,9 +80,7 @@ interface EvidenceRecordWire {
 }
 
 async function fetchAuditTimeline(): Promise<AuditTimelineEntry[]> {
-  const res = await apiGet<{ data: EvidenceRecordWire[] }>(
-    `/api/v1/evidence?orgId=${CURRENT_ORG_ID}&limit=100`,
-  );
+  const res = await apiGet<{ data: EvidenceRecordWire[] }>("/api/v1/evidence?limit=100");
   return res.data.map((e) => ({
     id: e.id,
     type: e.type,
@@ -116,18 +113,26 @@ interface ComplianceCheckResultWire {
   label: string;
   controlRefs: string[];
   status: "pass" | "fail" | "not_applicable";
-  /**
-   * Fixed per check (which of the six v1 checks tends to matter more if it
-   * fails), not a fabricated per-finding value — every finding under the
-   * same check shares it. Sourced from the backend's
-   * `ComplianceCheck.severity` (the one place severity is defined — see
-   * `apps/control-plane/src/domain/compliance/types.ts`), not a second,
-   * independently-maintained classification here.
-   */
-  severity: FindingSeverity;
   findings: ComplianceFindingWire[];
   medianAgeDays: number | null;
 }
+
+/**
+ * The real backend has no per-finding severity — findings are a fact
+ * ("this machine diverges from its manifest"), not a graded risk score.
+ * This is a fixed, check-level editorial classification (which of the six
+ * v1 checks tends to matter more if it fails), not a fabricated per-finding
+ * value — every finding under the same check gets the same severity.
+ * Unlisted/future checks default to "medium".
+ */
+const CHECK_SEVERITY: Record<string, FindingSeverity> = {
+  "elevated-access-approved": "high",
+  "access-revoked-on-offboarding": "high",
+  "retention-honoured": "medium",
+  "no-undeclared-software": "medium",
+  "active-owner": "medium",
+  "machines-reporting": "low",
+};
 
 function summarizeDetail(detail: Record<string, unknown>): string {
   const entries = Object.entries(detail).map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
@@ -150,12 +155,8 @@ function checkDetailLine(check: ComplianceCheckResultWire): string {
 
 async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
   const [controlMap, findingsRes] = await Promise.all([
-    apiGet<{ controls: ControlMapEntryWire[] }>(
-      `/api/v1/compliance/control-map?orgId=${CURRENT_ORG_ID}`,
-    ),
-    apiGet<{ checks: ComplianceCheckResultWire[] }>(
-      `/api/v1/compliance/findings?orgId=${CURRENT_ORG_ID}`,
-    ),
+    apiGet<{ controls: ControlMapEntryWire[] }>("/api/v1/compliance/control-map"),
+    apiGet<{ checks: ComplianceCheckResultWire[] }>("/api/v1/compliance/findings"),
   ]);
   const checksById = new Map(findingsRes.checks.map((c) => [c.checkId, c]));
 
@@ -168,15 +169,15 @@ async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
         checkLabel: check.label,
         status: toCheckStatus(check.status),
         detail: checkDetailLine(check),
+        medianAgeDays: check.medianAgeDays,
         findings: check.findings.map((finding, index) => ({
           id: `${check.checkId}:${finding.machineId ?? "org"}:${index}`,
           summary: finding.machineId
             ? `${finding.machineId}: ${summarizeDetail(finding.detail)}`
             : summarizeDetail(finding.detail),
-          severity: check.severity,
+          severity: CHECK_SEVERITY[check.checkId] ?? "medium",
           openSince: finding.firstSeenAt,
         })),
-        medianAgeDays: check.medianAgeDays,
       }));
 
     // A control with no implemented check evidencing it (spec §19: "most of
@@ -194,8 +195,8 @@ async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
           control.status === "not_covered"
             ? "Not covered by any of the six v1 compliance checks."
             : "Manual action required — no automated check evidences this control yet.",
-        findings: [],
         medianAgeDays: null,
+        findings: [],
       });
     }
 

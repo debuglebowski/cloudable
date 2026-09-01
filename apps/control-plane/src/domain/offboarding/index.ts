@@ -3,16 +3,19 @@ import { EventBus } from "../../services/EventBus";
 import { DefaultCertificateRevokerLive } from "./CertificateRevoker.default";
 import { DefaultMachineArchiverLive } from "./MachineArchiver.default";
 import { DrizzleOffboardingRepoLive } from "./OffboardingRepo.drizzle";
+import { DefaultSessionTerminatorLive } from "./SessionTerminator.default";
 
 export {
   offboardPerson,
   offboardPersonDetailed,
+  resumeOffboarding,
   type OffboardPersonOutcome,
 } from "./offboardPerson";
 export { OffboardingError } from "./errors";
 export { OffboardingRepoTag, type OffboardingRepo } from "./OffboardingRepo";
 export { CertificateRevokerTag, type CertificateRevoker } from "./CertificateRevoker";
 export { MachineArchiverTag, type MachineArchiver } from "./MachineArchiver";
+export { SessionTerminatorTag, type SessionTerminator } from "./SessionTerminator";
 
 /**
  * Every layer `offboardPersonDetailed`/`offboardPerson` needs beyond the
@@ -26,12 +29,16 @@ export { MachineArchiverTag, type MachineArchiver } from "./MachineArchiver";
  * time). `DefaultCertificateRevokerLive` still delegates to a stand-in at
  * `domain/certificates/revokeCertificate.ts` pending unit 12's real
  * certificate-revocation logic — see that file's doc comment for the
- * expected consolidation once unit 12 merges.
+ * expected consolidation once unit 12 merges. `DefaultSessionTerminatorLive`
+ * needs `TunnelRelay` — a caller-provided requirement this layer leaves
+ * open, same as `ProvisioningServiceTag` below (see `layers.ts`'s
+ * `OffboardingLive.pipe(Layer.provide(adapters.provisioning), Layer.provide(tunnelRelay))`).
  */
 export const OffboardingLive = Layer.mergeAll(
   DrizzleOffboardingRepoLive,
   DefaultCertificateRevokerLive,
   DefaultMachineArchiverLive,
+  DefaultSessionTerminatorLive,
 ).pipe(
   // `DefaultMachineArchiverLive` needs `EventBus` (to emit `machine.archived`).
   // `EventBus.Default` is memoized by reference, so providing it here shares

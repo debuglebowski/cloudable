@@ -1,9 +1,14 @@
+import type { DomainEvent } from "@cloudable/events";
+import { events, elevations } from "@cloudable/schema";
+import { and, eq, lt } from "drizzle-orm";
 import { Effect } from "effect";
+import { Db } from "../../db/layer";
 import { ApprovalService } from "../../services/ApprovalService";
-import { EventBus } from "../../services/EventBus";
+import { EventBus, toEventRows } from "../../services/EventBus";
 import { ElevationRepoTag, type MachineRecord } from "./ElevationRepo";
 import {
   type EventContext,
+  buildAutoApprovalGrantedEvent,
   buildElevationExpiredEvent,
   buildElevationGrantedEvent,
   buildElevationRequestedEvent,
@@ -140,11 +145,18 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
         ),
       );
 
-    const loadElevation = (elevationId: string) =>
+    // `orgId` is the authenticated caller's own org (see `CurrentUserTag`) —
+    // an elevation belonging to a DIFFERENT org resolves to the same
+    // `ElevationNotFoundError` as one that doesn't exist, same masking
+    // rationale `request()` already applies to a cross-org person/machine
+    // pair above.
+    const loadElevation = (elevationId: string, orgId: string) =>
       repo.findElevation(elevationId).pipe(
         Effect.mapError(toInfraError("elevation_lookup_failed")),
         Effect.flatMap((row) =>
-          row ? Effect.succeed(row) : Effect.fail(new ElevationNotFoundError({ elevationId })),
+          row && row.orgId === orgId
+            ? Effect.succeed(row)
+            : Effect.fail(new ElevationNotFoundError({ elevationId })),
         ),
       );
 
@@ -189,20 +201,27 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
           )
         : Effect.void;
 
-    /** Publishes the granted event (plus the requested event too, when this is the same call that created it) and notifies the owner. */
+    /**
+     * Publishes the granted event (plus the requested event too, when this is the same
+     * call that created it) and notifies the owner. `extraEvents` (default none) lets the
+     * `"always"`-policy caller append its own `approval.granted` — see that call site's
+     * comment for why only it needs one.
+     */
     const finalizeGrant = (
       elevationRow: Elevation,
       ctx: EventContext,
       machine: Pick<MachineRecord, "id" | "name" | "ownerPersonId">,
       includeRequestedEvent: boolean,
+      extraEvents: ReadonlyArray<DomainEvent> = [],
     ) =>
       Effect.gen(function* () {
         const batch = includeRequestedEvent
           ? [
               buildElevationRequestedEvent(elevationRow, ctx),
               buildElevationGrantedEvent(elevationRow, ctx),
+              ...extraEvents,
             ]
-          : [buildElevationGrantedEvent(elevationRow, ctx)];
+          : [buildElevationGrantedEvent(elevationRow, ctx), ...extraEvents];
         yield* publishEvents(batch);
         yield* notifyIfOwned(machine, elevationRow);
       });
@@ -310,7 +329,16 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
             correlationId: elevationRow.id,
             occurredAt: now,
           };
-          yield* finalizeGrant(elevationRow, ctx, machine, true);
+          // `requestAutoApproved` bypasses `ApprovalService.request()`'s own event
+          // publication entirely (it's a raw auto-grant, not a resolved-to-"none" request
+          // going through the same code path) — nothing else emits `approval.granted` for
+          // this path, so `elevated-access-approved`'s compliance check would otherwise
+          // permanently flag every `"always"`-policy elevation as unapproved. Shares `ctx`'s
+          // correlationId (the elevation's own id) specifically so that check can join the
+          // two events (see that check's own doc comment).
+          yield* finalizeGrant(elevationRow, ctx, machine, true, [
+            buildAutoApprovalGrantedEvent(ctx, "admin_access"),
+          ]);
           return elevationRow;
         }
 
@@ -393,9 +421,12 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
      * This is the only way to recover from a failed notification, since
      * there's no background retry queue in this build.
      */
-    const syncApproval = (elevationId: string): Effect.Effect<Elevation, SyncApprovalError> =>
+    const syncApproval = (
+      elevationId: string,
+      orgId: string,
+    ): Effect.Effect<Elevation, SyncApprovalError> =>
       Effect.gen(function* () {
-        const elevation = yield* loadElevation(elevationId);
+        const elevation = yield* loadElevation(elevationId, orgId);
         if (elevation.status === "granted") {
           const machine = yield* loadMachine(elevation.machineId);
           yield* notifyIfOwned(machine, elevation);
@@ -411,7 +442,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
         }
 
         const approvalResult = yield* approvalService
-          .status(elevation.approvalId)
+          .status(elevation.approvalId, orgId)
           .pipe(Effect.mapError(toApprovalServiceCallError));
 
         if (approvalResult.status === "pending") return elevation;
@@ -461,9 +492,9 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
      * elevation that isn't granted, or hasn't actually expired yet) — no
      * sweep is scheduled by this unit.
      */
-    const expire = (elevationId: string): Effect.Effect<void, ExpireError> =>
+    const expire = (elevationId: string, orgId: string): Effect.Effect<void, ExpireError> =>
       Effect.gen(function* () {
-        const elevation = yield* loadElevation(elevationId);
+        const elevation = yield* loadElevation(elevationId, orgId);
         if (elevation.status !== "granted") {
           return yield* Effect.fail(
             new ElevationStateError({
@@ -507,9 +538,56 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
         ]);
       });
 
-    const get = (elevationId: string): Effect.Effect<Elevation, GetError> =>
-      loadElevation(elevationId);
+    const get = (elevationId: string, orgId: string): Effect.Effect<Elevation, GetError> =>
+      loadElevation(elevationId, orgId);
 
     return { request, syncApproval, expire, get } as const;
   }),
 }) {}
+
+/**
+ * Sweeps every `granted` elevation whose `expiresAt` has passed, flipping
+ * each to `expired` and emitting `access.elevation_expired` — same shape as
+ * `ApprovalService.ts`'s `expireOverdueApprovals`/`archive/snapshot.ts`'s
+ * `expireOverdueSnapshots`: reads `Db` directly rather than going through
+ * `ElevationRepoTag`, since a sweep has no single elevation's request
+ * context to route through that port, and one transaction commits every
+ * status flip alongside its event so a crash mid-sweep can't flip a row
+ * without recording why.
+ */
+export const expireOverdueElevations: Effect.Effect<number, ElevationInfraError, Db> = Effect.gen(
+  function* () {
+    const db = yield* Db;
+    const now = new Date();
+
+    const overdue = yield* Effect.tryPromise({
+      try: () =>
+        db.transaction(async (tx) => {
+          const rows = await tx
+            .update(elevations)
+            .set({ status: "expired" })
+            .where(and(eq(elevations.status, "granted"), lt(elevations.expiresAt, now)))
+            .returning();
+
+          if (rows.length > 0) {
+            const eventsToInsert = rows.map((row) =>
+              buildElevationExpiredEvent(row, {
+                orgId: row.orgId,
+                actorType: "system",
+                actorId: "elevation-expiry",
+                machineId: row.machineId,
+                correlationId: row.id,
+                occurredAt: now,
+              }),
+            );
+            await tx.insert(events).values(toEventRows(eventsToInsert));
+          }
+
+          return rows;
+        }),
+      catch: (cause) => new ElevationInfraError({ reason: `expiry_sweep_failed: ${cause}` }),
+    });
+
+    return overdue.length;
+  },
+);

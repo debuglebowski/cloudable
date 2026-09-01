@@ -20,6 +20,11 @@ export * from "./tables/control-override";
 export * from "./tables/secret-binding";
 export * from "./tables/upgrade-attempt";
 export * from "./tables/notification";
+export * from "./tables/auth-user";
+export * from "./tables/auth-session";
+export * from "./tables/auth-account";
+export * from "./tables/auth-verification";
+export * from "./tables/restore-request";
 
 export * from "./shared";
 export * from "./relations";

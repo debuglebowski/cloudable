@@ -13,6 +13,13 @@ export const approvals = pgTable("approvals", {
     .default("pending"),
   requestedByPersonId: uuid("requested_by_person_id").notNull(),
   targetMachineId: uuid("target_machine_id"),
+  // Nullable, like `targetMachineId` — a person-targeted action type (today: only
+  // `offboarding`) sets this instead. An approval has at most one real target; both
+  // columns existing lets the generic approval object (spec §13) point at either
+  // kind without a separate table per target type. Also lets an approver (and the
+  // resumed-after-approval path) know WHO an offboarding approval is about, not
+  // just that "an offboarding" is pending.
+  targetPersonId: uuid("target_person_id"),
   reason: text("reason").notNull(),
   requiredApprovals: integer("required_approvals").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

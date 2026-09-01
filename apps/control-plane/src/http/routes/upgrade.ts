@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "@effect/platform";
 import { Schema } from "effect";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 /**
  * `POST /api/v1/machines/:machineId/upgrade` — triggers the transactional
@@ -28,10 +29,12 @@ export const UpgradeResponse = Schema.Struct({
   failureReason: Schema.optional(Schema.String),
 });
 
-export const UpgradeGroup = HttpApiGroup.make("upgrade").add(
-  HttpApiEndpoint.post(
-    "triggerUpgrade",
-  )`/api/v1/machines/${HttpApiSchema.param("machineId", Schema.String)}/upgrade`
-    .setPayload(UpgradeRequestPayload)
-    .addSuccess(UpgradeResponse),
-);
+export const UpgradeGroup = HttpApiGroup.make("upgrade")
+  .add(
+    HttpApiEndpoint.post(
+      "triggerUpgrade",
+    )`/api/v1/machines/${HttpApiSchema.param("machineId", Schema.String)}/upgrade`
+      .setPayload(UpgradeRequestPayload)
+      .addSuccess(UpgradeResponse),
+  )
+  .middleware(CurrentUserAuthentication);

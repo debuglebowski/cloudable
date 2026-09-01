@@ -29,8 +29,18 @@ import { Db } from "../db/layer";
 import { resolveAccessMethodsEnabled } from "../domain/machine/settings";
 import { EventBus } from "../services/EventBus";
 import type { SignerTag } from "../services/Signer";
+import { isAuthorizedForInteractiveAccess } from "./access-authorization";
 import { type SessionMethod, mintSessionToken } from "./session-token";
 import { TunnelSignal } from "./signal";
+
+/**
+ * A real Linux username — never starting with `-` (the exact
+ * privilege-escalation-adjacent scenario this guards: a value like `"-c"`
+ * hijacking `su`'s/`ssh`'s own argument parsing once this string reaches a
+ * real shell daemon-side), lowercase, digits, underscore, hyphen only,
+ * capped at the real POSIX username length limit.
+ */
+const OS_USERNAME_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/;
 
 export class TunnelError extends Data.TaggedError("TunnelError")<{
   reason: "denied" | "not_found" | "lookup_failed" | "persist_failed" | "sign_failed";
@@ -56,6 +66,14 @@ export interface MintedSession {
 export interface EndSessionInput {
   sessionId: string;
   orgId: string;
+  /** `sessions.terminationReason` / `access.session_ended.payload.reason` — both additive,
+   * optional fields (invariant #11), so omitting this preserves the original
+   * person-initiated-end shape exactly. See `docs/access.md`. */
+  reason?: string;
+  /** Defaults to `{actorType: "person", actorId: <the session's own personId>}` — the one
+   * real production caller (a person ending their own session). A system-triggered end
+   * (policy change, re-authorization sweep) passes its own actor instead. */
+  actor?: { actorType: "person" | "system"; actorId: string };
 }
 
 const durationSecondsSince = (startedAt: Date, now: Date): number =>
@@ -88,13 +106,19 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
             db.select().from(machines).where(eq(machines.id, input.targetMachineId)).limit(1),
           catch: (cause) => new TunnelError({ reason: "lookup_failed", cause }),
         });
-        const machine = found[0];
+        // A machine belonging to a DIFFERENT org resolves to the same `machine_not_found`
+        // as one that doesn't exist at all — never leak that a machine id is real but
+        // belongs to another tenant.
+        const rawMachine = found[0];
+        const machine = rawMachine && rawMachine.orgId === input.orgId ? rawMachine : undefined;
 
         let denialReason: string | null = !machine
           ? "machine_not_found"
           : machine.state !== "running"
             ? `machine_${machine.state}`
-            : null;
+            : !OS_USERNAME_PATTERN.test(input.targetOsUser)
+              ? "invalid_target_os_user"
+              : null;
 
         // spec.md §11.1/§11: "Admin-disablable at any level" — refusing new
         // sessions once a method is disabled is the other half of the gap
@@ -111,7 +135,22 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
           const methodEnabled =
             input.method === "terminal" ? accessMethods.value.webTerminal : accessMethods.value.ssh;
           if (!methodEnabled) {
-            denialReason = input.method === "terminal" ? "web_terminal_disabled" : "ssh_disabled";
+            denialReason = "method_disabled";
+          }
+        }
+
+        // spec §15: admin access to a machine you don't own needs the owner
+        // themselves, or a granted, unexpired, shell-level elevation — see
+        // `access-authorization.ts`'s own doc comment for the exact rule and
+        // why this was, until now, the one check `mintSession` skipped.
+        if (!denialReason && machine) {
+          const authorized = yield* isAuthorizedForInteractiveAccess(db, {
+            personId: input.personId,
+            machineId: machine.id,
+            ownerPersonId: machine.ownerPersonId,
+          }).pipe(Effect.mapError((cause) => new TunnelError({ reason: "lookup_failed", cause })));
+          if (!authorized) {
+            denialReason = "elevation_required";
           }
         }
 
@@ -155,6 +194,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
                 method: input.method,
                 osUser: input.targetOsUser,
                 startedAt: now,
+                sessionToken: minted.token,
               })
               .returning({ id: sessions.id });
             if (!row) throw new Error("insert returned no row");
@@ -234,10 +274,15 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
 
         const durationSeconds = durationSecondsSince(row.startedAt, now);
         yield* Effect.tryPromise({
-          try: () => db.update(sessions).set({ durationSeconds }).where(eq(sessions.id, row.id)),
+          try: () =>
+            db
+              .update(sessions)
+              .set({ durationSeconds, terminationReason: input.reason ?? null })
+              .where(eq(sessions.id, row.id)),
           catch: (cause) => new TunnelError({ reason: "persist_failed", cause }),
         });
 
+        const actor = input.actor ?? { actorType: "person" as const, actorId: row.personId };
         yield* eventBus
           .publish([
             {
@@ -246,12 +291,12 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
               type: "access.session_ended",
               occurredAt: now,
               orgId: input.orgId,
-              actorType: "person",
-              actorId: row.personId,
+              actorType: actor.actorType,
+              actorId: actor.actorId,
               machineId: row.machineId,
               correlationId: row.id,
               schemaVersion: 1,
-              payload: { durationSeconds },
+              payload: { durationSeconds, ...(input.reason ? { reason: input.reason } : {}) },
             },
           ])
           .pipe(Effect.mapError((cause) => new TunnelError({ reason: "persist_failed", cause })));
@@ -266,11 +311,8 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
      * "Disabling terminates live sessions" (spec §11.1) / policy-change
      * termination. Ends every still-open session against `machineId`,
      * regardless of how it started, and emits `access.session_ended` for
-     * each. `reason` is accepted for the caller's own logging/audit
-     * trail but is not persisted as a distinct column — neither
-     * `sessions` nor the `access.session_ended` payload (both already
-     * built by an earlier unit) carry a termination-reason field; see
-     * docs/access.md for this tradeoff.
+     * each. `reason` is persisted on both `sessions.terminationReason` and
+     * the `access.session_ended` payload's own `reason` field.
      *
      * Also pushes one `session_terminate` tunnel signal per session ended,
      * down the exact same channel `mintSession` uses — this is the piece
@@ -309,7 +351,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
             try: () =>
               db
                 .update(sessions)
-                .set({ endedAt: now, durationSeconds })
+                .set({ endedAt: now, durationSeconds, terminationReason: input.reason })
                 .where(eq(sessions.id, row.id)),
             catch: (cause) => new TunnelError({ reason: "persist_failed", cause }),
           });
@@ -327,7 +369,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
                 machineId: row.machineId,
                 correlationId: row.id,
                 schemaVersion: 1,
-                payload: { durationSeconds },
+                payload: { durationSeconds, reason: input.reason },
               },
             ])
             .pipe(Effect.mapError((cause) => new TunnelError({ reason: "persist_failed", cause })));

@@ -15,8 +15,9 @@ import { ArchiveDbError } from "../archive/errors";
 import { type CertificateRevoker, CertificateRevokerTag } from "./CertificateRevoker";
 import { type MachineArchiver, MachineArchiverTag } from "./MachineArchiver";
 import { type OffboardingRepo, OffboardingRepoTag } from "./OffboardingRepo";
+import { type SessionTerminator, SessionTerminatorTag } from "./SessionTerminator";
 import { OffboardingError } from "./errors";
-import { offboardPerson, offboardPersonDetailed } from "./offboardPerson";
+import { offboardPerson, offboardPersonDetailed, resumeOffboarding } from "./offboardPerson";
 
 const PERSON_ID = "person-1";
 const ORG_ID = "org-1";
@@ -40,6 +41,12 @@ function buildTestLayers(opts: {
   liveCertificateIds?: string[];
   /** Machine id whose `machineArchiver.archive` call should fail, to test per-machine isolation. */
   failArchiveForMachine?: string;
+  /** What `ApprovalService.status(...)` reports — `resumeOffboarding` reads this, not
+   * `.request()`'s return value. Defaults to mirroring `approvalStatus`/a real
+   * `targetPersonId`, since that's what a genuine offboarding approval always carries
+   * (this iteration's fix — see `services/ApprovalService.ts`). Override to test
+   * `resumeOffboarding` against a malformed/foreign approval. */
+  statusResult?: Partial<ApprovalResult>;
 }) {
   const { approvalStatus, calls } = opts;
   const ownedMachines = opts.ownedMachines ?? [MACHINE_A, MACHINE_B];
@@ -90,6 +97,11 @@ function buildTestLayers(opts: {
       ),
   };
 
+  const sessionTerminator: SessionTerminator = {
+    terminateForMachine: (_orgId, machineId) =>
+      Effect.sync(() => void calls.push(`sessionTerminator.terminateForMachine:${machineId}`)),
+  };
+
   const provisioning: ProvisioningService = {
     create: () => Effect.die("not used in this test"),
     archive: (machineId) =>
@@ -109,6 +121,7 @@ function buildTestLayers(opts: {
     status: approvalStatus,
     requestedByPersonId: "requester-1",
     targetMachineId: null,
+    targetPersonId: PERSON_ID,
     reason: "test",
     requiredApprovals: 0,
     approvedCount: 0,
@@ -116,6 +129,7 @@ function buildTestLayers(opts: {
     expiresAt: new Date(),
     decidedAt: null,
   };
+  const statusResult: ApprovalResult = { ...approvalResult, ...opts.statusResult };
   const approvalServiceImpl = {
     request: (_req: ApprovalRequest) =>
       Effect.sync(() => {
@@ -123,7 +137,11 @@ function buildTestLayers(opts: {
         return approvalResult;
       }),
     decide: () => Effect.die("not used in this test"),
-    status: () => Effect.die("not used in this test"),
+    status: () =>
+      Effect.sync(() => {
+        calls.push("approval.status");
+        return statusResult;
+      }),
     list: () => Effect.die("not used in this test"),
     requestAutoApproved: () => Effect.die("not used in this test"),
   };
@@ -137,6 +155,7 @@ function buildTestLayers(opts: {
     Layer.succeed(OffboardingRepoTag, repo),
     Layer.succeed(CertificateRevokerTag, certificateRevoker),
     Layer.succeed(MachineArchiverTag, machineArchiver),
+    Layer.succeed(SessionTerminatorTag, sessionTerminator),
     Layer.succeed(ProvisioningServiceTag, provisioning),
     Layer.succeed(ApprovalService, ApprovalService.make(approvalServiceImpl)),
     Layer.succeed(EventBus, EventBus.make(eventBusImpl)),
@@ -168,21 +187,25 @@ describe("offboardPerson", () => {
     const firstMachineStepIdx = calls.indexOf(`provisioning.archive:${MACHINE_A}`);
     expect(certRevokeIdx.every((i) => i >= 0 && i < firstMachineStepIdx)).toBe(true);
 
-    // Per machine A: stop -> clear owner -> archive, strictly in that order.
+    // Per machine A: stop -> clear owner -> archive -> terminate live sessions, in that order.
     const stopIdx = calls.indexOf(`provisioning.archive:${MACHINE_A}`);
     const clearIdx = calls.indexOf(`repo.clearMachineOwner:${MACHINE_A}`);
     const archiveIdx = calls.indexOf(`archiver.archive:${MACHINE_A}`);
+    const terminateIdx = calls.indexOf(`sessionTerminator.terminateForMachine:${MACHINE_A}`);
     expect(stopIdx).toBeGreaterThanOrEqual(0);
     expect(clearIdx).toBeGreaterThan(stopIdx);
     expect(archiveIdx).toBeGreaterThan(clearIdx);
+    expect(terminateIdx).toBeGreaterThan(archiveIdx);
 
     // Same for machine B, and machine B's sequence starts after machine A's finishes.
     const stopIdxB = calls.indexOf(`provisioning.archive:${MACHINE_B}`);
     const clearIdxB = calls.indexOf(`repo.clearMachineOwner:${MACHINE_B}`);
     const archiveIdxB = calls.indexOf(`archiver.archive:${MACHINE_B}`);
-    expect(stopIdxB).toBeGreaterThan(archiveIdx);
+    const terminateIdxB = calls.indexOf(`sessionTerminator.terminateForMachine:${MACHINE_B}`);
+    expect(stopIdxB).toBeGreaterThan(terminateIdx);
     expect(clearIdxB).toBeGreaterThan(stopIdxB);
     expect(archiveIdxB).toBeGreaterThan(clearIdxB);
+    expect(terminateIdxB).toBeGreaterThan(archiveIdxB);
 
     // machine.offboarded fires once per machine, after that machine's archive.
     const offboardedEvents = calls.filter((c) => c.startsWith("event:machine.offboarded"));
@@ -216,11 +239,14 @@ describe("offboardPerson", () => {
 
     // Certs were still revoked once for the whole person, regardless of A's failure.
     expect(calls.filter((c) => c === "event:access.certificate_revoked")).toHaveLength(2);
-    // Machine A got as far as stop + clear owner before its archive failed...
+    // Machine A got as far as stop + clear owner before its archive failed, and never
+    // reached the session-terminator step that only runs after a successful archive.
     expect(calls).toContain(`provisioning.archive:${MACHINE_A}`);
     expect(calls).toContain(`repo.clearMachineOwner:${MACHINE_A}`);
+    expect(calls).not.toContain(`sessionTerminator.terminateForMachine:${MACHINE_A}`);
     // ...but machine B was still attempted and fully completed afterward.
     expect(calls).toContain(`archiver.archive:${MACHINE_B}`);
+    expect(calls).toContain(`sessionTerminator.terminateForMachine:${MACHINE_B}`);
     expect(calls.filter((c) => c === "event:machine.offboarded")).toHaveLength(1);
   });
 
@@ -281,5 +307,60 @@ describe("offboardPerson", () => {
 
     expect(result).toBeUndefined();
     expect(calls).toContain(`archiver.archive:${MACHINE_A}`);
+  });
+});
+
+describe("resumeOffboarding", () => {
+  test("still pending: no-op, no certs revoked, no machine touched", async () => {
+    const calls: string[] = [];
+    const layers = buildTestLayers({
+      approvalStatus: "approved", // irrelevant here — resumeOffboarding reads .status(), not this
+      calls,
+      statusResult: { status: "pending" },
+    });
+
+    const outcome = await Effect.runPromise(
+      Effect.provide(resumeOffboarding("approval-1", ORG_ID), layers),
+    );
+
+    expect(outcome.status).toBe("pending");
+    expect(outcome.machinesOffboarded).toEqual([]);
+    expect(calls).toEqual(["approval.status"]);
+  });
+
+  test("now approved: runs the exact same revoke -> per-machine sequence as the immediate path", async () => {
+    const calls: string[] = [];
+    const layers = buildTestLayers({
+      approvalStatus: "pending",
+      calls,
+      statusResult: { status: "approved" },
+    });
+
+    const outcome = await Effect.runPromise(
+      Effect.provide(resumeOffboarding("approval-1", ORG_ID), layers),
+    );
+
+    expect(outcome.status).toBe("approved");
+    expect(outcome.machinesOffboarded).toEqual([MACHINE_A, MACHINE_B]);
+    expect(calls.filter((c) => c === "event:access.certificate_revoked")).toHaveLength(2);
+    expect(calls.filter((c) => c === "event:machine.offboarded")).toHaveLength(2);
+  });
+
+  test("rejects an approval that isn't an offboarding approval, or has no targetPersonId", async () => {
+    const calls: string[] = [];
+    const layers = buildTestLayers({
+      approvalStatus: "approved",
+      calls,
+      statusResult: { actionType: "admin_access", targetPersonId: null },
+    });
+
+    const error = await Effect.runPromise(
+      Effect.provide(resumeOffboarding("approval-1", ORG_ID), layers).pipe(Effect.flip),
+    );
+
+    expect(error).toBeInstanceOf(OffboardingError);
+    expect((error as OffboardingError).reason).toBe("invalid_approval");
+    // Never even looked up a person or touched anything.
+    expect(calls).toEqual(["approval.status"]);
   });
 });

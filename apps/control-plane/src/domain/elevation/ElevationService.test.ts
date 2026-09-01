@@ -21,6 +21,7 @@ import { ElevationService } from "./ElevationService";
 import { ADMIN_ACCESS_APPROVAL_MODE_SETTING_KEY, ADMIN_ACCESS_POLICY_SETTING_KEY } from "./policy";
 import type { Elevation } from "./types";
 import {
+  ElevationNotFoundError,
   ElevationPolicyDeniedError,
   ElevationStateError,
   MachineNotFoundError,
@@ -170,6 +171,7 @@ function makeFakeApprovalService() {
     status,
     requestedByPersonId: "fake-requester",
     targetMachineId: null,
+    targetPersonId: null,
     reason: "fake",
     requiredApprovals: 1,
     approvedCount: status === "approved" ? 1 : 0,
@@ -397,6 +399,7 @@ describe("ElevationService", () => {
       expect(eventBus.published.map((e) => e.type)).toEqual([
         "access.elevation_requested",
         "access.elevation_granted",
+        "approval.granted",
       ]);
 
       // spec §15 "owner notified" — a grant persists exactly one in-app
@@ -439,6 +442,7 @@ describe("ElevationService", () => {
       expect(eventBus.published.map((e) => e.type)).toEqual([
         "access.elevation_requested",
         "access.elevation_granted",
+        "approval.granted",
       ]);
       expect(repo.notifications).toHaveLength(0);
     });
@@ -472,7 +476,7 @@ describe("ElevationService", () => {
       const firstRetry = await run(
         Effect.gen(function* () {
           const svc = yield* ElevationService;
-          return yield* svc.syncApproval(elevation.id);
+          return yield* svc.syncApproval(elevation.id, s.orgId);
         }),
         layers,
       );
@@ -489,7 +493,7 @@ describe("ElevationService", () => {
       await run(
         Effect.gen(function* () {
           const svc = yield* ElevationService;
-          return yield* svc.syncApproval(elevation.id);
+          return yield* svc.syncApproval(elevation.id, s.orgId);
         }),
         layers,
       );
@@ -497,7 +501,38 @@ describe("ElevationService", () => {
       expect(eventBus.published.map((e) => e.type)).toEqual([
         "access.elevation_requested",
         "access.elevation_granted",
+        "approval.granted",
       ]);
+    });
+
+    test("emits approval.granted sharing the elevation's correlationId — the exact evidence elevated-access-approved's compliance check reads", async () => {
+      // Regression test: `insertAutoApprovedApproval` bypasses `ApprovalService`
+      // with a raw insert, so nothing else emits this event for the "always"
+      // path — without it, every "always"-policy elevation was permanently
+      // flagged as unapproved by that check (see events.ts's doc comment on
+      // `buildAutoApprovalGrantedEvent`).
+      const s = seed();
+      const repo = makeFakeRepo(s);
+      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      const approval = makeFakeApprovalService();
+      const eventBus = makeFakeEventBus();
+
+      const elevation = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* svc.request({
+            personId: s.adminPersonId,
+            machineId: s.machineId,
+            level: "file_recovery",
+            reason: "need it",
+          });
+        }),
+        { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer },
+      );
+
+      const grantedApproval = eventBus.published.find((e) => e.type === "approval.granted");
+      expect(grantedApproval?.correlationId).toBe(elevation.id);
+      expect(grantedApproval?.payload).toEqual({ approverIds: [], actionType: "admin_access" });
     });
   });
 
@@ -611,7 +646,7 @@ describe("ElevationService", () => {
       const synced = await run(
         Effect.gen(function* () {
           const svc = yield* ElevationService;
-          return yield* svc.syncApproval(requested.id);
+          return yield* svc.syncApproval(requested.id, s.orgId);
         }),
         layers,
       );
@@ -666,7 +701,7 @@ describe("ElevationService", () => {
       const synced = await run(
         Effect.gen(function* () {
           const svc = yield* ElevationService;
-          return yield* svc.syncApproval(requested.id);
+          return yield* svc.syncApproval(requested.id, s.orgId);
         }),
         layers,
       );
@@ -701,7 +736,7 @@ describe("ElevationService", () => {
       const synced = await run(
         Effect.gen(function* () {
           const svc = yield* ElevationService;
-          return yield* svc.syncApproval(requested.id);
+          return yield* svc.syncApproval(requested.id, s.orgId);
         }),
         layers,
       );
@@ -741,7 +776,7 @@ describe("ElevationService", () => {
       await run(
         Effect.gen(function* () {
           const svc = yield* ElevationService;
-          return yield* svc.expire(granted.id);
+          return yield* svc.expire(granted.id, s.orgId);
         }),
         layers,
       );
@@ -750,6 +785,7 @@ describe("ElevationService", () => {
       expect(eventBus.published.map((e) => e.type)).toEqual([
         "access.elevation_requested",
         "access.elevation_granted",
+        "approval.granted",
         "access.elevation_expired",
       ]);
     });
@@ -778,7 +814,7 @@ describe("ElevationService", () => {
       const error = await run(
         Effect.gen(function* () {
           const svc = yield* ElevationService;
-          return yield* Effect.flip(svc.expire(granted.id));
+          return yield* Effect.flip(svc.expire(granted.id, s.orgId));
         }),
         layers,
       );
@@ -810,11 +846,129 @@ describe("ElevationService", () => {
       const error = await run(
         Effect.gen(function* () {
           const svc = yield* ElevationService;
-          return yield* Effect.flip(svc.expire(requested.id));
+          return yield* Effect.flip(svc.expire(requested.id, s.orgId));
         }),
         layers,
       );
       expect(error).toBeInstanceOf(ElevationStateError);
+    });
+  });
+
+  // `get`/`syncApproval`/`expire` all take an optional `orgId` that scopes
+  // the lookup — a caller from a DIFFERENT org must see the same
+  // `ElevationNotFoundError` as an unknown id, never the real elevation.
+  // See `loadElevation`'s own doc comment in ElevationService.ts.
+  describe("tenant isolation: get/syncApproval/expire scoped by orgId", () => {
+    test("get returns the elevation when orgId matches, and ElevationNotFoundError when it doesn't", async () => {
+      const s = seed();
+      const repo = makeFakeRepo(s);
+      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      const approval = makeFakeApprovalService();
+      const eventBus = makeFakeEventBus();
+      const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
+
+      const granted = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* svc.request({
+            personId: s.adminPersonId,
+            machineId: s.machineId,
+            level: "file_recovery",
+            reason: "need it",
+          });
+        }),
+        layers,
+      );
+
+      const fetchedOwn = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* svc.get(granted.id, s.orgId);
+        }),
+        layers,
+      );
+      expect(fetchedOwn.id).toBe(granted.id);
+
+      const error = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* Effect.flip(svc.get(granted.id, nextId("other-org")));
+        }),
+        layers,
+      );
+      expect(error).toBeInstanceOf(ElevationNotFoundError);
+    });
+
+    test("syncApproval on another org's elevation fails with ElevationNotFoundError, and never touches it", async () => {
+      const s = seed();
+      const repo = makeFakeRepo(s);
+      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "with_approval");
+      const approval = makeFakeApprovalService();
+      const eventBus = makeFakeEventBus();
+      const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
+
+      const requested = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* svc.request({
+            personId: s.adminPersonId,
+            machineId: s.machineId,
+            level: "file_recovery",
+            reason: "need it",
+          });
+        }),
+        layers,
+      );
+      const approvalId = requested.approvalId;
+      if (!approvalId) throw new Error("expected approvalId to be set");
+      approval.setStatus(approvalId, "approved");
+
+      const error = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* Effect.flip(svc.syncApproval(requested.id, nextId("other-org")));
+        }),
+        layers,
+      );
+      expect(error).toBeInstanceOf(ElevationNotFoundError);
+      // Still genuinely "requested" — the wrong-org call above didn't sync it.
+      expect(repo.elevationsById.get(requested.id)?.status).toBe("requested");
+    });
+
+    test("expire on another org's elevation fails with ElevationNotFoundError, and never touches it", async () => {
+      const s = seed();
+      const repo = makeFakeRepo(s);
+      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      const approval = makeFakeApprovalService();
+      const eventBus = makeFakeEventBus();
+      const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
+
+      const granted = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* svc.request({
+            personId: s.adminPersonId,
+            machineId: s.machineId,
+            level: "file_recovery",
+            reason: "need it",
+          });
+        }),
+        layers,
+      );
+      const existing = repo.elevationsById.get(granted.id);
+      if (!existing) throw new Error("expected the elevation to exist in the fake repo");
+      repo.elevationsById.set(granted.id, { ...existing, expiresAt: new Date(Date.now() - 1000) });
+
+      const error = await run(
+        Effect.gen(function* () {
+          const svc = yield* ElevationService;
+          return yield* Effect.flip(svc.expire(granted.id, nextId("other-org")));
+        }),
+        layers,
+      );
+      expect(error).toBeInstanceOf(ElevationNotFoundError);
+      // Still genuinely "granted" — the wrong-org call above didn't expire it.
+      expect(repo.elevationsById.get(granted.id)?.status).toBe("granted");
     });
   });
 });

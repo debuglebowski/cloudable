@@ -26,8 +26,10 @@ import { NotificationsLive } from "../src/http/handlers/notifications";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
 import { OrganisationLive } from "../src/http/handlers/organisation";
 import { PeopleLive } from "../src/http/handlers/people";
+import { TunnelLive } from "../src/http/handlers/tunnel";
 import { TunnelSignalLive } from "../src/http/handlers/tunnel-signal";
 import { UpgradeLive } from "../src/http/handlers/upgrade";
+import { CurrentUserAuthenticationLive } from "../src/http/middleware/auth";
 import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
 import { FakeProvisioningServiceLive } from "../src/services/ProvisioningService.fake";
@@ -38,6 +40,8 @@ import { joinTokenAttestation } from "../src/services/attestation/JoinTokenAttes
 import { MachineDirectory } from "../src/services/attestation/MachineDirectory";
 import { FederationService } from "../src/services/federation/FederationService";
 import { SshCaService } from "../src/services/ssh-ca/SshCaService";
+import { TunnelRegistry } from "../src/tunnel/registry";
+import { TunnelRelay } from "../src/tunnel/relay";
 import { TunnelServer } from "../src/tunnel/server";
 import { TunnelSignal } from "../src/tunnel/signal";
 import { startTestDb } from "./testcontainers";
@@ -112,6 +116,7 @@ describe("agent-protocol handlers (integration)", () => {
           OrganisationLive,
           IntegrationsLive,
           TunnelSignalLive,
+          TunnelLive,
           NotificationsLive,
         ),
       ),
@@ -119,6 +124,22 @@ describe("agent-protocol handlers (integration)", () => {
     const AttestationRegistryLive = Layer.succeed(
       AttestationRegistryTag,
       new Map([[joinTokenAttestation.method, joinTokenAttestation]]),
+    );
+    // Same wiring as `layers.ts`: `TunnelRelay` composes `TunnelServer` (below) with
+    // `TunnelRegistry` — built once so `OffboardingLive` and `ArchiveLive` (folded into
+    // `ApiLive` above) share the same registry instance.
+    const tunnelServerForRelay = TunnelServer.Default.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          EventBus.Default,
+          LocalSignerLive,
+          Layer.succeed(Db, testDb.db),
+          TunnelSignal.Default,
+        ),
+      ),
+    );
+    const tunnelRelay = TunnelRelay.Default.pipe(
+      Layer.provideMerge(Layer.mergeAll(tunnelServerForRelay, TunnelRegistry.Default)),
     );
     const AppLayer = Layer.mergeAll(
       EventBus.Default,
@@ -130,7 +151,9 @@ describe("agent-protocol handlers (integration)", () => {
       ApprovalService.Default,
       AttestationRegistryLive,
       FakeProvisioningServiceLive,
-      OffboardingLive.pipe(Layer.provide(FakeProvisioningServiceLive)),
+      CurrentUserAuthenticationLive,
+      tunnelRelay,
+      OffboardingLive.pipe(Layer.provide(FakeProvisioningServiceLive), Layer.provide(tunnelRelay)),
       // Same wiring as `layers.ts`'s `buildAppLive`: `ElevationService`
       // needs EventBus/ApprovalService/its own repo provided explicitly —
       // `Layer.mergeAll` is a flat union, not a dependency graph.
@@ -154,19 +177,10 @@ describe("agent-protocol handlers (integration)", () => {
           Layer.mergeAll(EventBus.Default, LocalSignerLive, Layer.succeed(Db, testDb.db)),
         ),
       ),
-      TunnelServer.Default.pipe(
-        Layer.provideMerge(
-          Layer.mergeAll(
-            EventBus.Default,
-            LocalSignerLive,
-            Layer.succeed(Db, testDb.db),
-            TunnelSignal.Default,
-          ),
-        ),
-      ),
-      // Same reference `TunnelServer` above provides itself via `provideMerge` — exposed
-      // standalone too so `TunnelSignalLive` (folded into `ApiLive` above) can depend on it
-      // directly, same wiring as `layers.ts`'s `buildAppLive`.
+      // Same instance `tunnelRelay` above is built from — not a second, separately
+      // constructed `TunnelServer` — exposed standalone so `TunnelSignalLive` (folded into
+      // `ApiLive` above) can depend on `TunnelServer`/`TunnelSignal` directly.
+      tunnelServerForRelay,
       TunnelSignal.Default,
     ).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Db, testDb.db), AppConfigLive)));
 
