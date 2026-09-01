@@ -24,6 +24,7 @@ import { AccessAttachRouteLive, TunnelConnectRouteLive, TunnelLive } from "./htt
 import { TunnelSignalLive } from "./http/handlers/tunnel-signal";
 import { UpgradeLive } from "./http/handlers/upgrade";
 import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
+import { AuthRouteLive } from "./http/routes/auth";
 import { buildAppLive } from "./layers";
 import { AzureProvisioningServiceLive } from "./services/ProvisioningService.azure";
 import { makeDockerProvisioningServiceLive } from "./services/ProvisioningService.docker";
@@ -110,6 +111,7 @@ const ServerLive = HttpApiBuilder.serve(
   Layer.provide(ApiLive),
   Layer.provide(AgentWakeLive),
   Layer.provide(TunnelRoutesLive),
+  Layer.provide(AuthRouteLive),
   Layer.provide(AppLive),
   Layer.provide(BunHttpServer.layer({ port: config.port })),
 );
