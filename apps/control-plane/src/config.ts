@@ -41,6 +41,15 @@ export interface AppConfig {
    * Terraform Cloud, etc. use for the same mechanism).
    */
   readonly federationAudience: string;
+  /**
+   * Origin of the console dev server (see `apps/console/vite.config.ts`),
+   * allowed via CORS — the console and control-plane run on different
+   * ports/origins in local dev, and every console page's `fetch` call would
+   * otherwise be silently blocked by the browser with no server-side error
+   * to point at (the response itself is fine; the browser just withholds
+   * the body from JS when `Access-Control-Allow-Origin` is missing).
+   */
+  readonly consoleOrigin: string;
 }
 
 const readConfig = (): AppConfig => {
@@ -58,6 +67,7 @@ const readConfig = (): AppConfig => {
       process.env["MANAGED_IDENTITY_AUDIENCE"] ?? "https://management.azure.com/",
     federationIssuerUrl: process.env["FEDERATION_ISSUER_URL"] ?? `http://localhost:${port}`,
     federationAudience: process.env["FEDERATION_AUDIENCE"] ?? "api://AzureADTokenExchange",
+    consoleOrigin: process.env["CONSOLE_ORIGIN"] ?? "http://localhost:5180",
   };
 };
 

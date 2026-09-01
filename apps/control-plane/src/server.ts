@@ -1,4 +1,4 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder, HttpMiddleware } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Layer } from "effect";
 import { config } from "./config";
@@ -76,7 +76,13 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
 // `AppLive` (provided to `ServerLive` below) already supplies.
 const AgentWakeLive = AgentWakeRouteLive.pipe(Layer.provide(WakeRegistry.Default));
 
-const ServerLive = HttpApiBuilder.serve().pipe(
+// Every console page fetches cross-origin (console and control-plane run on
+// different ports in local dev, and there's no reverse proxy in front of
+// either yet) — without this, the browser silently withholds every response
+// body from JS, which surfaces as every query on every page failing at once.
+const ServerLive = HttpApiBuilder.serve(
+  HttpMiddleware.cors({ allowedOrigins: [config.consoleOrigin] }),
+).pipe(
   Layer.provide(ApiLive),
   Layer.provide(AgentWakeLive),
   Layer.provide(AppLive),
