@@ -21,6 +21,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 interface RestoreModeOption {
@@ -216,21 +223,20 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
             <label htmlFor="restore-requester" className="text-sm font-medium">
               Requested by <Badge variant="outline">required</Badge>
             </label>
-            <select
-              id="restore-requester"
-              value={requesterId}
-              onChange={(e) => setRequesterId(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              <option value="" disabled>
-                {peopleQuery.isLoading ? "Loading people…" : "Select a person"}
-              </option>
-              {peopleQuery.data?.map((person) => (
-                <option key={person.id} value={person.id}>
-                  {person.email}
-                </option>
-              ))}
-            </select>
+            <Select value={requesterId} onValueChange={setRequesterId}>
+              <SelectTrigger id="restore-requester" className="h-9">
+                <SelectValue
+                  placeholder={peopleQuery.isLoading ? "Loading people…" : "Select a person"}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {peopleQuery.data?.map((person) => (
+                  <SelectItem key={person.id} value={person.id}>
+                    {person.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
 

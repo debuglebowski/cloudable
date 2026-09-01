@@ -19,6 +19,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // There is no auth/identity system yet (see docs/spec.md's known-gaps note),
 // so "who is deciding" has to be picked from the org's real people instead
@@ -99,21 +106,20 @@ export function ApprovalDecisionDialog({ approval, decision }: ApprovalDecisionD
           <label htmlFor={`decider-${approval.id}`} className="text-sm font-medium">
             Deciding as <span className="text-destructive">(required)</span>
           </label>
-          <select
-            id={`decider-${approval.id}`}
-            value={deciderId}
-            onChange={(event) => setDeciderId(event.target.value)}
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            <option value="" disabled>
-              {peopleQuery.isLoading ? "Loading people…" : "Select a person"}
-            </option>
-            {peopleQuery.data?.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.email}
-              </option>
-            ))}
-          </select>
+          <Select value={deciderId} onValueChange={setDeciderId}>
+            <SelectTrigger id={`decider-${approval.id}`} className="h-9">
+              <SelectValue
+                placeholder={peopleQuery.isLoading ? "Loading people…" : "Select a person"}
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {peopleQuery.data?.map((person) => (
+                <SelectItem key={person.id} value={person.id}>
+                  {person.email}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {peopleQuery.isError && (
             <span className="text-xs text-destructive">Failed to load people.</span>
           )}
