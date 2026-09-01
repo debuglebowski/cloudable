@@ -124,7 +124,9 @@ describe("agent-protocol handlers (integration)", () => {
       EventBus.Default,
       MachineDirectory.Default,
       AgentSessionToken.Default,
-      MachineService.Default,
+      // Same wiring as `layers.ts`: MachineService.create now calls
+      // ProvisioningServiceTag directly, so it needs it provided explicitly.
+      MachineService.Default.pipe(Layer.provide(FakeProvisioningServiceLive)),
       ApprovalService.Default,
       AttestationRegistryLive,
       FakeProvisioningServiceLive,

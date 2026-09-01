@@ -5,6 +5,7 @@ import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { type EffectiveLoggingTier, getEffectiveLoggingTier } from "../../logging/settings";
 import { EventBus } from "../../services/EventBus";
+import { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { InvalidCursorError, MachineNotFoundError, PackagePinConflictError } from "./errors";
 import {
   machineCreatedEvent,
@@ -142,6 +143,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
   effect: Effect.gen(function* () {
     const db = yield* Db;
     const eventBus = yield* EventBus;
+    const provisioning = yield* ProvisioningServiceTag;
 
     const manifestScopeFilter = (machine: Pick<MachineRow, "id" | "orgId" | "templateId">) => {
       const conditions = [
@@ -236,7 +238,61 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           }),
         ]);
 
-        return machine;
+        // Register the machine with provisioning right away, closing a
+        // long-standing gap: a machine created through this API used to be
+        // completely invisible to `ProvisioningService` from birth (its
+        // in-memory map only ever knew about machines it created itself),
+        // so archive/upgrade/reconcile against a real-API-created machine
+        // 404'd — the seed script's own comment on this exact problem is
+        // now obsolete, see its updated note. A provisioning failure here
+        // doesn't fail the whole create — the row already exists and
+        // "machines are never deleted" (CLAUDE.md invariant #6); it lands
+        // in the pre-existing `"error"` state instead, same as a failed
+        // reconcile/upgrade would report.
+        //
+        // Packages are resolved the same way `getById` resolves a machine's
+        // effective manifest — org (+ template) rows only, since a
+        // brand-new machine has no machine-level override yet. This is
+        // what a provisioning backend (e.g. the local Docker adapter)
+        // actually installs.
+        const manifestRows = yield* fetchManifestRows(machine);
+        const packages = resolveManifest(manifestRows.map(toManifestRow), {
+          orgId: machine.orgId,
+          templateId: machine.templateId,
+          machineId: machine.id,
+        }).map((entry) => entry.packageName);
+
+        const provisionedState = yield* provisioning
+          .create({
+            machineId: machine.id,
+            orgId: machine.orgId,
+            region: machine.region,
+            sizeSku: machine.sizeSku,
+            image: machine.image,
+            packages,
+          })
+          .pipe(
+            Effect.map((status) =>
+              status.state === "running" ? ("running" as const) : ("error" as const),
+            ),
+            Effect.catchTag("ProvisioningError", () => Effect.succeed("error" as const)),
+          );
+
+        const settledRows = yield* Effect.tryPromise({
+          try: () =>
+            db
+              .update(machines)
+              .set({
+                state: provisionedState,
+                lastVerifiedAt: provisionedState === "running" ? new Date() : null,
+              })
+              .where(eq(machines.id, machine.id))
+              .returning(),
+          catch: (cause) =>
+            new MachineServiceError({ reason: "provisioning_state_update_failed", cause }),
+        });
+
+        return settledRows[0] ?? machine;
       });
 
     const list = (

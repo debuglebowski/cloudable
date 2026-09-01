@@ -8,6 +8,7 @@ import postgres from "postgres";
 import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
+import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { MachineService } from "../machine/MachineService";
 import { PackagePinConflictError } from "../machine/errors";
 import { type OrgPackagesError, listOrgPackages, updateOrgPackages } from "./packages";
@@ -32,9 +33,11 @@ describe("org-scope package manifest write path", () => {
     // so `eventBusLayer` is listed both as its own sibling (to expose `EventBus`
     // to `updateOrgPackages`/`listOrgPackages` below) and via the trailing
     // `Layer.provide(dbLayer)` that resolves every sibling's remaining `Db` need.
-    TestLayer = Layer.mergeAll(eventBusLayer, MachineService.Default, dbLayer).pipe(
-      Layer.provide(dbLayer),
-    );
+    TestLayer = Layer.mergeAll(
+      eventBusLayer,
+      MachineService.Default.pipe(Layer.provide(FakeProvisioningServiceLive)),
+      dbLayer,
+    ).pipe(Layer.provide(dbLayer));
   });
 
   afterAll(async () => {

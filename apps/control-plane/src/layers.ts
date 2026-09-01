@@ -70,7 +70,11 @@ export const buildAppLive = (adapters: {
     // `toEventRows`), so it does not depend on `EventBus` as a context
     // service here — it only imports a plain helper function from it.
     ApprovalService.Default,
-    MachineService.Default,
+    // MachineService.create now calls ProvisioningServiceTag directly (see
+    // that file) — same reasoning as OffboardingLive just below: not a fixed
+    // `.Default` sibling like EventBus, but the caller-chosen adapter, so
+    // it's provided explicitly rather than relying on mergeAll's flat union.
+    MachineService.Default.pipe(Layer.provide(adapters.provisioning)),
     AgentSessionToken.Default,
     MachineDirectory.Default,
     // OffboardingLive's MachineArchiver delegates to the real archiveMachine,

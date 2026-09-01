@@ -24,6 +24,8 @@ import { TunnelSignalLive } from "./http/handlers/tunnel-signal";
 import { UpgradeLive } from "./http/handlers/upgrade";
 import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
 import { buildAppLive } from "./layers";
+import { AzureProvisioningServiceLive } from "./services/ProvisioningService.azure";
+import { makeDockerProvisioningServiceLive } from "./services/ProvisioningService.docker";
 import { FakeProvisioningServiceLive } from "./services/ProvisioningService.fake";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
 import { LocalSignerLive } from "./services/Signer.local";
@@ -33,8 +35,20 @@ import { LocalSignerLive } from "./services/Signer.local";
 // (see Signer.azure.ts / ProvisioningService.azure.ts). Attestation isn't
 // swappable here at all — see `layers.ts`'s doc comment on `buildAppLive`
 // for why both join-token and managed-identity are always wired in live.
+//
+// `provisioning` is the one adapter actually selectable via env
+// (`PROVISIONING_ADAPTER`, see config.ts) — `"docker"` runs real local
+// containers for dev/demo without an Azure account; never a customer-facing
+// choice, just how this process happens to be booted.
+const provisioningLive =
+  config.provisioningAdapter === "docker"
+    ? makeDockerProvisioningServiceLive({ controlPlaneUrl: config.localDockerControlPlaneUrl })
+    : config.provisioningAdapter === "azure"
+      ? AzureProvisioningServiceLive
+      : FakeProvisioningServiceLive;
+
 const AppLive = buildAppLive({
-  provisioning: FakeProvisioningServiceLive,
+  provisioning: provisioningLive,
   signer: LocalSignerLive,
   secrets: FakeSecretsProviderLive,
 });
