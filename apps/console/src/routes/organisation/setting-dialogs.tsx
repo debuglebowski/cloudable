@@ -12,6 +12,7 @@ import {
 } from "@/api/organisation";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 import { ValueEditDialog } from "./value-edit-dialog";
 
@@ -36,7 +37,7 @@ export function ApprovalModeDialog({
   onOpenChange,
   onSave,
 }: ApprovalModeDialogProps) {
-  const name = useId();
+  const id = useId();
 
   return (
     <ValueEditDialog<ApprovalMode>
@@ -50,21 +51,20 @@ export function ApprovalModeDialog({
       }}
     >
       {(mode, setMode) => (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="sr-only">Approval mode</legend>
+        <RadioGroup
+          value={mode}
+          onValueChange={(value) => setMode(value as ApprovalMode)}
+          aria-label="Approval mode"
+        >
           {APPROVAL_MODES.map((candidate) => (
-            <label key={candidate} className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name={name}
-                value={candidate}
-                checked={mode === candidate}
-                onChange={() => setMode(candidate)}
-              />
-              {APPROVAL_MODE_DESCRIPTION[candidate]}
-            </label>
+            <div key={candidate} className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value={candidate} id={`${id}-${candidate}`} />
+              <Label htmlFor={`${id}-${candidate}`} className="font-normal">
+                {APPROVAL_MODE_DESCRIPTION[candidate]}
+              </Label>
+            </div>
           ))}
-        </fieldset>
+        </RadioGroup>
       )}
     </ValueEditDialog>
   );
@@ -86,7 +86,7 @@ export function LoggingTierDialog({
   onOpenChange,
   onSave,
 }: LoggingTierDialogProps) {
-  const name = useId();
+  const id = useId();
 
   return (
     <ValueEditDialog<LoggingTier>
@@ -98,19 +98,19 @@ export function LoggingTierDialog({
       onSave={onSave}
     >
       {(tier, setTier) => (
-        <fieldset className="flex flex-col gap-3">
-          <legend className="sr-only">Logging tier</legend>
+        <RadioGroup
+          value={String(tier)}
+          onValueChange={(value) => setTier(Number(value) as LoggingTier)}
+          aria-label="Logging tier"
+        >
           {LOGGING_TIERS.map((candidate) => (
-            <label key={candidate} className="flex items-start gap-2 text-sm">
-              <input
-                type="radio"
-                name={name}
+            <div key={candidate} className="flex items-start gap-2 text-sm">
+              <RadioGroupItem
+                value={String(candidate)}
+                id={`${id}-${candidate}`}
                 className="mt-0.5"
-                value={candidate}
-                checked={tier === candidate}
-                onChange={() => setTier(candidate)}
               />
-              <span>
+              <Label htmlFor={`${id}-${candidate}`} className="font-normal">
                 {LOGGING_TIER_LABELS[candidate]}
                 {candidate === 3 && (
                   <>
@@ -121,10 +121,10 @@ export function LoggingTierDialog({
                     Tiers 1 and 2 stay off it; the tunnel passes TLS through untouched.
                   </>
                 )}
-              </span>
-            </label>
+              </Label>
+            </div>
           ))}
-        </fieldset>
+        </RadioGroup>
       )}
     </ValueEditDialog>
   );
@@ -230,7 +230,7 @@ export function RetentionLocationDialog({
   onOpenChange,
   onSave,
 }: RetentionLocationDialogProps) {
-  const name = useId();
+  const id = useId();
 
   return (
     <ValueEditDialog<RetentionLocation>
@@ -242,21 +242,20 @@ export function RetentionLocationDialog({
       onSave={onSave}
     >
       {(location, setLocation) => (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="sr-only">Log retention location</legend>
+        <RadioGroup
+          value={location}
+          onValueChange={(value) => setLocation(value as RetentionLocation)}
+          aria-label="Log retention location"
+        >
           {RETENTION_LOCATIONS.map((candidate) => (
-            <label key={candidate} className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name={name}
-                value={candidate}
-                checked={location === candidate}
-                onChange={() => setLocation(candidate)}
-              />
-              {RETENTION_LOCATION_LABELS[candidate]}
-            </label>
+            <div key={candidate} className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value={candidate} id={`${id}-${candidate}`} />
+              <Label htmlFor={`${id}-${candidate}`} className="font-normal">
+                {RETENTION_LOCATION_LABELS[candidate]}
+              </Label>
+            </div>
           ))}
-        </fieldset>
+        </RadioGroup>
       )}
     </ValueEditDialog>
   );
@@ -291,7 +290,7 @@ export function ControlOverrideDialog({
   onOpenChange,
   onSave,
 }: ControlOverrideDialogProps) {
-  const name = useId();
+  const id = useId();
 
   return (
     <ValueEditDialog<ControlOverrideChoice>
@@ -305,31 +304,26 @@ export function ControlOverrideDialog({
       }}
     >
       {(choice, setChoice) => (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="sr-only">Control status</legend>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="radio"
-              name={name}
-              value={USE_COMPUTED_DEFAULT}
-              checked={choice === USE_COMPUTED_DEFAULT}
-              onChange={() => setChoice(USE_COMPUTED_DEFAULT)}
-            />
-            Use Cloudable's computed default
-          </label>
+        <RadioGroup
+          value={choice}
+          onValueChange={(value) => setChoice(value as ControlOverrideChoice)}
+          aria-label="Control status"
+        >
+          <div className="flex items-center gap-2 text-sm">
+            <RadioGroupItem value={USE_COMPUTED_DEFAULT} id={`${id}-default`} />
+            <Label htmlFor={`${id}-default`} className="font-normal">
+              Use Cloudable's computed default
+            </Label>
+          </div>
           {CONTROL_STATUSES.map((candidate) => (
-            <label key={candidate} className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name={name}
-                value={candidate}
-                checked={choice === candidate}
-                onChange={() => setChoice(candidate)}
-              />
-              {CONTROL_STATUS_LABELS[candidate]}
-            </label>
+            <div key={candidate} className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value={candidate} id={`${id}-${candidate}`} />
+              <Label htmlFor={`${id}-${candidate}`} className="font-normal">
+                {CONTROL_STATUS_LABELS[candidate]}
+              </Label>
+            </div>
           ))}
-        </fieldset>
+        </RadioGroup>
       )}
     </ValueEditDialog>
   );

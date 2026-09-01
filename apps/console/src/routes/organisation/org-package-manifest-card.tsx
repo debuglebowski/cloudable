@@ -9,7 +9,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 /**
  * Org-level package manifest defaults (spec.md §6, docs/inheritance.md
@@ -148,15 +150,16 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
             className="w-32"
           />
         </div>
-        <label htmlFor={pinnedId} className="flex items-center gap-1.5 pb-1.5 text-sm">
-          <input
+        <div className="flex items-center gap-1.5 pb-1.5">
+          <Checkbox
             id={pinnedId}
-            type="checkbox"
             checked={pinned}
-            onChange={(event) => setPinned(event.target.checked)}
+            onCheckedChange={(checked) => setPinned(checked === true)}
           />
-          Pinned
-        </label>
+          <Label htmlFor={pinnedId} className="text-sm font-normal">
+            Pinned
+          </Label>
+        </div>
         <Button size="sm" onClick={submit} disabled={!canAdd}>
           {addPackage.isPending ? "Adding…" : "Add package"}
         </Button>
