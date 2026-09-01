@@ -13,9 +13,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-
-const selectClassName =
-  "flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 /** Connect form for an identity provider — SCIM 2.0 + OIDC discovery, never a client secret. */
 export function IdpConnectDialog() {
@@ -236,15 +240,18 @@ export function SecretStoreConnectDialog() {
             <label htmlFor={providerId} className="text-sm font-medium">
               Store
             </label>
-            <select
-              id={providerId}
-              className={selectClassName}
+            <Select
               value={provider}
-              onChange={(event) => setProvider(event.target.value as SecretStoreConfig["provider"])}
+              onValueChange={(value) => setProvider(value as SecretStoreConfig["provider"])}
             >
-              <option value="azure_key_vault">Azure Key Vault</option>
-              <option value="1password">1Password</option>
-            </select>
+              <SelectTrigger id={providerId}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="azure_key_vault">Azure Key Vault</SelectItem>
+                <SelectItem value="1password">1Password</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor={vaultUrlId} className="text-sm font-medium">

@@ -17,6 +17,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export interface AddMachineDialogProps {
   open: boolean;
@@ -160,21 +167,20 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
             <Label htmlFor="add-machine-owner">
               Owner <span className="text-destructive">(required)</span>
             </Label>
-            <select
-              id="add-machine-owner"
-              className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              value={ownerPersonId}
-              onChange={(event) => setOwnerPersonId(event.target.value)}
-            >
-              <option value="" disabled>
-                {peopleQuery.isLoading ? "Loading people…" : "Select a person"}
-              </option>
-              {activePeople.map((person) => (
-                <option key={person.id} value={person.id}>
-                  {person.email}
-                </option>
-              ))}
-            </select>
+            <Select value={ownerPersonId} onValueChange={setOwnerPersonId}>
+              <SelectTrigger id="add-machine-owner">
+                <SelectValue
+                  placeholder={peopleQuery.isLoading ? "Loading people…" : "Select a person"}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {activePeople.map((person) => (
+                  <SelectItem key={person.id} value={person.id}>
+                    {person.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {mutation.isError && (
