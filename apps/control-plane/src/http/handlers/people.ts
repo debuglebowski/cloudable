@@ -1,13 +1,14 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import {
+  type PersonRow,
   createPerson,
   listPeopleByOrg,
-  type PersonRow,
   setPersonActive,
   updatePerson,
 } from "../../domain/people/people";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 const toWire = (row: PersonRow) => ({
   id: row.id,
@@ -22,26 +23,42 @@ const toWire = (row: PersonRow) => ({
 
 export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
   handlers
-    .handle("list", ({ urlParams }) =>
-      listPeopleByOrg(urlParams.orgId).pipe(
+    .handle("list", () =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* listPeopleByOrg(currentUser.orgId);
+      }).pipe(
         Effect.map((rows) => ({ items: rows.map(toWire) })),
         Effect.catchTag("PeopleDbError", (e) => Effect.die(e)),
       ),
     )
     .handle("create", ({ payload }) =>
-      createPerson(payload).pipe(
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* createPerson({ ...payload, orgId: currentUser.orgId });
+      }).pipe(
         Effect.map(toWire),
         Effect.catchTag("PeopleDbError", (e) => Effect.die(e)),
       ),
     )
     .handle("update", ({ path, payload }) =>
-      updatePerson({ personId: path.id, ...payload }).pipe(
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* updatePerson({ personId: path.id, orgId: currentUser.orgId, ...payload });
+      }).pipe(
         Effect.map(toWire),
         Effect.catchTag("PeopleDbError", (e) => Effect.die(e)),
       ),
     )
     .handle("setActive", ({ path, payload }) =>
-      setPersonActive({ personId: path.id, active: payload.active }).pipe(
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* setPersonActive({
+          personId: path.id,
+          orgId: currentUser.orgId,
+          active: payload.active,
+        });
+      }).pipe(
         Effect.map(toWire),
         Effect.catchTag("PeopleDbError", (e) => Effect.die(e)),
       ),

@@ -1,0 +1,19 @@
+{
+  "name": "@cloudable/session-token",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "dev": "exit 0",
+    "build": "exit 0",
+    "typecheck": "tsc -b",
+    "test:unit": "bun test",
+    "test:integration": "exit 0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "typescript": "^5.7.0"
+  }
+}

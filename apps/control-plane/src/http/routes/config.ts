@@ -7,6 +7,7 @@ import {
   PinnedSettingError,
   SettingWriteError,
 } from "../../domain/config/errors";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 // Wire schemas for `/api/v1/config/...` (docs/spec.md §16). These mirror
 // `packages/contracts/src/domains/config.ts`'s plain interfaces (the CLI's
@@ -16,11 +17,6 @@ import {
 
 export const SettingScopeType = Schema.Literal("org", "machine");
 
-export const ConfigActor = Schema.Struct({
-  type: Schema.Literal("person", "system"),
-  id: Schema.String,
-});
-
 export const SettingChangeResult = Schema.Struct({
   scopeType: SettingScopeType,
   scopeId: Schema.String,
@@ -29,14 +25,16 @@ export const SettingChangeResult = Schema.Struct({
   current: Schema.Unknown,
 });
 
+// `orgId`/`actor` are gone from the wire — the server derives both from the
+// caller's session (`CurrentUserTag`): every config change is now
+// necessarily a real person acting through the console, not a
+// client-supplied identity (see `http/handlers/config.ts`).
 export const PatchSettingPayload = Schema.Struct({
-  orgId: Schema.String,
   scopeType: SettingScopeType,
   scopeId: Schema.String,
   key: Schema.String,
   value: Schema.Unknown,
   pinned: Schema.optional(Schema.Boolean),
-  actor: ConfigActor,
 });
 
 export const PatchSettingResponse = Schema.Struct({
@@ -51,11 +49,10 @@ export const ReconcileTriggerParams = Schema.Struct({
 // "false" must be rejected by the same confirmation-gate error (see
 // trigger-reconcile.ts), rather than "absent" failing schema validation and
 // "false" failing a domain check — one rule, one code path. `orgId` is
-// required and checked against the target machine's own org — the
-// tenant-isolation boundary this endpoint would otherwise lack (there is no
-// `CurrentUserTag` session yet to derive it from).
+// gone from the wire — derived from `CurrentUserTag.orgId` and checked
+// against the target machine's own org, the tenant-isolation boundary this
+// endpoint needs (see `../middleware/auth.ts`).
 export const ReconcileTriggerPayload = Schema.Struct({
-  orgId: Schema.String,
   confirm: Schema.optional(Schema.Boolean),
 });
 
@@ -73,8 +70,6 @@ export const ImportConfigEntry = Schema.Struct({
 });
 
 export const ImportConfigPayload = Schema.Struct({
-  orgId: Schema.String,
-  actor: ConfigActor,
   correlationId: Schema.optional(Schema.String),
   entries: Schema.Array(ImportConfigEntry),
 });
@@ -117,4 +112,5 @@ export const ConfigGroup = HttpApiGroup.make("config")
       .addError(MachineNotFoundError, { status: 404 })
       .addError(PinnedSettingError, { status: 409 })
       .addError(SettingWriteError, { status: 500 }),
-  );
+  )
+  .middleware(CurrentUserAuthentication);

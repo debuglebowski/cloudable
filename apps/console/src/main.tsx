@@ -3,6 +3,9 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "@/lib/query-client";
 import { routeTree } from "@/routes/route-tree";
 
@@ -23,8 +26,13 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider delayDuration={200}>
+          <RouterProvider router={router} />
+          <Toaster position="bottom-right" />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

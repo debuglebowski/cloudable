@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import {
@@ -7,7 +6,6 @@ import {
   type Decision,
   useDecideApprovalMutation,
 } from "@/api/approvals";
-import { listPeople } from "@/api/people-directory";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,18 +17,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
-// There is no auth/identity system yet (see docs/spec.md's known-gaps note),
-// so "who is deciding" has to be picked from the org's real people instead
-// of assumed to be "the signed-in user" — there is no such session concept
-// to read it from.
+// "Who is deciding" is the signed-in session, not a picker — the server
+// derives it from `CurrentUserTag` and rejects the request entirely if
+// there's no session, so there's nothing to select here (see
+// `api/approvals.ts`'s header comment).
 
 export interface ApprovalDecisionDialogProps {
   approval: Approval;
@@ -52,19 +45,16 @@ export interface ApprovalDecisionDialogProps {
 export function ApprovalDecisionDialog({ approval, decision }: ApprovalDecisionDialogProps) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
-  const [deciderId, setDeciderId] = useState("");
   const mutation = useDecideApprovalMutation();
-  const peopleQuery = useQuery({ queryKey: ["people-directory"], queryFn: listPeople, enabled: open });
 
   const isDeny = decision === "rejected";
   const reasonTrimmed = reason.trim();
-  const canSubmit = (isDeny ? reasonTrimmed.length > 0 : true) && deciderId.length > 0;
+  const canSubmit = isDeny ? reasonTrimmed.length > 0 : true;
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (!next) {
       setReason("");
-      setDeciderId("");
       mutation.reset();
     }
   }
@@ -75,7 +65,6 @@ export function ApprovalDecisionDialog({ approval, decision }: ApprovalDecisionD
       {
         approvalId: approval.id,
         decision,
-        decidedByPersonId: deciderId,
         ...(isDeny ? { reason: reasonTrimmed } : {}),
       },
       { onSuccess: () => handleOpenChange(false) },
@@ -102,41 +91,17 @@ export function ApprovalDecisionDialog({ approval, decision }: ApprovalDecisionD
           {approval.reason}
         </p>
 
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor={`decider-${approval.id}`} className="text-sm font-medium">
-            Deciding as <span className="text-destructive">(required)</span>
-          </label>
-          <Select value={deciderId} onValueChange={setDeciderId}>
-            <SelectTrigger id={`decider-${approval.id}`} className="h-9">
-              <SelectValue
-                placeholder={peopleQuery.isLoading ? "Loading people…" : "Select a person"}
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {peopleQuery.data?.map((person) => (
-                <SelectItem key={person.id} value={person.id}>
-                  {person.email}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {peopleQuery.isError && (
-            <span className="text-xs text-destructive">Failed to load people.</span>
-          )}
-        </div>
-
         {isDeny && (
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`deny-reason-${approval.id}`} className="text-sm font-medium">
+            <Label htmlFor={`deny-reason-${approval.id}`}>
               Reason for denial <span className="text-destructive">(required)</span>
-            </label>
-            <textarea
+            </Label>
+            <Textarea
               id={`deny-reason-${approval.id}`}
               value={reason}
               onChange={(event) => setReason(event.target.value)}
               rows={3}
               placeholder="Why is this being denied? This becomes part of the audit record."
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
             {reasonTrimmed.length === 0 && (
               <span className="text-xs text-muted-foreground">

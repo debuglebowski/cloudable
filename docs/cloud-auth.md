@@ -84,10 +84,16 @@ One Ed25519 key, `alg: EdDSA`. See "Signing key" below.
 
 ### Mint
 
+Requires a real BetterAuth session (`CurrentUserAuthentication`, applied per-endpoint — see
+`../apps/control-plane/src/http/routes/federation.ts`), unlike `discovery`/`jwks` above. `orgId`
+comes from that session, never from the request body: this endpoint mints a real,
+production-Key-Vault-signed credential and persists an `integrations` row for whatever org it's
+told to, so trusting a client-supplied `orgId` here would let any caller mint a credential for,
+and overwrite the stored cloud integration of, an org they don't belong to.
+
 ```
 POST /api/v1/federation/mint
 {
-  "orgId": "...",
   "customerId": "acme-corp",
   "subscriptionId": "...",
   "trustRule": { "issuer": "https://auth.cloudable.example", "boundSubject": "cloudable:tenant:acme-corp" }

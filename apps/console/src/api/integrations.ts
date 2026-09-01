@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { apiGet, apiPost } from "@/lib/api-client";
-import { CURRENT_ORG_ID } from "@/lib/current-org";
 
 /**
  * Integrations — wired to the real `apps/control-plane/src/http/routes/
@@ -69,9 +68,7 @@ export function useIntegrations() {
   return useQuery({
     queryKey: integrationKeys.list(),
     queryFn: async () => {
-      const res = await apiGet<{ items: Integration[] }>(
-        `/api/v1/integrations?orgId=${CURRENT_ORG_ID}`,
-      );
+      const res = await apiGet<{ items: Integration[] }>("/api/v1/integrations");
       return res.items;
     },
   });
@@ -92,7 +89,6 @@ export function useConnectIntegration() {
   return useMutation({
     mutationFn: (input: ConnectIntegrationInput) =>
       apiPost<Integration>("/api/v1/integrations", {
-        orgId: CURRENT_ORG_ID,
         kind: input.kind,
         identifier: input.identifier,
         config: input.config,

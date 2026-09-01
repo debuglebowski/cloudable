@@ -8,6 +8,7 @@
   "references": [
     { "path": "../../packages/schema" },
     { "path": "../../packages/events" },
-    { "path": "../../packages/contracts" }
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/session-token" }
   ]
 }

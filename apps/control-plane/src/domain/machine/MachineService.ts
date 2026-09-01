@@ -86,6 +86,7 @@ export interface PackageManifestEdit {
 
 export interface UpdateMachinePackagesInput {
   machineId: string;
+  orgId: string;
   upserts?: ReadonlyArray<PackageManifestEdit> | undefined;
   removals?: ReadonlyArray<string> | undefined;
   actorPersonId?: string | null;
@@ -163,14 +164,20 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         catch: (cause) => new MachineServiceError({ reason: "manifest_read_failed", cause }),
       });
 
-    const fetchMachine = (machineId: string) =>
+    // `orgId` is the authenticated caller's own org (see `CurrentUserTag`),
+    // not something the machine row is queried by directly — a machine
+    // belonging to a DIFFERENT org resolves to the same `notFound` as one
+    // that doesn't exist at all. That's deliberate: distinguishing "not
+    // yours" from "doesn't exist" across tenants is itself an information
+    // leak (confirms another org's machine id is real).
+    const fetchMachine = (machineId: string, orgId: string) =>
       Effect.gen(function* () {
         const rows = yield* Effect.tryPromise({
           try: () => db.select().from(machines).where(eq(machines.id, machineId)).limit(1),
           catch: (cause) => new MachineServiceError({ reason: "get_failed", cause }),
         });
         const machine = rows[0];
-        if (!machine) return yield* Effect.fail(notFound(machineId));
+        if (!machine || machine.orgId !== orgId) return yield* Effect.fail(notFound(machineId));
         return machine;
       });
 
@@ -294,9 +301,10 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
 
     const getById = (
       machineId: string,
+      orgId: string,
     ): Effect.Effect<MachineDetail, MachineServiceError | MachineNotFoundError> =>
       Effect.gen(function* () {
-        const machine = yield* fetchMachine(machineId);
+        const machine = yield* fetchMachine(machineId, orgId);
         const rows = yield* fetchManifestRows(machine);
         const chain = {
           orgId: machine.orgId,
@@ -327,7 +335,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       MachineServiceError | MachineNotFoundError | PackagePinConflictError
     > =>
       Effect.gen(function* () {
-        const machine = yield* fetchMachine(input.machineId);
+        const machine = yield* fetchMachine(input.machineId, input.orgId);
         const upserts = input.upserts ?? [];
         const removals = input.removals ?? [];
         const editedPackageNames = [

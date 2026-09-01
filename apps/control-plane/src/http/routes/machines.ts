@@ -5,6 +5,7 @@ import {
   MachineNotFoundError,
   PackagePinConflictError,
 } from "../../domain/machine/errors";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 const machineStateSchema = Schema.Literal(
   "provisioning",
@@ -75,7 +76,6 @@ const pageInfoSchema = Schema.Struct({
 });
 
 const createMachinePayloadSchema = Schema.Struct({
-  orgId: Schema.UUID,
   name: Schema.String.pipe(Schema.minLength(1)),
   // Optional — omitted, `MachineService.create` resolves the org's
   // configured default region instead of requiring the caller to always
@@ -87,11 +87,9 @@ const createMachinePayloadSchema = Schema.Struct({
   // exactly one owner, always a person. See docs/inheritance.md.
   ownerPersonId: Schema.UUID,
   templateId: Schema.optional(Schema.NullOr(Schema.UUID)),
-  actorPersonId: Schema.optional(Schema.UUID),
 });
 
 const listMachinesUrlParamsSchema = Schema.Struct({
-  orgId: Schema.UUID,
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.NumberFromString),
 });
@@ -112,7 +110,6 @@ const packageManifestEntrySchema = Schema.Struct({
 const updateMachinePackagesPayloadSchema = Schema.Struct({
   upserts: Schema.optional(Schema.Array(packageManifestEntrySchema)),
   removals: Schema.optional(Schema.Array(Schema.String.pipe(Schema.minLength(1)))),
-  actorPersonId: Schema.optional(Schema.UUID),
 });
 
 const updateMachinePackagesResponseSchema = Schema.Struct({
@@ -150,4 +147,5 @@ export const MachinesGroup = HttpApiGroup.make("machines")
       .addError(MachineNotFoundError, { status: 404 })
       .addError(PackagePinConflictError, { status: 422 }),
   )
-  .prefix("/api/v1/machines");
+  .prefix("/api/v1/machines")
+  .middleware(CurrentUserAuthentication);

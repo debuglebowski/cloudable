@@ -1,4 +1,8 @@
+import { Archive as ArchiveGlyph, Calendar, Clock, DollarSign, Scale, Server } from "lucide-react";
+
 import { type ArchivedSnapshot, useArchivedSnapshots } from "@/api/archive";
+import { PageHeaderIcon } from "@/components/page-header-icon";
+import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -71,24 +75,30 @@ export function ArchivePage() {
   const { data: snapshots, isLoading, isError } = useArchivedSnapshots();
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold">Archive</h1>
-        <p className="max-w-prose text-sm text-muted-foreground">
-          Machines are archived, never deleted. This page governs the retention clock and restore
-          for archived snapshots — separate from the live Machines list.
-        </p>
+    // h-full min-h-0 + the Card below being flex-1: fills whatever height
+    // `main` actually has left under the header instead of capping at a flat
+    // vh fraction — see machines-page.tsx's comment on the same pattern.
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="flex shrink-0 items-center gap-3">
+        <PageHeaderIcon icon={ArchiveGlyph} />
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold">Archive</h1>
+          <p className="max-w-prose text-sm text-muted-foreground">
+            Machines are archived, never deleted. This page governs the retention clock and restore
+            for archived snapshots — separate from the live Machines list.
+          </p>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
+      <Card className="flex min-h-0 flex-1 flex-col">
+        <CardHeader className="shrink-0">
           <CardTitle>Snapshots</CardTitle>
           <CardDescription>
             Volume data plus machine desired state and configuration, captured on archive. Region is
             inherited from the machine.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="min-h-0 flex-1">
           {isLoading && (
             <p className="text-sm text-muted-foreground">Loading archived snapshots…</p>
           )}
@@ -99,14 +109,39 @@ export function ArchivePage() {
             <p className="text-sm text-muted-foreground">No archived machines yet.</p>
           )}
           {snapshots && snapshots.length > 0 && (
-            <Table>
+            <Table containerClassName="h-full max-h-none">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Machine</TableHead>
-                  <TableHead>Archived</TableHead>
-                  <TableHead>Retention</TableHead>
-                  <TableHead>Legal hold</TableHead>
-                  <TableHead>Projected cost</TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Server} />
+                      Machine
+                    </span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Calendar} />
+                      Archived
+                    </span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Clock} />
+                      Retention
+                    </span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Scale} />
+                      Legal hold
+                    </span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={DollarSign} />
+                      Projected cost
+                    </span>
+                  </TableHead>
                   <TableHead className="text-right">Restore</TableHead>
                 </TableRow>
               </TableHeader>

@@ -5,6 +5,7 @@ import { ElevationRepoLive } from "./domain/elevation/ElevationRepo.live";
 import { ElevationService } from "./domain/elevation/ElevationService";
 import { MachineService } from "./domain/machine/MachineService";
 import { OffboardingLive } from "./domain/offboarding";
+import { CurrentUserAuthenticationLive } from "./http/middleware/auth";
 import { ApprovalService } from "./services/ApprovalService";
 import { EventBus } from "./services/EventBus";
 import type { ProvisioningServiceTag } from "./services/ProvisioningService";
@@ -15,6 +16,8 @@ import { MachineDirectory } from "./services/attestation/MachineDirectory";
 import { AttestationRegistryLive } from "./services/attestation/registry";
 import { FederationService } from "./services/federation/FederationService";
 import { SshCaService } from "./services/ssh-ca/SshCaService";
+import { TunnelRegistry } from "./tunnel/registry";
+import { TunnelRelay } from "./tunnel/relay";
 import { TunnelServer } from "./tunnel/server";
 import { TunnelSignal } from "./tunnel/signal";
 
@@ -61,6 +64,15 @@ export const buildAppLive = (adapters: {
   const tunnel = TunnelServer.Default.pipe(
     Layer.provideMerge(Layer.mergeAll(eventBus, adapters.signer, infra, tunnelSignal)),
   );
+  // `TunnelRelay` composes the DB-backed `TunnelServer` above with the
+  // in-process `TunnelRegistry` (live websocket connections) — see
+  // `tunnel/relay.ts`'s own doc comment. Built once here (not per-consumer)
+  // so `OffboardingLive`'s `DefaultSessionTerminatorLive` below and
+  // `ArchiveLive` (server.ts's HTTP layer) share the same registry instance
+  // rather than each getting an empty one of their own.
+  const tunnelRelay = TunnelRelay.Default.pipe(
+    Layer.provideMerge(Layer.mergeAll(tunnel, TunnelRegistry.Default)),
+  );
 
   return Layer.mergeAll(
     eventBus,
@@ -78,7 +90,7 @@ export const buildAppLive = (adapters: {
     // like EventBus, but the caller-chosen adapter, so it's provided
     // explicitly here rather than relying on mergeAll's flat union (see the
     // note below on why that doesn't resolve cross-layer dependencies).
-    OffboardingLive.pipe(Layer.provide(adapters.provisioning)),
+    OffboardingLive.pipe(Layer.provide(adapters.provisioning), Layer.provide(tunnelRelay)),
     // `Layer.mergeAll` does not let sibling entries satisfy each other's
     // requirements — only the trailing `.pipe(Layer.provide(...))` below
     // does that, and only for `AppConfigLive`/`DbLive`. ElevationService
@@ -96,6 +108,10 @@ export const buildAppLive = (adapters: {
     adapters.signer,
     adapters.secrets,
     AttestationRegistryLive,
+    // Real session auth (see `http/middleware/auth.ts`) — needs `Db` to
+    // resolve a BetterAuth session's email to a `people` row, ambient below
+    // via `infra`.
+    CurrentUserAuthenticationLive,
     // Unit 18 (upgrade transactionality) and unit 19 (config editor):
     // `domain/upgrade/UpgradeService.ts` and the config feature's
     // `ConfigLive` are plain functions/handlers (per the shared
@@ -122,6 +138,10 @@ export const buildAppLive = (adapters: {
     // `TunnelSignalLive` (the tunnel-signal long-poll HTTP handler) can depend on `TunnelSignal`
     // directly, without going through `TunnelServer` at all.
     tunnelSignal,
+    // Same reference `OffboardingLive` above is given via `Layer.provide` — exposed
+    // standalone too so `ArchiveLive` (server.ts's HTTP layer, not part of this file)
+    // can depend on `TunnelRelay` directly.
+    tunnelRelay,
     // Feature units: append your service's `.Default` (or Layer) to the Layer.mergeAll(...) argument
     // list above. Never reorder existing entries.
     //

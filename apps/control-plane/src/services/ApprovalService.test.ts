@@ -153,7 +153,7 @@ describe("ApprovalService", () => {
     const decided = await run(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.decide(requested.id, approverId, "approved");
+        return yield* service.decide(requested.id, orgId, approverId, "approved");
       }),
     );
     expect(decided.status).toBe("approved");
@@ -191,7 +191,7 @@ describe("ApprovalService", () => {
     const afterFirst = await run(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.decide(requested.id, approverA, "approved");
+        return yield* service.decide(requested.id, orgId, approverA, "approved");
       }),
     );
     expect(afterFirst.status).toBe("pending");
@@ -200,7 +200,7 @@ describe("ApprovalService", () => {
     const afterSecond = await run(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.decide(requested.id, approverB, "approved");
+        return yield* service.decide(requested.id, orgId, approverB, "approved");
       }),
     );
     expect(afterSecond.status).toBe("approved");
@@ -305,7 +305,7 @@ describe("ApprovalService", () => {
     const missingReasonError = await runFail(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.decide(requested.id, approverId, "rejected");
+        return yield* service.decide(requested.id, orgId, approverId, "rejected");
       }),
     );
     expect(missingReasonError).toBeInstanceOf(ApprovalError);
@@ -315,7 +315,7 @@ describe("ApprovalService", () => {
     const stillPending = await run(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.status(requested.id);
+        return yield* service.status(requested.id, orgId);
       }),
     );
     expect(stillPending.status).toBe("pending");
@@ -323,7 +323,13 @@ describe("ApprovalService", () => {
     const denied = await run(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.decide(requested.id, approverId, "rejected", "fails change review");
+        return yield* service.decide(
+          requested.id,
+          orgId,
+          approverId,
+          "rejected",
+          "fails change review",
+        );
       }),
     );
     expect(denied.status).toBe("rejected");
@@ -359,14 +365,14 @@ describe("ApprovalService", () => {
     await run(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.decide(requested.id, approverId, "approved");
+        return yield* service.decide(requested.id, orgId, approverId, "approved");
       }),
     );
 
     const error = await runFail(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.decide(requested.id, approverId, "approved");
+        return yield* service.decide(requested.id, orgId, approverId, "approved");
       }),
     );
     expect((error as ApprovalError).reason).toBe("duplicate_decision");
@@ -394,7 +400,7 @@ describe("ApprovalService", () => {
     const error = await runFail(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.decide(requested.id, crypto.randomUUID(), "approved");
+        return yield* service.decide(requested.id, orgId, crypto.randomUUID(), "approved");
       }),
     );
     expect((error as ApprovalError).reason).toBe("already_decided");
@@ -404,7 +410,7 @@ describe("ApprovalService", () => {
     const statusError = await runFail(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.status(crypto.randomUUID());
+        return yield* service.status(crypto.randomUUID(), crypto.randomUUID());
       }),
     );
     expect((statusError as ApprovalError).reason).toBe("not_found");
@@ -412,10 +418,61 @@ describe("ApprovalService", () => {
     const decideError = await runFail(
       Effect.gen(function* () {
         const service = yield* ApprovalService;
-        return yield* service.decide(crypto.randomUUID(), crypto.randomUUID(), "approved");
+        return yield* service.decide(
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+          crypto.randomUUID(),
+          "approved",
+        );
       }),
     );
     expect((decideError as ApprovalError).reason).toBe("not_found");
+  });
+
+  test("status and decide return not_found for an approval that belongs to a DIFFERENT org — the actual tenant-isolation fix, not just an unknown id", async () => {
+    const orgId = crypto.randomUUID();
+    const otherOrgId = crypto.randomUUID();
+    const personId = crypto.randomUUID();
+    await setApprovalMode(orgId, "admin_access", "single");
+
+    const requested = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.request({
+          orgId,
+          actionType: "admin_access",
+          requestedByPersonId: personId,
+          targetMachineId: null,
+          reason: "need to recover files",
+        });
+      }),
+    );
+
+    const statusError = await runFail(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.status(requested.id, otherOrgId);
+      }),
+    );
+    expect((statusError as ApprovalError).reason).toBe("not_found");
+
+    const decideError = await runFail(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.decide(requested.id, otherOrgId, crypto.randomUUID(), "approved");
+      }),
+    );
+    expect((decideError as ApprovalError).reason).toBe("not_found");
+
+    // Still genuinely pending in its real org — the wrong-org calls above
+    // didn't leak into deciding it either.
+    const stillPending = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.status(requested.id, orgId);
+      }),
+    );
+    expect(stillPending.status).toBe("pending");
   });
 
   test("an empty or missing reason on request is rejected", async () => {

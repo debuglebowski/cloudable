@@ -23,7 +23,10 @@ export type AccessEvent =
     })
   | (EventEnvelope & {
       type: "access.session_ended";
-      payload: { durationSeconds: number };
+      // `reason` is optional (additive — invariant #11) rather than a new payload shape: a
+      // pre-existing consumer that hasn't read this field yet still parses the event fine.
+      // `person_ended` | `policy_terminated` | `connection_lost` (see `sessions.terminationReason`).
+      payload: { durationSeconds: number; reason?: string };
     })
   | (EventEnvelope & {
       type: "access.session_denied";

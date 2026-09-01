@@ -66,6 +66,35 @@ export function buildElevationGrantedEvent(elevation: Elevation, ctx: EventConte
   };
 }
 
+/**
+ * The org policy `"always"` (admin access to an unowned machine, spec §15)
+ * auto-approves by inserting an `approvals` row directly
+ * (`ElevationRepo.insertAutoApprovedApproval`) rather than going through
+ * `ApprovalService.request()` — so unlike the `with_approval` branch, no
+ * `approval.granted` event exists unless this builds one. Without it, the
+ * `elevated-access-approved` compliance check (which cross-references
+ * `access.elevation_granted`'s `correlationId` against `approval.granted`
+ * events) permanently flags every `"always"`-policy elevation as a
+ * violation — the opposite of what the policy represents. Mirrors
+ * `ApprovalService.request()`'s own `"none"`-mode auto-approval event
+ * exactly (`approverIds: []`, since no human approver acted).
+ */
+export function buildAutoApprovalGrantedEvent(ctx: EventContext, actionType: string): DomainEvent {
+  return {
+    id: "",
+    occurredAt: ctx.occurredAt,
+    recordedAt: ctx.occurredAt,
+    orgId: ctx.orgId,
+    actorType: ctx.actorType,
+    actorId: ctx.actorId,
+    machineId: ctx.machineId,
+    correlationId: ctx.correlationId,
+    schemaVersion: 1,
+    type: "approval.granted",
+    payload: { approverIds: [], actionType },
+  };
+}
+
 export function buildElevationExpiredEvent(elevation: Elevation, ctx: EventContext): DomainEvent {
   return {
     id: "",

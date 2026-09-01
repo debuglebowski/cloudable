@@ -21,10 +21,7 @@ export class IntegrationsDbError extends Data.TaggedError("IntegrationsDbError")
   cause?: unknown;
 }> {}
 
-const dbTry = <A>(
-  thunk: () => Promise<A>,
-  reason: string,
-): Effect.Effect<A, IntegrationsDbError> =>
+const dbTry = <A>(thunk: () => Promise<A>, reason: string): Effect.Effect<A, IntegrationsDbError> =>
   Effect.tryPromise({ try: thunk, catch: (cause) => new IntegrationsDbError({ reason, cause }) });
 
 export const listActiveIntegrations = (
@@ -88,8 +85,15 @@ export const connectIntegration = (
     return row;
   });
 
+// `orgId` scopes the update to that org — an integration belonging to a
+// DIFFERENT org is simply not matched by the `where`, so the update
+// affects zero rows rather than someone else's integration. Same
+// non-leaking posture as everywhere else in this build; unlike a fetch,
+// there's no separate row to compare against, so the check is folded
+// straight into the `where` clause instead of a preceding lookup.
 export const disconnectIntegration = (
   integrationId: string,
+  orgId: string,
 ): Effect.Effect<void, IntegrationsDbError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
@@ -98,7 +102,7 @@ export const disconnectIntegration = (
         db
           .update(integrations)
           .set({ removedAt: new Date() })
-          .where(eq(integrations.id, integrationId)),
+          .where(and(eq(integrations.id, integrationId), eq(integrations.orgId, orgId))),
       "disconnect_integration_failed",
     );
   });

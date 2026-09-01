@@ -8,6 +8,7 @@ import {
 import type { FederationError } from "../../services/federation/FederationService";
 import { FederationService } from "../../services/federation/FederationService";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 /** Same list `FakeAzureTrustRule.ts` defines — see there for the single source of truth. */
 const REJECTION_REASONS: ReadonlySet<string> = new Set(TRUST_RULE_REJECTION_REASONS);
@@ -72,9 +73,14 @@ export const FederationLive = HttpApiBuilder.group(Api, "federation", (handlers)
     )
     .handle("mint", ({ payload }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const federation = yield* FederationService;
+        // `orgId` comes from the authenticated session, never the request body — see
+        // `MintFederationTokenRequest`'s own doc comment in `../routes/federation.ts` for
+        // why (this endpoint mints a real signed credential and persists an `integrations`
+        // row for whatever org it's told to).
         const outcome = yield* federation
-          .federateCredential(payload)
+          .federateCredential({ ...payload, orgId: currentUser.orgId })
           .pipe(Effect.catchTag("FederationError", toMintErrorResponse));
         return {
           subject: outcome.subject,

@@ -310,10 +310,13 @@ what the cloud provider independently reports — out of scope for this
 unit, but the reason report bodies are treated as claims to verify (e.g.
 against the `machines` row) rather than facts to trust outright.
 
-## Tunnel daemon (spec-level only — not implemented in this build)
+## Tunnel daemon (spec §8.2 — build in progress, `apps/tunnel-daemon`)
 
-The second agent (spec §8.2). Not part of `apps/agent` in this build; noted
-here because `docs/agents.md` is the doc that's supposed to cover it.
+The second agent. A genuinely separate app from `apps/agent` (different
+trust level, different failure domain, per spec §8) — copy-and-adapt from
+`apps/agent`'s conventions (`config.ts`, `backoff.ts`,
+`attestation.ts`-style bearer caching), never a shared import, for the same
+reason the two are separate processes at all.
 
 - A reverse tunnel over an outbound connection, carrying interactive
   sessions (web terminal, SSH) to the control plane's tunnel endpoint —
@@ -324,6 +327,45 @@ here because `docs/agents.md` is the doc that's supposed to cover it.
   new ones: if access is revoked or an elevation expires mid-session, the
   daemon has to actually kill the open connection, not just stop admitting
   new ones.
+
+**Session token verification**: `packages/session-token` is a real, tested,
+framework-free package (pure function, `node:crypto` only, no `effect`
+dependency) holding the exact byte-level check spec §11.1 requires ("the
+agent must validate the signature on every session, including under
+load"). `apps/control-plane/src/tunnel/session-token.ts`'s `verifySessionToken`
+is now a thin wrapper around it (fetches the public key via `Signer`, then
+calls the pure check) — the tunnel daemon imports the same package
+directly rather than re-deriving the check, closing the exact "two
+independent copies of signature-verification logic" risk that would
+otherwise exist between the two processes.
+
+**PTY mechanism — decided, with a known limitation**: `Bun.Terminal`
+(native, first-party, shipped Bun 1.3.5+), not `node-pty` (confirmed
+broken under Bun, `oven-sh/bun#7362`). Spiked empirically on both macOS and
+real Linux (`oven/bun:1.3.6-slim`, the pinned production target) before
+committing to it:
+- Basic I/O, resize (real termios-level size change), full-screen/cursor-
+  addressed programs (`less`, confirmed via real ANSI escapes), and forced
+  external termination (`Subprocess.kill()` from the daemon side — the
+  mechanism policy-triggered session termination depends on) **all work
+  correctly**.
+- **Known limitation, confirmed reproducible, not yet fixed upstream**: a
+  keystroke-generated signal from *inside* the session (Ctrl-C/Ctrl-Z) does
+  not reach the foreground process. Tested three independent ways (the raw
+  PTY byte, `Subprocess.kill('SIGINT')`, raw `process.kill(pid, 'SIGINT')`
+  by the exact reported PID) — all three fail identically, while the same
+  direct-kill call works correctly on a plain non-PTY `Bun.spawn`. Confirmed
+  unfixed as of Bun 1.4.0. Practical effect: a user pressing Ctrl-C in the
+  web terminal to stop a runaway foreground command (e.g. `sleep 100`) sees
+  nothing happen; ending the session from the Access page (which *does*
+  work, since it uses the daemon's own forced-termination path, not an
+  in-session signal) is the only way to regain control.
+- **Decision**: ship v1 on `Bun.Terminal` anyway, with this limitation
+  documented rather than silently discovered by a user — the alternative
+  (shelling out to `tmux`/`screen` as a correctly-behaved PTY host) adds a
+  new system dependency on the customer's VM for one keystroke's worth of
+  behavior, and is worth revisiting only if this doesn't get fixed
+  upstream. Worth filing as a Bun issue.
 
 See `docs/access.md` for the web terminal / SSH certificate model this
 daemon serves, and `docs/spec.md` §8.2/§11 for the full reasoning.

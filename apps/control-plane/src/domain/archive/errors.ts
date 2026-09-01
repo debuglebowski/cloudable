@@ -68,6 +68,15 @@ export class InvalidLegalHoldReasonError extends Schema.TaggedError<InvalidLegal
   { message: Schema.String },
 ) {}
 
+/** `resumeRestore`'s target approval isn't a `snapshot_restore` approval, doesn't belong
+ * to the caller's org, or has no persisted `restore_requests` row (should never happen
+ * for a genuine `snapshot_restore` approval, but a foreign/malformed id must not leak
+ * which case it is — same non-leaking "not found" shape as everywhere else). */
+export class InvalidRestoreApprovalError extends Schema.TaggedError<InvalidRestoreApprovalError>()(
+  "InvalidRestoreApprovalError",
+  { approvalId: Schema.String },
+) {}
+
 /** `ApprovalService.request()` itself failed (it is still a unit-5 stub — see
  * `services/ApprovalService.ts`). Never surfaced to callers as a specific wire error;
  * the HTTP layer treats it as an internal failure. */

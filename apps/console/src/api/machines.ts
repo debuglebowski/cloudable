@@ -1,11 +1,5 @@
-import type { LoggingTier } from "@/api/organisation";
 import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
-import { CURRENT_ORG_ID } from "@/lib/current-org";
-import {
-  type ApiErrorBody,
-  LOGGING_TIER_SETTING_KEY,
-  type PatchSettingResponse,
-} from "@cloudable/contracts";
+import type { ApiErrorBody } from "@cloudable/contracts";
 
 export type MachineState =
   | "provisioning"
@@ -41,43 +35,6 @@ export interface ManifestEntry {
   /** Count of machines that override this entry below the level shown here. No real endpoint
    * aggregates this yet (see `getMachineManifest` below) — always undefined against real data. */
   overriddenBelow?: number;
-}
-
-/** spec.md §7/§11: which of the two access methods are turned on for a machine. */
-export interface AccessMethodsEnabled {
-  webTerminal: boolean;
-  ssh: boolean;
-}
-
-/** A resolved org → machine setting, lowest level wins — the shared shape `persistentPaths`
- * and `accessMethodsEnabled` both come back as (see `@cloudable/contracts`'s `MachineDetail`). */
-export interface ResolvedMachineSetting<T> {
-  value: T;
-  source: SettingLevel;
-}
-
-/**
- * Written via the generic `PATCH /api/v1/config/settings` endpoint
- * (`apps/control-plane/src/http/routes/config.ts`) rather than a
- * dedicated machines endpoint — same shared write path as the Git-sourced
- * config import (docs/spec.md §16), which is also what lets disabling web
- * terminal terminate live sessions no matter which UI/API entry point the
- * change came through (spec §11.1). Keep these two literals in sync with
- * `PERSISTENT_PATHS_KEY`/`ACCESS_METHODS_ENABLED_KEY` in
- * `apps/control-plane/src/domain/machine/settings.ts`.
- */
-const PERSISTENT_PATHS_SETTING_KEY = "machine.persistentPaths";
-const ACCESS_METHODS_ENABLED_SETTING_KEY = "machine.accessMethodsEnabled";
-
-/**
- * The logging tier resolved for one specific machine — its own machine-
- * scoped override if it has one, else the org default (spec §17,
- * `resolveSetting()`'s org → machine chain — see
- * `apps/control-plane/src/logging/settings.ts`'s `getEffectiveLoggingTier`).
- */
-export interface MachineLoggingTier {
-  tier: LoggingTier;
-  source: SettingLevel;
 }
 
 export type DriftStatus = "clean" | "detected" | "unknown";
@@ -119,11 +76,6 @@ export const machinesKeys = {
   detail: (machineId: string) => [...machinesKeys.details(), machineId] as const,
   manifest: (machineId: string) => [...machinesKeys.all, "manifest", machineId] as const,
   drift: (machineId: string) => [...machinesKeys.all, "drift", machineId] as const,
-  persistentPaths: (machineId: string) =>
-    [...machinesKeys.all, "persistentPaths", machineId] as const,
-  accessMethodsEnabled: (machineId: string) =>
-    [...machinesKeys.all, "accessMethodsEnabled", machineId] as const,
-  loggingTier: (machineId: string) => [...machinesKeys.all, "loggingTier", machineId] as const,
 };
 
 interface MachineSummaryWire {
@@ -167,17 +119,8 @@ interface ResolvedManifestEntryWire {
   resolvedFromScopeId: string;
 }
 
-interface ResolvedMachineSettingWire<T> {
-  value: T;
-  source: SettingLevel;
-  resolvedFromScopeId: string;
-}
-
 interface MachineDetailWire extends MachineSummaryWire {
   manifest: ResolvedManifestEntryWire[];
-  persistentPaths: ResolvedMachineSettingWire<string[]>;
-  accessMethodsEnabled: ResolvedMachineSettingWire<AccessMethodsEnabled>;
-  loggingTier: MachineLoggingTier;
 }
 
 function toManifestEntry(wire: ResolvedManifestEntryWire): ManifestEntry {
@@ -190,28 +133,22 @@ function toManifestEntry(wire: ResolvedManifestEntryWire): ManifestEntry {
 }
 
 export async function listMachines(): Promise<Machine[]> {
-  const res = await apiGet<{ items: MachineSummaryWire[] }>(
-    `/api/v1/machines?orgId=${CURRENT_ORG_ID}`,
-  );
+  const res = await apiGet<{ items: MachineSummaryWire[] }>("/api/v1/machines");
   return res.items.map(toMachine);
 }
 
 export interface CreateMachineInput {
   name: string;
-  /** Omitted — the control plane resolves the org's configured default region
-   * (docs/spec.md §5) instead of the console prefilling one. */
-  region?: string;
+  region: string;
   sizeSku: string;
   image: string;
   /** A machine always has exactly one owner, always a person (CLAUDE.md invariant #3). */
   ownerPersonId: string;
 }
 
+/** `orgId`/`actorPersonId` are derived server-side from the caller's session — not sent here. */
 export async function createMachine(input: CreateMachineInput): Promise<Machine> {
-  const wire = await apiPost<MachineSummaryWire>("/api/v1/machines", {
-    orgId: CURRENT_ORG_ID,
-    ...input,
-  });
+  const wire = await apiPost<MachineSummaryWire>("/api/v1/machines", input);
   return toMachine(wire);
 }
 
@@ -227,91 +164,9 @@ export async function getMachineManifest(machineId: string): Promise<ManifestEnt
   return wire.manifest.map(toManifestEntry);
 }
 
-export async function getMachineLoggingTier(machineId: string): Promise<MachineLoggingTier> {
-  const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`);
-  return wire.loggingTier;
-}
-
-/**
- * Writes a machine-scoped `logging_tier` override through the generic
- * config editor endpoint (`PATCH /api/v1/config/settings`,
- * `apps/control-plane/src/domain/config/apply-setting-change.ts`) — the
- * same "same path whether UI or Git" mechanism every other chain-resolved
- * setting uses (docs/spec.md §16), not a dedicated logging-tier endpoint.
- */
-export async function overrideMachineLoggingTier(
-  machineId: string,
-  tier: LoggingTier,
-): Promise<void> {
-  await apiPatch<PatchSettingResponse>("/api/v1/config/settings", {
-    orgId: CURRENT_ORG_ID,
-    scopeType: "machine",
-    scopeId: machineId,
-    key: LOGGING_TIER_SETTING_KEY,
-    value: tier,
-    // No auth/identity system yet — same gap as Organisation settings (see
-    // `api/organisation.ts`'s `useUpdateOrgSettings`).
-    actor: { type: "system", id: "console" },
-  });
-}
-
 export async function getMachineDrift(_machineId: string): Promise<DriftInfo> {
   // See the DriftInfo doc comment above — there is no real endpoint for this yet.
   return { status: "unknown" };
-}
-
-export async function getMachinePersistentPaths(
-  machineId: string,
-): Promise<ResolvedMachineSetting<string[]>> {
-  const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`);
-  return { value: wire.persistentPaths.value, source: wire.persistentPaths.source };
-}
-
-export async function getMachineAccessMethodsEnabled(
-  machineId: string,
-): Promise<ResolvedMachineSetting<AccessMethodsEnabled>> {
-  const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`);
-  return { value: wire.accessMethodsEnabled.value, source: wire.accessMethodsEnabled.source };
-}
-
-/**
- * `PATCH /api/v1/config/settings` at `scopeType: "machine"` — always writes (and always
- * resolves to) a machine-level override, so the result's `source` is trivially "machine"
- * without needing to re-fetch and re-resolve the chain.
- */
-export async function overridePersistentPaths(
-  machineId: string,
-  paths: string[],
-): Promise<ResolvedMachineSetting<string[]>> {
-  const res = await apiPatch<{ setting: { current: string[] } }>("/api/v1/config/settings", {
-    orgId: CURRENT_ORG_ID,
-    scopeType: "machine",
-    scopeId: machineId,
-    key: PERSISTENT_PATHS_SETTING_KEY,
-    value: paths,
-    // No auth/identity system yet — same gap as Approvals/Archive/Organisation (see
-    // `api/organisation.ts`'s identical comment) — recorded as a system actor.
-    actor: { type: "system", id: "console" },
-  });
-  return { value: res.setting.current, source: "machine" };
-}
-
-export async function overrideAccessMethodsEnabled(
-  machineId: string,
-  next: AccessMethodsEnabled,
-): Promise<ResolvedMachineSetting<AccessMethodsEnabled>> {
-  const res = await apiPatch<{ setting: { current: AccessMethodsEnabled } }>(
-    "/api/v1/config/settings",
-    {
-      orgId: CURRENT_ORG_ID,
-      scopeType: "machine",
-      scopeId: machineId,
-      key: ACCESS_METHODS_ENABLED_SETTING_KEY,
-      value: next,
-      actor: { type: "system", id: "console" },
-    },
-  );
-  return { value: res.setting.current, source: "machine" };
 }
 
 /**
@@ -347,4 +202,47 @@ export async function overrideManifestEntry(
     }
     throw err;
   }
+}
+
+export type UpgradeOutcome = "success" | "rolled_back" | "aborted" | "rollback_failed";
+
+export interface UpgradeResult {
+  outcome: UpgradeOutcome;
+  previousImage: string;
+  currentImage: string;
+  targetImage: string;
+  nextEligibleAt: string;
+  driftUrl?: string;
+  failureReason?: string;
+}
+
+/**
+ * Real `POST /api/v1/machines/:id/upgrade` — the transactional snapshot ->
+ * apply -> verify -> rollback-on-failure flow (spec §19). A non-"success"
+ * outcome is not itself a thrown error — it's a legitimate, informative
+ * result the caller renders (see `UpgradeMachineDialog`).
+ */
+export async function triggerUpgrade(
+  machineId: string,
+  targetImage: string,
+): Promise<UpgradeResult> {
+  return apiPost<UpgradeResult>(`/api/v1/machines/${machineId}/upgrade`, { targetImage });
+}
+
+export interface ReconcileResult {
+  machineId: string;
+  desiredStateVersion: number;
+}
+
+/**
+ * Real `POST /api/v1/config/machines/:id/reconcile` — the ONLY operation
+ * that mutates a live machine (spec §16); editing desired state elsewhere
+ * is always inert until this runs. `confirm: true` is required — the
+ * server rejects both an absent and an explicit `false` with the same
+ * confirmation-gate error, so there's nothing to send otherwise.
+ */
+export async function triggerReconcile(machineId: string): Promise<ReconcileResult> {
+  return apiPost<ReconcileResult>(`/api/v1/config/machines/${machineId}/reconcile`, {
+    confirm: true,
+  });
 }

@@ -6,6 +6,7 @@ import {
   ApprovalService,
 } from "../../services/ApprovalService";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 const mapError = (error: ApprovalError) => {
   switch (error.reason) {
@@ -33,11 +34,12 @@ export const ApprovalsLive = HttpApiBuilder.group(Api, "approvals", (handlers) =
   handlers
     .handle("create", ({ payload }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const approvalService = yield* ApprovalService;
         const result = yield* approvalService.request({
-          orgId: payload.orgId,
+          orgId: currentUser.orgId,
           actionType: payload.actionType,
-          requestedByPersonId: payload.requestedByPersonId,
+          requestedByPersonId: currentUser.personId,
           targetMachineId: payload.targetMachineId,
           reason: payload.reason,
         });
@@ -46,10 +48,12 @@ export const ApprovalsLive = HttpApiBuilder.group(Api, "approvals", (handlers) =
     )
     .handle("decide", ({ path, payload }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const approvalService = yield* ApprovalService;
         const result = yield* approvalService.decide(
           path.id,
-          payload.personId,
+          currentUser.orgId,
+          currentUser.personId,
           payload.decision,
           payload.reason,
         );
@@ -58,16 +62,18 @@ export const ApprovalsLive = HttpApiBuilder.group(Api, "approvals", (handlers) =
     )
     .handle("getById", ({ path }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const approvalService = yield* ApprovalService;
-        const result = yield* approvalService.status(path.id);
+        const result = yield* approvalService.status(path.id, currentUser.orgId);
         return toWire(result);
       }).pipe(Effect.mapError(mapError)),
     )
     .handle("list", ({ urlParams }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const approvalService = yield* ApprovalService;
         const result = yield* approvalService.list({
-          orgId: urlParams.orgId,
+          orgId: currentUser.orgId,
           status: urlParams.status,
           cursor: urlParams.cursor,
           limit: urlParams.limit,

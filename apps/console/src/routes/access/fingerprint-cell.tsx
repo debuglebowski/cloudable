@@ -2,13 +2,14 @@ import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function truncateFingerprint(fingerprint: string): string {
   if (fingerprint.length <= 20) return fingerprint;
   return `${fingerprint.slice(0, 13)}…${fingerprint.slice(-6)}`;
 }
 
-/** Truncated, copyable SSH certificate fingerprint — the full value is always available via copy or the title tooltip. */
+/** Truncated, copyable SSH certificate fingerprint — the full value is always available via copy or the hover tooltip. */
 export function FingerprintCell({ fingerprint }: { fingerprint: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -24,9 +25,12 @@ export function FingerprintCell({ fingerprint }: { fingerprint: string }) {
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className="font-mono text-xs" title={fingerprint}>
-        {truncateFingerprint(fingerprint)}
-      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="font-mono text-xs">{truncateFingerprint(fingerprint)}</span>
+        </TooltipTrigger>
+        <TooltipContent className="font-mono">{fingerprint}</TooltipContent>
+      </Tooltip>
       <Button
         type="button"
         variant="ghost"

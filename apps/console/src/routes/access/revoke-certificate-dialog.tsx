@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface RevokeCertificateDialogProps {
   certificate: LiveCertificate | null;
@@ -56,9 +57,9 @@ export function RevokeCertificateDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="revoke-reason" className="text-sm font-medium">
+          <Label htmlFor="revoke-reason">
             Reason <span className="text-destructive">(required)</span>
-          </label>
+          </Label>
           <Input
             id="revoke-reason"
             value={reason}

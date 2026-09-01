@@ -20,6 +20,7 @@ import { NotificationsLive } from "./http/handlers/notifications";
 import { OffboardingHttpLive } from "./http/handlers/offboarding";
 import { OrganisationLive } from "./http/handlers/organisation";
 import { PeopleLive } from "./http/handlers/people";
+import { AccessAttachRouteLive, TunnelConnectRouteLive, TunnelLive } from "./http/handlers/tunnel";
 import { TunnelSignalLive } from "./http/handlers/tunnel-signal";
 import { UpgradeLive } from "./http/handlers/upgrade";
 import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
@@ -27,6 +28,7 @@ import { buildAppLive } from "./layers";
 import { FakeProvisioningServiceLive } from "./services/ProvisioningService.fake";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
 import { LocalSignerLive } from "./services/Signer.local";
+import { TunnelRegistry } from "./tunnel/registry";
 
 // Fakes by default for this skeleton — a real deployment would swap the
 // Azure-backed adapters in here, but no Azure account exists in this build
@@ -64,6 +66,7 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       OrganisationLive,
       IntegrationsLive,
       TunnelSignalLive,
+      TunnelLive,
       NotificationsLive,
     ),
   ),
@@ -76,6 +79,13 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
 // `AppLive` (provided to `ServerLive` below) already supplies.
 const AgentWakeLive = AgentWakeRouteLive.pipe(Layer.provide(WakeRegistry.Default));
 
+// Raw websocket-upgrade routes on the same shared router (an `HttpApiEndpoint` can't model
+// an upgrade at all — see `agent-wake.ts`'s doc comment), same reasoning as `AgentWakeLive`
+// above — not part of `Api`/`ApiLive`.
+const TunnelRoutesLive = Layer.mergeAll(TunnelConnectRouteLive, AccessAttachRouteLive).pipe(
+  Layer.provide(TunnelRegistry.Default),
+);
+
 // Every console page fetches cross-origin (console and control-plane run on
 // different ports in local dev, and there's no reverse proxy in front of
 // either yet) — without this, the browser silently withholds every response
@@ -85,6 +95,7 @@ const ServerLive = HttpApiBuilder.serve(
 ).pipe(
   Layer.provide(ApiLive),
   Layer.provide(AgentWakeLive),
+  Layer.provide(TunnelRoutesLive),
   Layer.provide(AppLive),
   Layer.provide(BunHttpServer.layer({ port: config.port })),
 );

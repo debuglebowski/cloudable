@@ -3,9 +3,10 @@
 # apps/agent/Dockerfile
 #
 # NOT the agent's real distribution format — that's a compiled standalone
-# binary (apps/agent/package.json's `build`/`build:arm64`) installed
-# directly on a customer's VM under systemd (docs/agents.md), never run in
-# a container there.
+# binary (apps/agent/package.json's `build`/`build:arm64`, published via
+# .github/workflows/release-agent-cli.yml) installed directly on a
+# customer's VM under systemd (docs/agents.md), never run in a container
+# there.
 #
 # This Dockerfile exists solely for test/agent-connectivity/: it runs the
 # agent from source under Bun, the same way apps/control-plane/Dockerfile

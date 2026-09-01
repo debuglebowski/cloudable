@@ -1,12 +1,13 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import {
+  type IntegrationRow,
   connectIntegration,
   disconnectIntegration,
-  type IntegrationRow,
   listActiveIntegrations,
 } from "../../domain/integrations/integrations";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 const toWire = (row: IntegrationRow) => ({
   id: row.id,
@@ -20,20 +21,29 @@ const toWire = (row: IntegrationRow) => ({
 
 export const IntegrationsLive = HttpApiBuilder.group(Api, "integrations", (handlers) =>
   handlers
-    .handle("list", ({ urlParams }) =>
-      listActiveIntegrations(urlParams.orgId).pipe(
+    .handle("list", () =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* listActiveIntegrations(currentUser.orgId);
+      }).pipe(
         Effect.map((rows) => ({ items: rows.map(toWire) })),
         Effect.catchTag("IntegrationsDbError", (e) => Effect.die(e)),
       ),
     )
     .handle("connect", ({ payload }) =>
-      connectIntegration(payload).pipe(
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* connectIntegration({ ...payload, orgId: currentUser.orgId });
+      }).pipe(
         Effect.map(toWire),
         Effect.catchTag("IntegrationsDbError", (e) => Effect.die(e)),
       ),
     )
     .handle("disconnect", ({ path }) =>
-      disconnectIntegration(path.id).pipe(
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* disconnectIntegration(path.id, currentUser.orgId);
+      }).pipe(
         Effect.map(() => ({ ok: true as const })),
         Effect.catchTag("IntegrationsDbError", (e) => Effect.die(e)),
       ),

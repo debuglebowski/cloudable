@@ -17,8 +17,14 @@ export {
   setLegalHold,
   clearLegalHold,
   computeExpirySweepCandidates,
+  expireOverdueSnapshots,
   type SnapshotTrigger,
   type SnapshotRow,
 } from "./snapshot";
 export { archiveMachine } from "./archive";
-export { restoreSnapshot, type RestoreSnapshotInput, type RestoreSnapshotResult } from "./restore";
+export {
+  restoreSnapshot,
+  resumeRestore,
+  type RestoreSnapshotInput,
+  type RestoreSnapshotResult,
+} from "./restore";
