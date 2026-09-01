@@ -1,5 +1,6 @@
+import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 import { ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import {
   type ArchivedSnapshot,
@@ -9,6 +10,7 @@ import {
 } from "@/api/archive";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -87,6 +89,7 @@ export interface RestoreDialogProps {
 
 /** Restore-mode picker with visibly escalating friction, per spec §14. */
 export function RestoreDialog({ snapshot }: RestoreDialogProps) {
+  const ackId = useId();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<RestoreMode>("data");
   const [reason, setReason] = useState("");
@@ -155,20 +158,22 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
         </DialogHeader>
 
         {!confirmingFull && (
-          <div className="flex flex-col gap-2" role="radiogroup" aria-label="Restore mode">
+          <RadioGroupPrimitive.Root
+            className="flex flex-col gap-2"
+            aria-label="Restore mode"
+            value={mode}
+            onValueChange={(value) => selectMode(value as RestoreMode)}
+          >
             {RESTORE_MODE_OPTIONS.map((option) => {
-              const selected = option.mode === mode;
               const Icon = option.icon;
               return (
-                <button
+                <RadioGroupPrimitive.Item
                   key={option.mode}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => selectMode(option.mode)}
+                  value={option.mode}
                   className={cn(
                     "flex flex-col gap-1.5 rounded-md border p-3 text-left transition-colors",
-                    selected ? "border-primary bg-accent" : "border-border hover:bg-muted/50",
+                    "border-border hover:bg-muted/50",
+                    "data-[state=checked]:border-primary data-[state=checked]:bg-accent data-[state=checked]:hover:bg-accent",
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -179,10 +184,10 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
                     <Badge variant={option.badgeVariant}>{approvalLabelFor(option.mode)}</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">{option.description}</p>
-                </button>
+                </RadioGroupPrimitive.Item>
               );
             })}
-          </div>
+          </RadioGroupPrimitive.Root>
         )}
 
         {!confirmingFull && (
@@ -200,18 +205,18 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
         )}
 
         {!confirmingFull && requiresAck && (
-          <label className="flex items-start gap-2 rounded-md border border-drift bg-drift-soft p-3 text-sm text-drift">
-            <input
-              type="checkbox"
+          <div className="flex items-start gap-2 rounded-md border border-drift bg-drift-soft p-3 text-sm text-drift">
+            <Checkbox
+              id={ackId}
               className="mt-0.5"
               checked={acknowledged}
-              onChange={(e) => setAcknowledged(e.target.checked)}
+              onCheckedChange={(checked) => setAcknowledged(checked === true)}
             />
-            <span>
+            <Label htmlFor={ackId} className="font-normal text-drift">
               I understand this reattaches secret bindings to the restored machine. Secret bindings
               are never reattached silently.
-            </span>
-          </label>
+            </Label>
+          </div>
         )}
 
         {confirmingFull && (
