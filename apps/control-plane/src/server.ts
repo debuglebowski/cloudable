@@ -106,7 +106,7 @@ const TunnelRoutesLive = Layer.mergeAll(TunnelConnectRouteLive, AccessAttachRout
 // either yet) — without this, the browser silently withholds every response
 // body from JS, which surfaces as every query on every page failing at once.
 const ServerLive = HttpApiBuilder.serve(
-  HttpMiddleware.cors({ allowedOrigins: [config.consoleOrigin] }),
+  HttpMiddleware.cors({ allowedOrigins: [config.consoleOrigin], credentials: true }),
 ).pipe(
   Layer.provide(ApiLive),
   Layer.provide(AgentWakeLive),
