@@ -11,11 +11,20 @@ export interface MachineDescriptor {
   region: string;
   sizeSku: string;
   /**
+   * The machine's declared OS image (e.g. "ubuntu-22.04"). Optional: the
+   * reconcile loop's `DesiredMachineState` (`reconcile/types.ts`) has no
+   * image field yet (unwired, provisional — see that file), so this can't
+   * be required without rippling into that unrelated, still-dead code
+   * path. `MachineService.create` (the real, wired caller) always supplies
+   * it.
+   */
+  image?: string;
+  /**
    * The declared package manifest to provision the machine with, as plain
    * entry strings (e.g. "docker", "nodejs 20" — see `docs/spec.md` §6).
-   * Optional and provisional: real manifest resolution (org → template →
-   * machine inheritance, pinning) lands with unit 2/5. Absent means "no
-   * declared packages known yet".
+   * Resolved from the org → template → machine manifest chain at creation
+   * time (see `MachineService.create`) — a brand-new machine has no
+   * machine-level overrides yet, so this is the org (+ template) manifest.
    */
   packages?: ReadonlyArray<string>;
 }

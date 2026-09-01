@@ -8,6 +8,7 @@ import { Effect, Layer } from "effect";
 import postgres from "postgres";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
+import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { MachineService } from "./MachineService";
 import { DEFAULT_REGION, DEFAULT_REGION_KEY, resolveOrgDefaultRegion } from "./region-policy";
 
@@ -51,7 +52,13 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
 
     const dbLayer = Layer.succeed(Db, db);
     TestLayer = MachineService.Default.pipe(
-      Layer.provide(Layer.mergeAll(dbLayer, Layer.provide(EventBus.Default, dbLayer))),
+      Layer.provide(
+        Layer.mergeAll(
+          dbLayer,
+          Layer.provide(EventBus.Default, dbLayer),
+          FakeProvisioningServiceLive,
+        ),
+      ),
     );
   });
 

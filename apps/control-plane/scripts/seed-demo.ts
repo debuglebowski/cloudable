@@ -161,17 +161,10 @@ async function main() {
     });
     machines.push({ id: created.id, name: m.name, ownerPersonId: m.owner.id });
   }
-  // Every new machine starts in `provisioning` (the real create handler's
-  // correct default) and only leaves it once the reconcile loop calls
-  // `ProvisioningService.create`/`.reconcile` and observes it come up. No
-  // reconcile loop actually runs continuously in a dev session, so nothing
-  // would ever move these machines to `running` on its own — flip it
-  // directly here to stand in for a fleet that already finished
-  // provisioning, since that's the realistic demo state.
-  await db
-    .update(schema.machines)
-    .set({ state: "running", lastVerifiedAt: new Date() })
-    .where(eq(schema.machines.orgId, org.id));
+  // `POST /api/v1/machines` now calls `ProvisioningService.create` itself
+  // (see `MachineService.create`), settling each row to `running` (or
+  // `error`, against whichever adapter this control-plane was booted with)
+  // synchronously — no manual state flip needed here anymore.
   console.log(`machines: ${machines.length} created`);
   const [dbProd, buildRunner, analytics, staging, worker] = machines;
   if (!dbProd || !buildRunner || !analytics || !staging || !worker) {
@@ -275,41 +268,13 @@ async function main() {
   console.log("elevations: 1 requested, approved, and granted (owner notified)");
 
   // --- Archive one machine ---------------------------------------------------
-  // NOT going through the real POST .../archive endpoint here: it calls
-  // ProvisioningServiceTag.archive(machineId), and the fake provisioning
-  // adapter only knows about machines it created itself via its own
-  // create() (an in-memory Map, keyed by machineId). The real machines API
-  // (unit 2) never calls ProvisioningService at all when it inserts a row —
-  // no unit wired machine creation to the reconcile loop that would
-  // normally register a machine with the provisioning adapter. So a machine
-  // created through the real HTTP API 404s ("unknown machineId") the moment
-  // anything tries to provision-archive it. This is a genuine integration
-  // gap between units 1 and 2, not something this seed script should paper
-  // over silently — flagged here and in the follow-up report. Standing in
-  // for it: insert exactly what a successful archive would have produced
-  // (snapshot row + machine state flip), matching createSnapshot's own field
-  // set in domain/archive/snapshot.ts.
-  const retentionDays = 30;
-  const archivedAt = new Date();
-  const expiresAt = new Date(archivedAt.getTime() + retentionDays * 24 * 60 * 60 * 1000);
-  await db.insert(schema.snapshots).values({
-    orgId: org.id,
-    machineId: worker.id,
-    trigger: "archive",
-    region: "eastus",
-    sizeBytes: 42_949_672_960,
-    containsData: true,
-    containsConfig: true,
-    legalHold: false,
-    retentionDays,
-    createdAt: archivedAt,
-    expiresAt,
-  });
-  await db
-    .update(schema.machines)
-    .set({ state: "archived_restorable", archivedAt })
-    .where(eq(schema.machines.id, worker.id));
-  console.log("archive: worker-04 archived (1 snapshot, seeded directly — see comment above)");
+  // Goes through the real POST .../archive endpoint now — `MachineService.create`
+  // (above) registers every machine with `ProvisioningService` right away, so
+  // a machine created through the real HTTP API is no longer invisible to
+  // archive/reconcile/upgrade (previously a genuine integration gap; see
+  // `MachineService.create`'s own comment).
+  await api("POST", `/api/v1/archive/machines/${worker.id}/archive`, {});
+  console.log("archive: worker-04 archived (1 snapshot, via the real archive endpoint)");
 
   console.log("\nDone. orgId for manual API/browser poking:");
   console.log(org.id);

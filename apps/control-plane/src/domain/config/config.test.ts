@@ -10,6 +10,7 @@ import postgres from "postgres";
 import { Db } from "../../db/layer";
 import { handleImportConfig, handlePatchSetting } from "../../http/handlers/config";
 import { EventBus } from "../../services/EventBus";
+import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { TunnelServer } from "../../tunnel/server";
 import { TunnelSignal } from "../../tunnel/signal";
 import { MachineService } from "../machine/MachineService";
@@ -99,7 +100,10 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       Layer.provide(Layer.mergeAll(dbLayer, eventBusLayer, tunnelSignalLayer)),
     );
     envLayer = Layer.mergeAll(dbLayer, eventBusLayer, tunnelLayer);
-    machineLayer = Layer.provide(MachineService.Default, dbLayer);
+    machineLayer = Layer.provide(
+      MachineService.Default,
+      Layer.mergeAll(dbLayer, FakeProvisioningServiceLive),
+    );
   });
 
   afterAll(async () => {
