@@ -10,6 +10,7 @@ import { listPeople, peopleKeys } from "@/api/people";
 import { Freshness } from "@/components/freshness";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 import { ARCHIVED_MACHINE_STATES, MACHINE_STATE_LABEL } from "./machines/machine-state";
@@ -75,7 +76,7 @@ function StatCard({
             <ArrowRight className="size-3.5 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
           </div>
           {isLoading ? (
-            <div className="h-7 w-12 animate-pulse rounded bg-muted" />
+            <Skeleton className="h-7 w-12" />
           ) : (
             <span className="text-2xl font-semibold tabular-nums leading-none">{value}</span>
           )}
