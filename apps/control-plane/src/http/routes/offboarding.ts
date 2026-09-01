@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 /**
  * Unit 16 — offboarding action. A single endpoint a console button (a
@@ -7,12 +8,10 @@ import { Schema } from "effect";
  * design (see spec §14 — "build the action first, wire the trigger
  * later").
  */
+// `requestedByPersonId` is gone from the wire — derived from
+// `CurrentUserTag.personId` in the handler, not trusted from the client.
 export const OffboardPersonRequest = Schema.Struct({
   personId: Schema.String,
-  // TODO(auth feature unit): once `CurrentUserTag` is wired to a real
-  // session (see `http/middleware/auth.ts`), derive this from the
-  // authenticated caller instead of accepting it in the body.
-  requestedByPersonId: Schema.String,
   reason: Schema.String,
 });
 
@@ -31,8 +30,25 @@ export const OffboardPersonResponse = Schema.Struct({
   machineFailures: Schema.Array(Schema.Struct({ machineId: Schema.String, reason: Schema.String })),
 });
 
-export const OffboardingGroup = HttpApiGroup.make("offboarding").add(
-  HttpApiEndpoint.post("offboardPerson", "/api/v1/offboarding")
-    .setPayload(OffboardPersonRequest)
-    .addSuccess(OffboardPersonResponse),
-);
+export const SyncOffboardingParams = Schema.Struct({
+  approvalId: Schema.String,
+});
+
+export const OffboardingGroup = HttpApiGroup.make("offboarding")
+  .add(
+    HttpApiEndpoint.post("offboardPerson", "/api/v1/offboarding")
+      .setPayload(OffboardPersonRequest)
+      .addSuccess(OffboardPersonResponse),
+  )
+  .add(
+    // Resumes a `"pending"` offboarding (single/dual approval mode) once its
+    // approval has since been decided — `ApprovalService.decide()` has no
+    // callback wiring this up automatically (same "sync" shape elevations
+    // already use — see `domain/offboarding/offboardPerson.ts`'s
+    // `resumeOffboarding` doc comment). A safe no-op if still pending or
+    // already resumed once.
+    HttpApiEndpoint.post("sync", "/api/v1/offboarding/:approvalId/sync")
+      .setPath(SyncOffboardingParams)
+      .addSuccess(OffboardPersonResponse),
+  )
+  .middleware(CurrentUserAuthentication);

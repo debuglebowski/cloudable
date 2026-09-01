@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export interface AddPersonDialogProps {
   open: boolean;
@@ -63,8 +64,8 @@ export function AddPersonDialog({ open, onOpenChange }: AddPersonDialogProps) {
             if (email.trim()) mutation.mutate();
           }}
         >
-          <label className="flex flex-col gap-1 text-sm" htmlFor="add-person-email">
-            <span className="font-medium">Email</span>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="add-person-email">Email</Label>
             <Input
               id="add-person-email"
               type="email"
@@ -73,16 +74,16 @@ export function AddPersonDialog({ open, onOpenChange }: AddPersonDialogProps) {
               onChange={(event) => setEmail(event.target.value)}
               placeholder="name@company.com"
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm" htmlFor="add-person-role">
-            <span className="font-medium">Role</span>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="add-person-role">Role</Label>
             <Input
               id="add-person-role"
               value={role}
               onChange={(event) => setRole(event.target.value)}
               placeholder={DEFAULT_ROLE}
             />
-          </label>
+          </div>
           {mutation.isError && <p className="text-sm text-destructive">{mutation.error.message}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

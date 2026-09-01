@@ -1,7 +1,8 @@
-import { machines, snapshots } from "@cloudable/schema";
+import { machines, restoreRequests, snapshots } from "@cloudable/schema";
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
+import type { RestoreMode } from "./approval-escalation";
 import { ArchiveDbError, MachineNotFoundError, SnapshotNotFoundError } from "./errors";
 import type { SnapshotRow } from "./snapshot";
 
@@ -21,7 +22,15 @@ export const dbTry = <A>(
       }),
   });
 
-export const fetchMachine = (machineId: string) =>
+// `orgId` is optional and, when passed, scopes the lookup to that org — a
+// machine belonging to a DIFFERENT org resolves to the same
+// `MachineNotFoundError` as one that doesn't exist, same reasoning as
+// `MachineService.fetchMachine`. Optional (not required) because
+// `restore.ts`'s `restoreSnapshot()` calls this internally with a
+// signature that's "exact and load-bearing" (see that file) and doesn't
+// itself take an `orgId` — only the HTTP-facing callers in
+// `http/handlers/archive.ts` pass one.
+export const fetchMachine = (machineId: string, orgId?: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
     const rows = yield* dbTry(
@@ -29,11 +38,14 @@ export const fetchMachine = (machineId: string) =>
       "fetch_machine",
     );
     const machine = rows[0];
-    if (!machine) return yield* Effect.fail(new MachineNotFoundError({ machineId }));
+    if (!machine || (orgId !== undefined && machine.orgId !== orgId)) {
+      return yield* Effect.fail(new MachineNotFoundError({ machineId }));
+    }
     return machine;
   });
 
-export const fetchSnapshot = (snapshotId: string) =>
+// Same optional-`orgId` reasoning as `fetchMachine` above.
+export const fetchSnapshot = (snapshotId: string, orgId?: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
     const rows = yield* dbTry(
@@ -41,7 +53,9 @@ export const fetchSnapshot = (snapshotId: string) =>
       "fetch_snapshot",
     );
     const snapshot = rows[0];
-    if (!snapshot) return yield* Effect.fail(new SnapshotNotFoundError({ snapshotId }));
+    if (!snapshot || (orgId !== undefined && snapshot.orgId !== orgId)) {
+      return yield* Effect.fail(new SnapshotNotFoundError({ snapshotId }));
+    }
     return snapshot;
   });
 
@@ -144,4 +158,63 @@ export const listSnapshotsByOrg = (
     const nextCursor = hasMore && last ? encodeSnapshotCursor(last) : null;
 
     return { items: page, nextCursor, hasMore };
+  });
+
+export interface RestoreRequestInput {
+  approvalId: string;
+  snapshotId: string;
+  targetMachineId: string;
+  mode: RestoreMode;
+  confirmSecretBindings: boolean;
+  requestedByPersonId: string;
+  reason: string;
+}
+
+export type RestoreRequestRow = typeof restoreRequests.$inferSelect;
+
+/** Persists a restore's parameters once its approval goes `"pending"` — see
+ * `restoreRequests`'s own doc comment for why the approval alone can't carry
+ * `snapshotId`/`mode`/`confirmSecretBindings`. Never called for an approval that
+ * resolves immediately (nothing to resume). */
+export const saveRestoreRequest = (
+  input: RestoreRequestInput,
+): Effect.Effect<void, ArchiveDbError, Db> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    yield* dbTry(() => db.insert(restoreRequests).values(input), "save_restore_request");
+  });
+
+export const findRestoreRequest = (
+  approvalId: string,
+): Effect.Effect<RestoreRequestRow | null, ArchiveDbError, Db> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rows = yield* dbTry(
+      () =>
+        db
+          .select()
+          .from(restoreRequests)
+          .where(eq(restoreRequests.approvalId, approvalId))
+          .limit(1),
+      "find_restore_request",
+    );
+    return rows[0] ?? null;
+  });
+
+/** Idempotency guard for `resumeRestore` — set once `snapshot.restored` has actually
+ * been published for this request, so a repeated `sync` call finds `completedAt`
+ * already set and returns the prior result instead of publishing a second event. */
+export const markRestoreRequestCompleted = (
+  approvalId: string,
+): Effect.Effect<void, ArchiveDbError, Db> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    yield* dbTry(
+      () =>
+        db
+          .update(restoreRequests)
+          .set({ completedAt: new Date() })
+          .where(eq(restoreRequests.approvalId, approvalId)),
+      "mark_restore_request_completed",
+    );
   });

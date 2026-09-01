@@ -1,5 +1,4 @@
 import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
-import { CURRENT_ORG_ID } from "@/lib/current-org";
 
 /**
  * People API layer — wired to the real `apps/control-plane/src/http/routes/
@@ -33,7 +32,7 @@ export function isManuallyManaged(person: Person): boolean {
 }
 
 export async function listPeople(): Promise<Person[]> {
-  const res = await apiGet<{ items: Person[] }>(`/api/v1/people?orgId=${CURRENT_ORG_ID}`);
+  const res = await apiGet<{ items: Person[] }>("/api/v1/people");
   return res.items;
 }
 
@@ -46,7 +45,6 @@ export interface AddPersonInput {
 export async function addPerson(input: AddPersonInput): Promise<Person> {
   try {
     return await apiPost<Person>("/api/v1/people", {
-      orgId: CURRENT_ORG_ID,
       email: input.email,
       role: input.role,
     });

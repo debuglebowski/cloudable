@@ -5,6 +5,7 @@ import {
   PersonNotFoundError,
   PersonNotManuallyManagedError,
 } from "../../domain/people/people";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 // Real backend for the People page (spec §20: "People is top-level and
 // fully editable" when SCIM is absent). `source`/`active`/`deactivatedAt`
@@ -25,11 +26,10 @@ const Person = Schema.Struct({
 
 const PersonIdPath = Schema.Struct({ id: Schema.String });
 
-const ListPeopleUrlParams = Schema.Struct({ orgId: Schema.String });
 const ListPeopleResponse = Schema.Struct({ items: Schema.Array(Person) });
 
+// `orgId` is gone from the wire — derived from `CurrentUserTag.orgId`.
 const CreatePersonPayload = Schema.Struct({
-  orgId: Schema.String,
   email: Schema.String.pipe(Schema.minLength(1)),
   role: Schema.String.pipe(Schema.minLength(1)),
 });
@@ -42,11 +42,7 @@ const UpdatePersonPayload = Schema.Struct({
 const SetActivePayload = Schema.Struct({ active: Schema.Boolean });
 
 export const PeopleGroup = HttpApiGroup.make("people")
-  .add(
-    HttpApiEndpoint.get("list", "/api/v1/people")
-      .setUrlParams(ListPeopleUrlParams)
-      .addSuccess(ListPeopleResponse),
-  )
+  .add(HttpApiEndpoint.get("list", "/api/v1/people").addSuccess(ListPeopleResponse))
   .add(
     HttpApiEndpoint.post("create", "/api/v1/people")
       .setPayload(CreatePersonPayload)
@@ -68,4 +64,5 @@ export const PeopleGroup = HttpApiGroup.make("people")
       .addSuccess(Person)
       .addError(PersonNotFoundError, { status: 404 })
       .addError(PersonNotManuallyManagedError, { status: 409 }),
-  );
+  )
+  .middleware(CurrentUserAuthentication);

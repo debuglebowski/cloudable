@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
 import { useState } from "react";
 
@@ -8,7 +7,6 @@ import {
   type RestoreMode,
   useRestoreSnapshot,
 } from "@/api/archive";
-import { listPeople } from "@/api/people-directory";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,13 +19,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 interface RestoreModeOption {
@@ -38,27 +30,19 @@ interface RestoreModeOption {
   icon: typeof ShieldOff;
 }
 
-// "none" (data mode) is deliberately NOT the reassuring "ok"/green variant: it means "no
-// floor enforced," not "no approval will be asked for" — the org's own policy still
-// applies and may well be stricter. Neutral "outline" avoids implying a guarantee this
-// mode doesn't actually make; only "dual" (full mode) is an unconditional guarantee.
 const APPROVAL_BADGE_VARIANT: Record<
   (typeof RESTORE_MODE_APPROVAL)[RestoreMode],
   BadgeProps["variant"]
 > = {
-  none: "outline",
+  none: "ok",
   single: "drift",
   dual: "destructive",
 };
 
-// Phrased as a floor/guarantee, not an exact value — `RESTORE_MODE_APPROVAL["data"]`
-// being `"none"` means no *minimum* is enforced, not that no approval will be asked for
-// (the org's own configured policy still applies). Only `"dual"` (full mode) is an exact,
-// unconditional guarantee — see `RESTORE_MODE_APPROVAL`'s doc comment in `api/archive.ts`.
 const APPROVAL_LABEL: Record<(typeof RESTORE_MODE_APPROVAL)[RestoreMode], string> = {
-  none: "Follows org policy",
-  single: "Always at least single approval",
-  dual: "Always dual approval",
+  none: "No approval required",
+  single: "Approval required · single",
+  dual: "Approval required · dual",
 };
 
 function approvalLabelFor(mode: RestoreMode): string {
@@ -69,10 +53,9 @@ function approvalBadgeVariantFor(mode: RestoreMode): BadgeProps["variant"] {
   return APPROVAL_BADGE_VARIANT[RESTORE_MODE_APPROVAL[mode]];
 }
 
-// Escalating order — data (no minimum, follows org policy) < config (at least single) <
-// full (always dual, deliberately hardest to reach). See spec §14 "Restore modes —
-// escalating approval". The floor itself comes from RESTORE_MODE_APPROVAL in
-// api/archive.ts, the single source of truth for that mapping.
+// Escalating order — data (default, no approval) < config (single) < full (dual, deliberately
+// hardest to reach). See spec §14 "Restore modes — escalating approval". Approval level itself
+// comes from RESTORE_MODE_APPROVAL in api/archive.ts, the single source of truth for that mapping.
 const RESTORE_MODE_OPTIONS: RestoreModeOption[] = [
   {
     mode: "data",
@@ -107,22 +90,20 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<RestoreMode>("data");
   const [reason, setReason] = useState("");
-  const [requesterId, setRequesterId] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [confirmingFull, setConfirmingFull] = useState(false);
   const restore = useRestoreSnapshot();
-  const peopleQuery = useQuery({ queryKey: ["people-directory"], queryFn: listPeople, enabled: open });
 
   // Every restore is backed by an approval object regardless of mode (spec §13:
   // reason is "required free text, never optional") — the real endpoint rejects
   // an empty reason even for data-only restores, unlike the mock this replaced.
+  // "Requested by" is the signed-in session, not a picker (server derives it).
   const requiresAck = mode === "full";
-  const canProceed = reason.trim().length > 0 && requesterId.length > 0 && (!requiresAck || acknowledged);
+  const canProceed = reason.trim().length > 0 && (!requiresAck || acknowledged);
 
   function reset() {
     setMode("data");
     setReason("");
-    setRequesterId("");
     setAcknowledged(false);
     setConfirmingFull(false);
   }
@@ -143,7 +124,7 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
       return;
     }
     restore.mutate(
-      { snapshotId: snapshot.id, mode, reason: reason.trim(), requestedByPersonId: requesterId },
+      { snapshotId: snapshot.id, mode, reason: reason.trim() },
       { onSuccess: () => handleOpenChange(false) },
     );
   }
@@ -206,37 +187,15 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
 
         {!confirmingFull && (
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="restore-reason" className="text-sm font-medium">
+            <Label htmlFor="restore-reason">
               Reason <Badge variant="outline">required</Badge>
-            </label>
+            </Label>
             <Input
               id="restore-reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Why is this restore needed?"
             />
-          </div>
-        )}
-
-        {!confirmingFull && (
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="restore-requester" className="text-sm font-medium">
-              Requested by <Badge variant="outline">required</Badge>
-            </label>
-            <Select value={requesterId} onValueChange={setRequesterId}>
-              <SelectTrigger id="restore-requester" className="h-9">
-                <SelectValue
-                  placeholder={peopleQuery.isLoading ? "Loading people…" : "Select a person"}
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {peopleQuery.data?.map((person) => (
-                  <SelectItem key={person.id} value={person.id}>
-                    {person.email}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         )}
 
@@ -260,8 +219,7 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
             <p className="font-medium text-destructive">Final confirmation — full restore</p>
             <p className="text-muted-foreground">
               Restoring <strong>{snapshot.machineName}</strong> with data, configuration, and secret
-              bindings. {approvalLabelFor("full")} — enforced by the control plane regardless of the
-              org's configured restore-approval policy — and cannot be undone silently.
+              bindings. This requires dual approval and cannot be undone silently.
             </p>
             <p className="text-xs text-muted-foreground">Reason on file: "{reason.trim()}"</p>
           </div>

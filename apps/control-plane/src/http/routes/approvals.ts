@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema } from "@effect/platform";
 import { Schema } from "effect";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 const ActionType = Schema.Literal("snapshot_restore", "break_glass", "admin_access", "offboarding");
 const Mode = Schema.Literal("none", "single", "dual");
@@ -15,6 +16,11 @@ const ApprovalResource = Schema.Struct({
   status: Status,
   requestedByPersonId: Schema.String,
   targetMachineId: Schema.NullOr(Schema.String),
+  // Set only by person-targeted action types (today: `offboarding`) — see
+  // `services/ApprovalService.ts`. Lets a caller (an approver deciding an
+  // "Offboarding" approval, or the console) know WHO it's about, not just
+  // that one is pending.
+  targetPersonId: Schema.NullOr(Schema.String),
   reason: Schema.String,
   requiredApprovals: Schema.Number,
   approvedCount: Schema.Number,
@@ -23,22 +29,22 @@ const ApprovalResource = Schema.Struct({
   decidedAt: Schema.NullOr(Schema.String),
 });
 
+// `orgId`/`requestedByPersonId`/`personId` are gone from the wire: derived
+// from `CurrentUserTag` (see `../middleware/auth.ts`) rather than trusted
+// from the client — a caller can't request or decide an approval
+// attributed to someone else, or in another org.
 const CreateApprovalPayload = Schema.Struct({
-  orgId: Schema.UUID,
   actionType: ActionType,
-  requestedByPersonId: Schema.UUID,
   targetMachineId: Schema.NullOr(Schema.UUID),
   reason: Schema.String.pipe(Schema.minLength(1)),
 });
 
 const DecideApprovalPayload = Schema.Struct({
-  personId: Schema.UUID,
   decision: DecisionValue,
   reason: Schema.optional(Schema.String),
 });
 
 const ListApprovalsUrlParams = Schema.Struct({
-  orgId: Schema.optional(Schema.String),
   status: Schema.optional(Status),
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.NumberFromString),
@@ -93,4 +99,5 @@ export const ApprovalsGroup = HttpApiGroup.make("approvals")
   .add(create)
   .add(decide)
   .add(getById)
-  .add(list);
+  .add(list)
+  .middleware(CurrentUserAuthentication);

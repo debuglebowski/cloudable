@@ -6,13 +6,13 @@
 //
 // This file only ever calls `Signer.sign()` / `Signer.publicKey()` — it
 // never generates or holds key material itself (CLAUDE.md invariant #9).
-// `crypto.createPublicKey`/`crypto.verify` below operate on the CA's PUBLIC
-// key only (returned by `Signer.publicKey()`), which is not sensitive
-// material — verification is deliberately done locally rather than via the
-// `Signer` port, mirroring how a real KMS/HSM works: only signing needs the
-// vault, anyone holding the public key can verify.
+// The actual signature check (`@cloudable/session-token`) runs against the
+// CA's PUBLIC key only (returned by `Signer.publicKey()`), which is not
+// sensitive material — verification is deliberately done locally rather
+// than via the `Signer` port, mirroring how a real KMS/HSM works: only
+// signing needs the vault, anyone holding the public key can verify.
 // ---------------------------------------------------------------------------
-import * as crypto from "node:crypto";
+import { verifySessionToken as verifySessionTokenPure } from "@cloudable/session-token";
 import { Effect } from "effect";
 import { SignerError, SignerTag } from "../services/Signer";
 
@@ -64,21 +64,7 @@ interface RawClaims {
   expiresAt: string;
 }
 
-function isRawClaims(value: unknown): value is RawClaims {
-  if (typeof value !== "object" || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.idpIdentity === "string" &&
-    typeof v.targetMachineId === "string" &&
-    typeof v.targetOsUser === "string" &&
-    (v.method === "terminal" || v.method === "ssh") &&
-    typeof v.issuedAt === "string" &&
-    typeof v.expiresAt === "string"
-  );
-}
-
 const toBase64Url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
-const fromBase64Url = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, "base64url"));
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 /**
@@ -123,6 +109,11 @@ export const mintSessionToken = (
  * to learn anything, including "the claims were well-formed", from an
  * unsigned or mis-signed token).
  *
+ * This is a thin wrapper: `signer.publicKey()` is the only I/O (Key Vault
+ * read), and the byte-level check itself lives in the pure, framework-free
+ * `@cloudable/session-token` package — shared verbatim with the tunnel
+ * daemon, which can't depend on `effect`/`SignerTag` (see that package's
+ * header comment for why two copies of this logic would be a real risk).
  * `keyId` is fixed to `SESSION_TOKEN_KEY_ID` rather than read from the
  * token itself, deliberately — trusting an attacker-supplied key
  * identifier to pick which key to verify against is a classic
@@ -133,65 +124,11 @@ export const verifySessionToken = (
 ): Effect.Effect<SessionClaims, SignerError, SignerTag> =>
   Effect.gen(function* () {
     const signer = yield* SignerTag;
-
-    const parts = token.split(".");
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
-      return yield* Effect.fail(
-        new SignerError({ reason: "malformed", cause: "expected `<claims>.<signature>`" }),
-      );
-    }
-    const [claimsSegment, signatureSegment] = parts as [string, string];
-
     const publicKeyDer = yield* signer.publicKey(SESSION_TOKEN_KEY_ID);
-    const publicKey = yield* Effect.try({
-      try: () =>
-        crypto.createPublicKey({ key: Buffer.from(publicKeyDer), format: "der", type: "spki" }),
-      catch: (cause) => new SignerError({ reason: "malformed_key", cause }),
-    });
 
-    // Plain try/catch (not `Effect.try`, whose `catch` maps into the *error* channel): a
-    // malformed signature segment throwing and a well-formed-but-wrong signature both mean
-    // "not valid" — a success value of `false`, not a distinct effect failure.
-    const signatureValid = yield* Effect.sync(() => {
-      try {
-        return crypto.verify(
-          null,
-          Buffer.from(utf8(claimsSegment)),
-          publicKey,
-          Buffer.from(fromBase64Url(signatureSegment)),
-        );
-      } catch {
-        return false;
-      }
-    });
-    if (!signatureValid) {
-      return yield* Effect.fail(new SignerError({ reason: "invalid_signature" }));
+    const result = verifySessionTokenPure(token, publicKeyDer);
+    if (!result.ok) {
+      return yield* Effect.fail(new SignerError({ reason: result.reason, cause: result.cause }));
     }
-
-    // Only decode/trust claims content once the signature over those exact bytes is confirmed.
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(new TextDecoder().decode(fromBase64Url(claimsSegment)));
-    } catch (cause) {
-      return yield* Effect.fail(new SignerError({ reason: "malformed", cause }));
-    }
-    if (!isRawClaims(parsed)) {
-      return yield* Effect.fail(
-        new SignerError({ reason: "malformed", cause: "unexpected claim shape" }),
-      );
-    }
-
-    const expiresAt = new Date(parsed.expiresAt);
-    if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
-      return yield* Effect.fail(new SignerError({ reason: "expired" }));
-    }
-
-    return {
-      idpIdentity: parsed.idpIdentity,
-      targetMachineId: parsed.targetMachineId,
-      targetOsUser: parsed.targetOsUser,
-      method: parsed.method,
-      issuedAt: new Date(parsed.issuedAt),
-      expiresAt,
-    } satisfies SessionClaims;
+    return result.claims;
   });

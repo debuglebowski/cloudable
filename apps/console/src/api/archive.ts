@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { apiGet, apiPost } from "@/lib/api-client";
-import { CURRENT_ORG_ID } from "@/lib/current-org";
 import { listMachines } from "./machines";
 
 /**
@@ -89,7 +88,7 @@ interface SnapshotViewWire {
 
 export async function fetchArchivedSnapshots(): Promise<ArchivedSnapshot[]> {
   const [res, machines] = await Promise.all([
-    apiGet<{ items: SnapshotViewWire[] }>(`/api/v1/archive/snapshots?orgId=${CURRENT_ORG_ID}`),
+    apiGet<{ items: SnapshotViewWire[] }>("/api/v1/archive/snapshots"),
     listMachines(),
   ]);
   return res.items.map((s) => ({
@@ -148,8 +147,6 @@ export interface RestoreSnapshotInput {
   /** Every restore is backed by an approval object (spec §13: reason is "required free text,
    * never optional") — the real endpoint rejects an empty reason regardless of mode. */
   reason: string;
-  /** No auth/identity system yet — same gap as the Approvals decide flow. */
-  requestedByPersonId: string;
 }
 
 interface RestoreSnapshotResponseWire {
@@ -175,7 +172,6 @@ export function useRestoreSnapshot() {
           // dialog has no "restore to a different machine" picker, and that's the
           // common case (spec §7: disposable machines, reimage-in-place).
           targetMachineId: snapshot.machineId,
-          requestedByPersonId: input.requestedByPersonId,
           reason: input.reason,
           ...(input.mode === "full" ? { confirmSecretBindings: true } : {}),
         },

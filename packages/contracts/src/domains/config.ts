@@ -19,26 +19,18 @@ export type SettingScopeType = "org" | "machine";
  */
 export const LOGGING_TIER_SETTING_KEY = "logging_tier";
 
-/**
- * Who made the change. "person" is a UI-driven admin edit; "system" is a
- * Git-sourced (or otherwise automated) change applied via `/config/import`.
- * Once real auth (`CurrentUserTag`) is wired to the PATCH endpoint, this can
- * become derived-and-optional instead of caller-supplied.
- */
-export interface ConfigActor {
-  type: "person" | "system";
-  id: string;
-}
+// `orgId`/`actor` are gone from every request below: the server derives
+// both from the caller's session (`CurrentUserTag`) — every config change
+// is now necessarily a real person acting through the console, not a
+// client-supplied identity.
 
 export interface PatchSettingRequest {
-  orgId: string;
   scopeType: SettingScopeType;
   scopeId: string;
   key: string;
   value: unknown;
   /** Org-scope only: marks the entry un-overridable below (docs/spec.md §6). */
   pinned?: boolean;
-  actor: ConfigActor;
 }
 
 export interface SettingChangeResult {
@@ -55,8 +47,6 @@ export interface PatchSettingResponse {
 
 /** `confirm` must be exactly `true` — absent or `false` is rejected (400). */
 export interface ReconcileTriggerRequest {
-  /** Must match the target machine's org — the tenant-isolation check (no `CurrentUserTag` session exists yet to derive this from). */
-  orgId: string;
   confirm?: boolean;
 }
 
@@ -75,8 +65,6 @@ export interface ImportConfigEntry {
 
 /** Bulk desired-state document — the GitOps path. Applied entry-by-entry through the exact same code path as `PatchSettingRequest` (docs/spec.md §16: "same path whether the change came from the UI or a Git commit"). */
 export interface ImportConfigRequest {
-  orgId: string;
-  actor: ConfigActor;
   /** Shared across every event this import produces. Generated if omitted. */
   correlationId?: string;
   entries: ImportConfigEntry[];
