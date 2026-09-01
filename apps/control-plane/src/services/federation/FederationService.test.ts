@@ -18,6 +18,7 @@ const testConfig: AppConfig = {
   managedIdentityAudience: "unused",
   federationIssuerUrl: "https://auth.test.cloudable.example",
   federationAudience: "api://AzureADTokenExchange",
+  consoleOrigin: "unused",
 };
 
 /** Captures every batch published through `EventBus`, without touching Postgres. */
