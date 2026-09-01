@@ -30,7 +30,18 @@ function formatValue(value: unknown): string {
 /** A single labeled setting row with its effective value and lineage source. */
 export function SettingRow({ label, value, source, onOverride, inheritedValue }: SettingRowProps) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-border py-2.5 last:border-b-0">
+    // border-border/60, not the full-strength border — same hairline-not-a-rule
+    // convention as TableRow's own divider (components/ui/table.tsx): this is a
+    // divider between rows of one list, not a boxed grid line.
+    //
+    // hover:bg-muted/50, matching that same TableRow: every other place this app
+    // shows a list of rows (any table) already highlights the row under the
+    // cursor as a scanning aid, independent of whether the whole row is
+    // clickable — Organisation's setting rows were the one row-shaped list left
+    // with zero hover feedback. rounded-md since (unlike a table row) this one
+    // doesn't span its container edge-to-edge, so the highlight reads as an
+    // inset rectangle rather than a full-bleed strip.
+    <div className="flex items-center justify-between gap-4 rounded-md border-b border-border/60 py-2.5 transition-colors last:border-b-0 hover:bg-muted/50">
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-medium">{label}</span>
         <span className="text-xs text-muted-foreground">from {source}</span>

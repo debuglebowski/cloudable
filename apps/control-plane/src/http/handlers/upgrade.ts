@@ -2,9 +2,11 @@ import type { ApiErrorBody } from "@cloudable/contracts";
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { Effect } from "effect";
 import { ulid } from "ulid";
+import { MachineService } from "../../domain/machine/MachineService";
 import { upgradeMachine } from "../../domain/upgrade/UpgradeService";
-import type { UpgradeError } from "../../domain/upgrade/types";
+import { UpgradeError } from "../../domain/upgrade/types";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 import { mapErrorToResponse } from "../middleware/error-mapper";
 
 const statusFor = (error: UpgradeError): number => {
@@ -38,7 +40,24 @@ const errorBodyFor = (error: UpgradeError): ApiErrorBody => ({
 
 export const UpgradeLive = HttpApiBuilder.group(Api, "upgrade", (handlers) =>
   handlers.handle("triggerUpgrade", ({ path, payload }) =>
-    upgradeMachine(path.machineId, payload.targetImage).pipe(
+    Effect.gen(function* () {
+      const currentUser = yield* CurrentUserTag;
+      // `upgradeMachine`'s own signature doesn't take an `orgId` — this
+      // scoped fetch is the tenant-ownership gate in front of it, same
+      // reasoning as `archive`/`offboarding`'s handlers. Reusing
+      // `MachineService.getById`'s existing org check rather than
+      // duplicating a second machine query here.
+      const machineService = yield* MachineService;
+      yield* machineService.getById(path.machineId, currentUser.orgId).pipe(
+        Effect.catchTags({
+          MachineNotFoundError: () =>
+            Effect.fail(new UpgradeError({ reason: "machine_not_found", cause: path.machineId })),
+          MachineServiceError: (cause) =>
+            Effect.fail(new UpgradeError({ reason: "db_error", cause })),
+        }),
+      );
+      return yield* upgradeMachine(path.machineId, payload.targetImage);
+    }).pipe(
       Effect.map((result) => ({
         ...result,
         nextEligibleAt: result.nextEligibleAt.toISOString(),

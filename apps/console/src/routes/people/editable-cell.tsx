@@ -60,6 +60,39 @@ export function EditableCell({ value, onSave }: EditableCellProps) {
         autoFocus
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
+        // A focused text input's cursor lands at the end of its value by
+        // default, and the browser auto-scrolls to keep it visible — for a
+        // value longer than this narrow cell (most emails), that hides the
+        // *start* of the value the instant editing begins. Verified live via
+        // computed state (`scrollLeft`/`selectionStart`), not just a
+        // screenshot: clicking "marcus.webb@acme.com" left `scrollLeft: 13`,
+        // `selectionStart/End: 20/20` — cursor and scroll both parked at the
+        // end, hiding the leading "m". `select()` alone doesn't fix the
+        // scroll (confirmed live: selection moved to 0/20 but `scrollLeft`
+        // stayed put) since the browser tracks the *active* edge of a
+        // selection, which a forward select-all leaves at the end — so
+        // `scrollLeft` is reset explicitly too, deferred a frame since
+        // setting it in the same tick as focus/select doesn't hold (the
+        // browser's own "scroll the caret into view" pass for this same
+        // focus event runs after and undoes a same-tick write).
+        //
+        // Full end-to-end confirmation (an actual focus event firing) wasn't
+        // possible in this session's automated browser — that harness runs
+        // without real OS-level window focus, so `document.activeElement`
+        // updates correctly but no `focus` event ever dispatches at all, for
+        // *any* input on the page, React-wired or a raw `addEventListener`
+        // alike (checked directly). The scroll-position mechanics above were
+        // each verified in isolation by driving them manually against the
+        // already-focused element; only the "does a real focus event trigger
+        // this handler" link in the chain rests on `select()`-on-focus being
+        // the well-established standard fix for this exact failure mode.
+        onFocus={(event) => {
+          const input = event.target;
+          input.select();
+          requestAnimationFrame(() => {
+            input.scrollLeft = 0;
+          });
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") commit();
           if (event.key === "Escape") cancel();

@@ -1,4 +1,4 @@
-import * as schema from "@cloudable/schema";
+import type * as schema from "@cloudable/schema";
 import { people } from "@cloudable/schema";
 import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -57,9 +57,14 @@ export const listPeopleByOrg = (orgId: string): Effect.Effect<PersonRow[], Peopl
     );
   });
 
+// `orgId` scopes the lookup to that org — a person belonging to a
+// DIFFERENT org resolves to the same `PersonNotFoundError` as one that
+// doesn't exist, same non-leaking posture as everywhere else in this
+// build (see e.g. `MachineService.fetchMachine`).
 const findById = (
   db: DbHandle,
   personId: string,
+  orgId: string,
 ): Effect.Effect<PersonRow, PeopleDbError | PersonNotFoundError> =>
   Effect.gen(function* () {
     const rows = yield* dbTry(
@@ -67,7 +72,8 @@ const findById = (
       "find_person_failed",
     );
     const row = rows[0];
-    if (!row) return yield* Effect.fail(new PersonNotFoundError({ personId }));
+    if (!row || row.orgId !== orgId)
+      return yield* Effect.fail(new PersonNotFoundError({ personId }));
     return row;
   });
 
@@ -89,7 +95,9 @@ export const createPerson = (
         db
           .select({ id: people.id })
           .from(people)
-          .where(and(eq(people.orgId, input.orgId), sql`lower(${people.email}) = ${normalizedEmail}`))
+          .where(
+            and(eq(people.orgId, input.orgId), sql`lower(${people.email}) = ${normalizedEmail}`),
+          )
           .limit(1),
       "check_existing_person_failed",
     );
@@ -118,6 +126,7 @@ export const createPerson = (
 
 export interface UpdatePersonInput {
   personId: string;
+  orgId: string;
   email?: string | undefined;
   role?: string | undefined;
 }
@@ -131,7 +140,7 @@ export const updatePerson = (
 > =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const existing = yield* findById(db, input.personId);
+    const existing = yield* findById(db, input.personId, input.orgId);
     if (existing.source !== "manual") {
       return yield* Effect.fail(new PersonNotManuallyManagedError({ personId: input.personId }));
     }
@@ -155,6 +164,7 @@ export const updatePerson = (
 
 export interface SetPersonActiveInput {
   personId: string;
+  orgId: string;
   active: boolean;
 }
 
@@ -167,7 +177,7 @@ export const setPersonActive = (
 > =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const existing = yield* findById(db, input.personId);
+    const existing = yield* findById(db, input.personId, input.orgId);
     if (existing.source !== "manual") {
       return yield* Effect.fail(new PersonNotManuallyManagedError({ personId: input.personId }));
     }

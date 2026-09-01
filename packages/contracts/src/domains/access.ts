@@ -2,10 +2,12 @@
  * Wire types for `/api/v1/access/...` (SSH certificates + terminal/SSH
  * sessions). See `docs/access.md` for the full flow.
  *
- * No real auth middleware exists yet (see `apps/control-plane/src/http/middleware/auth.ts`),
- * so every request below carries `personId` explicitly rather than deriving it from a
- * session — a future feature unit that wires `CurrentUserTag` up to these endpoints should
- * drop the field from the request body and read it from the authenticated context instead.
+ * Every request below is real-session-scoped (`CurrentUserTag`, see
+ * `apps/control-plane/src/http/middleware/auth.ts`) EXCEPT
+ * `IssueCertificateRequest`: `issueCertificate` is still `cloudable
+ * login`'s dev-mode identity stand-in, not a browser session, so it keeps
+ * `orgId`/`personId` on the wire — see that endpoint's own doc comment in
+ * `apps/control-plane/src/http/routes/access.ts`.
  */
 
 /** Which machines a certificate or session grant is scoped to. */
@@ -50,15 +52,11 @@ export interface ListCertificatesResponse {
 }
 
 export interface RevokeCertificateRequest {
-  orgId: string;
   certificateId: string;
   reason: string;
 }
 
 export interface MintSessionTokenRequest {
-  orgId: string;
-  personId: string;
-  idpIdentity: string;
   targetMachineId: string;
   targetOsUser: string;
   method: "terminal" | "ssh";
@@ -72,7 +70,6 @@ export interface MintSessionTokenResponse {
 }
 
 export interface EndSessionRequest {
-  orgId: string;
   sessionId: string;
 }
 

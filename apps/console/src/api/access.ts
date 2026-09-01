@@ -3,7 +3,6 @@ import { toast } from "sonner";
 
 import type { BadgeProps } from "@/components/ui/badge";
 import { apiGet, apiPost } from "@/lib/api-client";
-import { CURRENT_ORG_ID } from "@/lib/current-org";
 import { listMachines } from "./machines";
 import { listPeople } from "./people-directory";
 
@@ -104,9 +103,7 @@ interface ElevationListItemWire {
 
 async function fetchLiveCertificates(): Promise<LiveCertificate[]> {
   const [res, people, machines] = await Promise.all([
-    apiGet<{ certificates: CertificateSummaryWire[] }>(
-      `/api/v1/access/certificates?orgId=${CURRENT_ORG_ID}`,
-    ),
+    apiGet<{ certificates: CertificateSummaryWire[] }>("/api/v1/access/certificates"),
     listPeople(),
     listMachines(),
   ]);
@@ -126,7 +123,6 @@ async function fetchLiveCertificates(): Promise<LiveCertificate[]> {
 
 async function revokeCertificateRequest(id: string, reason: string): Promise<void> {
   await apiPost("/api/v1/access/certificates/revoke", {
-    orgId: CURRENT_ORG_ID,
     certificateId: id,
     reason,
   });
@@ -134,7 +130,7 @@ async function revokeCertificateRequest(id: string, reason: string): Promise<voi
 
 async function fetchActiveSessions(): Promise<ActiveSession[]> {
   const [res, people] = await Promise.all([
-    apiGet<{ sessions: SessionSummaryWire[] }>(`/api/v1/access/sessions?orgId=${CURRENT_ORG_ID}`),
+    apiGet<{ sessions: SessionSummaryWire[] }>("/api/v1/access/sessions"),
     listPeople(),
   ]);
   return res.sessions.map((s) => ({
@@ -148,12 +144,12 @@ async function fetchActiveSessions(): Promise<ActiveSession[]> {
 }
 
 async function terminateSessionRequest(id: string): Promise<void> {
-  await apiPost("/api/v1/access/sessions/end", { orgId: CURRENT_ORG_ID, sessionId: id });
+  await apiPost("/api/v1/access/sessions/end", { sessionId: id });
 }
 
 async function fetchElevations(): Promise<ElevationGrant[]> {
   const [res, people] = await Promise.all([
-    apiGet<{ elevations: ElevationListItemWire[] }>(`/api/v1/elevations?orgId=${CURRENT_ORG_ID}`),
+    apiGet<{ elevations: ElevationListItemWire[] }>("/api/v1/elevations"),
     listPeople(),
   ]);
   return res.elevations.map((e) => ({
@@ -219,6 +215,111 @@ export function useTerminateSession() {
     },
     onError: (error) => {
       toast.error("Couldn't terminate session", { description: error.message });
+    },
+  });
+}
+
+export interface MintSessionInput {
+  targetMachineId: string;
+  targetOsUser: string;
+}
+
+export interface MintedSession {
+  sessionId: string;
+  token: string;
+  expiresAt: string;
+}
+
+/** Real `POST /api/v1/access/sessions`, method fixed to `"terminal"` — this is the web
+ * terminal's mint call specifically (spec §11.1); the `"ssh"` method's session-accounting
+ * mint has no console-side caller of its own, real SSH access goes through `cloudable
+ * login`'s certificate flow instead, not this dialog. `personId`/`orgId` are derived
+ * server-side from the caller's own session, same as every other access.ts mutation. */
+async function mintSessionRequest(input: MintSessionInput): Promise<MintedSession> {
+  return apiPost<MintedSession>("/api/v1/access/sessions", {
+    targetMachineId: input.targetMachineId,
+    targetOsUser: input.targetOsUser,
+    method: "terminal",
+  });
+}
+
+export function useMintSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: mintSessionRequest,
+    onSuccess: () => {
+      // The new session is now genuinely live — worth refreshing the Access page's own
+      // list even though this hook's caller navigates away immediately afterward (coming
+      // back to Access should already show it as an active session).
+      void queryClient.invalidateQueries({ queryKey: accessKeys.sessions() });
+    },
+    onError: (error) => {
+      toast.error("Couldn't connect", { description: error.message });
+    },
+  });
+}
+
+export interface RequestElevationInput {
+  machineId: string;
+  level: ElevationGrant["level"];
+  reason: string;
+}
+
+/** `personId` is derived server-side from the caller's own session — the requester is always
+ * whoever is signed in, never a client-supplied id (see `http/middleware/auth.ts`). */
+async function requestElevationRequest(input: RequestElevationInput): Promise<void> {
+  await apiPost("/api/v1/elevations", {
+    machineId: input.machineId,
+    level: input.level,
+    reason: input.reason,
+  });
+}
+
+async function syncElevationRequest(id: string): Promise<void> {
+  await apiPost(`/api/v1/elevations/${id}/sync`);
+}
+
+async function expireElevationRequest(id: string): Promise<void> {
+  await apiPost(`/api/v1/elevations/${id}/expire`);
+}
+
+export function useRequestElevation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: requestElevationRequest,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: accessKeys.elevations() });
+      toast.success("Elevation requested");
+    },
+    onError: (error) => {
+      toast.error("Couldn't request elevation", { description: error.message });
+    },
+  });
+}
+
+export function useSyncElevation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: syncElevationRequest,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: accessKeys.elevations() });
+    },
+    onError: (error) => {
+      toast.error("Couldn't sync elevation", { description: error.message });
+    },
+  });
+}
+
+export function useExpireElevation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: expireElevationRequest,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: accessKeys.elevations() });
+      toast.success("Elevation expired");
+    },
+    onError: (error) => {
+      toast.error("Couldn't expire elevation", { description: error.message });
     },
   });
 }

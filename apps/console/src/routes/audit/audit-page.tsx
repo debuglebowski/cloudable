@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Clock, FileText, ScrollText, Server, User, Zap } from "lucide-react";
 
 import {
   AUDIT_EXPORT_URLS,
@@ -8,11 +9,17 @@ import {
   useAuditTimeline,
   useControlEvidence,
 } from "@/api/audit";
+import type { DirectoryPerson } from "@/api/people-directory";
+import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ControlStatus } from "@/components/control-status";
 import { Freshness } from "@/components/freshness";
+import { PageHeaderIcon } from "@/components/page-header-icon";
+import { PersonAvatar } from "@/components/person-avatar";
+import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -21,9 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
-
-type AuditView = "timeline" | "evidence";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /**
  * Audit — one section, two in-page views (spec §20): the admin timeline and the
@@ -31,114 +36,173 @@ type AuditView = "timeline" | "evidence";
  * read as one page over the same append-only event log.
  */
 export function AuditPage() {
-  const [view, setView] = useState<AuditView>("timeline");
-
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold">Audit</h1>
-        <p className="max-w-prose text-sm text-muted-foreground">
-          Every event Cloudable emits, and what it evidences. Timeline is the raw feed; evidence
-          export groups the same events by control for an auditor.
-        </p>
+    // h-full min-h-0 + the Tabs below being flex-1: fills whatever height
+    // `main` actually has left under the header instead of capping at a flat
+    // vh fraction — see machines-page.tsx's comment on the same pattern. The
+    // Evidence-export tab (a variable-length stack of Cards, not one table)
+    // deliberately opts out below and just flows/scrolls normally — this
+    // treatment is for "one table is the whole view" tabs.
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="flex shrink-0 items-center gap-3">
+        <PageHeaderIcon icon={ScrollText} />
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold">Audit</h1>
+          <p className="max-w-prose text-sm text-muted-foreground">
+            Every event Cloudable emits, and what it evidences. Timeline is the raw feed; evidence
+            export groups the same events by control for an auditor.
+          </p>
+        </div>
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Audit view"
-        className="inline-flex w-fit items-center rounded-md border border-border bg-muted p-0.5"
-      >
-        <ViewTab
-          label="Timeline"
-          active={view === "timeline"}
-          onClick={() => setView("timeline")}
-        />
-        <ViewTab
-          label="Evidence export"
-          active={view === "evidence"}
-          onClick={() => setView("evidence")}
-        />
-      </div>
-
-      {view === "timeline" ? <TimelineView /> : <EvidenceExportView />}
+      <Tabs defaultValue="timeline" className="flex min-h-0 flex-1 flex-col">
+        <TabsList className="shrink-0">
+          <TabsTrigger value="timeline">Timeline</TabsTrigger>
+          <TabsTrigger value="evidence">Evidence export</TabsTrigger>
+        </TabsList>
+        {/* flex + min-h-0 + flex-1: only on this tab, not "evidence" below —
+            TimelineView's own Card fills this exactly instead of sizing to
+            its (usually short) content. */}
+        <TabsContent value="timeline" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <TimelineView />
+        </TabsContent>
+        <TabsContent value="evidence">
+          <EvidenceExportView />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
 
-function ViewTab({
-  label,
-  active,
-  onClick,
+/** Actor column: "person" resolves `actorId` (a raw personId, illegible on its own) to an
+ * email via the same read-only directory lookup every other person-identifying column in
+ * the app already uses (People/Access/Machines/Approvals) — "who did this" is the central
+ * compliance question this column exists to answer (spec §…, actor_type's own doc comment),
+ * and a bare UUID doesn't answer it. `agent`/`idp` keep their raw id/type as-is: neither is
+ * a person, so resolving one through the people directory (or giving it a PersonAvatar)
+ * would misattribute the action to someone who didn't do it. */
+function ActorCell({
+  entry,
+  people,
 }: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
+  entry: AuditTimelineEntry;
+  people: DirectoryPerson[] | undefined;
 }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "rounded-sm px-3 py-1 text-sm font-medium transition-colors",
-        active
-          ? "bg-card text-foreground shadow-sm"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
-function formatActor(entry: AuditTimelineEntry): string {
-  if (entry.actorType === "system") return "system";
-  return entry.actorId ?? entry.actorType;
+  if (entry.actorType === "system") {
+    return <span className="text-muted-foreground">system</span>;
+  }
+  if (entry.actorType === "person") {
+    const email = people?.find((person) => person.id === entry.actorId)?.email ?? entry.actorId;
+    return (
+      <span className="flex items-center gap-1.5">
+        <PersonAvatar name={email ?? "?"} className="size-5" />
+        {email ?? "unknown"}
+      </span>
+    );
+  }
+  return <>{entry.actorId ?? entry.actorType}</>;
 }
 
 function TimelineView() {
   const { data: entries, isLoading } = useAuditTimeline();
+  // Same query key `machine-detail-page.tsx`/`machines-page.tsx`/`add-machine-dialog.tsx`
+  // already use for this exact directory lookup — one shared cache entry app-wide.
+  const peopleQuery = useQuery({
+    queryKey: ["people-directory"],
+    queryFn: listPeopleDirectory,
+  });
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="flex min-h-0 flex-1 flex-col">
+      <CardHeader className="shrink-0">
         <CardTitle className="text-base">Timeline</CardTitle>
         <CardDescription>Chronological feed of every event, newest first.</CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
-        {isLoading ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading…</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Event</TableHead>
-                <TableHead>Summary</TableHead>
-                <TableHead>Actor</TableHead>
-                <TableHead>Machine</TableHead>
-                <TableHead>When</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {entries?.map((entry) => (
-                <TableRow key={entry.id}>
+      <CardContent className="min-h-0 flex-1 p-0">
+        <Table containerClassName="h-full max-h-none">
+          <TableHeader>
+            <TableRow>
+              <TableHead>
+                <span className="flex items-center gap-1.5">
+                  <TableHeaderIcon icon={Zap} />
+                  Event
+                </span>
+              </TableHead>
+              <TableHead>
+                <span className="flex items-center gap-1.5">
+                  <TableHeaderIcon icon={FileText} />
+                  Summary
+                </span>
+              </TableHead>
+              <TableHead>
+                <span className="flex items-center gap-1.5">
+                  <TableHeaderIcon icon={User} />
+                  Actor
+                </span>
+              </TableHead>
+              <TableHead>
+                <span className="flex items-center gap-1.5">
+                  <TableHeaderIcon icon={Server} />
+                  Machine
+                </span>
+              </TableHead>
+              <TableHead>
+                <span className="flex items-center gap-1.5">
+                  <TableHeaderIcon icon={Clock} />
+                  When
+                </span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading &&
+              Array.from({ length: 6 }, (_, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
+                <TableRow key={i}>
                   <TableCell>
+                    <Skeleton className="h-4 w-36" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-64" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-24" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-20" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-16" />
+                  </TableCell>
+                </TableRow>
+              ))}
+            {!isLoading &&
+              entries?.map((entry) => (
+                // align-top on every cell, not the TableCell default align-middle —
+                // Summary regularly wraps to several lines while Event/Actor/Machine/
+                // When stay single-line; centering those against a multi-line
+                // neighbor left them floating disconnected from their own row's
+                // first line. Harmless everywhere a row's cells already share one
+                // line height (every other table in the app), so scoped to this
+                // table rather than changing TableCell's own default.
+                <TableRow key={entry.id}>
+                  <TableCell className="align-top">
                     <code className="font-mono text-xs text-muted-foreground">{entry.type}</code>
                   </TableCell>
-                  <TableCell className="max-w-md">{entry.summary}</TableCell>
-                  <TableCell className="whitespace-nowrap text-sm">{formatActor(entry)}</TableCell>
-                  <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+                  <TableCell className="max-w-md align-top">{entry.summary}</TableCell>
+                  <TableCell className="whitespace-nowrap align-top text-sm">
+                    <ActorCell entry={entry} people={peopleQuery.data} />
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap align-top font-mono text-xs text-muted-foreground">
                     {entry.machineId ?? "—"}
                   </TableCell>
-                  <TableCell className="whitespace-nowrap">
+                  <TableCell className="whitespace-nowrap align-top">
                     <Freshness occurredAt={entry.occurredAt} recordedAt={entry.recordedAt} />
                   </TableCell>
                 </TableRow>
               ))}
-            </TableBody>
-          </Table>
-        )}
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   );

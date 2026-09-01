@@ -142,14 +142,14 @@ describe("ElevationService (live DB) — owner notification", () => {
     await run(
       Effect.gen(function* () {
         const approvalService = yield* ApprovalService;
-        return yield* approvalService.decide(approvalId, owner.id, "approved");
+        return yield* approvalService.decide(approvalId, org.id, owner.id, "approved");
       }),
     );
 
     const synced = await run(
       Effect.gen(function* () {
         const svc = yield* ElevationService;
-        return yield* svc.syncApproval(requested.id);
+        return yield* svc.syncApproval(requested.id, org.id);
       }),
     );
     expect(synced.status).toBe("granted");

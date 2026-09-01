@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
+import { CurrentUserAuthentication } from "../http/middleware/auth";
 
 /**
  * Wire schema for the normalised evidence projection (spec §18). Kept in
@@ -50,13 +51,14 @@ export const EvidencePageSchema = Schema.Struct({
 });
 
 export const EvidenceQueryParams = Schema.Struct({
-  orgId: Schema.UUID,
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.NumberFromString),
 });
 
-export const EvidenceGroup = HttpApiGroup.make("evidence").add(
-  HttpApiEndpoint.get("list", "/api/v1/evidence")
-    .setUrlParams(EvidenceQueryParams)
-    .addSuccess(EvidencePageSchema),
-);
+export const EvidenceGroup = HttpApiGroup.make("evidence")
+  .add(
+    HttpApiEndpoint.get("list", "/api/v1/evidence")
+      .setUrlParams(EvidenceQueryParams)
+      .addSuccess(EvidencePageSchema),
+  )
+  .middleware(CurrentUserAuthentication);

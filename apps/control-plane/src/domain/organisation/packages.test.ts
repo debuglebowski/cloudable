@@ -86,7 +86,7 @@ describe("org-scope package manifest write path", () => {
     const detail = await run(
       Effect.gen(function* () {
         const service = yield* MachineService;
-        return yield* service.getById(machine.id);
+        return yield* service.getById(machine.id, org.id);
       }),
     );
 
@@ -118,6 +118,7 @@ describe("org-scope package manifest write path", () => {
         const service = yield* MachineService;
         return yield* service.updatePackages({
           machineId: machine.id,
+          orgId: org.id,
           upserts: [{ packageName: "docker", versionPin: "26" }],
         });
       }),

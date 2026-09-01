@@ -8,6 +8,48 @@ export class SessionQueryError extends Data.TaggedError("SessionQueryError")<{
   cause?: unknown;
 }> {}
 
+export interface SessionForAttach {
+  id: string;
+  orgId: string;
+  machineId: string;
+  personId: string;
+  sessionToken: string | null;
+  endedAt: Date | null;
+}
+
+/**
+ * The raw fields the browser-attach route (`http/handlers/tunnel.ts`) needs to authorize an
+ * attach and replay the stored token to the daemon: `sessions.orgId === currentUser.orgId &&
+ * sessions.personId === currentUser.personId && endedAt IS NULL` (the plan's own stated
+ * authorization rule — deliberately not "any admin can attach to anyone's session", that's
+ * the elevation-approval machinery's job, not a bypass added here). Returns `undefined` for a
+ * nonexistent id rather than failing — "not found" and "found but not authorized" are handled
+ * identically by the caller (a 404, not a 403, leaking nothing about whether the id exists).
+ */
+export const fetchSessionForAttach = (
+  sessionId: string,
+): Effect.Effect<SessionForAttach | undefined, SessionQueryError, Db> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rows = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select({
+            id: sessions.id,
+            orgId: sessions.orgId,
+            machineId: sessions.machineId,
+            personId: sessions.personId,
+            sessionToken: sessions.sessionToken,
+            endedAt: sessions.endedAt,
+          })
+          .from(sessions)
+          .where(eq(sessions.id, sessionId))
+          .limit(1),
+      catch: (cause) => new SessionQueryError({ reason: "query_failed", cause }),
+    });
+    return rows[0];
+  });
+
 export interface ActiveSessionRow {
   id: string;
   orgId: string;

@@ -37,8 +37,9 @@ export interface ElevationDto {
   status: ElevationStatus;
 }
 
+// `personId` is gone from the wire — the server derives the requesting
+// person from the caller's session (`CurrentUserTag`), not the body.
 export interface RequestElevationBody {
-  personId: string;
   machineId: string;
   level: ElevationLevel;
   /** Required free text — never optional (spec §13). */

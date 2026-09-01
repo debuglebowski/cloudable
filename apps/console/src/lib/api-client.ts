@@ -42,6 +42,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = init?.method ?? "GET";
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
+    // The control plane and console are different origins (see
+    // `vite.config.ts`'s pinned dev port and `CONSOLE_ORIGIN` in the
+    // control plane's own config) — a BetterAuth session cookie only rides
+    // along on a cross-origin request that explicitly asks for it.
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...init?.headers,

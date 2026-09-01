@@ -17,6 +17,7 @@
     "@cloudable/contracts": "workspace:*",
     "@cloudable/events": "workspace:*",
     "@cloudable/schema": "workspace:*",
+    "@cloudable/session-token": "workspace:*",
     "@effect/platform": "0.97.1",
     "@effect/platform-bun": "0.91.2",
     "better-auth": "1.7.2",

@@ -7,7 +7,7 @@ import {
   resolveSetting,
   settingValues,
 } from "@cloudable/schema";
-import { type SQL, and, desc, eq, inArray, lt, or } from "drizzle-orm";
+import { type SQL, and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { type Context, Data, Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../db/layer";
@@ -27,6 +27,9 @@ export interface ApprovalRequest {
   actionType: ApprovalActionType;
   requestedByPersonId: string;
   targetMachineId: string | null;
+  /** A person-targeted action (today: only `offboarding`) sets this instead of
+   * `targetMachineId`. Optional, not just nullable — most call sites never set it. */
+  targetPersonId?: string | null;
   reason: string;
   /**
    * A minimum mode a caller can require ON TOP OF whatever the org has configured for
@@ -50,6 +53,7 @@ export interface ApprovalResult {
   status: ApprovalStatus;
   requestedByPersonId: string;
   targetMachineId: string | null;
+  targetPersonId: string | null;
   reason: string;
   requiredApprovals: number;
   /** Count of distinct people who have recorded an "approved" decision so far. */
@@ -154,6 +158,7 @@ const toResult = (row: ApprovalRow, approvedCount: number): ApprovalResult => ({
   status: row.status,
   requestedByPersonId: row.requestedByPersonId,
   targetMachineId: row.targetMachineId,
+  targetPersonId: row.targetPersonId,
   reason: row.reason,
   requiredApprovals: row.requiredApprovals,
   approvedCount,
@@ -183,7 +188,11 @@ const baseEnvelope = (
 });
 
 export interface ListApprovalsParams {
-  orgId?: string | undefined;
+  // Required, not optional: the caller's own org (`CurrentUserTag.orgId`),
+  // never omitted — an omitted filter here would list every org's
+  // approvals, which is exactly the cross-tenant leak real session auth
+  // exists to close.
+  orgId: string;
   status?: ApprovalStatus | undefined;
   cursor?: string | undefined;
   limit?: number | undefined;
@@ -234,14 +243,19 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
-    const getRow = (approvalId: string): Effect.Effect<ApprovalRow, ApprovalError> =>
+    // `orgId` is the caller's own org — an approval belonging to a
+    // DIFFERENT org resolves to the same `not_found` as one that doesn't
+    // exist, same reasoning as `MachineService.fetchMachine`.
+    const getRow = (approvalId: string, orgId: string): Effect.Effect<ApprovalRow, ApprovalError> =>
       Effect.gen(function* () {
         const rows = yield* Effect.tryPromise({
           try: () => db.select().from(approvals).where(eq(approvals.id, approvalId)).limit(1),
           catch: (cause) => new ApprovalError({ reason: "query_failed", cause }),
         });
         const row = rows[0];
-        if (!row) return yield* Effect.fail(new ApprovalError({ reason: "not_found" }));
+        if (!row || row.orgId !== orgId) {
+          return yield* Effect.fail(new ApprovalError({ reason: "not_found" }));
+        }
         return row;
       });
 
@@ -310,6 +324,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
                   status: "pending",
                   requestedByPersonId: req.requestedByPersonId,
                   targetMachineId: req.targetMachineId,
+                  targetPersonId: req.targetPersonId ?? null,
                   reason: req.reason,
                   requiredApprovals,
                   expiresAt,
@@ -334,7 +349,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
                   type: "approval.requested",
                   payload: {
                     actionType: req.actionType,
-                    actionRef: req.targetMachineId ?? req.requestedByPersonId,
+                    actionRef: req.targetMachineId ?? req.targetPersonId ?? req.requestedByPersonId,
                     reason: req.reason,
                     mode,
                   },
@@ -434,6 +449,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
 
     const decide = (
       approvalId: string,
+      orgId: string,
       personId: string,
       decision: ApprovalDecisionValue,
       reason?: string,
@@ -466,7 +482,9 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
                 .where(eq(approvals.id, approvalId))
                 .for("update")
                 .limit(1);
-              if (!existing) return { kind: "not_found" };
+              // A different org's approval is `not_found`, not a separate
+              // "denied" case — same reasoning as `getRow` above.
+              if (!existing || existing.orgId !== orgId) return { kind: "not_found" };
               if (existing.status !== "pending") return { kind: "already_decided" };
 
               const [duplicate] = await tx
@@ -572,9 +590,12 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
         return toResult(outcome.row, outcome.approverIds.length);
       });
 
-    const status = (approvalId: string): Effect.Effect<ApprovalResult, ApprovalError> =>
+    const status = (
+      approvalId: string,
+      orgId: string,
+    ): Effect.Effect<ApprovalResult, ApprovalError> =>
       Effect.gen(function* () {
-        const row = yield* getRow(approvalId);
+        const row = yield* getRow(approvalId, orgId);
         const approverIds = yield* countApproved(approvalId);
         return toResult(row, approverIds.length);
       });
@@ -584,13 +605,31 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
         const limit = Math.min(Math.max(params.limit ?? 25, 1), 100);
         const cursor = params.cursor ? decodeCursor(params.cursor) : null;
 
-        const conditions: SQL[] = [];
-        if (params.orgId) conditions.push(eq(approvals.orgId, params.orgId));
+        // `created_at` is a `timestamptz` — Postgres keeps microsecond precision, but
+        // a JS `Date` (and therefore `encodeCursor`'s `toISOString()`) can only hold
+        // milliseconds. Comparing the raw column against a cursor built from a `Date`
+        // silently drops rows: any two approvals created within the same millisecond
+        // (plausible — bulk actions, concurrent requests; not a contrived edge case)
+        // fail both the `lt` and the tie-break `eq` once the cursor lands between
+        // them, since the DB value has microseconds the cursor's `Date` never could.
+        // Truncating consistently here — in both `ORDER BY` and the cursor condition
+        // below — keeps ordering and paging self-consistent: ties within a millisecond
+        // are broken by `id` alone, never by a precision this API can't round-trip.
+        const createdAtMs = sql`date_trunc('milliseconds', ${approvals.createdAt})`;
+
+        const conditions: SQL[] = [eq(approvals.orgId, params.orgId)];
         if (params.status) conditions.push(eq(approvals.status, params.status));
         if (cursor) {
+          // Bound as an explicitly-cast string, not a raw `Date` — postgres-js's
+          // parameter binder only knows how to serialize a `Date` when Drizzle
+          // attaches a typed column to the parameter (as it does for a plain
+          // `approvals.createdAt` comparison); a bare `sql` fragment like
+          // `createdAtMs` carries no such column, so a `Date` bound against it
+          // crashes at the wire level instead of comparing.
+          const cursorCreatedAt = sql`${cursor.createdAt.toISOString()}::timestamptz`;
           const cursorCondition = or(
-            lt(approvals.createdAt, cursor.createdAt),
-            and(eq(approvals.createdAt, cursor.createdAt), lt(approvals.id, cursor.id)),
+            lt(createdAtMs, cursorCreatedAt),
+            and(eq(createdAtMs, cursorCreatedAt), lt(approvals.id, cursor.id)),
           );
           if (cursorCondition) conditions.push(cursorCondition);
         }
@@ -601,7 +640,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
               .select()
               .from(approvals)
               .where(conditions.length > 0 ? and(...conditions) : undefined)
-              .orderBy(desc(approvals.createdAt), desc(approvals.id))
+              .orderBy(desc(createdAtMs), desc(approvals.id))
               .limit(limit + 1),
           catch: (cause) => new ApprovalError({ reason: "query_failed", cause }),
         });

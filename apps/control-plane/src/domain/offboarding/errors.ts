@@ -9,6 +9,6 @@ import { Data } from "effect";
  * lost.
  */
 export class OffboardingError extends Data.TaggedError("OffboardingError")<{
-  reason: "person_not_found" | "sub_operation_failed";
+  reason: "person_not_found" | "sub_operation_failed" | "invalid_approval";
   cause?: unknown;
 }> {}

@@ -3,12 +3,14 @@ import { Schema } from "effect";
 import {
   FullRestoreNotAcknowledgedError,
   InvalidLegalHoldReasonError,
+  InvalidRestoreApprovalError,
   MachineAlreadyArchivedError,
   MachineNotFoundError,
   RestoreNotApprovedError,
   SnapshotExpiredError,
   SnapshotNotFoundError,
 } from "../../domain/archive";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 // Runtime request/response schemas for /api/v1/archive/*. Field shapes mirror the plain
 // TS types in `@cloudable/contracts`'s `domains/archive.ts` — kept in sync by hand (see
@@ -21,6 +23,7 @@ const ApprovalStatus = Schema.Literal("pending", "approved", "rejected", "expire
 
 const MachineIdPath = Schema.Struct({ machineId: Schema.String });
 const SnapshotIdPath = Schema.Struct({ snapshotId: Schema.String });
+const ApprovalIdPath = Schema.Struct({ approvalId: Schema.String });
 
 const ArchiveMachinePayload = Schema.Struct({
   approvalId: Schema.optional(Schema.String),
@@ -33,10 +36,11 @@ const ArchiveMachineSuccess = Schema.Struct({
   retentionExpiresAt: Schema.String,
 });
 
+// `requestedByPersonId` is gone from the wire — derived from
+// `CurrentUserTag.personId` in the handler, not trusted from the client.
 const RestoreSnapshotPayload = Schema.Struct({
   mode: RestoreMode,
   targetMachineId: Schema.String,
-  requestedByPersonId: Schema.String,
   reason: Schema.String,
   confirmSecretBindings: Schema.optional(Schema.Boolean),
 });
@@ -85,7 +89,6 @@ const CostEstimateSuccess = Schema.Struct({
 });
 
 const ListSnapshotsUrlParams = Schema.Struct({
-  orgId: Schema.String,
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.NumberFromString),
 });
@@ -116,6 +119,21 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .addError(MachineNotFoundError, { status: 404 })
       .addError(SnapshotExpiredError, { status: 409 })
       .addError(FullRestoreNotAcknowledgedError, { status: 400 })
+      .addError(RestoreNotApprovedError, { status: 403 }),
+  )
+  .add(
+    // Resumes a `"pending"` restore (single/dual approval mode) once its
+    // approval has since been decided — same "sync" shape elevations and
+    // offboarding already use (see `domain/archive/restore.ts`'s
+    // `resumeRestore` doc comment). A foreign or non-restore approval id
+    // resolves to `InvalidRestoreApprovalError`, the same non-leaking shape
+    // used everywhere else.
+    HttpApiEndpoint.post("resumeRestore", "/api/v1/archive/restores/:approvalId/sync")
+      .setPath(ApprovalIdPath)
+      .addSuccess(RestoreSnapshotSuccess)
+      .addError(InvalidRestoreApprovalError, { status: 404 })
+      .addError(SnapshotNotFoundError, { status: 404 })
+      .addError(SnapshotExpiredError, { status: 409 })
       .addError(RestoreNotApprovedError, { status: 403 }),
   )
   .add(
@@ -153,4 +171,5 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .setPath(SnapshotIdPath)
       .addSuccess(CostEstimateSuccess)
       .addError(SnapshotNotFoundError, { status: 404 }),
-  );
+  )
+  .middleware(CurrentUserAuthentication);

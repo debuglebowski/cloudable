@@ -84,11 +84,11 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     });
   }
 
-  const approvalStatusOf = (approvalId: string) =>
+  const approvalStatusOf = (approvalId: string, orgId: string) =>
     run(
       Effect.gen(function* () {
         const approvalService = yield* ApprovalService;
-        return yield* approvalService.status(approvalId);
+        return yield* approvalService.status(approvalId, orgId);
       }),
     );
 
@@ -114,7 +114,7 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     expect(result.approvalStatus).toBe("pending");
     expect(result.restored).toBe(false);
 
-    const approval = await approvalStatusOf(result.approvalId);
+    const approval = await approvalStatusOf(result.approvalId, org.id);
     expect(approval.mode).toBe("dual");
     expect(approval.requiredApprovals).toBe(2);
     expect(approval.status).toBe("pending");
@@ -137,7 +137,7 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     );
 
     expect(result.approvalStatus).toBe("pending");
-    const approval = await approvalStatusOf(result.approvalId);
+    const approval = await approvalStatusOf(result.approvalId, org.id);
     expect(approval.mode).toBe("single");
     expect(approval.requiredApprovals).toBe(1);
   });
@@ -185,17 +185,17 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     await run(
       Effect.gen(function* () {
         const approvalService = yield* ApprovalService;
-        yield* approvalService.decide(result.approvalId, approverA, "approved");
+        yield* approvalService.decide(result.approvalId, org.id, approverA, "approved");
       }),
     );
-    expect((await approvalStatusOf(result.approvalId)).status).toBe("pending");
+    expect((await approvalStatusOf(result.approvalId, org.id)).status).toBe("pending");
 
     await run(
       Effect.gen(function* () {
         const approvalService = yield* ApprovalService;
-        yield* approvalService.decide(result.approvalId, approverB, "approved");
+        yield* approvalService.decide(result.approvalId, org.id, approverB, "approved");
       }),
     );
-    expect((await approvalStatusOf(result.approvalId)).status).toBe("approved");
+    expect((await approvalStatusOf(result.approvalId, org.id)).status).toBe("approved");
   });
 });

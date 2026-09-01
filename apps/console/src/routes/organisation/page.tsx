@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { Building2 } from "lucide-react";
+import { Fragment, useState } from "react";
 
-import { CONTROL_STATUS_LABELS, useControlMap, useSetControlOverride } from "@/api/compliance";
 import {
   APPROVAL_ACTION_LABELS,
   APPROVAL_ACTION_TYPES,
@@ -11,18 +11,16 @@ import {
   useUpdateOrgSettings,
 } from "@/api/organisation";
 import { LineageGutter } from "@/components/lineage-gutter";
+import { PageHeaderIcon } from "@/components/page-header-icon";
 import { SettingRow } from "@/components/setting-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-
-import { OrgPackageManifestCard } from "./org-package-manifest-card";
+import { Label } from "@/components/ui/label";
 
 import {
   ApprovalModeDialog,
-  ControlOverrideDialog,
   LoggingTierDialog,
-  RegionDefaultDialog,
   RetentionDaysDialog,
   RetentionLocationDialog,
 } from "./setting-dialogs";
@@ -34,22 +32,16 @@ function formatMode(mode: string): string {
 export function OrganisationPage() {
   const { data: settings, isLoading } = useOrgSettings();
   const update = useUpdateOrgSettings();
-  const { data: controlMap, isLoading: controlMapLoading } = useControlMap();
-  const setControlOverride = useSetControlOverride();
 
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [editingApproval, setEditingApproval] = useState<ApprovalActionType | null>(null);
   const [editingLoggingTier, setEditingLoggingTier] = useState(false);
   const [editingRetentionDays, setEditingRetentionDays] = useState(false);
   const [editingRetentionLocation, setEditingRetentionLocation] = useState(false);
-  const [editingControlId, setEditingControlId] = useState<string | null>(null);
-  const [editingRegionDefault, setEditingRegionDefault] = useState(false);
 
   if (isLoading || !settings) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
-
-  const editingControl = controlMap?.controls.find((control) => control.id === editingControlId);
 
   const displayedName = nameDraft ?? settings.name;
   const trimmedNameDraft = nameDraft?.trim() ?? null;
@@ -61,12 +53,15 @@ export function OrganisationPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold">Organisation</h1>
-        <p className="max-w-prose text-sm text-muted-foreground">
-          Org-wide identity and defaults. These settings are policy, inherited down through
-          templates and machines (docs/spec.md §5).
-        </p>
+      <div className="flex items-center gap-3">
+        <PageHeaderIcon icon={Building2} />
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold">Organisation</h1>
+          <p className="max-w-prose text-sm text-muted-foreground">
+            Org-wide identity and defaults. These settings are policy, inherited down through
+            templates and machines (docs/spec.md §5).
+          </p>
+        </div>
       </div>
 
       <Card>
@@ -75,9 +70,7 @@ export function OrganisationPage() {
         </CardHeader>
         <CardContent className="flex items-end gap-2">
           <div className="flex flex-1 flex-col gap-1">
-            <label htmlFor="org-name" className="text-sm font-medium">
-              Name
-            </label>
+            <Label htmlFor="org-name">Name</Label>
             <Input
               id="org-name"
               value={displayedName}
@@ -106,13 +99,23 @@ export function OrganisationPage() {
         </CardHeader>
         <CardContent className="flex flex-col">
           {APPROVAL_ACTION_TYPES.map((actionType) => (
-            <SettingRow
-              key={actionType}
-              label={APPROVAL_ACTION_LABELS[actionType]}
-              value={formatMode(settings.approvalModes[actionType])}
-              source="org"
-              onOverride={() => setEditingApproval(actionType)}
-            />
+            <Fragment key={actionType}>
+              <SettingRow
+                label={APPROVAL_ACTION_LABELS[actionType]}
+                value={formatMode(settings.approvalModes[actionType])}
+                source="org"
+                onOverride={() => setEditingApproval(actionType)}
+              />
+              {settings.approvalOverrides[actionType] > 0 && (
+                <div className="-mt-1 pb-2.5">
+                  <LineageGutter
+                    source="org"
+                    viewing="org"
+                    overriddenBelow={settings.approvalOverrides[actionType]}
+                  />
+                </div>
+              )}
+            </Fragment>
           ))}
         </CardContent>
       </Card>
@@ -129,13 +132,6 @@ export function OrganisationPage() {
             source="org"
             onOverride={() => setEditingLoggingTier(true)}
           />
-          {settings.loggingTierOverrideCount > 0 && (
-            <LineageGutter
-              source="org"
-              viewing="org"
-              overriddenBelow={settings.loggingTierOverrideCount}
-            />
-          )}
           <ul className="flex flex-col gap-1 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
             <li>Tier 1 — metadata only: provisioning, auth, lifecycle.</li>
             <li>Tier 2 — session-level: connections, elevations, config changes.</li>
@@ -174,62 +170,6 @@ export function OrganisationPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Region</CardTitle>
-          <CardDescription>
-            Default Azure region for a new machine that doesn't specify one (docs/spec.md §5).
-            Resolved live at creation time through the same org → template → machine chain as every
-            other setting — never copied onto the machine as a wizard prefill.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col">
-          <SettingRow
-            label="Default region"
-            value={settings.regionDefault}
-            source="org"
-            onOverride={() => setEditingRegionDefault(true)}
-          />
-        </CardContent>
-      </Card>
-
-      <OrgPackageManifestCard />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Compliance controls</CardTitle>
-          <CardDescription>
-            Cloudable computes a default status per control from its registered compliance checks;
-            override one for your own framework or auditor (docs/spec.md §19).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col">
-          {controlMapLoading || !controlMap ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : (
-            controlMap.controls.map((control) => (
-              <SettingRow
-                key={control.id}
-                label={`${control.label} (${control.framework})`}
-                value={
-                  CONTROL_STATUS_LABELS[control.status] + (control.overridden ? " — override" : "")
-                }
-                source="org"
-                // Out-of-scope controls (overridable: false) never show an Override
-                // action — the backend always rejects an override attempt for one, so
-                // offering the button here would just be a guaranteed-to-fail affordance.
-                // Spread rather than `onOverride={... : undefined}`: the prop is optional
-                // under `exactOptionalPropertyTypes`, which means "present or absent", not
-                // "present, possibly with value undefined".
-                {...(control.overridable
-                  ? { onOverride: () => setEditingControlId(control.id) }
-                  : {})}
-              />
-            ))
-          )}
-        </CardContent>
-      </Card>
-
       <ApprovalModeDialog
         actionType={editingApproval}
         currentMode={editingApproval ? settings.approvalModes[editingApproval] : undefined}
@@ -264,26 +204,6 @@ export function OrganisationPage() {
         onOpenChange={setEditingRetentionLocation}
         onSave={async (location) => {
           await update.mutateAsync({ retentionLocation: location });
-        }}
-      />
-      <RegionDefaultDialog
-        open={editingRegionDefault}
-        currentRegion={settings.regionDefault}
-        onOpenChange={setEditingRegionDefault}
-        onSave={async (region) => {
-          await update.mutateAsync({ regionDefault: region });
-        }}
-      />
-      <ControlOverrideDialog
-        controlId={editingControl ? editingControl.id : null}
-        controlLabel={editingControl?.label ?? ""}
-        currentStatus={editingControl?.status ?? "manual_action_required"}
-        currentlyOverridden={editingControl?.overridden ?? false}
-        onOpenChange={(open) => {
-          if (!open) setEditingControlId(null);
-        }}
-        onSave={async (controlId, status) => {
-          await setControlOverride.mutateAsync({ controlId, status });
         }}
       />
     </div>

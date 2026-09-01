@@ -26,7 +26,6 @@ export interface MachineSummary {
 }
 
 export interface CreateMachineRequest {
-  orgId: string;
   name: string;
   /** Optional — omitted, the control plane resolves the org's configured default region
    * instead of the caller always supplying one (docs/inheritance.md, spec.md §5). */
@@ -36,13 +35,12 @@ export interface CreateMachineRequest {
   /** A machine always has exactly one owner, always a person (CLAUDE.md invariant #3). */
   ownerPersonId: string;
   templateId?: string | null;
-  /** Who is creating this machine, for event attribution. Omit for a system-initiated create. */
-  actorPersonId?: string;
 }
 
-export interface ListMachinesRequest extends PaginatedRequest {
-  orgId: string;
-}
+// `orgId`/`actorPersonId` are gone from every request below: the server
+// derives both from the caller's session (`CurrentUserTag`), not the wire —
+// see `apps/control-plane/src/http/middleware/auth.ts`.
+export type ListMachinesRequest = PaginatedRequest;
 
 export interface ListMachinesResponse {
   items: MachineSummary[];
@@ -101,7 +99,6 @@ export interface MachineDetail extends MachineSummary {
 export interface UpdateMachinePackagesRequest {
   upserts?: PackageManifestEntry[];
   removals?: string[];
-  actorPersonId?: string;
 }
 
 export interface UpdateMachinePackagesResponse {

@@ -1,5 +1,9 @@
+import { Lock, Network, Plug, UserCog } from "lucide-react";
+
 import { pickConnected, useDisconnectIntegration, useIntegrations } from "@/api/integrations";
 import type { Integration } from "@/api/integrations";
+import { PageHeaderIcon } from "@/components/page-header-icon";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import {
   CloudConnectDialog,
@@ -17,24 +21,24 @@ export function IntegrationsPage() {
   const cloud = pickConnected(integrations, "cloud");
   const secretStore = pickConnected(integrations, "secret_store");
 
+  // Confirmation now lives in IntegrationCard itself (an AlertDialog behind the
+  // Disconnect button) — this just forwards the already-confirmed mutation.
   function handleDisconnect(integration: Integration) {
-    const confirmed = window.confirm(
-      "Disconnect this integration? Cloudable stops using it immediately — nothing is deleted on the other side.",
-    );
-    if (confirmed) {
-      disconnect.mutate(integration.id);
-    }
+    disconnect.mutate(integration);
   }
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold">Integrations</h1>
-        <p className="max-w-prose text-sm text-muted-foreground">
-          Federation only — no cloud credential is ever stored (invariant 1), and Cloudable is the
-          secrets injector, never the vault (invariant 8). Every form below takes non-secret
-          pointers only.
-        </p>
+      <div className="flex items-center gap-3">
+        <PageHeaderIcon icon={Plug} />
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold">Integrations</h1>
+          <p className="max-w-prose text-sm text-muted-foreground">
+            Federation only — no cloud credential is ever stored (invariant 1), and Cloudable is the
+            secrets injector, never the vault (invariant 8). Every form below takes non-secret
+            pointers only.
+          </p>
+        </div>
       </div>
 
       {isLoading ? (
@@ -43,6 +47,7 @@ export function IntegrationsPage() {
         <div className="grid gap-4 md:grid-cols-3">
           <IntegrationCard
             title="Identity provider"
+            icon={UserCog}
             description="SCIM 2.0 + OIDC against any IdP. Optional — without one, People stays Cloudable's fully editable system of record (docs/spec.md §3)."
             integration={idp}
             connectForm={<IdpConnectDialog />}
@@ -60,6 +65,7 @@ export function IntegrationsPage() {
 
           <IntegrationCard
             title="Cloud provider"
+            icon={Network}
             description="Workload identity federation to Azure. Cloudable never receives or stores a client secret — only these three identifiers (docs/spec.md §10)."
             integration={cloud}
             connectForm={<CloudConnectDialog />}
@@ -67,24 +73,16 @@ export function IntegrationsPage() {
           >
             {(integration) => (
               <dl className="flex flex-col gap-1 font-mono text-xs text-muted-foreground">
-                <div className="flex justify-between gap-2">
-                  <dt>Tenant</dt>
-                  <dd className="truncate">{integration.config.tenantId}</dd>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <dt>Application</dt>
-                  <dd className="truncate">{integration.config.applicationId}</dd>
-                </div>
-                <div className="flex justify-between gap-2">
-                  <dt>Subscription</dt>
-                  <dd className="truncate">{integration.config.subscriptionId}</dd>
-                </div>
+                <IdentifierRow label="Tenant" value={integration.config.tenantId} />
+                <IdentifierRow label="Application" value={integration.config.applicationId} />
+                <IdentifierRow label="Subscription" value={integration.config.subscriptionId} />
               </dl>
             )}
           </IntegrationCard>
 
           <IntegrationCard
             title="Secret store"
+            icon={Lock}
             description="Cloudable fetches and injects at runtime; it never stores a secret value (docs/spec.md §12). Point at your own vault."
             integration={secretStore}
             connectForm={<SecretStoreConnectDialog />}
@@ -103,6 +101,21 @@ export function IntegrationsPage() {
           </IntegrationCard>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A truncated identifier that's still fully readable on hover — these are the exact three values a customer's security team would need to verify the federation is scoped correctly, so silently clipping one with no way to see the rest isn't acceptable here. */
+function IdentifierRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <dt>{label}</dt>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <dd className="truncate">{value}</dd>
+        </TooltipTrigger>
+        <TooltipContent className="font-mono">{value}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

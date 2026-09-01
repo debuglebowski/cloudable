@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export interface LegalHoldDialogProps {
   snapshot: ArchivedSnapshot;
@@ -79,9 +80,9 @@ export function LegalHoldDialog({ snapshot }: LegalHoldDialogProps) {
         )}
 
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="legal-hold-reason" className="text-sm font-medium">
+          <Label htmlFor="legal-hold-reason">
             Reason <Badge variant="outline">required</Badge>
-          </label>
+          </Label>
           <Input
             id="legal-hold-reason"
             value={reason}

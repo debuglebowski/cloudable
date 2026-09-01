@@ -15,6 +15,7 @@ import { NotificationsGroup } from "./routes/notifications";
 import { OffboardingGroup } from "./routes/offboarding";
 import { OrganisationGroup } from "./routes/organisation";
 import { PeopleGroup } from "./routes/people";
+import { TunnelGroup } from "./routes/tunnel";
 import { TunnelSignalGroup } from "./routes/tunnel-signal";
 import { UpgradeGroup } from "./routes/upgrade";
 
@@ -42,6 +43,7 @@ export class Api extends HttpApi.make("cloudable")
   .add(OrganisationGroup)
   .add(IntegrationsGroup)
   .add(TunnelSignalGroup)
+  .add(TunnelGroup)
   .add(NotificationsGroup) {}
 // Feature units: import your HttpApiGroup and append `.add(YourGroup)` to the chain above.
 // Never reorder existing `.add()` calls.

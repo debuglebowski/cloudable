@@ -12,6 +12,7 @@ import {
   PersonNotFoundError,
   SelfOwnedMachineError,
 } from "../../domain/elevation/types";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 // Kept separate from `http/handlers/elevations.ts` (which implements the
 // handlers) rather than combined into one file: `http/api.ts` imports
@@ -24,8 +25,12 @@ export const ElevationStatusSchema = Schema.Literal("requested", "granted", "exp
 
 export const ElevationIdPath = Schema.Struct({ id: Schema.String });
 
+// `personId` is gone from the wire — derived from `CurrentUserTag.personId`
+// in the handler. This is the person REQUESTING elevated access (the admin
+// wanting to connect to a machine they don't own), not a client-supplied
+// identity — otherwise a caller could request elevation attributed to
+// someone else.
 export const RequestElevationPayload = Schema.Struct({
-  personId: Schema.String,
   machineId: Schema.String,
   level: ElevationLevelSchema,
   reason: Schema.String,
@@ -44,7 +49,6 @@ export const ElevationSchema = Schema.Struct({
   status: ElevationStatusSchema,
 });
 
-export const ListElevationsUrlParams = Schema.Struct({ orgId: Schema.String });
 export const ElevationListItemSchema = Schema.Struct({
   id: Schema.String,
   personId: Schema.String,
@@ -76,10 +80,9 @@ export function toWire(elevation: Elevation): typeof ElevationSchema.Type {
 
 /**
  * `/api/v1/elevations` — request, view, manually sync a pending approval,
- * and manually expire an elevation (spec §15). No auth middleware is wired
- * up anywhere in the app yet (see `http/middleware/auth.ts`), so `personId`
- * is taken from the request body rather than a session — same as every
- * other unauthenticated endpoint in this skeleton.
+ * and manually expire an elevation (spec §15). Org- and person-scoped via
+ * the real session (`CurrentUserTag`, see `http/middleware/auth.ts` and
+ * `http/api.ts`'s `.middleware(...)` on this group).
  */
 export const ElevationsGroup = HttpApiGroup.make("elevations")
   .add(
@@ -120,7 +123,7 @@ export const ElevationsGroup = HttpApiGroup.make("elevations")
   )
   .add(
     HttpApiEndpoint.get("list", "/api/v1/elevations")
-      .setUrlParams(ListElevationsUrlParams)
       .addSuccess(ListElevationsResponse)
       .addError(ElevationInfraError, { status: 500 }),
-  );
+  )
+  .middleware(CurrentUserAuthentication);

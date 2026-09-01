@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { ulid } from "ulid";
+import type { Db } from "../../db/layer";
 import { ApprovalService } from "../../services/ApprovalService";
 import { EventBus, type EventBusError } from "../../services/EventBus";
 import { type RestoreMode, resolveRestoreApprovalFloor } from "./approval-escalation";
@@ -7,11 +8,18 @@ import {
   ApprovalRequestFailedError,
   ArchiveDbError,
   FullRestoreNotAcknowledgedError,
+  InvalidRestoreApprovalError,
   RestoreNotApprovedError,
   SnapshotExpiredError,
 } from "./errors";
 import { makeEnvelope } from "./events";
-import { fetchMachine, fetchSnapshot } from "./queries";
+import {
+  fetchMachine,
+  fetchSnapshot,
+  findRestoreRequest,
+  markRestoreRequestCompleted,
+  saveRestoreRequest,
+} from "./queries";
 import { getSnapshotSubState, restoreUnavailableReason } from "./sub-state";
 
 export type { RestoreMode } from "./approval-escalation";
@@ -92,11 +100,12 @@ export const restoreSnapshot = (input: RestoreSnapshotInput) =>
     const approvalService = yield* ApprovalService;
 
     const snapshot = yield* fetchSnapshot(input.snapshotId);
-    // Validate the restore target exists up front — otherwise an approval could be
-    // requested (and, once ApprovalService is real, granted) for a typo'd or
-    // nonexistent machine, with `snapshot.restored` written against a machine that was
-    // never real.
-    yield* fetchMachine(input.targetMachineId);
+    // Validate the restore target exists, and belongs to the SAME org as the snapshot,
+    // up front — otherwise an approval could be requested (and, once ApprovalService is
+    // real, granted) for a typo'd, nonexistent, or cross-tenant machine, with
+    // `snapshot.restored` written against a machine that was never real or never should
+    // have been reachable from this snapshot at all.
+    yield* fetchMachine(input.targetMachineId, snapshot.orgId);
 
     if (getSnapshotSubState(snapshot) === "expired") {
       const expiredAt = snapshot.expiredAt as Date;
@@ -147,6 +156,24 @@ export const restoreSnapshot = (input: RestoreSnapshotInput) =>
     }
 
     if (approvalResult.status === "pending") {
+      // Persisted so `resumeRestore` can pick this up once the approval is
+      // later decided — the approval row alone can't carry `snapshotId`/
+      // `mode`/`confirmSecretBindings` (see `restoreRequests`'s own doc
+      // comment in `packages/schema`).
+      yield* saveRestoreRequest({
+        approvalId: approvalResult.id,
+        snapshotId: snapshot.id,
+        targetMachineId: input.targetMachineId,
+        mode: input.mode,
+        confirmSecretBindings: input.confirmSecretBindings ?? false,
+        requestedByPersonId: input.requestedByPersonId,
+        reason: input.reason,
+      }).pipe(
+        Effect.mapError(
+          (cause) => new ArchiveDbError({ reason: `save_restore_request_failed: ${cause.reason}` }),
+        ),
+      );
+
       return {
         snapshotId: snapshot.id,
         targetMachineId: input.targetMachineId,
@@ -182,6 +209,116 @@ export const restoreSnapshot = (input: RestoreSnapshotInput) =>
       targetMachineId: input.targetMachineId,
       mode: input.mode,
       approvalId: approvalResult.id,
+      approvalStatus: "approved",
+      restored: true,
+    } satisfies RestoreSnapshotResult;
+  });
+
+/**
+ * Picks up a restore left `"pending"` by `restoreSnapshot` once its approval
+ * has since been decided — same "sync" shape `ElevationService.syncApproval`
+ * already uses for the identical problem (an approval decided later, out of
+ * band from the original request call). A no-op while still pending, and
+ * idempotent once completed (a repeated call finds `restoreRequests.completedAt`
+ * already set and returns the prior result rather than re-publishing
+ * `snapshot.restored`).
+ *
+ * `approvalId` alone can't identify what to resume — see `restoreRequests`'s
+ * own doc comment — so a missing `restore_requests` row collapses to the
+ * same `InvalidRestoreApprovalError` as a foreign/nonexistent approval id:
+ * never leak which case it is.
+ */
+export const resumeRestore = (
+  approvalId: string,
+  orgId: string,
+): Effect.Effect<
+  RestoreSnapshotResult,
+  InvalidRestoreApprovalError | RestoreNotApprovedError | ArchiveDbError,
+  Db | EventBus | ApprovalService
+> =>
+  Effect.gen(function* () {
+    const approvalService = yield* ApprovalService;
+
+    const restoreRequest = yield* findRestoreRequest(approvalId).pipe(
+      Effect.mapError(
+        (cause) => new ArchiveDbError({ reason: `find_restore_request_failed: ${cause.reason}` }),
+      ),
+    );
+    if (!restoreRequest) {
+      return yield* Effect.fail(new InvalidRestoreApprovalError({ approvalId }));
+    }
+
+    if (restoreRequest.completedAt) {
+      return {
+        snapshotId: restoreRequest.snapshotId,
+        targetMachineId: restoreRequest.targetMachineId,
+        mode: restoreRequest.mode,
+        approvalId,
+        approvalStatus: "approved",
+        restored: true,
+      } satisfies RestoreSnapshotResult;
+    }
+
+    // `orgId` here is the authenticated caller's own org — a restore request
+    // for another org's approval must fail the same way a nonexistent one
+    // does, never distinguishably.
+    const approvalResult = yield* approvalService
+      .status(approvalId, orgId)
+      .pipe(Effect.catchAll(() => Effect.fail(new InvalidRestoreApprovalError({ approvalId }))));
+
+    if (approvalResult.status === "pending") {
+      return {
+        snapshotId: restoreRequest.snapshotId,
+        targetMachineId: restoreRequest.targetMachineId,
+        mode: restoreRequest.mode,
+        approvalId,
+        approvalStatus: "pending",
+        restored: false,
+      } satisfies RestoreSnapshotResult;
+    }
+
+    if (approvalResult.status === "rejected" || approvalResult.status === "expired") {
+      return yield* Effect.fail(
+        new RestoreNotApprovedError({
+          snapshotId: restoreRequest.snapshotId,
+          approvalId,
+          status: approvalResult.status,
+        }),
+      );
+    }
+
+    const eventBus = yield* EventBus;
+    yield* publishOrDie(
+      eventBus.publish([
+        {
+          ...makeEnvelope({
+            orgId,
+            machineId: restoreRequest.targetMachineId,
+            correlationId: ulid(),
+            actorType: "person",
+            actorId: restoreRequest.requestedByPersonId,
+          }),
+          type: "snapshot.restored",
+          payload: {
+            mode: restoreRequest.mode,
+            targetMachineId: restoreRequest.targetMachineId,
+            approvalId,
+          },
+        },
+      ]),
+    );
+    yield* markRestoreRequestCompleted(approvalId).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ArchiveDbError({ reason: `mark_restore_request_completed_failed: ${cause.reason}` }),
+      ),
+    );
+
+    return {
+      snapshotId: restoreRequest.snapshotId,
+      targetMachineId: restoreRequest.targetMachineId,
+      mode: restoreRequest.mode,
+      approvalId,
       approvalStatus: "approved",
       restored: true,
     } satisfies RestoreSnapshotResult;
