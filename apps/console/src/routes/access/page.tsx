@@ -144,10 +144,12 @@ export function AccessPage() {
   const [sessionToTerminate, setSessionToTerminate] = useState<ActiveSession | null>(null);
 
   return (
-    // h-full min-h-0: each of the 3 sections below is flex-1, so together
-    // they split whatever height `main` actually has left under the header
-    // instead of each capping at a flat vh fraction — see machines-page.tsx's
-    // comment on the same pattern for a single-table page.
+    // h-full min-h-0: the Tabs block below is flex-1, so it fills whatever
+    // height `main` actually has left under the header instead of capping at
+    // a flat vh fraction — see machines-page.tsx's comment on the same
+    // pattern for a single-table page. Certificates/sessions/elevations were
+    // three stacked sections before; a tab only makes sense for one row of
+    // "who currently has access" at a time, not all three glued together.
     <div className="flex h-full min-h-0 flex-col gap-8">
       <div className="flex shrink-0 flex-col gap-1">
         <h1 className="text-xl font-semibold">Access</h1>
@@ -169,230 +171,227 @@ export function AccessPage() {
         </TabsList>
 
         <TabsContent value="certificates" className="mt-0 flex min-h-0 flex-1 flex-col">
-        {/* Shadow on all three of this page's table wrappers, not a bare
+          {/* Shadow on all three of this page's table wrappers, not a bare
             bg-card box — see Card's own comment for the exact value and why
             there's no border alongside it. */}
-        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
-          <Table containerClassName="h-full max-h-none">
-            <TableHeader>
-              <TableRow>
-                <Th icon={User}>Person</Th>
-                <Th icon={Server}>Machine scope</Th>
-                <Th icon={FingerprintGlyph}>Fingerprint</Th>
-                <Th icon={Calendar}>Issued</Th>
-                <Th icon={Clock}>Expires</Th>
-                <TableHead className="text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {certificatesQuery.isLoading && (
-                <SkeletonRows
-                  widths={["w-24", "w-28", "w-40", "w-32", "w-32", "w-16"]}
-                  lastColRight
-                />
-              )}
-              {certificatesQuery.isError && (
-                <TableStatusRow colSpan={6} tone="error">
-                  Couldn't load certificates.
-                </TableStatusRow>
-              )}
-              {certificatesQuery.data?.length === 0 && (
-                <TableStatusRow colSpan={6}>No live certificates.</TableStatusRow>
-              )}
-              {certificatesQuery.data?.map((cert) => (
-                <TableRow key={cert.id}>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <PersonAvatar name={cert.personName} />
-                      {cert.personName}
-                    </div>
-                  </TableCell>
-                  <TableCell>{cert.machineScopeLabel}</TableCell>
-                  <TableCell>
-                    <FingerprintCell fingerprint={cert.fingerprint} />
-                  </TableCell>
-                  <TableCell>{formatDateTime(cert.issuedAt)}</TableCell>
-                  <TableCell>{formatDateTime(cert.expiresAt)}</TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCertificateToRevoke(cert)}
-                    >
-                      Revoke
-                    </Button>
-                  </TableCell>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+            <Table containerClassName="h-full max-h-none">
+              <TableHeader>
+                <TableRow>
+                  <Th icon={User}>Person</Th>
+                  <Th icon={Server}>Machine scope</Th>
+                  <Th icon={FingerprintGlyph}>Fingerprint</Th>
+                  <Th icon={Calendar}>Issued</Th>
+                  <Th icon={Clock}>Expires</Th>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
-
-      <section className="flex min-h-0 flex-1 flex-col gap-2">
-        <h2 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Active sessions
-        </h2>
-        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
-          <Table containerClassName="h-full max-h-none">
-            <TableHeader>
-              <TableRow>
-                <Th icon={User}>Person</Th>
-                <Th icon={Server}>Machine</Th>
-                <Th icon={Terminal}>Method</Th>
-                <Th icon={UserCog}>OS user</Th>
-                <Th icon={Clock}>Started</Th>
-                <TableHead className="text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sessionsQuery.isLoading && (
-                <SkeletonRows
-                  widths={["w-24", "w-24", "w-16", "w-16", "w-32", "w-20"]}
-                  lastColRight
-                />
-              )}
-              {sessionsQuery.isError && (
-                <TableStatusRow colSpan={6} tone="error">
-                  Couldn't load active sessions.
-                </TableStatusRow>
-              )}
-              {sessionsQuery.data?.length === 0 && (
-                <TableStatusRow colSpan={6}>No active sessions.</TableStatusRow>
-              )}
-              {sessionsQuery.data?.map((session) => (
-                <TableRow key={session.id}>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <PersonAvatar name={session.personName} />
-                      {session.personName}
-                    </div>
-                  </TableCell>
-                  <TableCell>{session.machineName}</TableCell>
-                  <TableCell className="capitalize">{session.method}</TableCell>
-                  <TableCell className="font-mono text-xs">{session.osUser}</TableCell>
-                  <TableCell>{formatDateTime(session.startedAt)}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {session.method === "terminal" && (
-                        // Rejoining an existing session, not a fresh mint — the attach
-                        // endpoint replays the token already stored on this row (see
-                        // `api/access.ts`'s `useMintSession` doc comment), so this is a
-                        // plain link straight to the terminal page, no dialog needed.
-                        <Button type="button" variant="outline" size="sm" asChild>
-                          <Link
-                            to="/access/sessions/$sessionId/terminal"
-                            params={{ sessionId: session.id }}
-                          >
-                            Connect
-                          </Link>
-                        </Button>
-                      )}
+              </TableHeader>
+              <TableBody>
+                {certificatesQuery.isLoading && (
+                  <SkeletonRows
+                    widths={["w-24", "w-28", "w-40", "w-32", "w-32", "w-16"]}
+                    lastColRight
+                  />
+                )}
+                {certificatesQuery.isError && (
+                  <TableStatusRow colSpan={6} tone="error">
+                    Couldn't load certificates.
+                  </TableStatusRow>
+                )}
+                {certificatesQuery.data?.length === 0 && (
+                  <TableStatusRow colSpan={6}>No live certificates.</TableStatusRow>
+                )}
+                {certificatesQuery.data?.map((cert) => (
+                  <TableRow key={cert.id}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <PersonAvatar name={cert.personName} />
+                        {cert.personName}
+                      </div>
+                    </TableCell>
+                    <TableCell>{cert.machineScopeLabel}</TableCell>
+                    <TableCell>
+                      <FingerprintCell fingerprint={cert.fingerprint} />
+                    </TableCell>
+                    <TableCell>{formatDateTime(cert.issuedAt)}</TableCell>
+                    <TableCell>{formatDateTime(cert.expiresAt)}</TableCell>
+                    <TableCell className="text-right">
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        onClick={() => setSessionToTerminate(session)}
+                        onClick={() => setCertificateToRevoke(cert)}
                       >
-                        Terminate
+                        Revoke
                       </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
 
-      <section className="flex min-h-0 flex-1 flex-col gap-2">
-        <div className="flex shrink-0 items-center justify-between gap-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Elevation requests
-          </h2>
-          <RequestElevationDialog />
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
-          <Table containerClassName="h-full max-h-none">
-            <TableHeader>
-              <TableRow>
-                <Th icon={User}>Person</Th>
-                <Th icon={Server}>Machine</Th>
-                <Th icon={Gauge}>Level</Th>
-                <Th icon={MessageSquare}>Reason</Th>
-                <Th icon={Tag}>Status</Th>
-                <Th icon={Clock}>Expires</Th>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {elevationsQuery.isLoading && (
-                <SkeletonRows widths={["w-24", "w-24", "w-16", "w-48", "w-16", "w-32", "w-20"]} />
-              )}
-              {elevationsQuery.isError && (
-                <TableStatusRow colSpan={7} tone="error">
-                  Couldn't load elevation requests.
-                </TableStatusRow>
-              )}
-              {elevationsQuery.data?.length === 0 && (
-                <TableStatusRow colSpan={7}>No elevation requests.</TableStatusRow>
-              )}
-              {elevationsQuery.data?.map((elevation: ElevationGrant) => (
-                <TableRow key={elevation.id}>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <PersonAvatar name={elevation.personName} />
-                      {elevation.personName}
-                    </div>
-                  </TableCell>
-                  <TableCell>{elevation.machineName}</TableCell>
-                  <TableCell>
-                    <Badge variant={ELEVATION_LEVEL_BADGE_VARIANT[elevation.level]}>
-                      {ELEVATION_LEVEL_LABEL[elevation.level]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell title={elevation.reason}>{truncateReason(elevation.reason)}</TableCell>
-                  <TableCell>
-                    <Badge variant={ELEVATION_STATUS_BADGE_VARIANT[elevation.status]}>
-                      {elevation.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {elevation.expiresAt ? formatDateTime(elevation.expiresAt) : "—"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {elevation.status === "requested" && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={syncElevation.isPending}
-                          onClick={() => syncElevation.mutate(elevation.id)}
-                        >
-                          Sync
-                        </Button>
-                      )}
-                      {elevation.status === "granted" && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          disabled={expireElevation.isPending}
-                          onClick={() => expireElevation.mutate(elevation.id)}
-                        >
-                          Expire
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
+        <TabsContent value="sessions" className="mt-0 flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+            <Table containerClassName="h-full max-h-none">
+              <TableHeader>
+                <TableRow>
+                  <Th icon={User}>Person</Th>
+                  <Th icon={Server}>Machine</Th>
+                  <Th icon={Terminal}>Method</Th>
+                  <Th icon={UserCog}>OS user</Th>
+                  <Th icon={Clock}>Started</Th>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </section>
+              </TableHeader>
+              <TableBody>
+                {sessionsQuery.isLoading && (
+                  <SkeletonRows
+                    widths={["w-24", "w-24", "w-16", "w-16", "w-32", "w-20"]}
+                    lastColRight
+                  />
+                )}
+                {sessionsQuery.isError && (
+                  <TableStatusRow colSpan={6} tone="error">
+                    Couldn't load active sessions.
+                  </TableStatusRow>
+                )}
+                {sessionsQuery.data?.length === 0 && (
+                  <TableStatusRow colSpan={6}>No active sessions.</TableStatusRow>
+                )}
+                {sessionsQuery.data?.map((session) => (
+                  <TableRow key={session.id}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <PersonAvatar name={session.personName} />
+                        {session.personName}
+                      </div>
+                    </TableCell>
+                    <TableCell>{session.machineName}</TableCell>
+                    <TableCell className="capitalize">{session.method}</TableCell>
+                    <TableCell className="font-mono text-xs">{session.osUser}</TableCell>
+                    <TableCell>{formatDateTime(session.startedAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {session.method === "terminal" && (
+                          // Rejoining an existing session, not a fresh mint — the attach
+                          // endpoint replays the token already stored on this row (see
+                          // `api/access.ts`'s `useMintSession` doc comment), so this is a
+                          // plain link straight to the terminal page, no dialog needed.
+                          <Button type="button" variant="outline" size="sm" asChild>
+                            <Link
+                              to="/access/sessions/$sessionId/terminal"
+                              params={{ sessionId: session.id }}
+                            >
+                              Connect
+                            </Link>
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSessionToTerminate(session)}
+                        >
+                          Terminate
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="elevations" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+          <div className="flex shrink-0 justify-end">
+            <RequestElevationDialog />
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+            <Table containerClassName="h-full max-h-none">
+              <TableHeader>
+                <TableRow>
+                  <Th icon={User}>Person</Th>
+                  <Th icon={Server}>Machine</Th>
+                  <Th icon={Gauge}>Level</Th>
+                  <Th icon={MessageSquare}>Reason</Th>
+                  <Th icon={Tag}>Status</Th>
+                  <Th icon={Clock}>Expires</Th>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {elevationsQuery.isLoading && (
+                  <SkeletonRows widths={["w-24", "w-24", "w-16", "w-48", "w-16", "w-32", "w-20"]} />
+                )}
+                {elevationsQuery.isError && (
+                  <TableStatusRow colSpan={7} tone="error">
+                    Couldn't load elevation requests.
+                  </TableStatusRow>
+                )}
+                {elevationsQuery.data?.length === 0 && (
+                  <TableStatusRow colSpan={7}>No elevation requests.</TableStatusRow>
+                )}
+                {elevationsQuery.data?.map((elevation: ElevationGrant) => (
+                  <TableRow key={elevation.id}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <PersonAvatar name={elevation.personName} />
+                        {elevation.personName}
+                      </div>
+                    </TableCell>
+                    <TableCell>{elevation.machineName}</TableCell>
+                    <TableCell>
+                      <Badge variant={ELEVATION_LEVEL_BADGE_VARIANT[elevation.level]}>
+                        {ELEVATION_LEVEL_LABEL[elevation.level]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell title={elevation.reason}>
+                      {truncateReason(elevation.reason)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={ELEVATION_STATUS_BADGE_VARIANT[elevation.status]}>
+                        {elevation.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {elevation.expiresAt ? formatDateTime(elevation.expiresAt) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {elevation.status === "requested" && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={syncElevation.isPending}
+                            onClick={() => syncElevation.mutate(elevation.id)}
+                          >
+                            Sync
+                          </Button>
+                        )}
+                        {elevation.status === "granted" && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={expireElevation.isPending}
+                            onClick={() => expireElevation.mutate(elevation.id)}
+                          >
+                            Expire
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+      </Tabs>
 
       <RevokeCertificateDialog
         certificate={certificateToRevoke}
