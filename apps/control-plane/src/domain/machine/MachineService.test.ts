@@ -1,14 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import net from "node:net";
-import * as schema from "@cloudable/schema";
-import { orgs, people, settingValues } from "@cloudable/schema";
-import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
+import type * as schema from "@cloudable/schema";
+import { machines, orgs, people, settingValues } from "@cloudable/schema";
+import { inArray } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
-import postgres from "postgres";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
+import { connectAndMigrate } from "../../test-support/db";
 import { MachineService } from "./MachineService";
 import { DEFAULT_REGION, DEFAULT_REGION_KEY, resolveOrgDefaultRegion } from "./region-policy";
 
@@ -41,14 +41,15 @@ const { hostname, port } = new URL(databaseUrl);
 const postgresReachable = await isReachable(hostname, Number(port) || 5432, 2000);
 
 describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABASE_URL)", () => {
-  let sql: ReturnType<typeof postgres>;
+  let close: () => Promise<void>;
   let db: PostgresJsDatabase<typeof schema>;
   let TestLayer: Layer.Layer<MachineService>;
+  const createdOrgIds: string[] = [];
 
   beforeAll(async () => {
-    sql = postgres(databaseUrl);
-    db = drizzle(sql, { schema });
-    await migrate(db, { migrationsFolder: "../../packages/schema/migrations" });
+    const conn = await connectAndMigrate(databaseUrl);
+    db = conn.db;
+    close = conn.close;
 
     const dbLayer = Layer.succeed(Db, db);
     TestLayer = MachineService.Default.pipe(
@@ -63,7 +64,19 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
   });
 
   afterAll(async () => {
-    await sql.end();
+    // `close` (and `db`) are only ever assigned once `connectAndMigrate` in
+    // `beforeAll` actually succeeds — if it threw (e.g. a real migration
+    // failure, possibly from a concurrent worktree's own unrelated run),
+    // both stay unset, and running any of this would just throw a second,
+    // more confusing error on top of the real one.
+    if (!close) return;
+    if (createdOrgIds.length > 0) {
+      await db.delete(settingValues).where(inArray(settingValues.scopeId, createdOrgIds));
+      await db.delete(machines).where(inArray(machines.orgId, createdOrgIds));
+      await db.delete(people).where(inArray(people.orgId, createdOrgIds));
+      await db.delete(orgs).where(inArray(orgs.id, createdOrgIds));
+    }
+    await close();
   });
 
   const run = <A, E>(effect: Effect.Effect<A, E, MachineService>) =>
@@ -75,6 +88,7 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
       .values({ name: `org-${crypto.randomUUID()}` })
       .returning();
     if (!org) throw new Error("seed failed");
+    createdOrgIds.push(org.id);
     return org;
   }
 
