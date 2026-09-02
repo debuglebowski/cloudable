@@ -12,6 +12,7 @@ import {
   getMachine,
   getMachineDrift,
   getMachineManifest,
+  isMachineStale,
   machinesKeys,
   overrideManifestEntry,
 } from "@/api/machines";
@@ -293,11 +294,16 @@ export function MachineDetailPage() {
                   label="Last verified"
                   value={
                     machine.lastVerifiedAt ? (
-                      // Same single-timestamp simplification as the list page — see its comment.
-                      <Freshness
-                        occurredAt={machine.lastVerifiedAt}
-                        recordedAt={machine.lastVerifiedAt}
-                      />
+                      <span className="inline-flex items-center gap-1.5">
+                        {/* Same single-timestamp simplification as the list page — see its comment. */}
+                        <Freshness
+                          occurredAt={machine.lastVerifiedAt}
+                          recordedAt={machine.lastVerifiedAt}
+                        />
+                        {isMachineStale(machine.lastVerifiedAt) && (
+                          <Badge variant="stale">Not reporting</Badge>
+                        )}
+                      </span>
                     ) : (
                       <span className="text-xs text-muted-foreground">not yet verified</span>
                     )

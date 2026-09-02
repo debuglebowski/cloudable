@@ -33,6 +33,17 @@ const NOT_EXPECTED_TO_REPORT_STATES = ["archived_restorable", "archived_expired"
 const thresholdCutoff = (now: Date): Date =>
   new Date(now.getTime() - REPORTING_STALENESS_THRESHOLD_MINUTES * 60_000);
 
+/** Single-row version of this check's own staleness rule, for callers (like
+ * `TunnelServer.mintSession`) that already have one fetched machine row in
+ * hand rather than querying many at once. */
+export function isMachineStale(
+  machine: { lastVerifiedAt: Date | null; createdAt: Date },
+  now: Date,
+): boolean {
+  const cutoff = thresholdCutoff(now);
+  return machine.lastVerifiedAt ? machine.lastVerifiedAt < cutoff : machine.createdAt < cutoff;
+}
+
 /**
  * Check #6 — "Machines are reporting". Deliberately NOT an event query: it
  * reads current state directly off the `machines` table,

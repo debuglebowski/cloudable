@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { listMachines, machinesKeys } from "@/api/machines";
+import { isMachineStale, listMachines, machinesKeys } from "@/api/machines";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { Freshness } from "@/components/freshness";
 import { OsIcon } from "@/components/os-icon";
@@ -246,13 +246,18 @@ export function MachinesPage() {
                   </TableCell>
                   <TableCell>
                     {machine.lastVerifiedAt ? (
-                      // Machine model only has one timestamp (`lastVerifiedAt`); Freshness
-                      // wants an occurred/recorded pair to flag late reporting, so both are
-                      // set to the same value here — a deliberate simplification, not real data.
-                      <Freshness
-                        occurredAt={machine.lastVerifiedAt}
-                        recordedAt={machine.lastVerifiedAt}
-                      />
+                      <span className="inline-flex items-center gap-1.5">
+                        {/* Machine model only has one timestamp (`lastVerifiedAt`); Freshness
+                         * wants an occurred/recorded pair to flag late reporting, so both are
+                         * set to the same value here — a deliberate simplification, not real data. */}
+                        <Freshness
+                          occurredAt={machine.lastVerifiedAt}
+                          recordedAt={machine.lastVerifiedAt}
+                        />
+                        {isMachineStale(machine.lastVerifiedAt) && (
+                          <Badge variant="stale">Not reporting</Badge>
+                        )}
+                      </span>
                     ) : (
                       <span className="text-xs text-muted-foreground">not yet verified</span>
                     )}
