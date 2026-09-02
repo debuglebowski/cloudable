@@ -1,0 +1,24 @@
+{
+  "name": "cloudable-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -b",
+    "test:unit": "exit 0",
+    "test:integration": "exit 0",
+    "dev": "exit 0",
+    "build": "exit 0"
+  },
+  "dependencies": {
+    "@cloudable/schema": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
