@@ -34,8 +34,7 @@ export interface RestoreSnapshotInput {
    * Required — and must be `true` — when `mode` is `"full"`: an explicit, separate
    * acknowledgement that this restore reattaches secret bindings. Never defaulted and
    * never inferred from the other fields, so a data/config restore can never silently
-   * escalate into reattaching secrets (spec §14 "Never silently reattach secret
-   * bindings"). Ignored for `mode: "data"` / `"config"`.
+   * escalate into reattaching secrets. Ignored for `mode: "data"` / `"config"`.
    */
   confirmSecretBindings?: boolean | undefined;
 }
@@ -63,8 +62,8 @@ const publishOrDie = <A>(
   );
 
 /**
- * Restores a snapshot under mode-escalating approval (spec §13/§14). Signature is exact
- * and load-bearing — units 16/18 call this directly.
+ * Restores a snapshot under mode-escalating approval. Signature is exact
+ * and load-bearing — callers rely on it directly.
  *
  * Validates both that the snapshot exists and that `targetMachineId` refers to a real
  * machine before requesting approval — an approval should never be requested (and,

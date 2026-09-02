@@ -1,5 +1,5 @@
 /**
- * Wire types for the tunnel daemon's relay protocol (spec §8.2/§11.1) — the
+ * Wire types for the tunnel daemon's relay protocol — the
  * one shared envelope both legs of the relay speak:
  *
  *   browser <--wss--> control plane <--wss--> tunnel daemon (on the VM)
@@ -19,8 +19,8 @@ export type TunnelFrame =
   | { kind: "attach"; sessionId: string; sessionToken: string; cols: number; rows: number }
   /** Daemon -> control plane -> browser: the session token verified, a PTY is live. */
   | { kind: "attached"; sessionId: string }
-  /** Daemon -> control plane -> browser: the session token failed verification (spec §11.1's
-   * "validate the signature on every session, including under load") — nothing was spawned. */
+  /** Daemon -> control plane -> browser: the session token failed verification
+   * ("validate the signature on every session, including under load") — nothing was spawned. */
   | { kind: "attach_rejected"; sessionId: string; reason: string }
   /** Either direction: raw terminal bytes, base64-encoded. */
   | { kind: "data"; sessionId: string; dataBase64: string }

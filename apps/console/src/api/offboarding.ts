@@ -5,8 +5,8 @@ import { machinesKeys } from "./machines";
 import { peopleKeys } from "./people";
 
 /**
- * Real `POST /api/v1/offboarding` (spec §14: revoke live certificates, stop
- * every owned machine, clear ownership, archive each machine starting its
+ * Real `POST /api/v1/offboarding` (revokes live certificates, stops
+ * every owned machine, clears ownership, archives each machine starting its
  * retention clock). `personId` is the only body field the server still
  * trusts — `requestedByPersonId` is derived from the caller's session (see
  * `apps/control-plane/src/http/middleware/auth.ts`).

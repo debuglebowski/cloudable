@@ -7,7 +7,7 @@ import { queryEvidencePage } from "./service";
 
 /**
  * `GET /api/v1/evidence` — a page of the normalised evidence projection for
- * the caller's own org, newest first (spec §18).
+ * the caller's own org, newest first.
  *
  * DB failures are turned into defects (`Effect.orDie`) rather than a typed
  * endpoint error: this mirrors the placeholder posture of

@@ -10,7 +10,7 @@ export const accessRoute = createRoute({
   component: AccessPage,
 });
 
-/** Web terminal (spec §11.1) — attaches to a minted session by id. See
+/** Web terminal — attaches to a minted session by id. See
  * `session-terminal-page.tsx`'s own doc comment for the two real entry points. */
 export const accessSessionTerminalRoute = createRoute({
   getParentRoute: () => rootRoute,

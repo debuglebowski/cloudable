@@ -12,8 +12,8 @@ export interface SignRequest {
 }
 
 /**
- * Port for signing operations (CLAUDE.md invariant #9: "The CA private key
- * never enters the control plane. Sign operations only."). Implementations
+ * Port for signing operations. The CA private key
+ * never enters the control plane — sign operations only. Implementations
  * hold key material themselves and expose only sign/publicKey — never a
  * raw key export.
  */

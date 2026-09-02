@@ -72,8 +72,8 @@ export const TunnelLive = HttpApiBuilder.group(Api, "tunnel", (handlers) =>
 );
 
 /**
- * The tunnel daemon's persistent outbound connection (spec §8.2's "reverse tunnel over an
- * outbound connection"): one websocket per machine, bearer-authenticated the same way as
+ * The tunnel daemon's persistent outbound connection — a reverse tunnel over an
+ * outbound connection: one websocket per machine, bearer-authenticated the same way as
  * every other agent-protocol call, registered in `TunnelRegistry` for the lifetime of the
  * connection. Raw-mounted via `HttpApiBuilder.Router.use(...)` — an `HttpApiEndpoint` can't
  * model a websocket upgrade at all (see `agent-wake.ts`'s doc comment, the only other place
@@ -188,7 +188,7 @@ export const TunnelConnectRouteLive = HttpApiBuilder.Router.use((router) =>
 );
 
 /**
- * The browser's leg (spec §11.1) — the other half of the relay `TunnelConnectRouteLive`
+ * The browser's leg — the other half of the relay `TunnelConnectRouteLive`
  * above carries. Raw-mounted the same way (an `HttpApiEndpoint`/`.middleware()` can't model
  * a websocket upgrade), so `CurrentUserAuthentication` is run manually: `yield*` the
  * middleware tag itself to get the per-request authentication Effect, then `yield*` that.

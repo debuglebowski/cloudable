@@ -55,7 +55,7 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
         // scoped fetch is the tenant-ownership gate in front of it.
         yield* fetchMachine(path.machineId, currentUser.orgId);
         yield* archiveMachine(path.machineId, payload.approvalId);
-        // Spec §8.2/§11.1: archiving a machine directly (not via offboarding) must also kill
+        // Archiving a machine directly (not via offboarding) must also kill
         // any live terminal/SSH session on it, not just block new ones — same requirement
         // `domain/offboarding/offboardPerson.ts`'s own archive step now honors.
         const tunnelRelay = yield* TunnelRelay;

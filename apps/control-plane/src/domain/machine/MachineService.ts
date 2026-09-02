@@ -40,8 +40,8 @@ export interface CreateMachineInput {
   name: string;
   // Optional (and nullable, same convention as `templateId`/`actorPersonId`
   // below — `exactOptionalPropertyTypes` needs a real "not provided" value
-  // callers can pass through explicitly): spec.md §5 lists region among
-  // every setting that must flow org → machine through `resolveSetting()`,
+  // callers can pass through explicitly): region is
+  // among every setting that must flow org → machine through `resolveSetting()`,
   // not a caller-supplied value. Omitted/null/blank, `create` resolves the
   // org's configured default region (`region-policy.ts`) rather than
   // requiring the caller to always supply one. An explicit value is still
@@ -51,7 +51,7 @@ export interface CreateMachineInput {
   region?: string | null;
   sizeSku: string;
   image: string;
-  // Required, never null: CLAUDE.md invariant #3 — a machine always has
+  // Required, never null — a machine always has
   // exactly one owner, always a person. An owner is cleared only later, by
   // offboarding an existing machine, never omitted at creation.
   ownerPersonId: string;
@@ -75,7 +75,7 @@ export interface MachineDetail extends MachineRow {
   manifest: ResolvedManifestEntry[];
   persistentPaths: ResolvedMachineSetting<PersistentPaths>;
   accessMethodsEnabled: ResolvedMachineSetting<AccessMethodsEnabled>;
-  /** The tier actually in effect for this machine — its own override if it has one, else the org default (spec §17, docs/inheritance.md). */
+  /** The tier actually in effect for this machine — its own override if it has one, else the org default. */
   loggingTier: EffectiveLoggingTier;
 }
 
@@ -134,7 +134,7 @@ const notFound = (machineId: string) =>
   });
 
 /**
- * Business logic for the machine desired-state API — spec.md §5-7. Wraps
+ * Business logic for the machine desired-state API. Wraps
  * `machines`/`machine_packages` DB access and `EventBus` publication behind
  * a single `Effect.Service` (one real implementation, not a swappable
  * port — same shape as `ApprovalService`). HTTP handlers
@@ -253,7 +253,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         // 404'd — the seed script's own comment on this exact problem is
         // now obsolete, see its updated note. A provisioning failure here
         // doesn't fail the whole create — the row already exists and
-        // "machines are never deleted" (CLAUDE.md invariant #6); it lands
+        // machines are never deleted; it lands
         // in the pre-existing `"error"` state instead, same as a failed
         // reconcile/upgrade would report.
         //

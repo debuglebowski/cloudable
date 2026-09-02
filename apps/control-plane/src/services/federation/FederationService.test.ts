@@ -79,9 +79,9 @@ const makeRecordingDbLive = (rows: Array<{ id: string; config: unknown }>) => {
 };
 
 describe("FederationService.federateCredential — tenant isolation", () => {
-  // This is the canonical test named in docs/spec.md §10: "A trust rule
-  // naming only the issuer accepts a token minted for any customer. This is
-  // a single-line mistake with cross-tenant consequences." A token minted
+  // The canonical case: a trust rule naming only the issuer accepts a token
+  // minted for any customer — a single-line mistake with cross-tenant
+  // consequences. A token minted
   // for tenant A's subject must be REJECTED by a trust rule bound to tenant
   // B's subject, even though both trust the same issuer.
   test("rejects tenant A's token against a trust rule bound to tenant B's subject, same issuer", async () => {

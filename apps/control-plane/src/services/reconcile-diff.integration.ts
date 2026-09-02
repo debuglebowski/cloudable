@@ -134,14 +134,14 @@ describe("runDiffAndPublish (integration)", () => {
       });
 
       // Calling again with an identical report is a no-op reconcile: zero
-      // additional events (spec §24 "What is not an event").
+      // additional events.
       await Effect.runPromise(Effect.provide(runDiffAndPublish(machine.id, reported), TestLayer));
       const rowsAfterNoop = await db.select().from(events).where(eq(events.machineId, machine.id));
       expect(rowsAfterNoop).toHaveLength(2);
     } finally {
       // Test-fixture cleanup only — never how production code touches the
-      // append-only `events` table (that's exclusively `EventBus.publish`,
-      // invariant #2). This just keeps the shared dev database tidy across
+      // append-only `events` table (that's exclusively `EventBus.publish`).
+      // This just keeps the shared dev database tidy across
       // repeated runs of this integration test.
       await db.delete(events).where(eq(events.machineId, machine.id));
       await db.delete(machines).where(eq(machines.id, machine.id));

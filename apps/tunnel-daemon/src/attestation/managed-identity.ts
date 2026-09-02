@@ -1,5 +1,5 @@
-// Azure Instance Metadata Service (IMDS) — docs/spec.md §9: "Azure managed
-// identity — token from IMDS, verified against the published key set."
+// Azure Instance Metadata Service (IMDS): the managed-identity attestation
+// method — a token from IMDS, verified against the published key set.
 //
 // IMDS (`169.254.169.254`) is a link-local address only reachable from
 // inside an Azure VM, so it cannot be hit from this sandbox/CI. The base URL
@@ -33,7 +33,7 @@ export interface AcquireManagedIdentityCredentialOptions {
  * Fetches an OAuth2 access token from IMDS for the VM's managed identity.
  * Returns the raw access token string — the opaque credential the
  * control-plane-side `AttestationMethod` port's `verifyCredential` expects
- * (docs/spec.md §9: "both taking opaque strings").
+ * ("both taking opaque strings").
  */
 export async function acquireManagedIdentityCredential(
   options: AcquireManagedIdentityCredentialOptions = {},
@@ -70,11 +70,11 @@ export async function acquireManagedIdentityCredential(
  * from, so `{ method, acquireCredential }` is this unit's best-effort guess
  * at that shape — a plain object rather than an Effect `Context.Tag`,
  * since the agent (unlike the control plane) does not depend on `effect` at
- * all (docs/spec.md §25: "stdlib-equivalent HTTP, one JWT library, no
+ * all ("stdlib-equivalent HTTP, one JWT library, no
  * framework" — kept thin deliberately). Reconcile at merge if unit 3's
  * dispatcher expects a different shape.
  *
- * Bare metal (spec §9's third, unimplemented `AttestationMethod`) would plug
+ * Bare metal (the third, unimplemented `AttestationMethod`) would plug
  * in here the same way: `{ method: "bare_metal", acquireCredential }`
  * reading from wherever a bare-metal box's credential material lives — no
  * change to the orchestrator's dispatch needed.

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// In-process registry of live tunnel connections (spec §8.2/§11.1). This is
+// In-process registry of live tunnel connections. This is
 // the piece that closes the exact gap an earlier audit of this codebase
 // found: `TunnelServer.endSession`/`terminateSessionsForMachine` (unmodified
 // by this file) only ever touch the `sessions` DB row — nothing before this
@@ -165,8 +165,8 @@ export class TunnelRegistry extends Effect.Service<TunnelRegistry>()("TunnelRegi
         yield* deregisterRelay(sessionId);
       });
 
-    /** Ends every live session on `machineId` — used for policy-triggered termination (spec
-     * §8.2: "must terminate live sessions on policy change") and by `deregisterDaemon` when
+    /** Ends every live session on `machineId` — used for policy-triggered termination
+     * (must terminate live sessions on policy change) and by `deregisterDaemon` when
      * the daemon's own connection drops. */
     const closeAllForMachine = (machineId: string, reason: string): Effect.Effect<void> =>
       Effect.gen(function* () {

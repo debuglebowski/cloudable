@@ -2,7 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 
 /**
- * The control agent protocol (spec §23): attest, poll, report — one
+ * The control agent protocol: attest, poll, report — one
  * `HttpApiGroup` mounted at `/api/v1/agent`. Handler implementations live
  * in `../handlers/agent-protocol.ts`, kept separate so this file (imported
  * by both `../api.ts` and the handlers file) never has to import `Api`

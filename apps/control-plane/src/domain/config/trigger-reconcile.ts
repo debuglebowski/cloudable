@@ -18,14 +18,13 @@ export interface TriggerReconcileResult {
 }
 
 /**
- * The confirmation-gated action that marks a machine for reconciliation
- * (docs/spec.md §16 / §10: "Reconcile is the only operation that mutates a
- * machine, and it is confirmation-gated").
+ * The confirmation-gated action that marks a machine for reconciliation —
+ * the only operation that mutates a machine, and it is confirmation-gated.
  *
  * This does NOT reconcile the machine itself — it only bumps
- * `machines.desiredStateVersion`, the version/ETag unit 3's agent poll
+ * `machines.desiredStateVersion`, the version/ETag the agent poll
  * endpoint compares against to know there is new desired state to fetch.
- * The actual apply-on-next-poll behavior belongs to unit 1/3's reconcile
+ * The actual apply-on-next-poll behavior belongs to the reconcile
  * loop and poll endpoint; this function's only job is the confirmation gate
  * plus the version bump those units read.
  */

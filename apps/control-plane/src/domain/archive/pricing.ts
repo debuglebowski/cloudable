@@ -1,6 +1,5 @@
 /**
- * BYOC cost estimate (spec §14 "BYOC cost", CLAUDE.md invariant-adjacent "Not in v1:
- * billing" — "a rough sizing estimate at creation is fine — do not call it billing").
+ * BYOC cost estimate ("a rough sizing estimate at creation is fine — do not call it billing").
  *
  * An archived snapshot is a real Azure disk snapshot billed to the customer by Azure
  * directly for the hold period. This module produces a rough, clearly-labeled

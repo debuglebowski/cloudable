@@ -1,14 +1,14 @@
 # Agents
 
 Two separate daemons run on a Cloudable machine. Different trust levels,
-different failure domains (spec §8). This doc covers the **control agent**
-in full — it's this repo's `apps/agent` — and the **tunnel daemon** at
-spec-level detail only; nothing in `apps/agent` implements it.
+different failure domains. This doc covers the **control agent**
+in full — it's this repo's `apps/agent` — and the **tunnel daemon** at a
+high level only; nothing in `apps/agent` implements it.
 
 ## Control agent
 
 Systemd service (`apps/agent/systemd/cloudable-agent.service`), pull-only,
-no inbound access ever (invariant #7). One binary, compiled per-arch via
+no inbound access ever. One binary, compiled per-arch via
 `bun build --compile` (`apps/agent/package.json`'s `build`/`build:arm64`).
 
 On boot it attests its identity, then loops: poll desired state, reconcile
@@ -17,7 +17,7 @@ locally, report observed state, sleep, repeat.
 ### Attestation
 
 An `AttestationMethod` port (`apps/control-plane/src/services/attestation/AttestationMethod.ts`)
-with two operations, both on opaque strings (spec §9):
+with two operations, both on opaque strings:
 
 ```ts
 interface AttestationMethod {
@@ -28,7 +28,7 @@ interface AttestationMethod {
 ```
 
 **Join tokens** (`JoinTokenAttestation.ts`) are the first-class implementation
-here — not a fallback (spec §9) — used by local development, testing, and
+here — not a fallback — used by local development, testing, and
 bare metal (bare metal is another provider implementation, not a special
 case: it has no IMDS to hand it a managed-identity token, so it attests the
 same way a dev machine does). A join token is a pre-shared secret an org
@@ -58,7 +58,7 @@ structured) specifically so that could be true.
 (`AttestationError`, `reason: "malformed_credential" | "invalid_signature"`),
 never a generic crash. The HTTP layer (`apps/control-plane/src/http/handlers/agent-protocol.ts`)
 turns that into a 401 (`AttestRejected`) and always emits
-`agent.attestation_failed` — per spec §23, this is one of the two event
+`agent.attestation_failed` — this is one of the two event
 types the control plane emits itself rather than deriving from agent-
 reported state, because the control plane is the party doing the
 rejecting. A credential that verifies cryptographically but names a
@@ -67,8 +67,8 @@ rejected the same way, for the same reason: the signature only proves the
 *credential* is genuine, not that acting on its claim is still valid.
 
 Since a rejected credential might not decode at all, there's often no real
-org to attribute the failure event to. `events.org_id` is `NOT NULL`
-(invariant/spec §24), so a fully undecodable credential's failure event
+org to attribute the failure event to. `events.org_id` is `NOT NULL`,
+so a fully undecodable credential's failure event
 uses a documented all-zero UUID sentinel rather than skipping the event —
 see `UNATTRIBUTED_ORG_ID` in `agent-protocol.ts`. A credential with a valid
 *shape* but wrong signature still gets attributed to its claimed org —
@@ -93,7 +93,7 @@ a `/poll` or `/report` call comes back `401`.
 
 ### The four protocol operations
 
-One `HttpApiGroup` (`agent-protocol`, `/api/v1/agent/*`, spec §23):
+One `HttpApiGroup` (`agent-protocol`, `/api/v1/agent/*`):
 
 | Operation | Method | Notes |
 |---|---|---|
@@ -114,7 +114,7 @@ manifest lands.
 
 **Report** persists `machines.last_verified_at` and derives events
 *server-side* from the observed-state diff — the agent never submits audit
-events (invariant #12/spec §23): a user with root on their own machine
+events: a user with root on their own machine
 could otherwise author their own audit history, and they're exactly the
 person the compliance checks exist to catch. Today that derivation is
 intentionally simple:
@@ -123,10 +123,10 @@ intentionally simple:
 - Otherwise, an **in-memory**, per-process diff of `installedPackages` /
   `openPorts` / `configState.runningAccessMethods` against the previous
   report → `machine.state_reported` if anything changed, nothing if it
-  didn't (a no-op reconcile is not an event — spec §24).
+  didn't (a no-op reconcile is not an event).
   `configState` is the "config state" half of "installed packages and
-  config state" (spec §8.1): narrow and cheap-to-observe today — just
-  which access methods (spec §11) the agent found an actually-running
+  config state": narrow and cheap-to-observe today — just
+  which access methods the agent found an actually-running
   process for, e.g. a web terminal — see `packages/contracts/src/domains/
   agent-protocol.ts`'s `ConfigState` doc comment.
 
@@ -165,7 +165,7 @@ still a stub, so there's nothing yet to notify a machine about), so the
 channel is wired end-to-end but currently idle.
 
 `apps/agent/src/wake.ts`'s `connectWake` is the agent side: it dials out
-(invariant #7 — the control plane only ever sends on a connection the
+(the control plane only ever sends on a connection the
 agent already opened) with the cached bearer token, and reconnects with
 the same full-jitter backoff as the poll/report loop on any drop.
 `poll-report-loop.ts` wires its `onPullNow` callback into the sleep
@@ -200,16 +200,16 @@ long-polled continuously by `apps/agent/src/tunnel/signal-listener.ts`.
 Its only job: tell a machine's
 agent *"session `<id>` is waiting, connect now"* or *"session `<id>`,
 stop"* — the minimal signal needed once a browser mints a web-terminal/SSH
-session (`TunnelServer.mintSession`, `docs/access.md` §4) or a policy
+session (`TunnelServer.mintSession`, see `docs/access.md`) or a policy
 disables access (`TunnelServer.terminateSessionsForMachine`), so that fact
 actually reaches a connected agent instead of only updating the `sessions`
 DB row.
 
-**Why a new channel and not a repurposed `wake`:** spec §8.1 pins `wake` to
-"exactly one message, pull now, with no payload — it cannot carry
-instructions," and its whole purpose is accelerating the control agent's
+**Why a new channel and not a repurposed `wake`:** `wake` is pinned to
+exactly one message, pull now, with no payload — it cannot carry
+instructions — and its whole purpose is accelerating the control agent's
 *own* desired-state poll cycle above — an unrelated concern to "which
-session is waiting." Spec §23's agent protocol is also pinned to exactly
+session is waiting." The agent protocol is also pinned to exactly
 four operations; there's no fifth slot in that group for "attach to
 session X." Bolting a session id onto `wake` would violate both. See
 `apps/control-plane/src/tunnel/signal.ts`'s own header comment for the
@@ -267,7 +267,7 @@ schedule:
 backoff = random(0, min(cap, base * 2^attempt))
 ```
 
-**Exponential with full jitter, ~10 min cap** (spec §8.1), implemented in
+**Exponential with full jitter, ~10 min cap**, implemented in
 `apps/agent/src/backoff.ts` and unit-tested for the invariants that matter:
 stays within `[0, min(cap, base·2^attempt)]`, and is genuinely randomized
 rather than a fixed delay. The jitter is the part that matters, not the
@@ -283,26 +283,26 @@ since retrying with the same bad credential will never succeed.
 
 ### Sleeping machines and `last_verified_at`
 
-**Never fake liveness** (spec §8.1). A machine that's been asleep — or an
+**Never fake liveness.** A machine that's been asleep — or an
 agent that's been stopped, or a machine that's lost network — simply stops
 reporting. `machines.last_verified_at` only ever advances when `/report`
 actually runs, so it's a true "last time we heard from this machine," not
 a heartbeat interpolated between real reports. The "machines are
 reporting" compliance check reads this column directly rather than the
 event stream, because a healthy, silent machine emits no events at all —
-absence of an event is not itself an event (spec §24).
+absence of an event is not itself an event.
 
 When a long-asleep machine wakes and reports again, `occurred_at` on any
 event that report derives (e.g. `machine.state_reported`) reflects when
 the agent actually observed the change, which can be well before
 `recorded_at` (when the control plane wrote it down) — the reason those
-two timestamps are separate columns at all (spec §24).
+two timestamps are separate columns at all.
 
 ### Tampering
 
 Root users can stop the agent, patch it, or feed it false state — this is
 inherent to giving someone administrative access to their own machine, and
-is not itself a compliance failure (spec §23). A stopped agent stops
+is not itself a compliance failure. A stopped agent stops
 reporting, which fails the "machines are reporting" check on its own,
 without anyone having to notice the tampering specifically. A patched
 agent that misreports state is still checkable by contradiction against
@@ -310,17 +310,17 @@ what the cloud provider independently reports — out of scope for this
 unit, but the reason report bodies are treated as claims to verify (e.g.
 against the `machines` row) rather than facts to trust outright.
 
-## Tunnel daemon (spec §8.2 — build in progress, `apps/tunnel-daemon`)
+## Tunnel daemon (build in progress, `apps/tunnel-daemon`)
 
 The second agent. A genuinely separate app from `apps/agent` (different
-trust level, different failure domain, per spec §8) — copy-and-adapt from
+trust level, different failure domain) — copy-and-adapt from
 `apps/agent`'s conventions (`config.ts`, `backoff.ts`,
 `attestation.ts`-style bearer caching), never a shared import, for the same
 reason the two are separate processes at all.
 
 - A reverse tunnel over an outbound connection, carrying interactive
   sessions (web terminal, SSH) to the control plane's tunnel endpoint —
-  same pull/outbound-only posture as the control agent (invariant #7).
+  same pull/outbound-only posture as the control agent.
 - **TLS pass-through by default** — the control plane does not terminate
   the session's TLS itself.
 - **Must terminate live sessions on a policy change**, not merely refuse
@@ -330,9 +330,9 @@ reason the two are separate processes at all.
 
 **Session token verification**: `packages/session-token` is a real, tested,
 framework-free package (pure function, `node:crypto` only, no `effect`
-dependency) holding the exact byte-level check spec §11.1 requires ("the
+dependency) holding the exact byte-level check required: the
 agent must validate the signature on every session, including under
-load"). `apps/control-plane/src/tunnel/session-token.ts`'s `verifySessionToken`
+load. `apps/control-plane/src/tunnel/session-token.ts`'s `verifySessionToken`
 is now a thin wrapper around it (fetches the public key via `Signer`, then
 calls the pure check) — the tunnel daemon imports the same package
 directly rather than re-deriving the check, closing the exact "two
@@ -368,4 +368,4 @@ committing to it:
   upstream. Worth filing as a Bun issue.
 
 See `docs/access.md` for the web terminal / SSH certificate model this
-daemon serves, and `docs/spec.md` §8.2/§11 for the full reasoning.
+daemon serves.

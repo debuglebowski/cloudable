@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Join-token `AttestationMethod` (spec §9): first-class, not a fallback.
+// Join-token `AttestationMethod`: first-class, not a fallback.
 // Used by local development, testing, and bare metal (bare metal is
 // another provider implementation, not a special case — it has no IMDS to
 // hand it a managed-identity token, so it authenticates the same way a dev

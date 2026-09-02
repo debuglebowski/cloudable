@@ -14,8 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 /**
- * Org-level package manifest defaults (spec.md §6, docs/inheritance.md
- * "Package manifest"). Distinct from the machine-detail page's manifest
+ * Org-level package manifest defaults (see docs/inheritance.md's
+ * "Package manifest" section). Distinct from the machine-detail page's manifest
  * editor (`routes/machines/machine-detail-page.tsx`), which only
  * *overrides* an already-resolved entry for one machine — this card is the
  * only place that creates or removes an org-scoped entry at all. A pinned
@@ -32,7 +32,7 @@ export function OrgPackageManifestCard() {
         <CardTitle>Package manifest defaults</CardTitle>
         <CardDescription>
           The org-wide default manifest. Any machine without its own entry (or override) for a
-          package resolves to what's declared here — lowest level wins (docs/spec.md §5-6).
+          package resolves to what's declared here — lowest level wins.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

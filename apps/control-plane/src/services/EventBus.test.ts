@@ -89,7 +89,7 @@ const tier2Event = (orgId: string): DomainEvent => ({
 const rowsForOrg = async (orgId: string) =>
   db.select().from(eventsTable).where(eq(eventsTable.orgId, orgId)).orderBy(asc(eventsTable.type));
 
-describe("EventBus.publish — logging tier filtering (spec §17)", () => {
+describe("EventBus.publish — logging tier filtering", () => {
   test("org at tier 1: a tier-1 event lands, a tier-2 event is dropped", async () => {
     const orgId = freshOrgId();
     await seedLoggingTier(orgId, 1);

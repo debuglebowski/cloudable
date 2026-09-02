@@ -8,8 +8,8 @@ import { Db } from "../../db/layer";
 type DbHandle = PostgresJsDatabase<typeof schema>;
 
 /**
- * Real backend for the People page (spec §20: "People is top-level and
- * fully editable" when SCIM is absent). Deliberately mirrors
+ * Real backend for the People page — People is top-level and
+ * fully editable when SCIM is absent. Deliberately mirrors
  * `apps/console/src/api/people.ts`'s mock operations exactly —
  * `addPerson`/`updatePerson`/`setPersonActive` — since that mock was
  * written against the real `people` table's actual columns from the start,
@@ -17,7 +17,7 @@ type DbHandle = PostgresJsDatabase<typeof schema>;
  *
  * Every mutation here is a no-op error, not a silent no-op, against a
  * `source: "scim"` row: once SCIM is connected, synced fields are
- * read-only and driven by the IdP (spec §3), never by this API.
+ * read-only and driven by the IdP, never by this API.
  */
 
 export type PersonRow = typeof people.$inferSelect;

@@ -29,8 +29,8 @@ const STATUS_LABEL: Record<OffboardPersonResult["status"], string> = {
 };
 
 /**
- * Approval-gated (spec §13/§14): revokes live certificates, stops every
- * machine this person owns, clears ownership, archives each one and starts
+ * Approval-gated: revokes live certificates, stops every machine this
+ * person owns, clears ownership, archives each one and starts
  * its retention clock. Distinct from "Deactivate" (which only flips
  * `people.active`) — offboarding doesn't itself deactivate the person, so
  * this dialog says so rather than implying it does.

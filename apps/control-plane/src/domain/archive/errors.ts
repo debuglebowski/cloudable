@@ -21,7 +21,7 @@ export class MachineNotFoundError extends Schema.TaggedError<MachineNotFoundErro
 ) {}
 
 /** The machine is already in an archived state — archiving is a one-way transition
- * (spec §14 "live -> archived") and is never repeated for the same machine. */
+ * ("live -> archived") and is never repeated for the same machine. */
 export class MachineAlreadyArchivedError extends Schema.TaggedError<MachineAlreadyArchivedError>()(
   "MachineAlreadyArchivedError",
   { machineId: Schema.String, state: Schema.String },
@@ -36,7 +36,7 @@ export class SnapshotNotFoundError extends Schema.TaggedError<SnapshotNotFoundEr
 
 /** Restore was attempted against a snapshot whose retention window has elapsed and
  * whose volume data was hard-deleted. Restore must be greyed out with this reason
- * shown, never just hidden (spec §14 "Archived, expired"). */
+ * shown, never just hidden ("Archived, expired"). */
 export class SnapshotExpiredError extends Schema.TaggedError<SnapshotExpiredError>()(
   "SnapshotExpiredError",
   {

@@ -7,7 +7,7 @@ import {
 } from "../../domain/people/people";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
-// Real backend for the People page (spec §20: "People is top-level and
+// Real backend for the People page ("People is top-level and
 // fully editable" when SCIM is absent). `source`/`active`/`deactivatedAt`
 // mirror `packages/schema/src/tables/person.ts` exactly.
 

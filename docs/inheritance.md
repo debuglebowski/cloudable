@@ -1,6 +1,6 @@
 # Inheritance: org → template → machine
 
-Policy inheritance and the package manifest — spec.md §5-6. Owned by unit 2 (machine desired-state
+Policy inheritance and the package manifest. Owned by unit 2 (machine desired-state
 API + package manifest); see `apps/control-plane/src/domain/machine/*`,
 `packages/schema/src/tables/{setting,machine-package}.ts`.
 
@@ -96,8 +96,8 @@ drift from it.
 
 ## The package manifest
 
-A manifest entry names a package and **optionally** pins a version (`docker`, `nodejs 20`) — spec.md
-§6. There is no dependency resolution here; that is the machine's own package manager's job. Rows
+A manifest entry names a package and **optionally** pins a version (`docker`, `nodejs 20`).
+There is no dependency resolution here; that is the machine's own package manager's job. Rows
 live in `machinePackages`, one per `(scopeType, scopeId, packageName)` (enforced by a unique index,
 `machine_packages_scope_package_idx`), which is also the upsert key `MachineService.updatePackages`
 writes against.
@@ -111,7 +111,7 @@ already scope-generic and need no changes when that lands.
 ## Pinning
 
 **An org (or, once it exists, a template) can mark an entry `pinned`.** A pinned entry cannot be
-overridden *below* its own scope — spec.md §6: *"Attempting to override one is a validation error
+overridden *below* its own scope: *"Attempting to override one is a validation error
 at edit time, not a silent no-op at reconcile."*
 
 This is enforced by `findPinConflicts()` (`apps/control-plane/src/domain/machine/manifest.ts`):
@@ -140,17 +140,17 @@ No row is written and no event is emitted when this happens — the edit fails a
 `machine_packages` write. This is deliberately **edit-time-only**: pinning does not retroactively
 change what `resolveManifest()` returns for a machine-level row that was written *before* the pin
 was set (a machine can still be resolving its own pre-existing override). Reconcile never silently
-drops such a row either (CLAUDE.md invariant #4/#5 — reconcile only closes gaps against declared
+drops such a row either (reconcile only closes gaps against declared
 state and never auto-corrects); the pin only ever blocks a *new* write attempt.
 
 ## Allowlist detection
 
 `computeUndeclaredPackages(manifest, reported)`
-(`apps/control-plane/src/domain/machine/manifest.ts`) is the pure data path behind spec.md §19's "no
+(`apps/control-plane/src/domain/machine/manifest.ts`) is the pure data path behind the "no
 undeclared software" check and the reconcile loop's removal set: given a resolved manifest and a
 list of package names the agent reported as actually installed, it returns the reported names that
 aren't declared anywhere in the chain. It has no DB or HTTP dependency and no license to act on its
-own output — per CLAUDE.md invariant #4, only the reconcile loop (unit 1) may *remove* what this
+own output — only the reconcile loop (unit 1) may *remove* what this
 function reports, and only compliance (unit 8) may *surface* it as a finding; this function itself
 only computes the set.
 

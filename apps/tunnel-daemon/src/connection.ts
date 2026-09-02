@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
-// The daemon's persistent outbound connection (spec §8.2's "reverse tunnel
+// The daemon's persistent outbound connection ("reverse tunnel
 // over an outbound connection") — one websocket to the control plane's
 // `GET /api/v1/tunnel/connect` (control-plane side built and live-verified
 // separately), multiplexing every session on this machine over it via
-// `session-manager.ts`. Never accepts inbound traffic (invariant #7): this
+// `session-manager.ts`. Never accepts inbound traffic: this
 // file only ever opens connections outward.
 //
 // `attest()`/`fullJitterBackoffMs` are the same primitives `apps/agent`'s
 // `poll-report-loop.ts` uses — same full-jitter-with-cap reconnect
-// reasoning (spec §8.1's "the failure mode is a synchronised fleet-wide
+// reasoning ("the failure mode is a synchronised fleet-wide
 // poll after a control plane outage" applies just as much to a fleet of
 // tunnel daemons all trying to reconnect at once).
 // ---------------------------------------------------------------------------

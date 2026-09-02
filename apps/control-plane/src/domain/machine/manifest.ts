@@ -35,7 +35,7 @@ export interface ResolvedManifestEntry {
 
 /**
  * Resolve the effective package manifest for a machine across the
- * org → template → machine chain (spec.md §5-6, lowest level wins).
+ * org → template → machine chain (lowest level wins).
  *
  * Deliberately does not reimplement the chain walk: each distinct
  * `packageName` across `rows` is resolved individually via
@@ -81,9 +81,9 @@ export interface PinConflict {
 const SCOPE_RANK: Record<ManifestScope, number> = { org: 0, template: 1, machine: 2 };
 
 /**
- * spec.md §6: "the organisation can mark an entry pinned. A pinned entry
+ * The organisation can mark an entry pinned. A pinned entry
  * cannot be overridden below. Attempting to override one is a validation
- * error at edit time, not a silent no-op at reconcile."
+ * error at edit time, not a silent no-op at reconcile.
  *
  * Returns one conflict per edited package name that has a pinned row at a
  * *higher* scope than `targetScope` (org/template pin blocking a machine
@@ -120,11 +120,11 @@ export function findPinConflicts(
 }
 
 /**
- * Allowlist-detection data path (spec.md §7, §19 "no undeclared software").
- * Pure and exported cleanly so unit 8's compliance check and unit 1's
+ * Allowlist-detection data path for "no undeclared software".
+ * Pure and exported cleanly so the compliance check and the
  * reconcile loop can both consume it without depending on HTTP or the DB.
  *
- * Reconcile only ever *removes* what this returns (CLAUDE.md invariant #4)
+ * Reconcile only ever *removes* what this returns
  * — this function itself does nothing but compute the set; it has no
  * knowledge of, and no license to trigger, removal.
  */

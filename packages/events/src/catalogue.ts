@@ -20,7 +20,7 @@ export type DomainEvent =
 /**
  * The full, ordered catalogue of event type names.
  *
- * This is a public interface (invariant 11): additive only, never renamed
+ * This is a public interface: additive only, never renamed
  * or removed. `__tests__/catalogue.snapshot.test.ts` snapshots this array
  * so that any rename/removal fails CI.
  */

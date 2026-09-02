@@ -1,10 +1,9 @@
 # Cloud provider authentication
 
 Workload identity federation to the customer's Azure subscription. No cloud credential is ever
-stored (invariant 1) — Cloudable runs its own OIDC issuer, mints a short-lived, per-customer-subject
+stored — Cloudable runs its own OIDC issuer, mints a short-lived, per-customer-subject
 token, and the customer's Azure AD (Entra ID) validates it against a federated identity credential
-they configure themselves. See `docs/spec.md` §10 for the reasoning; this file covers the
-implementation.
+they configure themselves.
 
 ## The flow
 
@@ -19,7 +18,7 @@ implementation.
    scoped by the custom RBAC role assigned to Cloudable's service principal.
 
 **Fully managed mode** uses a managed identity in Cloudable's own tenant instead — same
-provisioning-layer code path, it does not know the difference (spec §10).
+provisioning-layer code path, it does not know the difference.
 
 ## ⚠️ The subject binding is the tenant isolation boundary
 
@@ -134,7 +133,7 @@ OIDC token exchange. Infra-level failures (signing, persistence) come back as a 
 Reuses the `Signer` port (`apps/control-plane/src/services/Signer.ts`) that the CA/SSH-cert
 signing path also uses, under its own key id (`FEDERATION_KEY_ID = "federation-oidc-v1"`) so the
 two never collide. `Signer.local.ts` and `Signer.azure.ts` remain the only two files anywhere
-that touch raw private key material (CLAUDE.md invariant 9) — `services/federation/jwk.ts` only
+that touch raw private key material — `services/federation/jwk.ts` only
 ever parses the **public** half (the SPKI DER bytes `Signer.publicKey()` already returns) into JWK
 form for the JWKS endpoint, and `services/federation/jwt.ts` is pure base64url/JSON plumbing
 around the port's `sign`/`publicKey` methods. No JWT library is used: `alg: EdDSA` over Ed25519 is
@@ -198,7 +197,7 @@ terraform plan \
 ```
 
 Outputs the application (client) ID — combined with `tenant_id` and `subscription_id`, this is
-the three non-secret identifiers the customer gives Cloudable (spec §10). No secret is ever
+the three non-secret identifiers the customer gives Cloudable. No secret is ever
 produced.
 
 **Bicep** (the one-click alternative): see the header comment in
@@ -211,7 +210,6 @@ primary customer-facing format per `CLAUDE.md`.)
 
 ## Related
 
-- `docs/spec.md` §10 — the reasoning behind every decision here.
 - `docs/events.md` — `cloud.credential_federated`/`cloud.credential_rejected` in the full catalogue.
 - `apps/control-plane/src/services/Signer.ts` — the signing port this unit reuses.
 - `apps/control-plane/src/services/federation/` — the implementation.

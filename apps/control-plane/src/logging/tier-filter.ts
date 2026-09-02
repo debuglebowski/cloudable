@@ -16,7 +16,7 @@ type DbHandle = PostgresJsDatabase<typeof schema>;
 
 /**
  * Filters a batch of events against each event's *effective* configured
- * logging tier (spec §17). Tier-1 events are the compliance floor and are
+ * logging tier. Tier-1 events are the compliance floor and are
  * never dropped, regardless of configuration. A tier-2/3 event is dropped
  * when the effective tier is below that event's minimum tier.
  *

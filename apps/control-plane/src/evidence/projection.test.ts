@@ -16,7 +16,7 @@ const baseRow = (overrides: Partial<RawEventRow>): RawEventRow => ({
   ...overrides,
 });
 
-describe("evidence projection (spec §18)", () => {
+describe("evidence projection", () => {
   test("projects the stable normalised shape", () => {
     const row = baseRow({
       type: "machine.created",
@@ -54,7 +54,7 @@ describe("evidence projection (spec §18)", () => {
 
     expect(record.commandRecording).toEqual({ correlationId: "corr-1", count: 42 });
     // The projection is a pointer (correlationId + count), never the raw
-    // command rows themselves (spec §17/§18 — never merged into the stream).
+    // command rows themselves — never merged into the stream.
     expect(record).not.toHaveProperty("commands");
   });
 

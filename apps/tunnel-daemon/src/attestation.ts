@@ -1,7 +1,7 @@
 // Adapted from `apps/agent/src/attestation.ts` — identical cached-bearer-session
 // pattern, calling the same `POST /api/v1/agent/attest`. Not a shared import:
-// this daemon and the control agent are deliberately independent processes
-// (spec §8), so ~80 lines duplicated here is cheaper than a cross-app
+// this daemon and the control agent are deliberately independent processes,
+// so ~80 lines duplicated here is cheaper than a cross-app
 // dependency that couples their release cadence.
 import { acquireManagedIdentityCredential } from "./attestation/managed-identity";
 import { config } from "./config";

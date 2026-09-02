@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
-// Pure, framework-free verification for Cloudable's signed session tokens
-// (spec §11.1: "The agent must validate the signature on every session,
-// including under load.").
+// Pure, framework-free verification for Cloudable's signed session tokens.
+// The agent must validate the signature on every session,
+// including under load.
 //
 // This is the ONE place the byte-level check (split -> verify signature over
 // the exact claims-segment bytes -> only then parse claims -> check expiry)

@@ -7,10 +7,10 @@ export type Elevation = typeof elevations.$inferSelect;
 export type ElevationLevel = Elevation["level"];
 export type ElevationStatus = Elevation["status"];
 
-/** Org policy for an admin connecting to a machine they do not own (spec §15). */
+/** Org policy for an admin connecting to a machine they do not own. */
 export type AdminAccessPolicy = "never" | "always" | "with_approval";
 
-/** Approval mode, per spec §13 — resolved generically per action type via `resolveSetting`. */
+/** Approval mode — resolved generically per action type via `resolveSetting`. */
 export type ApprovalMode = "none" | "single" | "dual";
 
 export interface RequestElevationInput {

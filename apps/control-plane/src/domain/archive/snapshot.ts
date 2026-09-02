@@ -29,8 +29,8 @@ const publishOrDie = <A>(
 
 /**
  * Captures a point-in-time snapshot of a machine: volume data AND its desired
- * state/configuration (`containsData`/`containsConfig` both default `true` — spec §14
- * "Snapshot contents"). Region is inherited from the machine's own region.
+ * state/configuration (`containsData`/`containsConfig` both default `true`).
+ * Region is inherited from the machine's own region.
  * `retentionDays` comes from org policy (`resolveSetting()`, default 30,
  * org-configurable — see `org-policy.ts`); `expiresAt` is computed from it. Emits
  * `snapshot.created`.
@@ -122,7 +122,7 @@ const requireNonEmptyReason = (reason: string, message: string) =>
 /**
  * Places a legal hold on a snapshot, exempting it from the expiry sweep
  * (`computeExpirySweepCandidates`) regardless of `expiresAt`. Renders as a documented
- * exception, never an error (spec §14). Emits `snapshot.legal_hold_set`.
+ * exception, never an error. Emits `snapshot.legal_hold_set`.
  */
 export const setLegalHold = (snapshotId: string, orgId: string, reason: string) =>
   Effect.gen(function* () {
@@ -224,8 +224,7 @@ export const computeExpirySweepCandidates = (now: Date = new Date(), orgId?: str
   });
 
 /**
- * The actual expiry sweep (spec §14 "Archived, expired — clock elapsed, volume data
- * hard-deleted"): flips `expiredAt` on every overdue, non-legal-hold snapshot and
+ * The actual expiry sweep: flips `expiredAt` on every overdue, non-legal-hold snapshot and
  * publishes `snapshot.expired` for each. Before this, `computeExpirySweepCandidates`
  * was a real, tested query with no caller anywhere — nothing ever actually set
  * `expiredAt`, so "Archived, expired" never happened and every snapshot past its

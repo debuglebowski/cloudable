@@ -30,7 +30,7 @@ export interface ComplianceCheck {
   /** Editorial classification of how much a failure of this check matters — see `ComplianceSeverity`. */
   severity: ComplianceSeverity;
   /**
-   * Spec §19: "a check is only asked where it makes sense" — a real, data-backed predicate,
+   * A check is only asked where it makes sense — a real, data-backed predicate,
    * not a bare `true`. Requires `Db` (widened from an earlier version of this type that
    * didn't) precisely so a check can look up whether the org has ever produced the kind of
    * data this check is about, e.g. "has this org ever used break-glass access at all" —

@@ -5,9 +5,9 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Data, Effect } from "effect";
 
 /**
- * Two more org → template → machine resolved settings from spec.md §7's
- * machine model list ("package manifest, persistent paths, access methods
- * enabled, logging tier, region, one owner") — alongside the package
+ * Two more org → template → machine resolved settings from the
+ * machine model's setting list (package manifest, persistent paths, access methods
+ * enabled, logging tier, region, one owner) — alongside the package
  * manifest (`manifest.ts`). Both follow the exact `resolveSetting()`
  * pattern `domain/archive/org-policy.ts` uses for retention/approval-mode:
  * raw rows live in the generic `settingValues` table (no dedicated table,
@@ -32,17 +32,17 @@ type DbHandle = PostgresJsDatabase<typeof schema>;
 export const PERSISTENT_PATHS_KEY = "machine.persistentPaths";
 export const ACCESS_METHODS_ENABLED_KEY = "machine.accessMethodsEnabled";
 
-/** spec.md §7: "disposable — persistent paths survive; the OS does not." */
+/** Disposable — persistent paths survive; the OS does not. */
 export type PersistentPaths = string[];
 export const DEFAULT_PERSISTENT_PATHS: PersistentPaths = [];
 
-/** spec.md §7/§11: which of the two access methods are turned on for a machine. */
+/** Which of the two access methods are turned on for a machine. */
 export interface AccessMethodsEnabled {
   webTerminal: boolean;
   ssh: boolean;
 }
 
-/** Both methods on by default — an org must deliberately disable one (spec §11: "Admin-disablable at any level"). */
+/** Both methods on by default — an org must deliberately disable one (admin-disablable at any level). */
 export const DEFAULT_ACCESS_METHODS_ENABLED: AccessMethodsEnabled = {
   webTerminal: true,
   ssh: true,

@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
-// Agent-side half of the CP -> agent tunnel-signal channel (docs/spec.md
-// §8.2/§11.1). See `apps/control-plane/src/tunnel/signal.ts`'s header
-// comment for the full design reasoning — in short: a *separate* channel
-// from `wake` (../wake.ts), because `wake`'s job (accelerate the control
-// agent's own desired-state poll) and this channel's job (tell the tunnel
-// client "session <id> is waiting, connect now" / "session <id>, stop")
-// are unrelated, and spec explicitly bars `wake` from carrying any payload
-// at all, let alone a session id.
+// Agent-side half of the CP -> agent tunnel-signal channel. See
+// `apps/control-plane/src/tunnel/signal.ts`'s header comment for the full
+// design reasoning — in short: a *separate* channel from `wake`
+// (../wake.ts), because `wake`'s job (accelerate the control agent's own
+// desired-state poll) and this channel's job (tell the tunnel client
+// "session <id> is waiting, connect now" / "session <id>, stop") are
+// unrelated, and `wake` is explicitly barred from carrying any payload at
+// all, let alone a session id.
 //
 // This is a continuous long poll, not a periodic poll like
 // `poll-report-loop.ts`'s ~30s cycle: `runTunnelSignalLoop` calls
@@ -94,9 +94,9 @@ const dispatch = (callbacks: TunnelSignalCallbacks, message: TunnelSignalMessage
  * `/api/v1/tunnel/signal`, dispatch whatever comes back (if anything), and
  * call again immediately — forever. On failure, backs off with the same
  * full-jitter strategy `poll-report-loop.ts` uses, for the identical
- * reason (spec §8.1's "the failure mode is a synchronised fleet-wide storm
- * after a control plane outage" applies here just as much as it does to
- * the regular poll/report cycle).
+ * reason ("the failure mode is a synchronised fleet-wide storm after a
+ * control plane outage" applies here just as much as it does to the
+ * regular poll/report cycle).
  *
  * Runs forever; `options.signal` is the only way out (used by tests).
  */

@@ -23,7 +23,7 @@ function fakeCheck(overrides: Partial<ComplianceCheck> & { id: string }): Compli
 const run = (checks: readonly ComplianceCheck[]) =>
   Effect.runPromise(Effect.provide(evaluateAllChecks("org-1", checks), fakeDb));
 
-describe("evaluateAllChecks: applicability gating (spec §19)", () => {
+describe("evaluateAllChecks: applicability gating", () => {
   test("a check whose appliesTo resolves false is reported not_applicable, and evaluate is never called", async () => {
     let evaluateCalled = false;
     const check = fakeCheck({

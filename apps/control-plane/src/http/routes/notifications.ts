@@ -3,8 +3,8 @@ import { Schema } from "effect";
 import { NotificationInfraError } from "../../domain/notifications/errors";
 
 // `/api/v1/notifications` — the read side of the owner-notification flow
-// (spec §15: "owner notified"; see `../../domain/elevation/notify.ts` for
-// the write side). No `CurrentUserTag` auth middleware exists yet (see
+// (see `../../domain/elevation/notify.ts` for the write side). No
+// `CurrentUserTag` auth middleware exists yet (see
 // `../middleware/auth.ts`), so — same stopgap as every other endpoint in
 // this build — `orgId` and `personId` travel as plain, unauthenticated
 // query params rather than being derived from a session.

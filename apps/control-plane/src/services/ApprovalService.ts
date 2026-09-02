@@ -107,9 +107,9 @@ const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 const NIL_MACHINE_ID = "00000000-0000-0000-0000-000000000000";
 
 // `actorId` is NOT NULL on the events table — this is the well-known sentinel
-// for `actorType: "system"` (spec §24: "actor_id: null when actor_type is
-// system" describes the conceptual model; this table's column is non-null,
-// so a system actor is still identified, just by this fixed id rather than null).
+// for `actorType: "system"`. The conceptual model treats a null actor_id as
+// meaning "actor_type is system", but this table's column is non-null, so a
+// system actor is still identified, just by this fixed id rather than null.
 const SYSTEM_ACTOR_ID = "system";
 
 // Exported so other real domains reading/writing this same setting (the
@@ -225,7 +225,7 @@ const decodeCursor = (cursor: string): Cursor | null => {
 };
 
 /**
- * The generic approval object (spec §13): single/dual-control gate for
+ * The generic approval object: single/dual-control gate for
  * sensitive actions (snapshot restore, break-glass, admin access,
  * offboarding). Approval mode is policy, resolved per action type through
  * the org -> machine chain (`resolveSetting`, template inert in v1), then
@@ -282,7 +282,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
      * shared path behind BOTH `request()`'s own mode-resolution below (when
      * the *floor-clamped* mode is `"none"`) AND `requestAutoApproved()` — the
      * org-policy bypass `ElevationService` uses for its `"always"`
-     * admin-access policy (spec §15), which forces this same outcome
+     * admin-access policy, which forces this same outcome
      * unconditionally, without resolving mode from settings at all. Before
      * this, that `"always"` path hand-rolled its own raw `approvals` insert
      * directly against `ElevationRepo`, with no approval-level events of its
@@ -436,7 +436,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
 
     /**
      * The org-policy `"always"` bypass for admin access to a machine the
-     * requester doesn't own (spec §15, `ElevationService`'s `adminAccessPolicy
+     * requester doesn't own (`ElevationService`'s `adminAccessPolicy
      * === "always"` branch) — a deliberate skip of approval entirely,
      * independent of whatever `approval_mode:admin_access` happens to be
      * configured to. Forces the exact insert+event shape `request()` produces

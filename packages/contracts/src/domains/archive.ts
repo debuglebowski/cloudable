@@ -1,5 +1,5 @@
 // Wire types for /api/v1/archive/* — shared directly from source by the CLI (no
-// generation step, see docs/spec.md §25). Runtime validation schemas live alongside the
+// generation step). Runtime validation schemas live alongside the
 // HTTP routes in `apps/control-plane/src/http/routes/archive.ts`; these plain types are
 // kept in sync with those schemas by hand.
 

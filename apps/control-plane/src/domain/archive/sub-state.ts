@@ -1,6 +1,6 @@
 export type SnapshotSubState = "restorable" | "expired";
 
-/** Computed sub-state (spec §14 "Archived sub-states") — never stored as its own
+/** Computed sub-state — never stored as its own
  * column, always derived from whether `expiredAt` has been set. */
 export function getSnapshotSubState(snapshot: { expiredAt: Date | null }): SnapshotSubState {
   return snapshot.expiredAt ? "expired" : "restorable";

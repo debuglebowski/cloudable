@@ -113,9 +113,9 @@ function scopeIdsFor(chain: SettingsChain): ReadonlyArray<string> {
 }
 
 /**
- * The elevation / break-glass grant+policy layer (spec §15). Session
- * recording (what an elevated admin actually does once connected) is unit
- * 12/14's concern — this service only decides whether, and for how long, an
+ * The elevation / break-glass grant+policy layer. Session
+ * recording (what an elevated admin actually does once connected) is a
+ * separate concern — this service only decides whether, and for how long, an
  * elevation exists. All persistence goes through `ElevationRepoTag` (see
  * `ElevationRepo.ts`) rather than `Db` directly, so this service's own unit
  * tests can mock the repo in-memory instead of needing a real database.
@@ -172,7 +172,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
      * Best-effort: the owner notification is evidence *about* an already-
      * decided grant, not part of deciding it, so a failure here must never
      * fail `request()`/`syncApproval()` — the grant (and its `elevation_granted`
-     * event, spec §2 "events are append-only": already durably committed by
+     * event — already durably committed, since events are append-only, by
      * the time this runs) has already happened and stands regardless.
      * Logged instead, so it's still observable. `insertNotification` is
      * idempotent per elevation (`ElevationRepo.ts`'s doc comment), and
@@ -278,7 +278,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
         const ttlMinutes = resolveElevationTtlMinutes(settingRows, chain);
 
         if (adminAccessPolicy === "always") {
-          // Still one generic approval object (spec §13) — mode "none" is an
+          // Still one generic approval object — mode "none" is an
           // auto-approved, fully logged, time-boxed grant, not a free-for-all.
           // (Note: "always" is the org's own explicit decision to skip
           // approval entirely for admin access to unowned machines — that
@@ -477,8 +477,8 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
 
         // approvalResult.status is "rejected" or "expired": the approval
         // never came through. `ApprovalService` already emits
-        // `approval.denied` / `approval.expired` for the audit trail (spec
-        // §13: "Every decision writes an event, granted or denied") — we
+        // `approval.denied` / `approval.expired` for the audit trail — every
+        // decision writes an event, granted or denied — we
         // just reflect the outcome on the elevation record itself.
         return yield* repo
           .updateElevationStatus(elevationId, "denied")

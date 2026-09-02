@@ -10,7 +10,7 @@ import { ulid } from "ulid";
 type DbHandle = PostgresJsDatabase<typeof schema>;
 
 /**
- * Logging tier and retention location (spec §17).
+ * Logging tier and retention location.
  *
  * Both are stored as ordinary rows in the existing `settingValues` table
  * (org → template → machine chain, `resolveSetting`'s pattern — see
@@ -20,17 +20,16 @@ type DbHandle = PostgresJsDatabase<typeof schema>;
  * table would just be a second, divergence-prone place to look.
  *
  * The two settings differ in how far down the chain they resolve:
- *  - Logging tier has a real machine-level override. Spec §17 frames it as
- *    "per-template tier; cost follows" — the template layer is inert in v1
- *    (CLAUDE.md "Not in v1"), so in practice that means org → machine, the
+ *  - Logging tier has a real machine-level override: "per-template tier;
+ *    cost follows" — the template layer is inert in v1, so in practice
+ *    that means org → machine, the
  *    exact same `resolveSetting()` mechanism every other chain-resolved
  *    setting uses. Writing a machine-scoped `logging_tier` row goes through
  *    the generic `applySettingChange` (`PATCH /api/v1/config/settings`) —
  *    there's nothing logging-tier-specific to write, only to *read*
  *    correctly, which is what `getEffectiveLoggingTier` below does.
  *  - Retention location remains a single org-wide value with NO per-machine
- *    override (spec §17: "single org-wide value, no per-machine setting...
- *    a DPA matter, not a toggle"). `setOrgRetentionLocation` and
+ *    override — a DPA matter, not a toggle. `setOrgRetentionLocation` and
  *    `getOrgRetentionLocation` below take an `orgId` and nothing else — no
  *    `scopeType`/`machineId` parameter to pass, so it is structurally
  *    impossible to call them with a machine scope. If a settings API is
@@ -53,7 +52,7 @@ export type RetentionLocation = "customer" | "cloudable_sweden_central";
  *
  * Tier 2 (session-level), not tier 3: tier 3 (full command capture) has a
  * stated consequence sold at purchase — Cloudable sits on the plaintext
- * path (spec §17) — and must be an explicit org decision, never a silent
+ * path — and must be an explicit org decision, never a silent
  * default. Tier 1 alone would silently under-log relative to what most
  * orgs actually want out of the box.
  */
@@ -63,7 +62,7 @@ export const DEFAULT_LOGGING_TIER: LoggingTier = 2;
  * Default residency for an org that hasn't configured one yet.
  *
  * "customer" (the customer's own store), not Cloudable-held: residency
- * changes are a DPA matter (spec §17), so Cloudable never defaults an org
+ * changes are a DPA matter, so Cloudable never defaults an org
  * into Cloudable-held storage on their behalf.
  */
 export const DEFAULT_RETENTION_LOCATION: RetentionLocation = "customer";
@@ -206,7 +205,7 @@ export const getOrgRetentionLocation = (
  *
  * This inserts directly into the `events` table rather than routing
  * through `EventBus.publish`: `EventBus.publish` exists to make the
- * tier-2/3 filtering decision (spec §17), which is moot for a tier-1 event
+ * tier-2/3 filtering decision, which is moot for a tier-1 event
  * that is never dropped, and going through it here would create a circular
  * import (`EventBus.publish` itself depends on this module via
  * `../logging/tier-filter`).
@@ -264,7 +263,7 @@ const writeOrgSettingAndRecord = (
  * (`domain/organisation/settings.ts`'s `updateOrgSettings`) writes this same
  * key through `applySettingChange` (`domain/config/apply-setting-change.ts`)
  * instead, to go through the one shared write+event path every other
- * setting in the product uses (docs/spec.md §16). This setter's own
+ * setting in the product uses. This setter's own
  * transactional write+event (`writeOrgSettingAndRecord`, above) is kept
  * for any lower-level caller that genuinely needs the atomicity guarantee
  * — none does today outside this file's own test — but a new caller

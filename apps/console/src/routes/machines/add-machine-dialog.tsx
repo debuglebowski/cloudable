@@ -33,7 +33,7 @@ const DEFAULTS = { region: "eastus", sizeSku: "Standard_D2s_v5", image: "ubuntu-
  * Real `POST /api/v1/machines` — no scope-2 template picker (templates
  * don't exist in v1), no manifest editor (that's the machine detail
  * page's job, once the machine exists). Owner is required and picked from
- * the real `people` directory — CLAUDE.md invariant #3: a machine always
+ * the real `people` directory — a machine always
  * has exactly one owner, always a person, never omitted.
  */
 export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) {

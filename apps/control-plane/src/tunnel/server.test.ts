@@ -240,12 +240,12 @@ describe("TunnelServer (against local dev Postgres)", () => {
     });
   });
 
-  // Spec §11: "Access method is policy, inherited through the chain." These four tests
+  // Access method is policy, inherited through the chain. These four tests
   // cover: no configured policy (default = both enabled), an org-level restriction, a
   // machine-level override of an org-level restriction, and a machine-level restriction on
   // top of no org-level setting at all — the same org→machine chain every other inherited
   // setting in this codebase uses.
-  describe("mintSession: access method policy (spec §11)", () => {
+  describe("mintSession: access method policy", () => {
     test("with no access_methods setting configured anywhere, both terminal and ssh are allowed", async () => {
       await withOrgAndMachine("running", async ({ orgId, machineId }) => {
         for (const method of ["terminal", "ssh"] as const) {
@@ -385,13 +385,13 @@ describe("TunnelServer (against local dev Postgres)", () => {
     });
   });
 
-  // Spec §15: "Admin connecting to a machine they do not own" needs a granted elevation.
+  // Admin connecting to a machine they do not own needs a granted elevation.
   // Every other test in this file mints against a NULL-owner machine (the established
   // fixture shape for everything above), which this gate deliberately exempts — see
   // `access-authorization.ts`'s own doc comment. These tests need a REAL owner, so they
   // use their own seeding helper rather than `withOrgAndMachine` (which always creates a
   // fresh org internally and has no way to attach a pre-existing person to it as owner).
-  describe("mintSession: ownership & elevation (spec §15)", () => {
+  describe("mintSession: ownership & elevation", () => {
     const seedOrgAndOwnedMachine = () =>
       queryDb(
         Effect.gen(function* () {

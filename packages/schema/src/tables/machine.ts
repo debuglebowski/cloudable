@@ -52,6 +52,6 @@ export const machines = pgTable("machines", {
   // (config feature unit — see apps/control-plane/src/domain/config).
   // Editing desired state (settingValues) never touches this column; it is
   // the version/ETag the agent's poll endpoint compares against to decide
-  // there is new desired state to pull (docs/spec.md §16, §23).
+  // there is new desired state to pull.
   desiredStateVersion: integer("desired_state_version").notNull().default(0),
 });

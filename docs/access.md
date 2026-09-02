@@ -1,15 +1,14 @@
 # Access
 
-Implementation detail for spec §11 (Access methods): the SSH CA, `cloudable login`, signed
-session tokens, and the web terminal / tunnel daemon's control-plane side. Read `docs/spec.md`
-§11 first for the *why*; this file is the *how*.
+How access methods are implemented: the SSH CA, `cloudable login`, signed
+session tokens, and the web terminal / tunnel daemon's control-plane side.
 
 ## What the Access surface shows, and nothing else
 
-Per spec: **"which certificates are live, for whom, expiring when"** — nothing more. This build
+**"Which certificates are live, for whom, expiring when"** — nothing more. This build
 deliberately does not implement, and must not grow, any of: per-key staleness clocks, 90-day
 access reviews, password-authentication toggles, per-machine connection passwords, or SSH public
-key upload. Certificates replace key upload entirely (`docs/spec.md` §11.2, §21).
+key upload. Certificates replace key upload entirely.
 
 `GET /api/v1/access/certificates?orgId=...` is the entire read surface for this: id, person,
 machine scope, fingerprint, issued/expires timestamps, revoked-at/reason. See
@@ -20,7 +19,7 @@ machine scope, fingerprint, issued/expires timestamps, revoked-at/reason. See
 ### Key handling
 
 The CA private key **never enters the control plane's own memory** beyond the `Signer` port
-(`apps/control-plane/src/services/Signer.ts`, CLAUDE.md invariant #9). `SshCaService.ts` calls
+(`apps/control-plane/src/services/Signer.ts`). `SshCaService.ts` calls
 exactly two operations against it:
 
 - `signer.publicKey(SSH_CA_KEY_ID)` — to embed the CA's public key in each certificate's
@@ -52,8 +51,8 @@ framing) plus the fixed field layout. `SshCaService.issueCertificate`:
    `permit-pty`**.
 3. Deliberately omits `permit-port-forwarding` / `permit-agent-forwarding` /
    `permit-X11-forwarding` / `permit-user-rc` (ssh-keygen's usual defaults) — this product brokers
-   governed interactive access, not a general tunneling/forwarding facility (CLAUDE.md invariant
-   #7, "no inbound access... tunnels are outbound"; "no general application hosting", §21). A
+   governed interactive access, not a general tunneling/forwarding facility ("no inbound access...
+   tunnels are outbound"; "no general application hosting"). A
    certificate that could also open arbitrary port forwards would be a much larger grant than "an
    interactive shell as this OS user."
 4. Serializes the body, signs it via `Signer`, assembles the final blob, and formats it as an
@@ -104,7 +103,7 @@ everything downstream of "we now know `{ personId, orgId }`" is unchanged.
    "the code runs," but "the byte offset is provably correct."
 2. Only the **public** half (`publicKeyBase64`) is sent to `POST /api/v1/access/certificates` —
    the private seed never leaves the CLI process.
-3. The control plane's SSH CA signs it (§1 above) and returns the certificate.
+3. The control plane's SSH CA signs it (the SSH CA section above) and returns the certificate.
 
 ### Loading into ssh-agent: wire protocol, not a shell-out
 
@@ -142,19 +141,19 @@ specific identity file is the documented escape hatch.
 
 ## 3. Signed session tokens (`apps/control-plane/src/tunnel/session-token.ts`)
 
-Spec §11.1: *"The control plane mints a short-lived token carrying IdP identity, target machine
+*"The control plane mints a short-lived token carrying IdP identity, target machine
 and target OS user, signed via the same Key Vault sign operation as the SSH CA. The agent
 validates the signature before attaching."*
 
 - **Format**: `<base64url claims>.<base64url signature>` — deliberately not a full JWT (no extra
-  library dependency; the agent's dependency surface is meant to stay thin per `docs/spec.md`
-  §25, and the tunnel daemon that will eventually verify these tokens is the agent-side
+  library dependency; the agent's dependency surface is meant to stay thin, and the tunnel daemon
+  that will eventually verify these tokens is the agent-side
   counterpart to this file). The signature covers the exact bytes of the claims segment string,
   not a re-serialization of parsed JSON, so verification never has a canonicalization mismatch to
   worry about.
 - **Same `Signer` port, a distinct key**: `mintSessionToken`/`verifySessionToken` use
   `SESSION_TOKEN_KEY_ID = "session-token"`, a different `Signer` keyId from
-  `SshCaService`'s `SSH_CA_KEY_ID = "ssh-ca"`. Spec's *"the same Key Vault sign operation as the
+  `SshCaService`'s `SSH_CA_KEY_ID = "ssh-ca"`. *"The same Key Vault sign operation as the
   SSH CA"* is read here as *the same port/mechanism* (both go through `Signer.sign`, never a
   separate ad hoc signing path), not literally the same key — separating the two means a
   session-token compromise cannot also be used to mint SSH certificates, and vice versa.
@@ -175,7 +174,7 @@ validates the signature before attaching."*
 
 ### Required failure-path test
 
-Per `docs/spec.md` §25's explicit requirement — *"an agent skipping signature validation attaches
+*"An agent skipping signature validation attaches
 sessions fine [...] a session token with a broken signature must be refused"* —
 `session-token.test.ts` includes, and passes:
 
@@ -201,13 +200,13 @@ terminal) can be trusted to gate on this token at all.
   archived or stopped machine has no live tunnel daemon connection to attach a session to, so
   minting a token for it would be a token nobody could ever redeem — denying it up front, with an
   audited reason, is more honest than minting a token that would silently never work.
-- On success: mints a session token (§3), inserts a `sessions` row (`method`, `osUser`,
+- On success: mints a session token (see the signed session tokens section above), inserts a `sessions` row (`method`, `osUser`,
   `startedAt`), and emits `access.session_started`.
 - **`endSession`** — marks a `sessions` row ended, computes `durationSeconds`, emits
   `access.session_ended`. Refuses (`reason: "not_found"`) if the session is already ended or
   doesn't belong to the calling org.
 - **`terminateSessionsForMachine(machineId, reason)`** — the *"disabling terminates live
-  sessions"* path (spec §11.1). Ends every still-open session against a machine in one call and
+  sessions"* path. Ends every still-open session against a machine in one call and
   emits `access.session_ended` for each. This is real and tested
   (`server.test.ts`) independent of whether anything is actually listening on the other end of a
   tunnel — a future feature unit (whichever wires "disable access" into machine/policy settings)
@@ -236,7 +235,7 @@ brief precisely: *"the actual reverse-tunnel network transport can be a document
 stub/simplification if time is tight [...] since there's no real fleet of machines to tunnel to
 [...] the SIGNATURE VALIDATION logic is what must be real and tested, the transport mechanics are
 secondary."* Token minting, verification, the policy gate, and the session lifecycle (`sessions`
-rows + events) are all real and tested against a real local Postgres (§5). One piece of the CP →
+rows + events) are all real and tested against a real local Postgres. One piece of the CP →
 agent direction *is* real now, though (see above): the tunnel-signal channel that tells a
 connected agent a session exists at all. What's still missing is everything downstream of that —
 an actual reverse-tunnel process on the machine (`apps/agent/src/tunnel/client.ts`) and a
@@ -244,15 +243,15 @@ byte-relay protocol — future work for whichever unit builds the agent's tunnel
 
 ### TLS terminates at the control plane, by construction
 
-Per spec §11.1: *"Browser TLS terminates at the control plane by construction — end-to-end
+*"Browser TLS terminates at the control plane by construction — end-to-end
 encryption to the machine is not available on this path at any logging tier."* This is not a
 configuration flag anywhere in this build — it falls directly out of the shape of the design: the
 browser's terminal talks HTTPS to the control plane's own domain (there is no public endpoint on
-any machine to connect to instead — invariant #7), so the control plane is unavoidably an
+any machine to connect to instead), so the control plane is unavoidably an
 intermediary that sees the (decrypted) session bytes, regardless of what logging tier is
 configured. Tier 1/2 logging tiers are honest specifically *because* the tunnel passes the
 session's TLS through rather than re-encrypting; tier 3 (full command capture) is the tier whose
-sold consequence is "Cloudable is on the plaintext path" (`docs/spec.md` §17) — this is the same
+sold consequence is "Cloudable is on the plaintext path" — this is the same
 structural fact stated two ways, not two different claims to keep consistent by hand.
 
 ## 5. HTTP surface (`apps/control-plane/src/http/routes/access.ts` + `handlers/access.ts`)
@@ -260,7 +259,7 @@ structural fact stated two ways, not two different claims to keep consistent by 
 | Method | Path | Purpose |
 | :--- | :--- | :--- |
 | `POST` | `/api/v1/access/certificates` | Issue a certificate (`cloudable login`'s call) |
-| `GET` | `/api/v1/access/certificates?orgId=...` | The Access surface's read view (§ above) |
+| `GET` | `/api/v1/access/certificates?orgId=...` | The Access surface's read view (see above) |
 | `POST` | `/api/v1/access/certificates/revoke` | Revoke a certificate (org-scoped) |
 | `POST` | `/api/v1/access/sessions` | Mint a session (web terminal / SSH session start) |
 | `POST` | `/api/v1/access/sessions/end` | End a session |
@@ -274,7 +273,7 @@ requires `CurrentUserTag`"), so there is no authenticated caller to scope a `/:i
 the first place; every request here also carries `orgId`/`personId` explicitly in the body for
 the same reason. A future feature unit that wires real auth up should both add `:id` path params
 back and drop the body-carried identity fields in favor of the authenticated session — the
-`orgId`-scoping already present in every DB query (§1, §4) is what that unit will lean on.
+`orgId`-scoping already present in every DB query is what that unit will lean on.
 
 Every endpoint shares one error shape (`{ code, message }`) with four variants —
 `not_found` (404), `denied` (403), `bad_request` (400), `internal_error` (500) — mapped from the

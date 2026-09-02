@@ -5,7 +5,7 @@ import type { EventEnvelope } from "../envelope";
  * the cloud resources Cloudable creates/deletes on the customer's behalf.
  *
  * No cloud credential is ever stored — federation only, never client
- * secrets (invariant 1).
+ * secrets.
  */
 export type CloudEvent =
   | (EventEnvelope & {

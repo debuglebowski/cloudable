@@ -28,8 +28,8 @@ export interface ReconcileLoopConfig<E, R> {
   /**
    * Called once per machine with its result. Optional — logging/metrics
    * only; turning results into `machine.drift_detected` etc. events is
-   * unit 6's job (event derivation is pure and happens above the
-   * provisioning port, per `docs/spec.md` §23).
+   * unit 6's job — event derivation is pure and happens above the
+   * provisioning port.
    */
   onResult?: (result: ReconcileMachineResult) => Effect.Effect<void>;
   /** Called once per machine whose reconcile call failed this pass. */

@@ -9,8 +9,8 @@
 //
 // Deliberately narrow extension set: only `permit-pty` is granted (no
 // X11/agent/port forwarding) — this product brokers governed interactive
-// access, not general tunneling (CLAUDE.md: no general application hosting,
-// invariant #7 "no inbound access... tunnels are outbound").
+// access, not general tunneling: no general application hosting, and
+// tunnels are outbound only, never inbound.
 // ---------------------------------------------------------------------------
 
 export const CERT_KEY_TYPE = "ssh-ed25519-cert-v01@openssh.com";

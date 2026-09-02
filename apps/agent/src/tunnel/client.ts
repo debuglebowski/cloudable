@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
 // Tunnel client: PTY + WebSocket transport for interactive sessions (web
-// terminal / SSH — spec §8.2/§11.1). This is the agent-side counterpart to
-// `apps/control-plane/src/tunnel/session-token.ts` — see docs/access.md §3/§4.
+// terminal / SSH). This is the agent-side counterpart to
+// `apps/control-plane/src/tunnel/session-token.ts`.
 //
-// SCOPE OF THIS UNIT: docs/access.md §4 documents that the actual
-// reverse-tunnel network transport (an outbound connection from a machine
-// that carries interactive session bytes) does not exist yet anywhere in
+// SCOPE OF THIS UNIT: the actual reverse-tunnel network transport (an
+// outbound connection from a machine that carries interactive session
+// bytes) does not exist yet anywhere in
 // this build — "wiring an actual tunnel daemon process into apps/agent and a
 // byte-relay protocol is future work for whichever unit builds the agent's
 // tunnel half." This file is that work. There is no `packages/contracts`
@@ -15,16 +15,15 @@
 // connects to should feel free to revise it.
 //
 // WHAT THIS DOES:
-//   1. Opens ONE outbound WebSocket (agent is always the client — CLAUDE.md
-//      invariant #7, no inbound access to any machine, ever).
+//   1. Opens ONE outbound WebSocket (agent is always the client — no
+//      inbound access to any machine, ever).
 //   2. On connect, verifies the session token via the real, tested primitive
 //      in `./session-token-verify.ts` (an exact port of the control plane's
 //      own signature-check logic) before doing anything else. A failed
 //      verification closes the socket immediately; no PTY is ever spawned
-//      (docs/spec.md §11.1: "trusting the tunnel because it is already
-//      authenticated makes a control plane compromise equal to root on every
-//      machine in the fleet" — this is why verification happens first, not
-//      after).
+//      ("trusting the tunnel because it is already authenticated makes a
+//      control plane compromise equal to root on every machine in the
+//      fleet" — this is why verification happens first, not after).
 //   3. On success, spawns a PTY-backed shell (`Bun.Terminal`, see below) and
 //      relays bytes bidirectionally between the socket and the process.
 //   4. Handles `{"type":"terminate"}` by killing the process and closing the
@@ -196,7 +195,7 @@ export const spawnRealPty: SpawnPty = (cols, rows, callbacks) => {
 };
 
 export interface TunnelSessionOptions {
-  /** Outbound WebSocket URL to connect to. Agent-initiated only (invariant #7). */
+  /** Outbound WebSocket URL to connect to. Agent-initiated only. */
   readonly url: string;
   /** The signed session token minted by `POST /api/v1/access/sessions`, verified locally
    * before any PTY is spawned. */

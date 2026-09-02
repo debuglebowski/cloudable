@@ -4,7 +4,7 @@ import { PackagePinConflictError } from "../../domain/machine/errors";
 import { OrgPackagesError } from "../../domain/organisation/packages";
 import { OrgSettingsError } from "../../domain/organisation/settings";
 
-// Real backend for the Organisation page (spec §20). An aggregate
+// Real backend for the Organisation page. An aggregate
 // read/write over settings that already live in, and are governed by,
 // several other domains — see domain/organisation/settings.ts's header
 // comment for why this doesn't duplicate their storage.
@@ -52,8 +52,7 @@ const UpdateOrgSettingsPayload = Schema.Struct({
   actor: ConfigActor,
 });
 
-// Org-scope package manifest entries (spec.md §6, docs/inheritance.md
-// "Package manifest"). Sibling of `PATCH /api/v1/machines/:id/packages`
+// Org-scope package manifest entries. Sibling of `PATCH /api/v1/machines/:id/packages`
 // (`http/routes/machines.ts`) but for the `org`-scoped rows of the same
 // `machine_packages` table — see `domain/organisation/packages.ts`.
 const PackageManifestEntry = Schema.Struct({

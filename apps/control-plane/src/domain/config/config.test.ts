@@ -317,8 +317,8 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       expect(row?.pinned).toBe(false);
     });
 
-    // spec.md §11.1: "Disabling terminates live sessions" — not merely refuses
-    // new ones. This is the gap this unit closes: `applySettingChange` (the one
+    // Disabling terminates live sessions — not merely refuses
+    // new ones. This is the gap this test closes: `applySettingChange` (the one
     // shared write path behind both the PATCH endpoint and Git import) must
     // itself call `TunnelServer.terminateSessionsForMachine`, not leave it
     // wired to nothing but its own test.

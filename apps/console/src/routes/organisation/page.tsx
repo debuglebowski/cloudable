@@ -124,7 +124,7 @@ export function OrganisationPage() {
           <h1 className="text-xl font-semibold">Organisation</h1>
           <p className="max-w-prose text-sm text-muted-foreground">
             Org-wide identity and defaults. These settings are policy, inherited down through
-            templates and machines (docs/spec.md §5).
+            templates and machines.
           </p>
         </div>
       </div>
@@ -159,7 +159,7 @@ export function OrganisationPage() {
         <CardHeader>
           <CardTitle>Approvals</CardTitle>
           <CardDescription>
-            Approval mode per action type — none, single, or dual approver (docs/spec.md §13).
+            Approval mode per action type — none, single, or dual approver.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col">
@@ -178,7 +178,7 @@ export function OrganisationPage() {
       <Card>
         <CardHeader>
           <CardTitle>Logging</CardTitle>
-          <CardDescription>Per-template tier; cost follows (docs/spec.md §17).</CardDescription>
+          <CardDescription>Per-template tier; cost follows.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <SettingRow
@@ -227,7 +227,7 @@ export function OrganisationPage() {
           />
           <p className="pt-2 text-xs text-muted-foreground">
             Single org-wide value — no per-machine variant. Residency changes are a DPA matter, not
-            a toggle (docs/spec.md §17).
+            a toggle.
           </p>
         </CardContent>
       </Card>
@@ -236,9 +236,9 @@ export function OrganisationPage() {
         <CardHeader>
           <CardTitle>Region</CardTitle>
           <CardDescription>
-            Default Azure region for a new machine that doesn't specify one (docs/spec.md §5).
-            Resolved live at creation time through the same org → template → machine chain as every
-            other setting — never copied onto the machine as a wizard prefill.
+            Default Azure region for a new machine that doesn't specify one. Resolved live at
+            creation time through the same org → template → machine chain as every other setting —
+            never copied onto the machine as a wizard prefill.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col">
@@ -258,7 +258,7 @@ export function OrganisationPage() {
           <CardTitle>Compliance controls</CardTitle>
           <CardDescription>
             Cloudable computes a default status per control from its registered compliance checks;
-            override one for your own framework or auditor (docs/spec.md §19).
+            override one for your own framework or auditor.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col">

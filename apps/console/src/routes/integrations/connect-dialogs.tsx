@@ -135,8 +135,7 @@ export function CloudConnectDialog() {
           <DialogDescription>
             Workload identity federation. Three non-secret identifiers — Cloudable never receives a
             client secret. Run Cloudable's Bicep template on your side to create the app
-            registration and federated credential, scoped to a single resource group (docs/spec.md
-            §10).
+            registration and federated credential, scoped to a single resource group.
           </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
@@ -221,9 +220,9 @@ export function SecretStoreConnectDialog() {
         <DialogHeader>
           <DialogTitle>Connect secret store</DialogTitle>
           <DialogDescription>
-            Cloudable is the injector, never the vault (docs/spec.md §12). Point at your own store
-            by URL — this form never asks for a secret value, and Cloudable fetches at runtime
-            without ever writing it to disk.
+            Cloudable is the injector, never the vault. Point at your own store by URL — this form
+            never asks for a secret value, and Cloudable fetches at runtime without ever writing it
+            to disk.
           </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>

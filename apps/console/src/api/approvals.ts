@@ -6,12 +6,11 @@ import { listMachines } from "./machines";
 import { listPeople } from "./people-directory";
 
 /**
- * Console-side data layer for the Approvals page (spec §13 "Approvals" / §20
- * "Approvals (badged queue)"), wired to the real `apps/control-plane/src/
- * http/routes/approvals.ts` (unit 5). One real gap versus the richer shape
- * this used to mock: the real `ApprovalResource` has no per-decision
- * history (who voted, when, with what reason) — only a running
- * `approvedCount`. Dual-mode approvals can no longer show "Priya approved,
+ * Console-side data layer for the Approvals page, wired to the real
+ * `apps/control-plane/src/http/routes/approvals.ts` (unit 5). One real gap
+ * versus the richer shape this used to mock: the real `ApprovalResource`
+ * has no per-decision history (who voted, when, with what reason) — only
+ * a running `approvedCount`. Dual-mode approvals can no longer show "Priya approved,
  * waiting on one more"; they show "1 / 2" instead.
  *
  * "Who is deciding" is the signed-in session (`CurrentUserTag`, server-

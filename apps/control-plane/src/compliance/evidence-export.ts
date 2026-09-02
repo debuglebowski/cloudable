@@ -31,10 +31,9 @@ export interface ControlFindingRow {
 /**
  * Every currently-open finding, one row per (control, finding) pair —
  * a finding whose check evidences two controls appears once under each,
- * matching the "grouped by control, not by time" evidence model
- * (docs/spec.md §19). Rows are ordered by control, then check, then
- * machine, so the CSV reads as sections without needing blank-line
- * separators.
+ * matching the "grouped by control, not by time" evidence model. Rows are
+ * ordered by control, then check, then machine, so the CSV reads as
+ * sections without needing blank-line separators.
  */
 export const collectOpenFindingsByControl = (
   orgId: string,
@@ -97,7 +96,7 @@ export const findingsByControlCsv = (rows: readonly ControlFindingRow[]): string
     ]),
   );
 
-/** The named "open findings" export (docs/spec.md §19: "Open findings CSV (control, severity, open-since)"). */
+/** The named "open findings" export ("Open findings CSV (control, severity, open-since)"). */
 export const openFindingsCsv = (rows: readonly ControlFindingRow[]): string =>
   toCsv(
     ["control", "check", "machine_id", "severity", "open_since"],
@@ -111,7 +110,7 @@ export const openFindingsCsv = (rows: readonly ControlFindingRow[]): string =>
   );
 
 /**
- * The named "asset inventory" export (docs/spec.md §19: "Asset inventory
+ * The named "asset inventory" export ("Asset inventory
  * CSV (owner, encryption, drift, patch status)"). Drift status comes from
  * the "no undeclared software" check (unit 8) when it's registered, else
  * reports "unknown" rather than guessing. Encryption and patch status have

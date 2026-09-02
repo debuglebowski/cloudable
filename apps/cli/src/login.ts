@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// `cloudable login` — spec §11.2: "browser → IdP → ~8h certificate into the
-// user's ssh-agent."
+// `cloudable login`: browser → IdP → ~8h certificate into the user's
+// ssh-agent.
 //
 // No real IdP exists in this sandbox (see CLAUDE.md's build-order note and
 // `docs/access.md`), so the browser→IdP round trip is simulated behind a

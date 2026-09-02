@@ -2,7 +2,7 @@ export type ApprovalMode = "none" | "single" | "dual";
 export type RestoreMode = "data" | "config" | "full";
 
 /**
- * Escalating approval-bar rule for snapshot restores (spec §14 "Restore modes").
+ * Escalating approval-bar rule for snapshot restores ("Restore modes").
  *
  * `ApprovalService.request()` (see `services/ApprovalService.ts`) resolves ONE approval
  * mode per `actionType` from the org's own policy (the `approval_mode:snapshot_restore`

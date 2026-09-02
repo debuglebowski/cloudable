@@ -34,10 +34,10 @@ const resolveMachineId = (machineScope: unknown): string | null => {
 };
 
 /**
- * "Access revoked on offboarding" — spec §19's first v1 check, and per
- * §22 the one every other check's registry/finding-age/control-mapping
- * shape gets validated against, so its `ComplianceFinding`/finding-store
- * usage is meant to be the pattern units 8/9/10 copy.
+ * "Access revoked on offboarding" — the first of the v1 checks, and the one
+ * every other check's registry/finding-age/control-mapping shape gets
+ * validated against, so its `ComplianceFinding`/finding-store usage is
+ * meant to be the pattern the other checks copy.
  *
  * Fails when a certificate is still valid 24h after its owner was
  * offboarded. "Still valid" is read directly off the `certificates` table
@@ -57,9 +57,9 @@ export const accessRevokedOnOffboardingCheck: ComplianceCheck = {
   // Not applicable to an org that has never issued a single certificate —
   // "access revoked on offboarding" presumes there was ever any SSH-certificate
   // access to revoke in the first place. A `pass` for an org that has never
-  // touched this feature is a false reassurance, not a real result (spec §19:
-  // "a dashboard full of N/A" is the thing to avoid — but a false `pass` for a
-  // feature never exercised is worse, not better).
+  // touched this feature is a false reassurance, not a real result — "a
+  // dashboard full of N/A" is the thing to avoid, but a false `pass` for a
+  // feature never exercised is worse, not better.
   appliesTo: ({ orgId }) =>
     Effect.gen(function* () {
       const db = yield* Db;

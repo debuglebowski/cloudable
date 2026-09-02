@@ -12,11 +12,10 @@ const ARCHIVED_STATES: Array<"archived_restorable" | "archived_expired"> = [
 ];
 
 /**
- * Check #2 — "Machine has an active owner" (docs/spec.md §19).
+ * Check #2 — "Machine has an active owner".
  *
  * Fails when a live machine has no owner, or its owner has been
- * deactivated (invariant 3: a machine always has exactly one owner,
- * always a person).
+ * deactivated — a machine always has exactly one owner, always a person.
  *
  * A specific machine's archived state is still filtered inside `evaluate`'s
  * query (`notInArray(machines.state, ARCHIVED_STATES)`) rather than

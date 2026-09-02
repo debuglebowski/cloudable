@@ -3,10 +3,9 @@ import { Schema } from "effect";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
 /**
- * Unit 16 — offboarding action. A single endpoint a console button (a
+ * Offboarding action. A single endpoint a console button (a
  * future unit) calls directly; no SCIM/webhook trigger exists here by
- * design (see spec §14 — "build the action first, wire the trigger
- * later").
+ * design — build the action first, wire the trigger later.
  */
 // `requestedByPersonId` is gone from the wire — derived from
 // `CurrentUserTag.personId` in the handler, not trusted from the client.

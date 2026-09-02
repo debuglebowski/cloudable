@@ -80,7 +80,7 @@ export function toWire(elevation: Elevation): typeof ElevationSchema.Type {
 
 /**
  * `/api/v1/elevations` — request, view, manually sync a pending approval,
- * and manually expire an elevation (spec §15). Org- and person-scoped via
+ * and manually expire an elevation. Org- and person-scoped via
  * the real session (`CurrentUserTag`, see `http/middleware/auth.ts` and
  * `http/api.ts`'s `.middleware(...)` on this group).
  */

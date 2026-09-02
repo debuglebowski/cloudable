@@ -51,9 +51,9 @@ export class TunnelRelay extends Effect.Service<TunnelRelay>()("TunnelRelay", {
       });
 
     /**
-     * Policy-triggered termination (spec §8.2: "must terminate live
-     * sessions on policy change", spec §11.1: "disabling terminates live
-     * sessions"). Ends every live session on `machineId` in the database
+     * Policy-triggered termination — must terminate live sessions on
+     * policy change; disabling terminates live sessions.
+     * Ends every live session on `machineId` in the database
      * first, then tears down every live connection for that machine —
      * same ordering rationale as `endSession`.
      */
@@ -73,11 +73,11 @@ export class TunnelRelay extends Effect.Service<TunnelRelay>()("TunnelRelay", {
 /**
  * Re-validates every currently open session's continued authorization and closes any that
  * no longer qualify — `TunnelServer.mintSession`/`access-authorization.ts`'s owner-or-
- * elevation gate (spec §15) only runs once, at mint time. Until this function, a session
+ * elevation gate only runs once, at mint time. Until this function, a session
  * opened on the strength of a valid elevation stayed live — both the DB row and, more to
  * the point, the actual registered tunnel connection — straight through that elevation's
  * `expiresAt`, until the person happened to end it themselves or some unrelated
- * machine-level event closed it. A break-glass grant that "expires on its own" (spec §15)
+ * machine-level event closed it. A break-glass grant that "expires on its own"
  * is not much of a boundary if the session it authorized keeps running afterward regardless.
  *
  * Same cadence/shape as the sibling expiry sweeps in `server.ts`'s `ExpirySweepLoopLive`

@@ -5,7 +5,7 @@ import { CURRENT_ORG_ID } from "@/lib/current-org";
 import { CURRENT_PERSON_ID } from "@/lib/current-person";
 
 /**
- * Console-side data layer for owner notifications (spec §15: "owner
+ * Console-side data layer for owner notifications ("owner
  * notified"), wired to the real `apps/control-plane/src/http/routes/
  * notifications.ts` (this unit). Mirrors `./approvals.ts`'s
  * `usePendingApprovalsCount` exactly, per this unit's own instructions:

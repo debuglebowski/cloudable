@@ -7,10 +7,10 @@ import { MachineDirectory } from "../../services/attestation/MachineDirectory";
 export type { WakeMessage } from "@cloudable/contracts";
 
 /**
- * `wake`: the fourth agent-protocol operation (spec §23) — an optional,
+ * `wake`: the fourth agent-protocol operation — an optional,
  * control-plane-to-agent fast path so a machine doesn't sit out its full
  * poll interval when there's fresh desired state. Exactly one message, no
- * payload, and it cannot carry instructions (spec §8.1): the agent still
+ * payload, and it cannot carry instructions: the agent still
  * has to poll to find out *what* changed.
  *
  * Not an `HttpApiEndpoint` — `HttpApiEndpoint`/`HttpApiGroup` model HTTP
@@ -25,9 +25,9 @@ export type { WakeMessage } from "@cloudable/contracts";
  * Bearer-authenticated the same way as `/poll`/`/report` (see
  * `../handlers/agent-protocol.ts`), but only once, at the upgrade — this
  * channel never carries another message from the agent to re-verify
- * against, and it is one-way, CP → agent only (invariant #7: the agent
+ * against, and it is one-way, CP → agent only: the agent
  * dials out; the control plane only ever sends on a connection the agent
- * already opened, never re-dials one itself).
+ * already opened, never re-dials one itself.
  */
 
 const BEARER_PREFIX = "Bearer ";

@@ -2,7 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 
 /**
- * The tunnel daemon's control-plane-facing endpoints (spec §8.2/§11.1) — one
+ * The tunnel daemon's control-plane-facing endpoints — one
  * `HttpApiGroup` mounted at `/api/v1/tunnel`. Bearer-authenticated the same
  * way `/api/v1/agent/poll`/`/report` are (see `routes/agent-protocol.ts`),
  * NOT `CurrentUserAuthentication` — the tunnel daemon is "just another

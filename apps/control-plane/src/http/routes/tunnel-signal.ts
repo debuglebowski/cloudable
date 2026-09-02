@@ -2,11 +2,11 @@ import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 
 /**
- * The CP -> agent tunnel-signal channel's HTTP surface (docs/spec.md
- * §8.2/§11.1) — one `HttpApiGroup` mounted at `/api/v1/tunnel/signal`,
+ * The CP -> agent tunnel-signal channel's HTTP surface — one
+ * `HttpApiGroup` mounted at `/api/v1/tunnel/signal`,
  * deliberately its own group rather than a fifth operation on
- * `agent-protocol.ts`'s `AgentProtocolGroup`: spec §23 pins that group to
- * exactly four operations (attest/poll/report/wake), and this is a
+ * `agent-protocol.ts`'s `AgentProtocolGroup`, which is pinned to
+ * exactly four operations (attest/poll/report/wake) — this is a
  * different concern from any of them — see
  * `apps/control-plane/src/tunnel/signal.ts`'s header comment for the full
  * reasoning on why this is a new channel, not a repurposed `wake`.

@@ -47,7 +47,7 @@ function isMachineLastKnownState(value: unknown): value is MachineLastKnownState
  * four separate round-trips: a crash between publish and persist (or two
  * concurrent reports for the same machine, e.g. an agent retry) would both
  * read the same `previous`, both derive and publish the same events, and —
- * because `events` is append-only, invariant #2, nothing can later delete
+ * because `events` is append-only, nothing can later delete
  * the duplicate — permanently double the audit trail for one real change.
  * The row lock plus one transaction makes the whole diff-publish-persist
  * cycle atomic and serializes concurrent reports for the same machine.

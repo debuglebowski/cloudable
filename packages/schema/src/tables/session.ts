@@ -12,8 +12,8 @@ export const sessions = pgTable("sessions", {
   endedAt: timestamp("ended_at", { withTimezone: true }),
   durationSeconds: integer("duration_seconds"),
   /** The signed token minted for this session (`tunnel/session-token.ts`), replayed
-   * server-side on attach — the browser never resupplies it directly (spec §11.1's web
-   * terminal plan). Nullable: SSH-certificate sessions don't mint one of these. */
+   * server-side on attach — the browser never resupplies it directly. Nullable:
+   * SSH-certificate sessions don't mint one of these. */
   sessionToken: text("session_token"),
   /** Set once, on the first successful daemon `attached` ack — distinct from `startedAt`
    * (when the token was minted, which may be before a browser ever connects). */

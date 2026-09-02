@@ -18,7 +18,7 @@ import { createSnapshot } from "./snapshot";
  * shared org-wide `approval_mode:snapshot_restore` setting applied identically to every
  * restore mode. An org that set that setting to `"none"` could therefore get a `"full"`
  * restore (secret bindings reattached) auto-approved with zero human review, directly
- * contradicting spec §14's "deliberately hardest to reach" for full restores.
+ * contradicting the intent that full restores be deliberately hardest to reach.
  *
  * Runs against the docker-compose Postgres, same convention as
  * `services/ApprovalService.test.ts` — this suite doesn't need an isolated database

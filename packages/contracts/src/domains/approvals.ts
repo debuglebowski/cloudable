@@ -1,7 +1,7 @@
 import type { PageInfo, PaginatedRequest } from "../common";
 
 /**
- * Wire types for the generic approval object (spec §13). One approval gates
+ * Wire types for the generic approval object. One approval gates
  * one sensitive action — snapshot restore, break-glass, admin access to an
  * unowned machine, or offboarding.
  */
@@ -22,7 +22,7 @@ export type ApprovalDecisionValue = "approved" | "rejected";
 // below: the server derives both from the caller's session
 // (`CurrentUserTag`), not the wire — see
 // `apps/control-plane/src/http/middleware/auth.ts`. A confirmation dialog
-// is self-approval and is not an approval (spec §13) — deriving the
+// is self-approval and is not an approval — deriving the
 // deciding person from the real session, not a client-supplied id, is
 // what actually enforces that.
 
@@ -31,7 +31,7 @@ export interface CreateApprovalRequest {
   actionType: ApprovalActionType;
   /** Null for actions that do not target a specific machine. */
   targetMachineId: string | null;
-  /** Required free text — never optional (spec §13). */
+  /** Required free text — never optional. */
   reason: string;
 }
 

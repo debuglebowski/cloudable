@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// The daemon's per-session multiplexing core (spec §11.1): one real PTY per
+// The daemon's per-session multiplexing core: one real PTY per
 // live session, keyed by `sessionId`. `attach` is where the plan's own
 // hard requirement lives — "the agent must validate the signature on every
 // session, including under load" — there is no code path here that spawns

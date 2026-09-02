@@ -12,9 +12,8 @@ import { restoreSnapshot } from "./snapshot-port";
 import { UpgradeError, type UpgradeOutcome, type UpgradeResult, driftViewUrl } from "./types";
 
 /**
- * Transactional OS upgrade (spec §19 "Upgrades are transactional"; spec §7:
- * "An OS upgrade is: reimage, remount persistent volume, reinstall declared
- * packages. One button."):
+ * Transactional OS upgrade: reimage, remount the persistent volume, reinstall
+ * declared packages. One button:
  *
  *   1. snapshot   — `createSnapshot(machineId, "upgrade")` (unit 15's real implementation,
  *                    `../archive/snapshot.ts` — `restoreSnapshot` below is still unit 18's own

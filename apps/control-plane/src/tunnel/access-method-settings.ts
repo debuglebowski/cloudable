@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
-// Access method policy (spec §11): "Access method is policy, inherited
-// through the chain. Contractors browser-only, employees browser plus
-// certificates, exceptions visible as overrides." Stored as an ordinary
+// Access method policy: access method is policy, inherited
+// through the chain — contractors browser-only, employees browser plus
+// certificates, exceptions visible as overrides. Stored as an ordinary
 // `settingValues` row (org → machine chain — templates excluded, matching
 // every other settings consumer in this codebase; templates are not in v1)
 // rather than a dedicated table, same reasoning `logging/settings.ts`

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// PTY spawning for the web terminal (spec §11.1), via `Bun.Terminal` — a
+// PTY spawning for the web terminal, via `Bun.Terminal` — a
 // real, native, first-party PTY implementation (Bun 1.3.5+), not `node-pty`
 // (confirmed broken under Bun, `oven-sh/bun#7362`). See docs/agents.md's
 // "Tunnel daemon" section for the full empirical spike this decision is
@@ -80,7 +80,7 @@ export interface PtySession {
   /**
    * Forcibly ends the session — confirmed reliable even though in-session
    * Ctrl-C is not (see file header). This is the mechanism policy-triggered
-   * termination (`TunnelRelay.closeAllForMachine`, spec §8.2's "must
+   * termination (`TunnelRelay.closeAllForMachine`, "must
    * terminate live sessions on policy change") calls; it does not rely on
    * the PTY's line discipline at all.
    */

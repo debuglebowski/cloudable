@@ -105,8 +105,8 @@ export const MintFederationTokenResponse = Schema.Struct({
 });
 
 /**
- * Well-known OIDC endpoints plus the per-customer mint endpoint (docs/spec.md
- * §10). The `.well-known/...` paths are spec-mandated absolute paths, not
+ * Well-known OIDC endpoints plus the per-customer mint endpoint.
+ * The `.well-known/...` paths are spec-mandated absolute paths, not
  * versioned `/api/v1/...` routes, and must stay public — Azure fetches them
  * directly with no Cloudable session of any kind.
  *

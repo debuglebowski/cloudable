@@ -4,12 +4,12 @@ import { actorTypeEnum } from "../shared";
 // ---------------------------------------------------------------------------
 // APPEND-ONLY. Do not call .update() or .delete() against this table, ever,
 // from anywhere outside this package's own tooling (e.g. a retention/expiry
-// job). Events are the evidence trail the whole product is built on
-// (invariant #2: "Events are append-only. No updates, no deletes. Retention
-// is expiry."). The control plane derives audit state from this stream —
-// mutating a row after the fact would falsify history.
+// job). Events are the evidence trail the whole product is built on —
+// no updates, no deletes, retention is expiry. The control plane derives
+// audit state from this stream — mutating a row after the fact would
+// falsify history.
 //
-// `type` values are a public interface (invariant #11): additive only, never
+// `type` values are a public interface: additive only, never
 // renamed or removed. See `packages/events` for the catalogue and its
 // snapshot test.
 // ---------------------------------------------------------------------------

@@ -1,10 +1,10 @@
 /**
- * Real, narrow config-state observation: which access methods (spec §11)
- * currently have a live, running process on this machine. This is the
+ * Real, narrow config-state observation: which access methods currently
+ * have a live, running process on this machine. This is the
  * `runningAccessMethods` half of `ConfigState`
  * (`packages/contracts/src/domains/agent-protocol.ts`) — the other, cheap
- * half of "installed packages and config state" (spec §8.1) that
- * `poll-report-loop.ts` reports alongside `installedPackages`/`openPorts`.
+ * half of "installed packages and config state" that `poll-report-loop.ts`
+ * reports alongside `installedPackages`/`openPorts`.
  *
  * Deliberately narrow (not full configuration coverage): each entry in
  * `ACCESS_METHODS` names one access method and a process marker to look
@@ -31,7 +31,7 @@ interface AccessMethodMarker {
 }
 
 const ACCESS_METHODS: readonly AccessMethodMarker[] = [
-  // `ttyd` is the plain web terminal spec §11.1 describes ("not code-server").
+  // `ttyd` is the plain web terminal ("not code-server").
   // Once the tunnel daemon actually installs and runs one, this is what the
   // agent looks for; nothing in this build spawns it yet.
   { name: "web_terminal", processMarker: "ttyd" },

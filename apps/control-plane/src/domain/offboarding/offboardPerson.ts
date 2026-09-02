@@ -167,7 +167,7 @@ const runOffboardingSequence = (
         // Emits `machine.archived` and starts the retention clock itself.
         yield* wrap(machineArchiver.archive(machineId, approvalId));
 
-        // Spec §8.2/§11.1: archiving must actually kill any live terminal/SSH session on the
+        // Archiving must actually kill any live terminal/SSH session on the
         // machine, not just leave the DB saying it was terminated while a real connection
         // stays open. A no-op if the machine had none.
         yield* wrap(
@@ -201,7 +201,7 @@ const runOffboardingSequence = (
   });
 
 /**
- * Approval-gated offboarding, per spec §14: requests approval, and — only
+ * Approval-gated offboarding: requests approval, and — only
  * once it resolves to `"approved"` in the SAME call (mode `"none"`, or an
  * org policy that auto-grants) — runs `runOffboardingSequence` immediately.
  *
@@ -251,8 +251,8 @@ export const offboardPersonDetailed = (
     );
 
     // Only an already-granted approval proceeds. Denied/pending/expired halt
-    // right here — no certs queried, no machine touched — per spec §14
-    // ("a confirmation dialog is self-approval and is not an approval").
+    // right here — no certs queried, no machine touched: a confirmation
+    // dialog is self-approval and is not an approval.
     if (approval.status !== "approved") {
       return {
         approvalId: approval.id,

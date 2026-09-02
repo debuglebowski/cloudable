@@ -1,8 +1,7 @@
 /**
- * The due-date/backoff policy for upgrade attempts (spec §19 "Upgrades are
- * transactional"): "a failed attempt resets the due-date clock exactly as a
- * success does, so a persistently failing machine backs off a full interval
- * instead of retrying every cycle."
+ * The due-date/backoff policy for upgrade attempts. A failed attempt resets
+ * the due-date clock exactly as a success does, so a persistently failing
+ * machine backs off a full interval instead of retrying every cycle.
  *
  * A success always resets to the base interval and clears the failure
  * streak. A failure grows the wait exponentially with each *consecutive*

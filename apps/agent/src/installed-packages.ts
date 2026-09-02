@@ -1,7 +1,7 @@
 /**
  * Real inventory of installed OS packages — the observed half of drift
- * detection (spec §7 "allowlist": anything installed outside the manifest is
- * detected on reconcile and surfaced; §12: "the agent never submits audit
+ * detection ("allowlist": anything installed outside the manifest is
+ * detected on reconcile and surfaced; "the agent never submits audit
  * events... it reports observed state"). Before this, `installedPackages` was
  * always `[]` (see `poll-report-loop.ts`'s old comment) — the control
  * plane's own diffing (`computeUndeclaredPackages`, `runDiffAndPublish`) was
@@ -26,7 +26,7 @@ interface PackageManager {
 
 // Bare package name per line, no version — matches `computeUndeclaredPackages`'s
 // comparison against `ResolvedManifestEntry.packageName` (pinning is a manifest-side
-// concern, docs/inheritance.md §6, not an observed-state one).
+// concern, not an observed-state one).
 const DPKG: PackageManager = {
   binary: "dpkg-query",
   args: ["-W", "-f=${Package}\\n"],

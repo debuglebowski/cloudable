@@ -28,11 +28,11 @@ export interface MachineSummary {
 export interface CreateMachineRequest {
   name: string;
   /** Optional — omitted, the control plane resolves the org's configured default region
-   * instead of the caller always supplying one (docs/inheritance.md, spec.md §5). */
+   * instead of the caller always supplying one. */
   region?: string;
   sizeSku: string;
   image: string;
-  /** A machine always has exactly one owner, always a person (CLAUDE.md invariant #3). */
+  /** A machine always has exactly one owner, always a person. */
   ownerPersonId: string;
   templateId?: string | null;
 }
@@ -61,8 +61,8 @@ export interface ResolvedPackageManifestEntry extends PackageManifestEntry {
 }
 
 /**
- * A resolved org → template → machine setting, lowest level wins (spec.md
- * §5, §7). Shared wire shape for every single-value machine setting that
+ * A resolved org → template → machine setting, lowest level wins.
+ * Shared wire shape for every single-value machine setting that
  * isn't a manifest entry — currently `persistentPaths` and
  * `accessMethodsEnabled` below. Written via the generic
  * `PATCH /api/v1/config/settings` endpoint (`packages/contracts/src/
@@ -74,11 +74,11 @@ export interface ResolvedMachineSetting<T> {
   resolvedFromScopeId: string;
 }
 
-/** spec.md §7: "disposable — persistent paths survive; the OS does not." A list of
+/** Disposable — persistent paths survive; the OS does not. A list of
  * absolute paths on the machine that survive an OS reimage/upgrade. */
 export type PersistentPaths = string[];
 
-/** spec.md §7/§11: which of the two access methods are turned on for a machine. */
+/** Which of the two access methods are turned on for a machine. */
 export interface AccessMethodsEnabled {
   webTerminal: boolean;
   ssh: boolean;
@@ -105,7 +105,7 @@ export interface UpdateMachinePackagesResponse {
   manifest: ResolvedPackageManifestEntry[];
 }
 
-/** 422 body detail when an edit would override a pinned entry below its scope — spec.md §6. */
+/** 422 body detail when an edit would override a pinned entry below its scope. */
 export interface PackagePinConflict {
   packageName: string;
   pinnedAtScope: ManifestScope;

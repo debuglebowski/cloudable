@@ -2,7 +2,7 @@ import type { DomainEvent } from "@cloudable/events";
 import type { Elevation } from "./types";
 
 /**
- * Builds the three `access.elevation_*` events (spec §15 / `packages/events`
+ * Builds the three `access.elevation_*` events (see `packages/events`
  * `domains/access.ts`). `EventBus.publish` fills in `id` and `recordedAt` —
  * everything else is ours to supply.
  */
@@ -67,7 +67,7 @@ export function buildElevationGrantedEvent(elevation: Elevation, ctx: EventConte
 }
 
 /**
- * The org policy `"always"` (admin access to an unowned machine, spec §15)
+ * The org policy `"always"` (admin access to an unowned machine)
  * auto-approves by inserting an `approvals` row directly
  * (`ElevationRepo.insertAutoApprovedApproval`) rather than going through
  * `ApprovalService.request()` — so unlike the `with_approval` branch, no

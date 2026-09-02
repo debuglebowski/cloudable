@@ -1,6 +1,6 @@
-// Config editor + GitOps path (docs/spec.md §16). Plain, dependency-free
-// wire types shared directly from source by the CLI (no generation step —
-// see docs/spec.md §25). The control plane's HTTP layer
+// Config editor + GitOps path. Plain, dependency-free
+// wire types shared directly from source by the CLI (no generation step).
+// The control plane's HTTP layer
 // (`apps/control-plane/src/http/routes/config.ts`) defines its own
 // `effect/Schema` structs with the same shape for runtime validation; these
 // interfaces are the type-only mirror used by non-Effect consumers.
@@ -9,7 +9,7 @@
 export type SettingScopeType = "org" | "machine";
 
 /**
- * The generic settings key for logging tier (spec §17) — the one literal
+ * The generic settings key for logging tier — the one literal
  * key string a non-Effect consumer needs to know to write a
  * `PatchSettingRequest`/`ImportConfigEntry` targeting it. Defined here
  * (rather than only in `apps/control-plane/src/logging/settings.ts`,
@@ -29,7 +29,7 @@ export interface PatchSettingRequest {
   scopeId: string;
   key: string;
   value: unknown;
-  /** Org-scope only: marks the entry un-overridable below (docs/spec.md §6). */
+  /** Org-scope only: marks the entry un-overridable below. */
   pinned?: boolean;
 }
 
@@ -63,7 +63,7 @@ export interface ImportConfigEntry {
   pinned?: boolean;
 }
 
-/** Bulk desired-state document — the GitOps path. Applied entry-by-entry through the exact same code path as `PatchSettingRequest` (docs/spec.md §16: "same path whether the change came from the UI or a Git commit"). */
+/** Bulk desired-state document — the GitOps path. Applied entry-by-entry through the exact same code path as `PatchSettingRequest` — same path whether the change came from the UI or a Git commit. */
 export interface ImportConfigRequest {
   /** Shared across every event this import produces. Generated if omitted. */
   correlationId?: string;

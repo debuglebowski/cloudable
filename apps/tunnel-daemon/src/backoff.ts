@@ -1,5 +1,5 @@
 /**
- * Exponential backoff with FULL JITTER, ~10 min cap (spec §8.1) — a named
+ * Exponential backoff with FULL JITTER, ~10 min cap — a named
  * invariant, not just a nice-to-have: the failure mode it guards against is
  * every agent in the fleet retrying in lockstep right after a control
  * plane outage ends, immediately causing another one.

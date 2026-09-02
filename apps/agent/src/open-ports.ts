@@ -1,6 +1,6 @@
 /**
  * Real inventory of listening TCP ports — the other half of "installed
- * packages and config state" (spec §8.1) `poll-report-loop.ts` reports.
+ * packages and config state" `poll-report-loop.ts` reports.
  * Before this, `openPorts` was always `[]`, with no scan behind it at all.
  *
  * Reads `/proc/net/tcp`/`/proc/net/tcp6` directly rather than shelling out

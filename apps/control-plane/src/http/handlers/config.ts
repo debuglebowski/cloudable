@@ -61,8 +61,7 @@ export const handleImportConfig = (
 ) =>
   Effect.gen(function* () {
     // The whole import is one operation — every event it produces shares a
-    // correlationId (docs/spec.md §24), same as a PATCH shares one for its
-    // single change.
+    // correlationId, same as a PATCH shares one for its single change.
     const correlationId = payload.correlationId ?? ulid();
 
     const applied = yield* Effect.forEach(

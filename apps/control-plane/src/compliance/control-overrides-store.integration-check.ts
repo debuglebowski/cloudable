@@ -18,7 +18,7 @@ function mustFirst<T>(rows: T[]): T {
   return row;
 }
 
-describe("control overrides (docs/spec.md §19: org-level, overridable per control)", () => {
+describe("control overrides (org-level, overridable per control)", () => {
   let db: Awaited<ReturnType<typeof startTestDb>>["db"];
   let stop: Awaited<ReturnType<typeof startTestDb>>["stop"];
   let orgAId: string;

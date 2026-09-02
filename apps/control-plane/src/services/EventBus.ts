@@ -33,14 +33,14 @@ export const toEventRows = (batch: ReadonlyArray<DomainEvent>) =>
   }));
 
 /**
- * Append-only event publication (CLAUDE.md invariant #2). `publish` assigns
+ * Append-only event publication. `publish` assigns
  * a fresh ULID `id` and `recordedAt` to every event it is given — even if
  * the caller already populated those fields to satisfy `DomainEvent`'s
  * type — and bulk-inserts the batch. There is deliberately no update/delete
  * method on this service.
  *
  * Before inserting, `publish` drops tier-2/3 events whose org is configured
- * (spec §17) below that event's minimum tier — see `../logging/tier-filter`.
+ * below that event's minimum tier — see `../logging/tier-filter`.
  * Tier-1 events (the compliance floor) are never dropped. This lives inside
  * `publish` itself, rather than a separate wrapper, so every existing and
  * future caller of `EventBus.publish` gets tier filtering for free.

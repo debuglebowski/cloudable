@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// Real 1Password Connect `SecretsProvider` adapter (CLAUDE.md invariant #8:
-// "Cloudable injects secrets, never stores them."). No 1Password Connect
+// Real 1Password Connect `SecretsProvider` adapter — Cloudable injects
+// secrets, never stores them. No 1Password Connect
 // server exists in this build (same situation as `azure-key-vault.ts`), so
 // the HTTP request construction and response parsing below are real, but
 // there is no live Connect token to exercise it against — callers supply a

@@ -12,10 +12,8 @@ export interface EvidenceActor {
 /**
  * A pointer into the separate, high-volume `access_command_recorded` store
  * (tier-3 shell capture) — never merged into the normalised evidence
- * stream itself (spec §17's warning about that table's write volume, and
- * the evidence model's own "referenced by correlationId ... never merged"
- * requirement, spec §18). `null` when no command recordings share this
- * event's correlationId.
+ * stream itself, given that table's write volume. `null` when no command
+ * recordings share this event's correlationId.
  */
 export interface CommandRecordingRef {
   correlationId: string;
@@ -24,7 +22,7 @@ export interface CommandRecordingRef {
 
 /**
  * Cloud-specific detail, exposed as extensions alongside the normalised
- * contract (spec §18). Populated only for the `cloud.*` event domain — the
+ * contract. Populated only for the `cloud.*` event domain — the
  * one place Cloudable's Azure-specific vocabulary (subscription ids,
  * resource ids, OIDC subjects) is allowed to leak past the cloud-agnostic
  * shape everything else in `EvidenceRecord` sticks to. `summary` still
@@ -38,7 +36,7 @@ export type EvidenceExtensions =
   | { cloud: { resourceId: string; kind: string } };
 
 /**
- * The normalised, cloud-agnostic evidence shape auditors read (spec §18).
+ * The normalised, cloud-agnostic evidence shape auditors read.
  *
  * This is a PURE, STATELESS transform over one raw `events` row — nothing
  * declared in this file is ever persisted. Forensics always has the raw
@@ -221,7 +219,7 @@ function summarize(row: RawEventRow): string {
 }
 
 /**
- * Cloud-specific detail for `EvidenceRecord.extensions` (spec §18). Written
+ * Cloud-specific detail for `EvidenceRecord.extensions`. Written
  * as its own exhaustive switch — mirroring `summarize`'s — so that adding a
  * new event type to `@cloudable/events` without teaching this function
  * what to do with it fails `bun run typecheck`, exactly like `summarize`.

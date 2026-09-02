@@ -269,7 +269,7 @@ See `docs/lifecycle.md` for implementation detail.
 
 ## 15. Admin access & break-glass
 
-Implemented in Cloudable, **not** Entra PIM. One elevation primitive on the §13 approval object.
+Implemented in Cloudable, **not** Entra PIM. One elevation primitive on the generic approval object.
 
 **Admin connecting to a machine they do not own:** org policy of **never / always / with approval**.
 
@@ -459,11 +459,11 @@ and excludes the separate `cloudable-deploy` repository entirely (see `SCOPE.md`
 
 ## 23. Agent protocol
 
-Outbound HTTPS, agent-initiated, ~30s interval with jitter (§8.1). Four operations, nothing else.
+Outbound HTTPS, agent-initiated, ~30s interval with jitter. Four operations, nothing else.
 
 | Operation | Direction | Purpose |
 |---|---|---|
-| Attest | Agent → CP | Exchange platform credential for a machine identity (§9) |
+| Attest | Agent → CP | Exchange platform credential for a machine identity |
 | Poll | Agent → CP | Fetch desired state. ETag / version check; `304` when unchanged |
 | Report | Agent → CP | Submit **observed state** after reconciling |
 | Wake | CP → Agent | Optional websocket. One message, *pull now*, no payload |
@@ -496,7 +496,7 @@ See `docs/agents.md` for implementation detail.
 
 ## 24. Event catalogue
 
-The public versioned interface (§19). Every event has at least one consumer; nothing is emitted speculatively. The full, generated, always-current listing lives at `docs/events.md` (generated from `packages/events` — do not hand-edit that file).
+The public versioned interface. Every event has at least one consumer; nothing is emitted speculatively. The full, generated, always-current listing lives at `docs/events.md` (generated from `packages/events` — do not hand-edit that file).
 
 ### Envelope
 
@@ -516,7 +516,7 @@ Present on every event, regardless of type. These are real columns, not payload 
 | `schema_version` | Per event type, starts at 1 |
 | `payload` | JSONB. Type-specific fields only |
 
-**`occurred_at` and `recorded_at` are separate because sleeping machines report late** (§8.1). An agent that wakes after four hours reports facts that occurred four hours ago. Collapsing these makes every compliance timing check wrong for exactly the machines most likely to fail one.
+**`occurred_at` and `recorded_at` are separate because sleeping machines report late.** An agent that wakes after four hours reports facts that occurred four hours ago. Collapsing these makes every compliance timing check wrong for exactly the machines most likely to fail one.
 
 **`actor_type` distinguishes human from automation.** "Who did this" is the central compliance question, and *the system did it on a schedule* is a materially different answer from *a person did it*. Deriving this later from a null actor is guesswork.
 
@@ -538,7 +538,7 @@ The tier column in `docs/events.md` is the **minimum** logging tier at which an 
 
 Reads and page views. Successful no-op reconciles. Poll requests. Anything emitted per-tick rather than per-change.
 
-**Log state changes, not state confirmations** (§17). Thousands of agents polling every 30 seconds will otherwise bury the catalogue in evidence that nothing happened.
+**Log state changes, not state confirmations.** Thousands of agents polling every 30 seconds will otherwise bury the catalogue in evidence that nothing happened.
 
 ### Check → event mapping
 
@@ -598,11 +598,11 @@ Testcontainers for PostgreSQL. A **fake cloud provider implementation** behind t
 ### Customer-facing artefacts
 The three things a customer executes in their own tenant:
 
-1. **Federated credential setup** — app registration, trust rule, custom RBAC role assignment (§10). Every BYOC customer runs this once
+1. **Federated credential setup** — app registration, trust rule, custom RBAC role assignment. Every BYOC customer runs this once
 2. **Control plane deployment** — self-hosters only
 3. The documentation accompanying both
 
-**Terraform is the primary format; Bicep is the one-click alternative.** The §4 rejection of Terraform applies to provisioning machines — hundreds of independently-lifecycled instances with state files and drift. It does not apply to one-shot infrastructure a customer runs occasionally, which is what Terraform is good at. Most infrastructure teams already have it in their pipeline, so shipping Bicep alone means they translate it themselves at exactly the wrong moment.
+**Terraform is the primary format; Bicep is the one-click alternative.** The rejection of Terraform above applies to provisioning machines — hundreds of independently-lifecycled instances with state files and drift. It does not apply to one-shot infrastructure a customer runs occasionally, which is what Terraform is good at. Most infrastructure teams already have it in their pipeline, so shipping Bicep alone means they translate it themselves at exactly the wrong moment.
 
 Use **OpenTofu** in Cloudable's own CI to stay licence-clean; publish HCL that works with either.
 
@@ -625,20 +625,20 @@ cloudable/                    (this repo — currently private)
     schema/                   Drizzle schema + migrations
   infra/
     terraform/
-      federated-credential/   customer runs this (§10)
+      federated-credential/   customer runs this
       control-plane/          self-hosters run this
     bicep/                    one-click equivalents
   docs/
   SCOPE.md
 ```
 
-`apps/` is things that run; `packages/` is things imported. The CLI shares `contracts/` directly from source (§25); the agent consumes a deliberately narrow slice.
+`apps/` is things that run; `packages/` is things imported. The CLI shares `contracts/` directly from source; the agent consumes a deliberately narrow slice.
 
 ### `packages/events` enforces the public interface
 
 The catalogue is a versioned public interface, so it exists **once** — type definitions, payload metadata and generated documentation all from the same source.
 
-A snapshot test (`packages/events/src/__tests__/catalogue.snapshot.test.ts`) fails when an event type is removed or renamed. This converts invariant 11 from a rule someone must remember into one the build enforces.
+A snapshot test (`packages/events/src/__tests__/catalogue.snapshot.test.ts`) fails when an event type is removed or renamed. This converts "additive only" from a rule someone must remember into one the build enforces.
 
 ### `cloudable-deploy` — separate, private
 

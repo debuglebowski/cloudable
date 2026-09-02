@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// The CP -> agent tunnel-signal channel's control-plane half (docs/spec.md
-// §8.2/§11.1; see `packages/contracts/src/domains/tunnel-signal.ts` for the
+// The CP -> agent tunnel-signal channel's control-plane half (see
+// `packages/contracts/src/domains/tunnel-signal.ts` for the
 // wire type and the full reasoning for why this is a separate channel from
 // `wake`, not a repurposed one).
 //
@@ -75,7 +75,7 @@ const emptyState: MachineSignalState = { queue: [], waiters: [] };
 
 /** Per-machine entries are removed outright once both empty, rather than left behind as an
  * inert `{queue: [], waiters: []}` forever — every machine that has ever minted a session
- * (including one later archived, which per CLAUDE.md invariant 6 exists permanently in
+ * (including one later archived, which exists permanently in
  * `machines`) would otherwise leave a permanent entry here with nothing to ever clean it up. */
 const withPruned = (
   map: ReadonlyMap<string, MachineSignalState>,

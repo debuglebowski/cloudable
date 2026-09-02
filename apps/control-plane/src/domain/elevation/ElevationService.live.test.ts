@@ -18,8 +18,8 @@ import { ADMIN_ACCESS_POLICY_SETTING_KEY } from "./policy";
  * `ApprovalService`, real `EventBus`, all against the docker-compose
  * Postgres — see `../../services/ApprovalService.test.ts`'s identical
  * connection strategy) rather than `ElevationService.test.ts`'s in-memory
- * fakes, specifically to prove `notifyOwnerOfElevation` (spec §15: "owner
- * notified") lands a real `notifications` row — the one behavior that
+ * fakes, specifically to prove `notifyOwnerOfElevation`
+ * lands a real `notifications` row — the one behavior that
  * can't be observed through a fake `ElevationRepo`. Every other behavior of
  * `ElevationService` is already covered by the fake-backed suite; this file
  * only re-covers the two paths that reach a grant.
