@@ -3,20 +3,19 @@ import { Clock, FileText, ScrollText, Server, User, Zap } from "lucide-react";
 
 import {
   AUDIT_EXPORT_URLS,
-  type AuditTimelineEntry,
   type ControlCheckEvidence,
-  type FindingSeverity,
+  SEVERITY_VARIANT,
+  daysOpen,
   useAuditTimeline,
   useControlEvidence,
 } from "@/api/audit";
-import type { DirectoryPerson } from "@/api/people-directory";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
+import { ActorCell } from "@/components/actor-cell";
 import { ControlStatus } from "@/components/control-status";
 import { Freshness } from "@/components/freshness";
 import { PageHeaderIcon } from "@/components/page-header-icon";
-import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
-import { Badge, type BadgeProps } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,8 +30,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /**
- * Audit — one section, two in-page views (spec §20): the admin timeline and the
- * auditor evidence export. A tab switch, not a nav item or a route change, so both
+ * Audit — one section, two in-page views: the admin timeline and the auditor
+ * evidence export. A tab switch, not a nav item or a route change, so both
  * read as one page over the same append-only event log.
  */
 export function AuditPage() {
@@ -72,35 +71,6 @@ export function AuditPage() {
       </Tabs>
     </div>
   );
-}
-
-/** Actor column: "person" resolves `actorId` (a raw personId, illegible on its own) to an
- * email via the same read-only directory lookup every other person-identifying column in
- * the app already uses (People/Access/Machines/Approvals) — "who did this" is the central
- * compliance question this column exists to answer (spec §…, actor_type's own doc comment),
- * and a bare UUID doesn't answer it. `agent`/`idp` keep their raw id/type as-is: neither is
- * a person, so resolving one through the people directory (or giving it a PersonAvatar)
- * would misattribute the action to someone who didn't do it. */
-function ActorCell({
-  entry,
-  people,
-}: {
-  entry: AuditTimelineEntry;
-  people: DirectoryPerson[] | undefined;
-}) {
-  if (entry.actorType === "system") {
-    return <span className="text-muted-foreground">system</span>;
-  }
-  if (entry.actorType === "person") {
-    const email = people?.find((person) => person.id === entry.actorId)?.email ?? entry.actorId;
-    return (
-      <span className="flex items-center gap-1.5">
-        <PersonAvatar name={email ?? "?"} className="size-5" />
-        {email ?? "unknown"}
-      </span>
-    );
-  }
-  return <>{entry.actorId ?? entry.actorType}</>;
 }
 
 function TimelineView() {
@@ -208,17 +178,6 @@ function TimelineView() {
   );
 }
 
-const SEVERITY_VARIANT: Record<FindingSeverity, BadgeProps["variant"]> = {
-  high: "destructive",
-  medium: "drift",
-  low: "outline",
-};
-
-function daysOpen(iso: string): number {
-  const ms = Date.now() - new Date(iso).getTime();
-  return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
-}
-
 /** Oldest (earliest) openSince among a non-empty findings list. */
 function oldestOpenSince(
   findings: [ControlCheckEvidence["findings"][number], ...ControlCheckEvidence["findings"]],
@@ -280,8 +239,8 @@ function EvidenceExportView() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-prose text-sm text-muted-foreground">
-          Grouped by control, not by time (§19). Cloud-specific detail lives in the raw event layer;
-          this is the normalised projection an auditor reads.
+          Grouped by control, not by time. Cloud-specific detail lives in the raw event layer; this
+          is the normalised projection an auditor reads.
         </p>
         <div className="flex shrink-0 gap-2">
           <Button asChild variant="outline" size="sm">

@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 
+import type { BadgeProps } from "@/components/ui/badge";
 import { BASE_URL, apiGet } from "@/lib/api-client";
+import { CURRENT_ORG_ID } from "@/lib/current-org";
 
 /**
  * Audit domain: timeline (raw event feed) and evidence export (events →
- * checks → controls, grouped by control per docs/spec.md §19/§20). Wired to
+ * checks → controls, grouped by control). Wired to
  * the real `evidence/api.ts` (timeline) and `http/routes/compliance.ts`
  * (control-map + findings + CSV exports) — both already existed and
  * worked; this file was never updated after they merged.
@@ -46,11 +48,13 @@ export interface OpenFinding {
   id: string;
   summary: string;
   severity: FindingSeverity;
-  /** ISO date the finding was first seen (§19 "Finding age"). */
+  /** ISO date the finding was first seen ("Finding age"). */
   openSince: string;
+  /** `undefined` when the finding isn't attributable to one machine. */
+  machineId?: string | undefined;
 }
 
-/** One of the six v1 compliance checks (§19), as evidence for a control. */
+/** One of the six v1 compliance checks, as evidence for a control. */
 export interface ControlCheckEvidence {
   id: string;
   checkLabel: string;
@@ -134,6 +138,17 @@ const CHECK_SEVERITY: Record<string, FindingSeverity> = {
   "machines-reporting": "low",
 };
 
+export const SEVERITY_VARIANT: Record<FindingSeverity, BadgeProps["variant"]> = {
+  high: "destructive",
+  medium: "drift",
+  low: "outline",
+};
+
+export function daysOpen(iso: string): number {
+  const ms = Date.now() - new Date(iso).getTime();
+  return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
+}
+
 function summarizeDetail(detail: Record<string, unknown>): string {
   const entries = Object.entries(detail).map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
   return entries.length > 0 ? entries.join(", ") : "No further detail.";
@@ -145,7 +160,7 @@ function toCheckStatus(status: ComplianceCheckResultWire["status"]): ControlChec
 
 function checkDetailLine(check: ComplianceCheckResultWire): string {
   if (check.status === "not_applicable") {
-    return "Not applicable to this org's current fleet — applicability-gated per spec §19.";
+    return "Not applicable to this org's current fleet.";
   }
   if (check.findings.length === 0) {
     return "No open findings.";
@@ -153,10 +168,30 @@ function checkDetailLine(check: ComplianceCheckResultWire): string {
   return `${check.findings.length} open finding${check.findings.length === 1 ? "" : "s"}.`;
 }
 
+/** Shared by `fetchControlEvidence` and `fetchComplianceChecks` — one finding-mapping rule. */
+function mapFindings(check: ComplianceCheckResultWire): OpenFinding[] {
+  return check.findings.map((finding, index) => ({
+    id: `${check.checkId}:${finding.machineId ?? "org"}:${index}`,
+    summary: finding.machineId
+      ? `${finding.machineId}: ${summarizeDetail(finding.detail)}`
+      : summarizeDetail(finding.detail),
+    severity: CHECK_SEVERITY[check.checkId] ?? "medium",
+    openSince: finding.firstSeenAt,
+    machineId: finding.machineId ?? undefined,
+  }));
+}
+
 async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
+  // `/api/v1/compliance/*` still takes `orgId` as a plain query param, not derived from
+  // the session — same known gap `api/compliance.ts`'s `useControlMap` already works
+  // around with this exact constant (see its own doc comment).
   const [controlMap, findingsRes] = await Promise.all([
-    apiGet<{ controls: ControlMapEntryWire[] }>("/api/v1/compliance/control-map"),
-    apiGet<{ checks: ComplianceCheckResultWire[] }>("/api/v1/compliance/findings"),
+    apiGet<{ controls: ControlMapEntryWire[] }>(
+      `/api/v1/compliance/control-map?orgId=${CURRENT_ORG_ID}`,
+    ),
+    apiGet<{ checks: ComplianceCheckResultWire[] }>(
+      `/api/v1/compliance/findings?orgId=${CURRENT_ORG_ID}`,
+    ),
   ]);
   const checksById = new Map(findingsRes.checks.map((c) => [c.checkId, c]));
 
@@ -170,22 +205,15 @@ async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
         status: toCheckStatus(check.status),
         detail: checkDetailLine(check),
         medianAgeDays: check.medianAgeDays,
-        findings: check.findings.map((finding, index) => ({
-          id: `${check.checkId}:${finding.machineId ?? "org"}:${index}`,
-          summary: finding.machineId
-            ? `${finding.machineId}: ${summarizeDetail(finding.detail)}`
-            : summarizeDetail(finding.detail),
-          severity: CHECK_SEVERITY[check.checkId] ?? "medium",
-          openSince: finding.firstSeenAt,
-        })),
+        findings: mapFindings(check),
       }));
 
-    // A control with no implemented check evidencing it (spec §19: "most of
-    // ISO Annex A... has no bearing on the product and must not be claimed
-    // as evidenced") still renders — as an explicit "not covered" row, not
+    // A control with no implemented check evidencing it ("most of ISO Annex
+    // A... has no bearing on the product and must not be claimed as
+    // evidenced") still renders — as an explicit "not covered" row, not
     // silently dropped. Dashboards full of N/A train people to ignore them,
-    // per spec, but that's an argument for a clear N/A row, not for hiding
-    // the control entirely.
+    // but that's an argument for a clear N/A row, not for hiding the
+    // control entirely.
     if (checks.length === 0) {
       checks.push({
         id: `${control.id}:not-covered`,
@@ -209,10 +237,42 @@ async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
   });
 }
 
+/** One of the six v1 checks, ungrouped by control — the shape a machine-scoped view
+ * wants ("does this check implicate this machine"), vs. `ControlEvidenceGroup`'s
+ * control/framework grouping (compliance-taxonomy detail an auditor cares about, a
+ * single machine's page doesn't) and its synthetic "not covered" placeholder checks. */
+export interface ComplianceCheckSummary {
+  id: string;
+  label: string;
+  status: ControlCheckStatus;
+  findings: OpenFinding[];
+  medianAgeDays: number | null;
+}
+
+async function fetchComplianceChecks(): Promise<ComplianceCheckSummary[]> {
+  const findingsRes = await apiGet<{ checks: ComplianceCheckResultWire[] }>(
+    `/api/v1/compliance/findings?orgId=${CURRENT_ORG_ID}`,
+  );
+  return findingsRes.checks.map((check) => ({
+    id: check.checkId,
+    label: check.label,
+    status: toCheckStatus(check.status),
+    medianAgeDays: check.medianAgeDays,
+    findings: mapFindings(check),
+  }));
+}
+
 export function useAuditTimeline() {
   return useQuery({ queryKey: auditKeys.timeline(), queryFn: fetchAuditTimeline });
 }
 
 export function useControlEvidence() {
   return useQuery({ queryKey: auditKeys.evidence(), queryFn: fetchControlEvidence });
+}
+
+export function useComplianceChecks() {
+  return useQuery({
+    queryKey: [...auditKeys.all, "checks"] as const,
+    queryFn: fetchComplianceChecks,
+  });
 }
