@@ -37,12 +37,15 @@ export interface OrgSettings {
   id: string;
   name: string;
   approvalModes: Record<ApprovalActionType, ApprovalMode>;
-  /** Count of this org's machines with their own override, per action type — read-only,
-   * feeds `LineageGutter`'s "N machines override this" badge. Not sent on update. */
-  approvalOverrides: Record<ApprovalActionType, number>;
   loggingTier: LoggingTier;
+  /** How many of this org's machines have their own logging-tier override — read-only,
+   * feeds `LineageGutter`'s "N machines override this" badge. Not sent on update. */
+  loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
+  /** Default Azure region for a new machine that doesn't specify one (docs/spec.md §5) —
+   * live-resolved server-side, not a client-side prefill. */
+  regionDefault: string;
 }
 
 export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
@@ -96,17 +99,23 @@ interface OrgPackagesResponse {
 export function useOrgSettings() {
   return useQuery({
     queryKey: organisationKeys.settings(),
-    queryFn: () => apiGet<OrgSettings>("/api/v1/organisation"),
+    queryFn: () => apiGet<OrgSettings>(`/api/v1/organisation?orgId=${CURRENT_ORG_ID}`),
   });
 }
 
-export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id" | "approvalOverrides">>;
+// `loggingTierOverrideCount` is derived (a count over machines' own
+// settings), never something the org PATCH endpoint accepts.
+export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id" | "loggingTierOverrideCount">>;
 
 export function useUpdateOrgSettings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: UpdateOrgSettingsInput) =>
-      apiPatch<OrgSettings>("/api/v1/organisation", input),
+      apiPatch<OrgSettings>("/api/v1/organisation", {
+        orgId: CURRENT_ORG_ID,
+        ...input,
+        actor: { type: "person", id: CURRENT_PERSON_ID },
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: organisationKeys.all });
       toast.success("Organisation settings updated");
