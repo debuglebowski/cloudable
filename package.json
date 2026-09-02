@@ -9,6 +9,7 @@
     "build": "bun run --filter '*' build",
     "test:unit": "bun run --filter '*' test:unit",
     "test:integration": "bun run --filter '*' test:integration",
+    "test:e2e": "bun --env-file=\"$PWD/.env\" run --cwd apps/e2e test:e2e",
     "typecheck": "bun run --filter '*' typecheck",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

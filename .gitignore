@@ -14,6 +14,10 @@ build/
 *.tfstate.*
 crash.log
 crash.*.log
+apps/e2e/test-results/
+apps/e2e/playwright-report/
+apps/e2e/blob-report/
+apps/e2e/playwright/.cache/
 override.tf
 override.tf.json
 *_override.tf
