@@ -23,6 +23,21 @@ export interface Machine {
   archivedAt: string | null;
 }
 
+/** Mirrors control-plane's `REPORTING_STALENESS_THRESHOLD_MINUTES`
+ * (`compliance/checks/machines-reporting.ts`) — can't import cross-app, kept
+ * as the same literal value with this comment instead. */
+const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+
+/** `null` means "no agent poll has landed yet" — a normal, non-alarming
+ * "not yet verified" state for a brand-new machine (see call sites' own
+ * fallback text), not staleness, so this only ever returns `true` for a
+ * machine that reported before and has since gone quiet. */
+export function isMachineStale(lastVerifiedAt: string | null): boolean {
+  return (
+    lastVerifiedAt != null && Date.now() - new Date(lastVerifiedAt).getTime() > STALE_THRESHOLD_MS
+  );
+}
+
 export type SettingLevel = "org" | "template" | "machine";
 
 export interface ManifestEntry {

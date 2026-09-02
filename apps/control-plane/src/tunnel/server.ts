@@ -25,6 +25,7 @@ import { machines, sessions } from "@cloudable/schema";
 // ---------------------------------------------------------------------------
 import { and, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
+import { isMachineStale } from "../compliance/checks/machines-reporting";
 import { Db } from "../db/layer";
 import { resolveAccessMethodsEnabled } from "../domain/machine/settings";
 import { EventBus } from "../services/EventBus";
@@ -137,6 +138,18 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
           if (!methodEnabled) {
             denialReason = "method_disabled";
           }
+        }
+
+        // A machine can say `state: "running"` in the DB forever with
+        // nothing ever re-verifying it — this is that re-verification,
+        // reusing the exact reasoning/threshold already justified for the
+        // "machines are reporting" compliance check
+        // (`compliance/checks/machines-reporting.ts`). Deliberately a pure
+        // read: `mintSession` is not reconcile, and "reconcile is the only
+        // operation that mutates a machine" (CLAUDE.md invariant #10), so
+        // this never writes to `machines`.
+        if (!denialReason && machine && isMachineStale(machine, now)) {
+          denialReason = "machine_not_reporting";
         }
 
         // Admin access to a machine you don't own needs the owner
