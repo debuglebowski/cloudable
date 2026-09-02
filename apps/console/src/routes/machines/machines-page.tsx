@@ -8,7 +8,6 @@ import {
   Disc,
   MapPin,
   Plus,
-  Server,
   Type,
   User,
 } from "lucide-react";
@@ -18,7 +17,6 @@ import { isMachineStale, listMachines, machinesKeys } from "@/api/machines";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { Freshness } from "@/components/freshness";
 import { OsIcon } from "@/components/os-icon";
-import { PageHeaderIcon } from "@/components/page-header-icon";
 import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
@@ -72,21 +70,12 @@ export function MachinesPage() {
     // feedback: "the table should fill all available space on the screen").
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex shrink-0 items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          {/* Exact hex, matching nav-config.ts's own Machines icon color — see its
-              comment for where the value came from (the reference product's real,
-              ground-truthed sidebar icon color, not Tailwind's stock blue-500). */}
-          <PageHeaderIcon
-            icon={Server}
-            className="bg-[#0090ff]/10 text-[#0090ff] dark:bg-[#59b7ff]/10 dark:text-[#59b7ff]"
-          />
-          <div>
-            <h1 className="text-xl font-semibold">Machines</h1>
-            <p className="text-sm text-muted-foreground">
-              Persistent, governed cloud machines this org owns. Archived machines stay here behind
-              a filter — Archive owns retention.
-            </p>
-          </div>
+        <div>
+          <h1 className="text-xl font-semibold">Machines</h1>
+          <p className="text-sm text-muted-foreground">
+            Persistent, governed cloud machines this org owns. Archived machines stay here behind
+            a filter — Archive owns retention.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowArchived((value) => !value)}>

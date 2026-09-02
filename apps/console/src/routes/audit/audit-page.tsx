@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Clock, FileText, ScrollText, Server, User, Zap } from "lucide-react";
+import { Clock, FileText, Server, User, Zap } from "lucide-react";
 
 import {
   AUDIT_EXPORT_URLS,
@@ -13,7 +13,6 @@ import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ActorCell } from "@/components/actor-cell";
 import { ControlStatus } from "@/components/control-status";
 import { Freshness } from "@/components/freshness";
-import { PageHeaderIcon } from "@/components/page-header-icon";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,15 +42,12 @@ export function AuditPage() {
     // deliberately opts out below and just flows/scrolls normally — this
     // treatment is for "one table is the whole view" tabs.
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex shrink-0 items-center gap-3">
-        <PageHeaderIcon icon={ScrollText} />
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">Audit</h1>
-          <p className="max-w-prose text-sm text-muted-foreground">
-            Every event Cloudable emits, and what it evidences. Timeline is the raw feed; evidence
-            export groups the same events by control for an auditor.
-          </p>
-        </div>
+      <div className="flex shrink-0 flex-col gap-1">
+        <h1 className="text-xl font-semibold">Audit</h1>
+        <p className="max-w-prose text-sm text-muted-foreground">
+          Every event Cloudable emits, and what it evidences. Timeline is the raw feed; evidence
+          export groups the same events by control for an auditor.
+        </p>
       </div>
 
       <Tabs defaultValue="timeline" className="flex min-h-0 flex-1 flex-col">

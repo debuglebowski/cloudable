@@ -1,7 +1,6 @@
-import { Archive as ArchiveGlyph, Calendar, Clock, DollarSign, Scale, Server } from "lucide-react";
+import { Calendar, Clock, DollarSign, Scale, Server } from "lucide-react";
 
 import { type ArchivedSnapshot, useArchivedSnapshots } from "@/api/archive";
-import { PageHeaderIcon } from "@/components/page-header-icon";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,15 +78,12 @@ export function ArchivePage() {
     // `main` actually has left under the header instead of capping at a flat
     // vh fraction — see machines-page.tsx's comment on the same pattern.
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex shrink-0 items-center gap-3">
-        <PageHeaderIcon icon={ArchiveGlyph} />
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">Archive</h1>
-          <p className="max-w-prose text-sm text-muted-foreground">
-            Machines are archived, never deleted. This page governs the retention clock and restore
-            for archived snapshots — separate from the live Machines list.
-          </p>
-        </div>
+      <div className="flex shrink-0 flex-col gap-1">
+        <h1 className="text-xl font-semibold">Archive</h1>
+        <p className="max-w-prose text-sm text-muted-foreground">
+          Machines are archived, never deleted. This page governs the retention clock and restore
+          for archived snapshots — separate from the live Machines list.
+        </p>
       </div>
 
       <Card className="flex min-h-0 flex-1 flex-col">

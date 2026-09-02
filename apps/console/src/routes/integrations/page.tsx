@@ -1,8 +1,7 @@
-import { Lock, Network, Plug, UserCog } from "lucide-react";
+import { Lock, Network, UserCog } from "lucide-react";
 
 import { pickConnected, useDisconnectIntegration, useIntegrations } from "@/api/integrations";
 import type { Integration } from "@/api/integrations";
-import { PageHeaderIcon } from "@/components/page-header-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import {
@@ -29,15 +28,12 @@ export function IntegrationsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <PageHeaderIcon icon={Plug} />
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">Integrations</h1>
-          <p className="max-w-prose text-sm text-muted-foreground">
-            Federation only — no cloud credential is ever stored, and Cloudable is the secrets
-            injector, never the vault. Every form below takes non-secret pointers only.
-          </p>
-        </div>
+      <div className="flex flex-col gap-1">
+        <h1 className="text-xl font-semibold">Integrations</h1>
+        <p className="max-w-prose text-sm text-muted-foreground">
+          Federation only — no cloud credential is ever stored, and Cloudable is the secrets
+          injector, never the vault. Every form below takes non-secret pointers only.
+        </p>
       </div>
 
       {isLoading ? (

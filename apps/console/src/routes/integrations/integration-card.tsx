@@ -27,9 +27,9 @@ import {
 export interface IntegrationCardProps<K extends IntegrationKind> {
   title: string;
   /** Small leading icon naming this card's kind — same "icon square before a
-   * title" convention as `PageHeaderIcon` and reports.png's own dashboard-card
-   * grid (each card there leads with a colored icon square too), just at the
-   * card's smaller scale rather than a page header's. */
+   * title" convention as reports.png's own dashboard-card grid (each card
+   * there leads with a colored icon square too), just at the card's smaller
+   * scale. */
   icon: LucideIcon;
   description: string;
   integration: Extract<Integration, { kind: K }> | undefined;
