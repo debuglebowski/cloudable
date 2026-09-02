@@ -30,7 +30,7 @@ export interface ManifestEntry {
   /** `null` means "any" version — no pin. */
   version: string | null;
   source: SettingLevel;
-  /** Org-level pin: cannot be overridden below (spec §6). */
+  /** Org-level pin: cannot be overridden below. */
   pinned: boolean;
   /** Count of machines that override this entry below the level shown here. No real endpoint
    * aggregates this yet (see `getMachineManifest` below) — always undefined against real data. */
@@ -142,7 +142,7 @@ export interface CreateMachineInput {
   region: string;
   sizeSku: string;
   image: string;
-  /** A machine always has exactly one owner, always a person (CLAUDE.md invariant #3). */
+  /** A machine always has exactly one owner, always a person. */
   ownerPersonId: string;
 }
 
@@ -171,8 +171,8 @@ export async function getMachineDrift(_machineId: string): Promise<DriftInfo> {
 
 /**
  * `PATCH /machines/:id/packages` — writes a machine-scoped override. Real
- * server-side enforcement of spec §6's "pinned entries cannot be overridden
- * below" (returns a 422 with `code: "pinned_entry_conflict"`), same
+ * server-side enforcement of "pinned entries cannot be overridden below"
+ * (returns a 422 with `code: "pinned_entry_conflict"`), same
  * validation-error-at-edit-time behavior the mock used to simulate by hand.
  */
 export async function overrideManifestEntry(
@@ -218,7 +218,7 @@ export interface UpgradeResult {
 
 /**
  * Real `POST /api/v1/machines/:id/upgrade` — the transactional snapshot ->
- * apply -> verify -> rollback-on-failure flow (spec §19). A non-"success"
+ * apply -> verify -> rollback-on-failure flow. A non-"success"
  * outcome is not itself a thrown error — it's a legitimate, informative
  * result the caller renders (see `UpgradeMachineDialog`).
  */
@@ -236,7 +236,7 @@ export interface ReconcileResult {
 
 /**
  * Real `POST /api/v1/config/machines/:id/reconcile` — the ONLY operation
- * that mutates a live machine (spec §16); editing desired state elsewhere
+ * that mutates a live machine; editing desired state elsewhere
  * is always inert until this runs. `confirm: true` is required — the
  * server rejects both an absent and an explicit `false` with the same
  * confirmation-gate error, so there's nothing to send otherwise.
@@ -245,4 +245,22 @@ export async function triggerReconcile(machineId: string): Promise<ReconcileResu
   return apiPost<ReconcileResult>(`/api/v1/config/machines/${machineId}/reconcile`, {
     confirm: true,
   });
+}
+
+export interface ArchiveMachineResult {
+  machineId: string;
+  state: "archived_restorable";
+  snapshotId: string;
+  retentionExpiresAt: string;
+}
+
+/**
+ * Real `POST /api/v1/archive/machines/:id/archive` — one-way `live ->
+ * archived_restorable` (archived, never deleted). Not itself
+ * on the approval-consumer list (`docs/lifecycle.md`), so `approvalId`
+ * is omitted here rather than threaded through from the console for
+ * attribution.
+ */
+export async function archiveMachine(machineId: string): Promise<ArchiveMachineResult> {
+  return apiPost<ArchiveMachineResult>(`/api/v1/archive/machines/${machineId}/archive`, {});
 }
