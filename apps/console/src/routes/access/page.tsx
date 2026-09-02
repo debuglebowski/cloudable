@@ -4,7 +4,6 @@ import {
   Clock,
   Fingerprint as FingerprintGlyph,
   Gauge,
-  KeyRound,
   type LucideIcon,
   MessageSquare,
   Server,
@@ -28,7 +27,6 @@ import {
   useLiveCertificates,
   useSyncElevation,
 } from "@/api/access";
-import { PageHeaderIcon } from "@/components/page-header-icon";
 import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 import { FingerprintCell } from "./fingerprint-cell";
@@ -131,6 +130,8 @@ function TableStatusRow({
   );
 }
 
+type AccessTab = "certificates" | "sessions" | "elevations";
+
 export function AccessPage() {
   const certificatesQuery = useLiveCertificates();
   const sessionsQuery = useActiveSessions();
@@ -138,6 +139,7 @@ export function AccessPage() {
   const syncElevation = useSyncElevation();
   const expireElevation = useExpireElevation();
 
+  const [activeTab, setActiveTab] = useState<AccessTab>("certificates");
   const [certificateToRevoke, setCertificateToRevoke] = useState<LiveCertificate | null>(null);
   const [sessionToTerminate, setSessionToTerminate] = useState<ActiveSession | null>(null);
 
@@ -147,27 +149,29 @@ export function AccessPage() {
     // instead of each capping at a flat vh fraction — see machines-page.tsx's
     // comment on the same pattern for a single-table page.
     <div className="flex h-full min-h-0 flex-col gap-8">
-      <div className="flex shrink-0 items-center gap-3">
-        <PageHeaderIcon icon={KeyRound} />
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">Access</h1>
-          <p className="max-w-prose text-sm text-muted-foreground">
-            Live certificates, active sessions, and elevation requests. Nothing else — no staleness
-            clocks, no periodic access reviews, no password-authentication toggle.
-          </p>
-        </div>
+      <div className="flex shrink-0 flex-col gap-1">
+        <h1 className="text-xl font-semibold">Access</h1>
+        <p className="max-w-prose text-sm text-muted-foreground">
+          Live certificates, active sessions, and elevation requests. Nothing else — no staleness
+          clocks, no periodic access reviews, no password-authentication toggle.
+        </p>
       </div>
 
-      <section className="flex min-h-0 flex-1 flex-col gap-2">
-        <h2 className="shrink-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Live certificates
-        </h2>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as AccessTab)}
+        className="flex min-h-0 flex-1 flex-col gap-3"
+      >
+        <TabsList className="w-fit shrink-0">
+          <TabsTrigger value="certificates">Live certificates</TabsTrigger>
+          <TabsTrigger value="sessions">Active sessions</TabsTrigger>
+          <TabsTrigger value="elevations">Elevation requests</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="certificates" className="mt-0 flex min-h-0 flex-1 flex-col">
         {/* Shadow on all three of this page's table wrappers, not a bare
             bg-card box — see Card's own comment for the exact value and why
-            there's no border alongside it. flex-1 min-h-0 on this wrapper
-            (and the section around it) plus the Table override make each of
-            the 3 tables fill its equal share of whatever's left, rather than
-            each capping at a flat vh fraction. */}
+            there's no border alongside it. */}
         <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
           <Table containerClassName="h-full max-h-none">
             <TableHeader>

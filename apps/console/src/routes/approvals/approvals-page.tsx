@@ -4,7 +4,6 @@ import {
   Gauge,
   type LucideIcon,
   MessageSquare,
-  ShieldCheck,
   Tag,
   Target as TargetGlyph,
   User,
@@ -20,7 +19,6 @@ import {
   usePendingApprovalsQuery,
 } from "@/api/approvals";
 import { Freshness } from "@/components/freshness";
-import { PageHeaderIcon } from "@/components/page-header-icon";
 import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
@@ -110,7 +108,6 @@ export function ApprovalsPage() {
     // fraction — see machines-page.tsx's identical comment.
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex shrink-0 items-center gap-3">
-        <PageHeaderIcon icon={ShieldCheck} />
         <h1 className="text-xl font-semibold">Approvals</h1>
         <Badge
           variant={pendingCount ? "drift" : "secondary"}

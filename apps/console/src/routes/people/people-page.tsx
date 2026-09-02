@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock, Mail, Plus, Shield, Tag, Users, Workflow } from "lucide-react";
+import { Clock, Mail, Plus, Shield, Tag, Workflow } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -11,7 +11,6 @@ import {
   setPersonActive,
   updatePerson,
 } from "@/api/people";
-import { PageHeaderIcon } from "@/components/page-header-icon";
 import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
@@ -85,21 +84,12 @@ export function PeoplePage() {
     // a flat vh fraction — see machines-page.tsx's identical comment.
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex shrink-0 items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          {/* Exact hex, matching nav-config.ts's own People icon color — see its
-              comment for where the value came from (the reference product's real,
-              ground-truthed sidebar icon color, not Tailwind's stock orange-500). */}
-          <PageHeaderIcon
-            icon={Users}
-            className="bg-[#ff7a1f]/10 text-[#ff7a1f] dark:bg-[#ffa262]/10 dark:text-[#ffa262]"
-          />
-          <div className="flex flex-col gap-1">
-            <h1 className="text-xl font-semibold">People</h1>
-            <p className="max-w-prose text-sm text-muted-foreground">
-              System of record for who can own machines. With no IdP connected this list is fully
-              editable; once SCIM is connected, synced people become read-only here.
-            </p>
-          </div>
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold">People</h1>
+          <p className="max-w-prose text-sm text-muted-foreground">
+            System of record for who can own machines. With no IdP connected this list is fully
+            editable; once SCIM is connected, synced people become read-only here.
+          </p>
         </div>
         <Button onClick={() => setAddOpen(true)}>
           <Plus />

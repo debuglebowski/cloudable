@@ -1,4 +1,3 @@
-import { Building2 } from "lucide-react";
 import { useState } from "react";
 
 import { CONTROL_STATUS_LABELS, useControlMap, useSetControlOverride } from "@/api/compliance";
@@ -13,7 +12,6 @@ import {
   useUpdateOrgSettings,
 } from "@/api/organisation";
 import { LineageGutter } from "@/components/lineage-gutter";
-import { PageHeaderIcon } from "@/components/page-header-icon";
 import { SettingRow } from "@/components/setting-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -118,15 +116,12 @@ export function OrganisationPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <PageHeaderIcon icon={Building2} />
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">Organisation</h1>
-          <p className="max-w-prose text-sm text-muted-foreground">
-            Org-wide identity and defaults. These settings are policy, inherited down through
-            templates and machines.
-          </p>
-        </div>
+      <div className="flex flex-col gap-1">
+        <h1 className="text-xl font-semibold">Organisation</h1>
+        <p className="max-w-prose text-sm text-muted-foreground">
+          Org-wide identity and defaults. These settings are policy, inherited down through
+          templates and machines.
+        </p>
       </div>
 
       <Card>
