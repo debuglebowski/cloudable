@@ -6,6 +6,7 @@ import { listActiveSessionsByOrg } from "../../tunnel/queries";
 import { TunnelServer } from "../../tunnel/server";
 import { SESSION_TOKEN_KEY_ID } from "../../tunnel/session-token";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 type AccessErrorBody =
   | { code: "not_found"; message: string }
@@ -85,11 +86,12 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
     )
     .handle("mintSession", ({ payload }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const tunnel = yield* TunnelServer;
         const minted = yield* tunnel.mintSession({
-          orgId: payload.orgId,
-          personId: payload.personId,
-          idpIdentity: payload.idpIdentity,
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+          idpIdentity: currentUser.email,
           targetMachineId: payload.targetMachineId,
           targetOsUser: payload.targetOsUser,
           method: payload.method,
