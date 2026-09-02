@@ -1,16 +1,16 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import net from "node:net";
-import * as schema from "@cloudable/schema";
+import type * as schema from "@cloudable/schema";
 import { events, machines, orgs, sessions, settingValues } from "@cloudable/schema";
-import { and, eq } from "drizzle-orm";
-import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { and, eq, inArray, or } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
 import postgres from "postgres";
 import { Db } from "../../db/layer";
 import { handleImportConfig, handlePatchSetting } from "../../http/handlers/config";
 import { EventBus } from "../../services/EventBus";
 import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
+import { connectAndMigrate } from "../../test-support/db";
 import { TunnelServer } from "../../tunnel/server";
 import { TunnelSignal } from "../../tunnel/signal";
 import { MachineService } from "../machine/MachineService";
@@ -83,15 +83,17 @@ const postgresReachable =
   (await hasDesiredStateVersionColumn(databaseUrl));
 
 describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)", () => {
-  let sql: ReturnType<typeof postgres>;
+  let close: () => Promise<void>;
   let db: PostgresJsDatabase<typeof schema>;
   let envLayer: Layer.Layer<Db | EventBus | TunnelServer>;
   let machineLayer: Layer.Layer<MachineService>;
+  const createdOrgIds: string[] = [];
+  const createdMachineIds: string[] = [];
 
   beforeAll(async () => {
-    sql = postgres(databaseUrl);
-    db = drizzle(sql, { schema });
-    await migrate(db, { migrationsFolder: "../../packages/schema/migrations" });
+    const conn = await connectAndMigrate(databaseUrl);
+    db = conn.db;
+    close = conn.close;
 
     const dbLayer = Layer.succeed(Db, db);
     const eventBusLayer = EventBus.Default.pipe(Layer.provide(dbLayer));
@@ -107,7 +109,23 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
   });
 
   afterAll(async () => {
-    await sql.end();
+    // See the identical comment in `MachineService.test.ts`'s own `afterAll`
+    // — `close`/`db` are unset if `connectAndMigrate` in `beforeAll` threw.
+    if (!close) return;
+    if (createdOrgIds.length > 0 || createdMachineIds.length > 0) {
+      await db.delete(sessions).where(inArray(sessions.orgId, createdOrgIds));
+      await db
+        .delete(settingValues)
+        .where(
+          or(
+            inArray(settingValues.scopeId, createdOrgIds),
+            inArray(settingValues.scopeId, createdMachineIds),
+          ),
+        );
+      await db.delete(machines).where(inArray(machines.orgId, createdOrgIds));
+      await db.delete(orgs).where(inArray(orgs.id, createdOrgIds));
+    }
+    await close();
   });
 
   const run = <A, E>(effect: Effect.Effect<A, E, Db | EventBus | TunnelServer>) =>
@@ -122,6 +140,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       .values({ name: `org-${crypto.randomUUID()}` })
       .returning();
     if (!org) throw new Error("seed failed");
+    createdOrgIds.push(org.id);
     return org;
   }
 
@@ -138,6 +157,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       })
       .returning();
     if (!machine) throw new Error("seed failed");
+    createdMachineIds.push(machine.id);
     return machine;
   }
 
