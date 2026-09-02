@@ -79,9 +79,9 @@ export function PeoplePage() {
   const mutationError = updateMutation.error ?? activeMutation.error;
 
   return (
-    // h-full min-h-0 + flex-1 on the table wrapper below: fills whatever
-    // height `main` actually has left under the header instead of capping at
-    // a flat vh fraction — see machines-page.tsx's identical comment.
+    // h-full min-h-0 + the table wrapper below: bounds this page to `main`'s
+    // real available height instead of an arbitrary vh fraction — see
+    // machines-page.tsx's identical comment.
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex shrink-0 items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
@@ -103,10 +103,12 @@ export function PeoplePage() {
         </p>
       )}
 
-      {/* Shadow, not a bare bg-card box — see Card's own comment for the exact
-          value and why there's no border alongside it. flex-1 min-h-0 + the
-          Table override fill remaining height instead of a flat vh cap. */}
-      <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+      {/* Shadow, not a bare bg-card box — see Card's own comment for the
+          exact value and why there's no border alongside it. min-h-0, no
+          flex-1: shrinks to the real available space when content
+          overflows, collapses to content otherwise — see
+          machines-page.tsx's identical comment. */}
+      <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
         <Table containerClassName="h-full max-h-none">
           <TableHeader>
             <TableRow>

@@ -35,12 +35,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
  */
 export function AuditPage() {
   return (
-    // h-full min-h-0 + the Tabs below being flex-1: fills whatever height
-    // `main` actually has left under the header instead of capping at a flat
-    // vh fraction — see machines-page.tsx's comment on the same pattern. The
-    // Evidence-export tab (a variable-length stack of Cards, not one table)
-    // deliberately opts out below and just flows/scrolls normally — this
-    // treatment is for "one table is the whole view" tabs.
+    // h-full min-h-0 + the Tabs below: bounds this page to `main`'s real
+    // available height instead of an arbitrary vh fraction — see
+    // machines-page.tsx's comment on the same pattern. The Evidence-export
+    // tab (a variable-length stack of Cards, not one table) deliberately
+    // opts out below and just flows/scrolls normally — this treatment is for
+    // "one table is the whole view" tabs.
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex shrink-0 flex-col gap-1">
         <h1 className="text-xl font-semibold">Audit</h1>
@@ -50,15 +50,22 @@ export function AuditPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="timeline" className="flex min-h-0 flex-1 flex-col">
-        <TabsList className="shrink-0">
+      <Tabs defaultValue="timeline" className="flex min-h-0 flex-col">
+        {/* self-start: Tabs' own flex-col stretches items to full width by
+            default (align-items: stretch) — without this the pill list would
+            span the whole page instead of sizing to its two triggers. */}
+        <TabsList className="shrink-0 self-start">
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
           <TabsTrigger value="evidence">Evidence export</TabsTrigger>
         </TabsList>
-        {/* flex + min-h-0 + flex-1: only on this tab, not "evidence" below —
-            TimelineView's own Card fills this exactly instead of sizing to
-            its (usually short) content. */}
-        <TabsContent value="timeline" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* flex + min-h-0: only on this tab, not "evidence" below —
+            TimelineView's own Card shrinks to this tab's real available
+            space instead of a flat vh cap. No overflow-hidden here: Card
+            already clips its own children, and adding it on this ancestor
+            clipped the Card's own box-shadow along with everything else,
+            since the shadow renders outside the Card's box but inside this
+            container's bounds. */}
+        <TabsContent value="timeline" className="flex min-h-0 flex-col">
           <TimelineView />
         </TabsContent>
         <TabsContent value="evidence">
@@ -79,12 +86,12 @@ function TimelineView() {
   });
 
   return (
-    <Card className="flex min-h-0 flex-1 flex-col">
+    <Card className="flex min-h-0 flex-col">
       <CardHeader className="shrink-0">
         <CardTitle className="text-base">Timeline</CardTitle>
         <CardDescription>Chronological feed of every event, newest first.</CardDescription>
       </CardHeader>
-      <CardContent className="min-h-0 flex-1 p-0">
+      <CardContent className="min-h-0 p-0">
         <Table containerClassName="h-full max-h-none">
           <TableHeader>
             <TableRow>
