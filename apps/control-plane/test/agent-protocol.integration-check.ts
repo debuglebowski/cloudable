@@ -17,6 +17,7 @@ import { ApprovalsLive } from "../src/http/handlers/approvals";
 import { ArchiveLive } from "../src/http/handlers/archive";
 import { ComplianceLive } from "../src/http/handlers/compliance";
 import { ConfigLive } from "../src/http/handlers/config";
+import { DevProvisioningLive } from "../src/http/handlers/dev-provisioning";
 import { ElevationsLive } from "../src/http/handlers/elevations";
 import { FederationLive } from "../src/http/handlers/federation";
 import { HealthLive } from "../src/http/handlers/health";
@@ -118,6 +119,7 @@ describe("agent-protocol handlers (integration)", () => {
           TunnelSignalLive,
           TunnelLive,
           NotificationsLive,
+          DevProvisioningLive,
         ),
       ),
     );

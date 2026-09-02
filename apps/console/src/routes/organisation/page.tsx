@@ -1,6 +1,7 @@
 import { Building2 } from "lucide-react";
 import { Fragment, useState } from "react";
 
+import { useDevProvisioningAdapter, useSetDevProvisioningAdapter } from "@/api/dev-provisioning";
 import {
   APPROVAL_ACTION_LABELS,
   APPROVAL_ACTION_TYPES,
@@ -18,12 +19,66 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+import { ProvisioningAdapterDialog } from "./dev-provisioning-dialog";
 import {
   ApprovalModeDialog,
   LoggingTierDialog,
   RetentionDaysDialog,
   RetentionLocationDialog,
 } from "./setting-dialogs";
+
+/**
+ * Dev-only card: lets a developer switch which `ProvisioningService` this
+ * console's control-plane dispatches to, without restarting the process
+ * (see `api/dev-provisioning.ts`). Gated on `import.meta.env.DEV` (same
+ * mechanism as `nav-config.ts`'s dev-time nav check) so it's stripped from
+ * a production build entirely — the real enforcement is server-side
+ * (`overridable`), this is just the console never offering it for real.
+ * Deliberately not a `SettingRow`/`LineageGutter` — those carry
+ * org→template→machine inheritance semantics that don't apply here.
+ */
+function DevProvisioningCard() {
+  const { data } = useDevProvisioningAdapter();
+  const setAdapter = useSetDevProvisioningAdapter();
+  const [editing, setEditing] = useState(false);
+
+  if (!data) return null;
+
+  return (
+    <Card className="border-dashed">
+      <CardHeader>
+        <CardTitle>Provisioning adapter (dev only)</CardTitle>
+        <CardDescription>
+          Boot default: {data.bootDefault}
+          {!data.overridable && " — this control-plane booted as azure and cannot be switched."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <span className="text-sm">
+            Current: <span className="font-medium">{data.current}</span>
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!data.overridable}
+            onClick={() => setEditing(true)}
+          >
+            Switch
+          </Button>
+        </div>
+      </CardContent>
+      <ProvisioningAdapterDialog
+        open={editing}
+        currentAdapter={data.current}
+        onOpenChange={setEditing}
+        onSave={async (adapter) => {
+          await setAdapter.mutateAsync(adapter);
+        }}
+      />
+    </Card>
+  );
+}
 
 function formatMode(mode: string): string {
   return mode.charAt(0).toUpperCase() + mode.slice(1);
@@ -206,6 +261,8 @@ export function OrganisationPage() {
           await update.mutateAsync({ retentionLocation: location });
         }}
       />
+
+      {import.meta.env.DEV && <DevProvisioningCard />}
     </div>
   );
 }

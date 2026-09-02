@@ -1,7 +1,7 @@
 import { Context, Layer } from "effect";
 
-const PROVISIONING_ADAPTERS = ["fake", "docker", "azure"] as const;
-type ProvisioningAdapter = (typeof PROVISIONING_ADAPTERS)[number];
+export const PROVISIONING_ADAPTERS = ["fake", "docker", "azure"] as const;
+export type ProvisioningAdapter = (typeof PROVISIONING_ADAPTERS)[number];
 
 const readProvisioningAdapter = (): ProvisioningAdapter => {
   const raw = process.env["PROVISIONING_ADAPTER"];
