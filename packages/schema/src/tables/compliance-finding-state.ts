@@ -14,10 +14,10 @@ import { pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core
 export const NO_MACHINE_SENTINEL = "00000000-0000-0000-0000-000000000000";
 
 /**
- * Finding-age bookkeeping for compliance checks (spec §19 "Finding age").
+ * Finding-age bookkeeping for compliance checks.
  *
- * Compliance is computed live (§19: "Computed live from current fleet
- * state, not stored") — this table is not evidence and never substitutes
+ * Compliance is computed live — from current fleet
+ * state, not stored — this table is not evidence and never substitutes
  * for re-running a check against `events`/current state. Its only job is
  * remembering the first time a given (check, org, machine, finding) tuple
  * was ever detected, so a finding that keeps recurring across evaluations
@@ -31,8 +31,7 @@ export const NO_MACHINE_SENTINEL = "00000000-0000-0000-0000-000000000000";
  * A row is deleted once its finding stops being detected (see
  * `clearResolvedFindings` in `apps/control-plane/src/compliance/
  * finding-store.ts`) — a resolved finding shouldn't keep aging forever in
- * the store. This never touches `events`, which stays append-only
- * (invariant #2).
+ * the store. This never touches `events`, which stays append-only.
  */
 export const complianceFindingState = pgTable(
   "compliance_finding_state",

@@ -9,7 +9,7 @@ const CHECK_ID = "retention-honoured";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
- * Check #5 — "Retention is honoured" (`docs/spec.md` §19).
+ * Check #5 — "Retention is honoured".
  *
  * Fails when a snapshot outlives its retention window without a legal hold.
  * `snapshot.expired` is the event that proves hard-deletion happened on

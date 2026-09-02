@@ -9,8 +9,8 @@ export interface SettingRowProps {
    * The value this setting would resolve to without the override currently in effect —
    * i.e. what's inherited from the level above `source`. Pass this only when an override
    * is active; the caller renders `value` as the new effective value in that case, and
-   * `inheritedValue` renders alongside it, struck through, so the override is visible per
-   * docs/spec.md §5 ("overrides render visibly with the inherited value struck through and
+   * `inheritedValue` renders alongside it, struck through, so the override is visible
+   * ("overrides render visibly with the inherited value struck through and
    * its origin named"). Omit when there's no override — `value` is already the inherited one.
    */
   inheritedValue?: unknown;

@@ -31,17 +31,16 @@ interface MachineStateSnapshot {
   packagesHash: string;
   /**
    * Packages present on the machine but absent from its declared manifest.
-   * Reconcile only ever surfaces these, never installs anything
-   * (CLAUDE.md invariant #4), and drift is flagged, never auto-corrected
-   * (invariant #5) — this list is the flag.
+   * Reconcile only ever surfaces these, never installs anything,
+   * and drift is flagged, never auto-corrected — this list is the flag.
    */
   undeclaredPackages: string[];
   /** The cloud provider's resource id for the machine, once provisioned. Mirrors `machines.externalResourceId`. Null before provisioning completes. */
   externalResourceId: string | null;
   /**
-   * Which access methods (spec §11) the agent found an actually-running
+   * Which access methods the agent found an actually-running
    * process for as of this report — the "config state" half of "installed
-   * packages and config state" (spec §8.1), alongside `packagesHash`.
+   * packages and config state", alongside `packagesHash`.
    * Order-independent: `deriveEvents` compares this as a set, the same way
    * it compares `undeclaredPackages`, not by array order.
    */
@@ -61,8 +60,8 @@ export type MachineLastKnownState = MachineStateSnapshot;
  * Carries `agentVersion` in addition to the fields shared with
  * `MachineLastKnownState` — needed for `machine.first_seen`'s payload
  * (`{ agentVersion: string }`, see `packages/events`). The agent already
- * reports its version as part of "installed packages and config state"
- * (spec §8.1), so it rides along on every report rather than requiring a
+ * reports its version as part of "installed packages and config state",
+ * so it rides along on every report rather than requiring a
  * separate attest-time field.
  */
 export interface MachineReportedState extends MachineStateSnapshot {

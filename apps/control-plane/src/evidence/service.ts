@@ -32,7 +32,7 @@ export const EVIDENCE_MAX_PAGE_LIMIT = 100;
  *
  * This is a read-only query over the append-only `events` table — nothing
  * here writes, updates, or deletes a row, and no second copy of the events
- * is persisted (spec §18). `id` is a ULID (ordered by creation), so
+ * is persisted. `id` is a ULID (ordered by creation), so
  * `ORDER BY id DESC` with an `id < cursor` predicate is a stable, gapless
  * "newest first" cursor without needing a separate offset or timestamp tie
  * -breaker.
@@ -40,7 +40,7 @@ export const EVIDENCE_MAX_PAGE_LIMIT = 100;
  * `access.command_recorded` rows (tier-3 shell capture, a separate
  * high-volume table — see `@cloudable/schema`) are looked up by
  * `correlationId` for the page's events and attached as a count/pointer,
- * never merged into the returned rows themselves (spec §17, §18).
+ * never merged into the returned rows themselves.
  */
 export const queryEvidencePage = (
   db: DbHandle,

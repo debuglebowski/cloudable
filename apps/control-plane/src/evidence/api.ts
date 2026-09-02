@@ -3,7 +3,7 @@ import { Schema } from "effect";
 import { CurrentUserAuthentication } from "../http/middleware/auth";
 
 /**
- * Wire schema for the normalised evidence projection (spec §18). Kept in
+ * Wire schema for the normalised evidence projection. Kept in
  * lockstep with `./projection.ts`'s `EvidenceRecord`/`CommandRecordingRef`/
  * `EvidenceExtensions` TypeScript shapes by hand — there's exactly one of
  * each in this unit, so a codegen step would be more machinery than the

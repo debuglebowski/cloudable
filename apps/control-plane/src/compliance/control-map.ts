@@ -21,13 +21,12 @@ export interface CheckRef {
 }
 
 /**
- * Cloudable's own default control taxonomy (docs/spec.md §19: "Cloudable
- * ships defaults for the controls it is itself audited against — access
- * management and asset management clauses"). This is the DEFAULT only —
- * an org can override a specific control's status on top of it (see
- * `applyControlOverrides` below); it never replaces this computation.
+ * Cloudable's own default control taxonomy — the controls it is itself
+ * audited against: access management and asset management. This is the
+ * DEFAULT only — an org can override a specific control's status on top of
+ * it (see `applyControlOverrides` below); it never replaces this computation.
  *
- * `id` is exactly the string feature-unit checks put in
+ * `id` is exactly the string checks put in
  * `ComplianceCheck.controlRefs` — see `registry.ts` for what's actually
  * registered. A control here is "implemented" once *any* registered check
  * evidences it; otherwise Cloudable claims the control as in scope but has
@@ -39,10 +38,10 @@ const IN_SCOPE_CONTROLS: readonly ControlDefinition[] = [
 ];
 
 /**
- * Controls explicitly OUT of scope for this product (docs/spec.md §19:
- * "Most of ISO Annex A — physical security, HR screening, supplier
- * contracts — has no bearing on the product and must not be claimed as
- * evidenced"). These always report `not_covered`, regardless of what's
+ * Controls explicitly out of scope for this product — most of ISO Annex A
+ * (physical security, HR screening, supplier contracts) has no bearing on
+ * the product and must not be claimed as evidenced. These always report
+ * `not_covered`, regardless of what's
  * registered in `COMPLIANCE_CHECKS`: no check should ever claim one of
  * these ids in `controlRefs`, and this list does not derive from
  * `COMPLIANCE_CHECKS` at all.
@@ -59,8 +58,8 @@ const OUT_OF_SCOPE_CONTROLS: readonly ControlDefinition[] = [
 
 /**
  * Computes the control map: for every control Cloudable knows about, an
- * honest status of implemented / manual action required / not covered
- * (docs/spec.md §19). Pure and synchronous — status only depends on which
+ * honest status of implemented / manual action required / not covered.
+ * Pure and synchronous — status only depends on which
  * checks are currently registered, not on any org's live findings, so no
  * `Db`/`Effect` dependency is needed here.
  */
@@ -123,10 +122,10 @@ export interface ControlMapEntryWithOverride extends ControlMapEntry {
 }
 
 /**
- * Layers an org's explicit overrides on top of the computed default map
- * (docs/spec.md §19: "organisation-level configuration, overridable per
- * control... customers adjust for their own framework or auditor"). A
- * control with no override for this org keeps exactly the status
+ * Layers an org's explicit overrides on top of the computed default map —
+ * organisation-level configuration, overridable per control, so customers
+ * can adjust for their own framework or auditor. A control with no
+ * override for this org keeps exactly the status
  * `computeControlMap` gave it — this never replaces that computation, it
  * only decorates its output. Pure: the caller loads `overrides` from the DB
  * for the current org (`loadControlOverrides` in `control-overrides-store.ts`).

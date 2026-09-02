@@ -1,6 +1,6 @@
 /**
  * Wire types for `/api/v1/elevations` (feature unit 17 — elevation /
- * break-glass, spec §15). Kept as plain TS types — framework-agnostic, for
+ * break-glass). Kept as plain TS types — framework-agnostic, for
  * any client (console, CLI) — mirroring `common.ts`'s convention. The
  * `@effect/platform` `Schema.Struct` runtime schemas that actually validate
  * these on the wire live alongside the route definitions in
@@ -19,7 +19,7 @@ export type ElevationLevel = "file_recovery" | "shell";
  */
 export type ElevationStatus = "requested" | "granted" | "expired" | "denied";
 
-/** Org policy for an admin connecting to a machine they do not own (spec §15). */
+/** Org policy for an admin connecting to a machine they do not own. */
 export type AdminAccessPolicy = "never" | "always" | "with_approval";
 
 export interface ElevationDto {
@@ -42,6 +42,6 @@ export interface ElevationDto {
 export interface RequestElevationBody {
   machineId: string;
   level: ElevationLevel;
-  /** Required free text — never optional (spec §13). */
+  /** Required free text — never optional. */
   reason: string;
 }

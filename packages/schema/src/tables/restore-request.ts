@@ -5,7 +5,7 @@ import { approvals } from "./approval";
  * The parameters of a snapshot restore that went "pending" (single/dual
  * approval mode) — persisted so `resumeRestore` can pick up exactly where
  * `restoreSnapshot` left off once the approval is later decided. Unlike
- * offboarding (spec §14), a restore's approval alone can't identify what to
+ * offboarding, a restore's approval alone can't identify what to
  * do: `approvals.targetMachineId` and `.reason` survive, but `snapshotId`,
  * `mode`, and `confirmSecretBindings` (safety-critical — never inferred,
  * see `restore.ts`'s own doc comment) have no home on the generic approval

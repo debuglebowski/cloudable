@@ -24,14 +24,14 @@ export class SshCaError extends Data.TaggedError("SshCaError")<{
 /**
  * `Signer` keyId for the SSH CA's own signing key. Deliberately a distinct
  * key from the session-token signer (`tunnel/session-token.ts`'s
- * `SESSION_TOKEN_KEY_ID`) — spec's "the same Key Vault sign operation as the
+ * `SESSION_TOKEN_KEY_ID`) — "the same Key Vault sign operation as the
  * SSH CA" is read as *the same port/mechanism*, not literally the same key;
  * separating the two keeps a session-token compromise from also being able
  * to mint SSH certificates. See `docs/access.md`.
  */
 export const SSH_CA_KEY_ID = "ssh-ca";
 
-/** ~8h validity window, per spec §11.2. */
+/** ~8h validity window. */
 export const CERTIFICATE_TTL_SECONDS = 8 * 60 * 60;
 
 export type MachineScope = "all" | ReadonlyArray<string>;
@@ -70,9 +70,9 @@ const serializeMachineScope = (scope: MachineScope): string =>
  * The Cloudable SSH CA. Assembles OpenSSH user certificates (see
  * `openssh-cert.ts` for the wire format) and calls `Signer.sign()` for the
  * one operation that needs the CA private key — this service never
- * generates, imports, or holds key material itself (CLAUDE.md invariant
- * #9). Persists to `certificates` and emits `access.certificate_issued` /
- * `access.certificate_revoked` via `EventBus` (invariant #2: append-only).
+ * generates, imports, or holds key material itself. Persists to
+ * `certificates` and emits `access.certificate_issued` /
+ * `access.certificate_revoked` via `EventBus` (append-only).
  */
 export class SshCaService extends Effect.Service<SshCaService>()("SshCaService", {
   effect: Effect.gen(function* () {

@@ -1,5 +1,5 @@
 // Same env-config convention as `apps/agent/src/config.ts` — this daemon is
-// a genuinely separate process/deploy unit (spec §8: "two separate
+// a genuinely separate process/deploy unit ("two separate
 // daemons, different trust levels, different failure domains"), so this is
 // a copy adapted for this daemon's own env vars, not a shared import.
 //
@@ -27,7 +27,7 @@ export const config = {
   get machineToken(): string {
     return process.env.MACHINE_TOKEN ?? "";
   },
-  /** Which `AttestationMethod` this daemon authenticates with (docs/spec.md §9) — the tunnel
+  /** Which `AttestationMethod` this daemon authenticates with — the tunnel
    * daemon is "just another attested machine identity", so it reuses the exact same
    * attestation methods and endpoint the control agent uses, no new method needed. */
   get attestationMethod(): "join_token" | "managed_identity" {

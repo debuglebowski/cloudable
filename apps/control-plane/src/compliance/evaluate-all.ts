@@ -15,12 +15,11 @@ export interface CheckEvaluation {
  * Runs every registered check for `orgId`, applicability-gated: a check
  * whose `appliesTo` returns false is reported `not_applicable` rather than
  * evaluated. Dashboards full of `N/A` are avoided by gating correctly up
- * front — not by hiding the row (docs/spec.md §19, "Checks are
- * applicability-gated").
+ * front — not by hiding the row.
  *
  * Iterates `checks` generically, so this works correctly regardless of how
  * many checks happen to be registered in `registry.ts` at any given time
- * (including zero, while other feature units haven't merged yet).
+ * (including zero, while other checks haven't merged yet).
  */
 export const evaluateAllChecks = (
   orgId: string,

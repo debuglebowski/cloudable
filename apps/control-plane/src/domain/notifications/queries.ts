@@ -18,7 +18,7 @@ export interface NotificationListRow {
 
 /**
  * Org- and person-scoped notification list, newest first — the read side
- * the console polls to badge the nav item (spec §15: "owner notified"),
+ * the console polls to badge the nav item,
  * exactly mirroring `../elevation/queries.ts`'s split: writes go through
  * `ElevationRepo` (the narrow, mockable port `ElevationService` depends on
  * — see `../elevation/notify.ts`), reads are a separate, plain-`Db`

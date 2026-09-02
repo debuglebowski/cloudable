@@ -4,7 +4,7 @@ import type { EventEnvelope } from "../envelope";
  * Agent events: attestation of the control agent running on a machine.
  *
  * The agent never submits audit events — it reports state, and the control
- * plane derives events/checks from that state (invariant 12). These two
+ * plane derives events/checks from that state. These two
  * events describe the agent's own attestation handshake with the control
  * plane, not machine state it observed.
  */

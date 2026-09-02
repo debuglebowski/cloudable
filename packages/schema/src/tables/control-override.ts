@@ -1,10 +1,10 @@
 import { pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 /**
- * Per-org override of a control's status in the compliance control map
- * (docs/spec.md §19: "organisation-level configuration, overridable per
- * control. Cloudable ships defaults for the controls it is itself audited
- * against... customers adjust for their own framework or auditor").
+ * Per-org override of a control's status in the compliance control map —
+ * organisation-level configuration, overridable per control. Cloudable
+ * ships defaults for the controls it is itself audited against; customers
+ * adjust for their own framework or auditor.
  *
  * `computeControlMap` (apps/control-plane/src/compliance/control-map.ts)
  * remains the source of the *default* status for every control Cloudable

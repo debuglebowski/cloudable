@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
-// Owner/elevation gate for interactive machine access (spec §15: "Admin
-// connecting to a machine they do not own" needs the elevation/break-glass
-// primitive built in `domain/elevation/ElevationService.ts`). Until this
+// Owner/elevation gate for interactive machine access. Admin
+// connecting to a machine they do not own needs the elevation/break-glass
+// primitive built in `domain/elevation/ElevationService.ts`. Until this
 // module, `TunnelServer.mintSession` checked machine existence/state/tenancy
 // and the access-method policy, but never who the requester actually is
 // relative to the machine's owner — any org member could open a terminal
@@ -35,16 +35,16 @@ type DbHandle = PostgresJsDatabase<typeof schema>;
  *
  *  - the machine has no owner at all (`null`) — a machine mid-provisioning
  *    or mid owner-reassignment must not become inaccessible to every org
- *    member; invariant #3 says a *live* machine always has exactly one
+ *    member; a *live* machine always has exactly one
  *    owner, but this gate errs toward "not yet assigned" rather than
  *    "locked to nobody", and every access-method/tenancy check ahead of
  *    this one in `mintSession` already ran, so this is never the ONLY
  *    thing standing between a stranger and the machine; or
  *  - `personId` IS that owner; or
  *  - `personId` holds a currently `granted`, non-expired, `"shell"`-level
- *    elevation for exactly this machine (spec §15's admin-access primitive
+ *    elevation for exactly this machine (the admin-access primitive
  *    — see `domain/elevation/ElevationService.ts`). A weaker
- *    `"file_recovery"` grant does NOT satisfy this: spec §15 draws the
+ *    `"file_recovery"` grant does NOT satisfy this: the gate draws the
  *    line at "interactive shell — can read injected secrets on a live
  *    machine" being the higher-risk level this gate protects.
  */

@@ -15,8 +15,8 @@
 // `infra/terraform/federated-credential/main.tf`, whose `issuer`/`subject`
 // arguments are exactly `FakeAzureTrustRule.issuer`/`boundSubject` here).
 // That's enough to exercise the one property this whole unit exists to
-// protect: subject binding as the tenant isolation boundary (docs/spec.md
-// §10). Do not wire this into any code path that claims to have verified a
+// protect: subject binding as the tenant isolation boundary. Do not wire
+// this into any code path that claims to have verified a
 // real Azure trust relationship.
 // ---------------------------------------------------------------------------
 import { Data, Effect } from "effect";
@@ -63,7 +63,7 @@ interface DecodedFederationPayload {
  * `issuer`/`subject`? See the module doc comment above for what this is
  * (and is not) a stand-in for.
  *
- * ⚠️ The subject check is the whole point (docs/spec.md §10): a rule naming
+ * ⚠️ The subject check is the whole point: a rule naming
  * only the issuer would accept a token minted for ANY customer. Never
  * shortcut this to an issuer-only comparison.
  */
@@ -89,7 +89,7 @@ export const validateAgainstTrustRule = (
       return yield* Effect.fail(new TrustRuleRejection({ reason: "issuer_mismatch" }));
     }
 
-    // The tenant isolation boundary (docs/spec.md §10): binding on subject,
+    // The tenant isolation boundary: binding on subject,
     // not just issuer, is what stops tenant A's token from validating
     // against tenant B's trust rule.
     if (claims.sub !== rule.boundSubject) {

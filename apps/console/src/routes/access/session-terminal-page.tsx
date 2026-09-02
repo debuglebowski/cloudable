@@ -3,7 +3,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { TerminalSession } from "@/components/terminal/terminal-session";
 
 /**
- * Attaches to an already-minted session by id (spec §11.1) — reached either from the
+ * Attaches to an already-minted session by id — reached either from the
  * machine detail page's "Connect" dialog (a fresh mint, see `../machines/connect-terminal-
  * dialog.tsx`) or from the Access page's "Connect" action on an existing `method:
  * "terminal"` session row (no re-mint — the attach endpoint replays the already-stored

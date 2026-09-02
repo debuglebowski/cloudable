@@ -2,8 +2,8 @@ import { boolean, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-or
 import { sourceEnum } from "../shared";
 
 /**
- * A single package manifest entry at a given scope (org / template / machine)
- * — spec.md §6. An entry names a package and optionally pins a version
+ * A single package manifest entry at a given scope (org / template / machine).
+ * An entry names a package and optionally pins a version
  * (`docker`, `nodejs 20`); there is no dependency resolution here, that's the
  * machine's own package manager's job.
  *

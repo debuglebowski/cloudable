@@ -21,9 +21,9 @@ Nothing is hardcoded into the nav beyond the three group headers — see "Nav re
 - **No Policies section.** Settings are inline in each object's page via `SettingRow` +
   `LineageGutter` (org → template → machine lineage shown per-field), not centralized into a
   separate policy editor.
-- **No Secrets section.** Cloudable injects secrets, it never stores them (invariant 8 in
-  `CLAUDE.md`) — there is nothing to list or manage in the console for this.
-- **Archive is separate from Machines.** Machines are archived, never deleted (invariant 6);
+- **No Secrets section.** Cloudable injects secrets, it never stores them —
+  there is nothing to list or manage in the console for this.
+- **Archive is separate from Machines.** Machines are archived, never deleted;
   archived machines live under their own Govern nav item rather than as a filtered view of the
   Machines list, so the two lifecycles don't get conflated in one table.
 - **Audit is one nav item with two in-page views**, not two nav items. It covers the

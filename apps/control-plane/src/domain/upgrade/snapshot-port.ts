@@ -38,8 +38,8 @@ export type RestoreMode = "data" | "config" | "full";
 export interface RestoreSnapshotOptions {
   targetMachineId: string;
   /**
-   * Spec §14 restore modes are escalating-approval, gated by the §13
-   * approval object for HUMAN-initiated restores. `null` here means a
+   * Restore modes are escalating-approval, gated by the approval object
+   * for HUMAN-initiated restores. `null` here means a
    * system-initiated rollback: the control plane restoring a snapshot it
    * itself took moments earlier, as the automatic failure path of the SAME
    * upgrade transaction — not a person requesting old data back. Flagged

@@ -30,7 +30,7 @@ export interface ApprovalModeDialogProps {
   onSave: (actionType: ApprovalActionType, mode: ApprovalMode) => void | Promise<void>;
 }
 
-/** Approval mode is policy, per action type: none / single / dual (docs/spec.md §13). */
+/** Approval mode is policy, per action type: none / single / dual. */
 export function ApprovalModeDialog({
   actionType,
   currentMode,
@@ -44,7 +44,7 @@ export function ApprovalModeDialog({
       open={actionType != null}
       currentValue={currentMode ?? "none"}
       title={`${actionType ? APPROVAL_ACTION_LABELS[actionType] : ""} — approval mode`}
-      description="Inherited through org → template → machine (docs/spec.md §13). A confirmation dialog is self-approval and is not an approval."
+      description="Inherited through org → template → machine. A confirmation dialog is self-approval and is not an approval."
       onOpenChange={onOpenChange}
       onSave={(mode) => {
         if (actionType) return onSave(actionType, mode);
@@ -79,7 +79,7 @@ export interface LoggingTierDialogProps {
   onSave: (tier: LoggingTier) => void | Promise<void>;
 }
 
-/** Tier 3's plaintext-path consequence is stated here too, not just on the page (docs/spec.md §17). */
+/** Tier 3's plaintext-path consequence is stated here too, not just on the page. */
 export function LoggingTierDialog({
   open,
   currentTier,
@@ -93,7 +93,7 @@ export function LoggingTierDialog({
       open={open}
       currentValue={currentTier}
       title="Logging tier"
-      description="Per-template tier; cost follows (docs/spec.md §17)."
+      description="Per-template tier; cost follows."
       onOpenChange={onOpenChange}
       onSave={onSave}
     >
@@ -137,7 +137,7 @@ export interface RetentionDaysDialogProps {
   onSave: (days: number) => void | Promise<void>;
 }
 
-/** Retention default, org-configurable (docs/spec.md §14). Whole days only. */
+/** Retention default, org-configurable. Whole days only. */
 export function RetentionDaysDialog({
   open,
   currentDays,
@@ -151,7 +151,7 @@ export function RetentionDaysDialog({
       open={open}
       currentValue={currentDays}
       title="Default retention"
-      description="Applies org-wide unless a template overrides it (docs/spec.md §5)."
+      description="Applies org-wide unless a template overrides it."
       onOpenChange={onOpenChange}
       onSave={onSave}
       isValid={(days) => Number.isInteger(days) && days >= 1}
@@ -180,7 +180,7 @@ export interface RegionDefaultDialogProps {
   onSave: (region: string) => void | Promise<void>;
 }
 
-/** Default Azure region for a new machine that doesn't specify one (docs/spec.md §5). */
+/** Default Azure region for a new machine that doesn't specify one. */
 export function RegionDefaultDialog({
   open,
   currentRegion,
@@ -194,7 +194,7 @@ export function RegionDefaultDialog({
       open={open}
       currentValue={currentRegion}
       title="Default region"
-      description="Applied to new machines that don't specify a region (docs/spec.md §5). Resolved live at creation time — not copied onto the machine as a wizard prefill."
+      description="Applied to new machines that don't specify a region. Resolved live at creation time — not copied onto the machine as a wizard prefill."
       onOpenChange={onOpenChange}
       onSave={onSave}
       isValid={(region) => region.trim().length > 0}
@@ -223,7 +223,7 @@ export interface RetentionLocationDialogProps {
   onSave: (location: RetentionLocation) => void | Promise<void>;
 }
 
-/** Single org-wide value, no per-machine variant — residency is a DPA matter (docs/spec.md §17). */
+/** Single org-wide value, no per-machine variant — residency is a DPA matter. */
 export function RetentionLocationDialog({
   open,
   currentLocation,
@@ -237,7 +237,7 @@ export function RetentionLocationDialog({
       open={open}
       currentValue={currentLocation}
       title="Log retention location"
-      description="Org-wide only — there is no per-machine variant. Residency changes are a DPA matter, not a toggle (docs/spec.md §17)."
+      description="Org-wide only — there is no per-machine variant. Residency changes are a DPA matter, not a toggle."
       onOpenChange={onOpenChange}
       onSave={onSave}
     >
@@ -278,8 +278,8 @@ export interface ControlOverrideDialogProps {
 }
 
 /**
- * A control's status is computed by default (docs/spec.md §19) — this only lets an org
- * flip a specific control to its own explicit choice, never edits the computation itself.
+ * A control's status is computed by default — this only lets an org flip a specific
+ * control to its own explicit choice, never edits the computation itself.
  * "Use Cloudable's computed default" clears any existing override for this control.
  */
 export function ControlOverrideDialog({
@@ -297,7 +297,7 @@ export function ControlOverrideDialog({
       open={controlId != null}
       currentValue={currentlyOverridden ? currentStatus : USE_COMPUTED_DEFAULT}
       title={`${controlLabel} — status override`}
-      description="Cloudable computes a default status from its registered compliance checks. Override it for your own framework or auditor (docs/spec.md §19) — this never changes the computation itself, only what this org reports."
+      description="Cloudable computes a default status from its registered compliance checks. Override it for your own framework or auditor — this never changes the computation itself, only what this org reports."
       onOpenChange={onOpenChange}
       onSave={(choice) => {
         if (controlId) return onSave(controlId, choice === USE_COMPUTED_DEFAULT ? null : choice);

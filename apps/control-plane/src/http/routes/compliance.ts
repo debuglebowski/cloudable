@@ -54,7 +54,7 @@ const ControlMapEntry = Schema.Struct({
   status: ControlStatus,
   evidencedByCheckIds: Schema.Array(Schema.String),
   // True when `status` came from this org's explicit override rather than
-  // the computed default (docs/spec.md §19).
+  // the computed default.
   overridden: Schema.Boolean,
   // True when this control is eligible for an override at all — false for a
   // structurally out-of-scope control (see `OVERRIDABLE_CONTROL_IDS` in

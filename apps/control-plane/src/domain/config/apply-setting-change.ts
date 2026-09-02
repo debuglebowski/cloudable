@@ -47,12 +47,10 @@ export type ApplySettingChangeError =
  * The single code path that writes a `settingValues` row and emits the
  * corresponding `*.setting_changed` event. Both the UI-facing PATCH
  * endpoint (`handlePatchSetting`) and the Git-sourced bulk import endpoint
- * (`handleImportConfig`) call this exact function, entry for entry — see
- * docs/spec.md §16: "Same path whether the change came from the UI or a
- * Git commit."
+ * (`handleImportConfig`) call this exact function, entry for entry — the
+ * same path whether the change came from the UI or a Git commit.
  *
- * Inert with respect to a machine's *desired state* (invariant #10 /
- * docs/spec.md §16): it never reads or writes `machines.desiredStateVersion`
+ * Inert with respect to a machine's *desired state*: it never reads or writes `machines.desiredStateVersion`
  * and never triggers reconcile — the agent picks up the new resolved value
  * on its own next poll. See `trigger-reconcile.ts` for the only operation
  * allowed to mutate a machine's desired-state version, which is
@@ -61,11 +59,11 @@ export type ApplySettingChangeError =
  * One deliberate exception to "only ever touches `setting_values` and the
  * append-only `events` table": a write to `machine.accessMethodsEnabled`
  * that disables web terminal also ends every affected machine's open
- * `sessions` rows via `TunnelServer.terminateSessionsForMachine` — spec.md
- * §11.1's "disabling terminates live sessions, not merely refuses new
- * ones." This is a *live session*, not a desired-state mutation, so it
+ * `sessions` rows via `TunnelServer.terminateSessionsForMachine` — disabling
+ * terminates live sessions, not merely refuses new
+ * ones. This is a *live session*, not a desired-state mutation, so it
  * doesn't touch `machines.desiredStateVersion` either and doesn't violate
- * the paragraph above — but it is real DB/event activity beyond
+ * the point above — but it is real DB/event activity beyond
  * `setting_values`/`events`, and runs after this function's own
  * `*.setting_changed` event is durably published (see below) so that a
  * termination failure never hides the fact that the setting itself did
@@ -184,8 +182,8 @@ export const applySettingChange = (
     // the event row. `null` round-trips explicitly.
     const previous: unknown = existing ? existing.value : null;
 
-    // `pinned` is an org-scope-only concept (docs/spec.md §6: the
-    // organisation marks an entry pinned so nothing below it can override).
+    // `pinned` is an org-scope-only concept: the
+    // organisation marks an entry pinned so nothing below it can override.
     // A machine-scope write must never be able to set or clear it — that
     // would let the very override this flag exists to block also toggle it.
     const nextPinned =
@@ -286,7 +284,7 @@ export const applySettingChange = (
         ),
       );
 
-    // --- spec.md §11.1: "disabling terminates live sessions", not merely
+    // --- Disabling terminates live sessions, not merely
     // refuses new ones. Only a webTerminal:true → false transition matters
     // here — enabling, or a no-op re-save of an already-disabled value,
     // never needs to end anything. `terminateSessionsForMachine` itself is

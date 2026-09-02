@@ -4,8 +4,8 @@ import type { MachineStatus } from "../services/ProvisioningService";
  * A machine's desired state, as the reconciliation loop needs to see it.
  *
  * Provisional shape: the real package manifest (org → template → machine
- * inheritance, pinning) is unit 2/5's job — see `docs/spec.md` §5–6 and
- * `docs/inheritance.md`. Until that lands, `packages` is a flat list of
+ * inheritance, pinning) is unit 2/5's job — see `docs/inheritance.md`.
+ * Until that lands, `packages` is a flat list of
  * manifest entry strings exactly as declared (e.g. "docker", "nodejs 20").
  */
 export interface DesiredMachineState {
@@ -17,7 +17,7 @@ export interface DesiredMachineState {
   packages: ReadonlyArray<string>;
   /**
    * Whether the machine should exist right now. There is no "deleted"
-   * state — machines are archived, never deleted (invariant #6).
+   * state — machines are archived, never deleted.
    */
   lifecycle: "live" | "archived";
 }

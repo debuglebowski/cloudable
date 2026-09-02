@@ -59,7 +59,7 @@ const insertRawEvent = (orgId: string, id: string, correlationId: string) =>
     payload: {},
   });
 
-describe("queryEvidencePage (spec §18)", () => {
+describe("queryEvidencePage", () => {
   test("projects raw events newest-first without mutating the source table", async () => {
     const orgId = freshOrgId();
     // ULIDs sort lexically by creation time — these three are deliberately

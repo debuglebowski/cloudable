@@ -13,7 +13,7 @@ interface ElevationGrantedPayload {
 }
 
 /**
- * Check #4 — "Elevated access was approved" (`docs/spec.md` §19).
+ * Check #4 — "Elevated access was approved".
  *
  * Fails when a break-glass or admin session (an `access.elevation_granted`
  * event) has no approval record and reason. Two independent things have to
@@ -38,8 +38,8 @@ export const elevatedAccessApprovedCheck: ComplianceCheck = {
   // Not applicable to an org that has never granted elevated access at all —
   // previously `evaluate` handled this by returning zero findings (a `pass`),
   // which is a false reassurance for a feature the org has simply never used,
-  // exactly the anti-pattern spec §19 warns about (just inverted: `pass`
-  // instead of a noisy `N/A`).
+  // exactly the anti-pattern to avoid (just inverted: `pass` instead of a
+  // noisy `N/A`).
   appliesTo: ({ orgId }) =>
     Effect.gen(function* () {
       const db = yield* Db;

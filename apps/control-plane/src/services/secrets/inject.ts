@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// CLAUDE.md invariant #8: "Cloudable injects secrets, never stores them."
+// Cloudable injects secrets, never stores them.
 //
 // `injectSecretsForSession` is the standalone fetch-and-inject function that
 // unit 12's session-start logic (web terminal / tunnel session) is expected
@@ -15,7 +15,7 @@
 //     wire to anything other than the live session process
 // Callers must hold it only in memory for the session's lifetime and let it
 // be garbage-collected once the session ends. See
-// `apps/control-plane/src/services/secrets/inject.invariant8.test.ts` for
+// `apps/control-plane/src/services/secrets/inject.no-disk-writes.test.ts` for
 // the explicit test asserting no disk/DB write happens on this path.
 // ---------------------------------------------------------------------------
 import { Effect } from "effect";

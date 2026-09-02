@@ -34,9 +34,8 @@ export function IntegrationsPage() {
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold">Integrations</h1>
           <p className="max-w-prose text-sm text-muted-foreground">
-            Federation only — no cloud credential is ever stored (invariant 1), and Cloudable is the
-            secrets injector, never the vault (invariant 8). Every form below takes non-secret
-            pointers only.
+            Federation only — no cloud credential is ever stored, and Cloudable is the secrets
+            injector, never the vault. Every form below takes non-secret pointers only.
           </p>
         </div>
       </div>
@@ -48,7 +47,7 @@ export function IntegrationsPage() {
           <IntegrationCard
             title="Identity provider"
             icon={UserCog}
-            description="SCIM 2.0 + OIDC against any IdP. Optional — without one, People stays Cloudable's fully editable system of record (docs/spec.md §3)."
+            description="SCIM 2.0 + OIDC against any IdP. Optional — without one, People stays Cloudable's fully editable system of record."
             integration={idp}
             connectForm={<IdpConnectDialog />}
             onDisconnect={handleDisconnect}
@@ -66,7 +65,7 @@ export function IntegrationsPage() {
           <IntegrationCard
             title="Cloud provider"
             icon={Network}
-            description="Workload identity federation to Azure. Cloudable never receives or stores a client secret — only these three identifiers (docs/spec.md §10)."
+            description="Workload identity federation to Azure. Cloudable never receives or stores a client secret — only these three identifiers."
             integration={cloud}
             connectForm={<CloudConnectDialog />}
             onDisconnect={handleDisconnect}
@@ -83,7 +82,7 @@ export function IntegrationsPage() {
           <IntegrationCard
             title="Secret store"
             icon={Lock}
-            description="Cloudable fetches and injects at runtime; it never stores a secret value (docs/spec.md §12). Point at your own vault."
+            description="Cloudable fetches and injects at runtime; it never stores a secret value. Point at your own vault."
             integration={secretStore}
             connectForm={<SecretStoreConnectDialog />}
             onDisconnect={handleDisconnect}

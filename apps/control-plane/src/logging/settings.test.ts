@@ -50,7 +50,7 @@ const freshOrgId = () => {
 
 const testActor = { actorType: "person" as const, actorId: "person-1" };
 
-describe("logging settings (spec §17)", () => {
+describe("logging settings", () => {
   test("getOrgLoggingTier defaults when unset", async () => {
     const orgId = freshOrgId();
     const tier = await Effect.runPromise(getOrgLoggingTier(db, orgId));
@@ -107,8 +107,7 @@ describe("logging settings (spec §17)", () => {
     });
 
     // Org-scoped read must be unaffected by the machine-scoped row above —
-    // retention location is an org-only setting (spec §17: "no per-machine
-    // override").
+    // retention location is an org-only setting with no per-machine override.
     const location = await Effect.runPromise(getOrgRetentionLocation(db, orgId));
     expect(location).toBe("customer");
   });
@@ -145,7 +144,7 @@ describe("logging settings (spec §17)", () => {
   });
 });
 
-describe("getEffectiveLoggingTier — machine-level override (spec §17)", () => {
+describe("getEffectiveLoggingTier — machine-level override", () => {
   test("defaults to DEFAULT_LOGGING_TIER with source 'org' when nothing is set anywhere", async () => {
     const orgId = freshOrgId();
     const machineId = crypto.randomUUID();

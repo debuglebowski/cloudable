@@ -33,8 +33,8 @@ describe("session-token", () => {
     expect(claims.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
-  // Explicit failure-path test required by CLAUDE.md / docs/spec.md §25: "a session token
-  // with a broken signature must be refused." Valid claims, valid expiry, wrong signature.
+  // Explicit failure-path test: a session token
+  // with a broken signature must be refused. Valid claims, valid expiry, wrong signature.
   test("REQUIRED FAILURE PATH: a token with a tampered signature is refused", async () => {
     const program = Effect.gen(function* () {
       const minted = yield* mintSessionToken(baseInput);

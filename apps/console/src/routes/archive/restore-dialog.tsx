@@ -56,8 +56,8 @@ function approvalBadgeVariantFor(mode: RestoreMode): BadgeProps["variant"] {
 }
 
 // Escalating order — data (default, no approval) < config (single) < full (dual, deliberately
-// hardest to reach). See spec §14 "Restore modes — escalating approval". Approval level itself
-// comes from RESTORE_MODE_APPROVAL in api/archive.ts, the single source of truth for that mapping.
+// hardest to reach). Approval level itself comes from RESTORE_MODE_APPROVAL in api/archive.ts,
+// the single source of truth for that mapping.
 const RESTORE_MODE_OPTIONS: RestoreModeOption[] = [
   {
     mode: "data",
@@ -87,7 +87,7 @@ export interface RestoreDialogProps {
   snapshot: ArchivedSnapshot;
 }
 
-/** Restore-mode picker with visibly escalating friction, per spec §14. */
+/** Restore-mode picker with visibly escalating friction. */
 export function RestoreDialog({ snapshot }: RestoreDialogProps) {
   const ackId = useId();
   const [open, setOpen] = useState(false);
@@ -97,9 +97,9 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
   const [confirmingFull, setConfirmingFull] = useState(false);
   const restore = useRestoreSnapshot();
 
-  // Every restore is backed by an approval object regardless of mode (spec §13:
-  // reason is "required free text, never optional") — the real endpoint rejects
-  // an empty reason even for data-only restores, unlike the mock this replaced.
+  // Every restore is backed by an approval object regardless of mode (reason is
+  // required free text, never optional) — the real endpoint rejects an empty
+  // reason even for data-only restores, unlike the mock this replaced.
   // "Requested by" is the signed-in session, not a picker (server derives it).
   const requiresAck = mode === "full";
   const canProceed = reason.trim().length > 0 && (!requiresAck || acknowledged);

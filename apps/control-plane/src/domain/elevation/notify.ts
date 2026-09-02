@@ -20,7 +20,7 @@ function buildMessage(machineName: string, elevation: Elevation): string {
 
 /**
  * Notify a machine's owner that an admin was granted elevated access to
- * their machine (spec §15: "owner notified"). Only called when the machine
+ * their machine. Only called when the machine
  * has a live owner — an elevation against a machine mid-offboarding
  * (`ownerPersonId` cleared) has nobody to notify.
  *

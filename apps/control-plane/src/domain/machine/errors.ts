@@ -36,7 +36,7 @@ const PinConflictSchema = Schema.Struct({
 });
 
 /**
- * spec.md §6: overriding a pinned manifest entry below its scope is a
+ * Overriding a pinned manifest entry below its scope is a
  * validation error at edit time (HTTP 422), never a silent no-op.
  */
 export class PackagePinConflictError extends Schema.TaggedError<PackagePinConflictError>(

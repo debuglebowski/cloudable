@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// Real Azure Key Vault `SecretsProvider` adapter (CLAUDE.md invariant #8:
-// "Cloudable injects secrets, never stores them."). No Azure Key Vault
+// Real Azure Key Vault `SecretsProvider` adapter — Cloudable injects
+// secrets, never stores them. No Azure Key Vault
 // account exists in this build (same situation as `Signer.azure.ts` /
 // `ProvisioningService.azure.ts`), so the HTTP request construction and
 // response parsing below are real, but there is no live token source to

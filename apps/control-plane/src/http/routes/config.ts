@@ -9,7 +9,7 @@ import {
 } from "../../domain/config/errors";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
-// Wire schemas for `/api/v1/config/...` (docs/spec.md §16). These mirror
+// Wire schemas for `/api/v1/config/...`. These mirror
 // `packages/contracts/src/domains/config.ts`'s plain interfaces (the CLI's
 // dependency-free copy) but are the actual runtime-validated shapes the
 // HttpApi layer decodes/encodes against — see the comment at the top of
@@ -90,8 +90,8 @@ export const ConfigGroup = HttpApiGroup.make("config")
   )
   .add(
     // The confirmation-gated reconcile trigger. This is the ONLY endpoint in
-    // this group allowed to mutate a machine (docs/spec.md §16) — it never
-    // writes settingValues, it only bumps machines.desiredStateVersion.
+    // this group allowed to mutate a machine — it never writes
+    // settingValues, it only bumps machines.desiredStateVersion.
     HttpApiEndpoint.post("triggerReconcile", "/api/v1/config/machines/:id/reconcile")
       .setPath(ReconcileTriggerParams)
       .setPayload(ReconcileTriggerPayload)
@@ -103,8 +103,8 @@ export const ConfigGroup = HttpApiGroup.make("config")
   .add(
     // The GitOps path: a bulk desired-state document applied entry-by-entry
     // through the exact same `applySettingChange` function `patchSetting`
-    // uses (docs/spec.md §16: "same path whether the change came from the UI
-    // or a Git commit"). Also purely inert — never touches a machine.
+    // uses — same path whether the change came from the UI or a Git commit.
+    // Also purely inert — never touches a machine.
     HttpApiEndpoint.post("importConfig", "/api/v1/config/import")
       .setPayload(ImportConfigPayload)
       .addSuccess(ImportConfigResponse)

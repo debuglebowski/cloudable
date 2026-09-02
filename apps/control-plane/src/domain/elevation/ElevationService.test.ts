@@ -402,7 +402,7 @@ describe("ElevationService", () => {
         "approval.granted",
       ]);
 
-      // spec §15 "owner notified" — a grant persists exactly one in-app
+      // A grant persists exactly one in-app
       // notification for the machine's owner (see ../notify.ts).
       expect(repo.notifications).toHaveLength(1);
       expect(repo.notifications[0]).toMatchObject({
@@ -663,7 +663,7 @@ describe("ElevationService", () => {
       expect(requestedEvent?.correlationId).toBe(requested.id);
       expect(grantedEvent?.correlationId).toBe(requested.id);
 
-      // spec §15 "owner notified" — the notification fires once the
+      // The notification fires once the
       // elevation actually finalizes as granted (syncApproval), not at the
       // earlier "requested" state.
       expect(repo.notifications).toHaveLength(1);

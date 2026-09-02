@@ -1,15 +1,15 @@
 /**
- * Wire types for the control agent protocol (spec §23): attest, poll,
+ * Wire types for the control agent protocol: attest, poll,
  * report, and the optional wake fast path. Plain TS types, not Effect
  * Schema — this package stays framework-free so the agent's dependency
- * surface stays thin (see CLAUDE.md / docs/spec.md §25 "Agent: revisit
- * triggers, not intentions"). The control plane's `HttpApiGroup` in
+ * surface stays thin ("Agent: revisit triggers, not intentions").
+ * The control plane's `HttpApiGroup` in
  * `apps/control-plane/src/http/routes/agent-protocol.ts` defines the
  * runtime-validated Effect Schema counterparts of these shapes.
  */
 
 /**
- * The attestation methods wired end-to-end (docs/spec.md §9). One
+ * The attestation methods wired end-to-end. One
  * `AttestationMethod` port implementation exists per value, dispatched by
  * the control plane's `AttestationRegistryTag` (see
  * `apps/control-plane/src/services/attestation/AttestationMethod.ts`) —
@@ -45,9 +45,9 @@ export interface DesiredStateResponse {
 }
 
 /**
- * Config state observed alongside installed packages (spec §8.1: "report
- * installed packages and config state"). Deliberately narrow, not full
- * configuration coverage: which access methods (spec §11 — e.g. the web
+ * Config state observed alongside installed packages — report
+ * installed packages and config state. Deliberately narrow, not full
+ * configuration coverage: which access methods (e.g. the web
  * terminal) the agent found an actually-running process for at observation
  * time. Cheap to observe and directly checkable against the corresponding
  * desired-state setting the same way `installedPackages` is checked
@@ -73,8 +73,8 @@ export interface AgentReportResponse {
 }
 
 /**
- * The one message the optional `wake` websocket may carry (CP → agent),
- * spec §23. No payload, and it cannot carry instructions — it only ever
+ * The one message the optional `wake` websocket may carry (CP → agent).
+ * No payload, and it cannot carry instructions — it only ever
  * means "poll now instead of waiting out the interval."
  */
 export interface WakeMessage {

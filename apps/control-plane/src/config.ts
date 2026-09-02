@@ -29,7 +29,7 @@ export interface AppConfig {
   readonly betterAuthUrl: string;
   /**
    * Azure AD's published JWKS, used to verify Azure managed-identity IMDS
-   * tokens (docs/spec.md §9). Azure AD's signing keys are shared across
+   * tokens. Azure AD's signing keys are shared across
    * tenants, so the "common" discovery endpoint's key set verifies a token
    * for any tenant — configurable so tests can point it at a local mock
    * JWKS server instead.

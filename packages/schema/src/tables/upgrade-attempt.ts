@@ -3,9 +3,9 @@ import { machines } from "./machine";
 
 /**
  * One row per upgrade attempt on a machine — success or failure — and the
- * due-date/backoff ledger for the transactional upgrade flow (spec §19
- * "Upgrades are transactional": snapshot → apply → verify → roll back on
- * verification failure).
+ * due-date/backoff ledger for the transactional upgrade flow — upgrades
+ * are transactional: snapshot → apply → verify → roll back on
+ * verification failure.
  *
  * Every attempt, success or failure, pushes `nextEligibleAt` forward by a
  * full backoff interval — "a failed attempt resets the due-date clock

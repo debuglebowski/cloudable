@@ -1,14 +1,14 @@
 /**
- * Wire types for the CP -> agent tunnel-signal channel (docs/spec.md §8.2,
- * §11.1 — the web terminal / SSH session path). Deliberately its own
+ * Wire types for the CP -> agent tunnel-signal channel (the web terminal /
+ * SSH session path). Deliberately its own
  * channel, NOT a repurposed `wake` (agent-protocol.ts):
  *
- * - `wake` (spec §8.1/§23) is the control agent's own fast path for its
- *   desired-state poll loop. Spec pins it to "exactly one message, pull
- *   now, with no payload. It cannot carry instructions" — a session id
+ * - `wake` is the control agent's own fast path for its
+ *   desired-state poll loop, pinned to exactly one message, pull
+ *   now, with no payload. It cannot carry instructions — a session id
  *   would BE an instruction, and `wake`'s job (accelerate the next
  *   `/poll`) has nothing to do with tunnel sessions at all.
- * - The agent protocol (spec §23) is pinned to exactly four operations —
+ * - The agent protocol is pinned to exactly four operations —
  *   attest/poll/report/wake. There is no slot in it for "attach to
  *   session X", so this is a fifth, separate CP -> agent surface, not an
  *   addition to that group.
@@ -22,7 +22,7 @@
  *
  * Plain TS types, not Effect Schema, matching `agent-protocol.ts`'s own
  * convention — this package stays framework-free so the agent's
- * dependency surface stays thin (CLAUDE.md / docs/spec.md §25).
+ * dependency surface stays thin.
  */
 export type TunnelSignalMessage =
   | { readonly type: "session_waiting"; readonly sessionId: string }

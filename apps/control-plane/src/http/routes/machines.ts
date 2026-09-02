@@ -54,7 +54,7 @@ const machineSummaryFields = {
 
 const machineSummarySchema = Schema.Struct(machineSummaryFields);
 
-// spec §17: logging tier resolves org → machine, same chain as everything
+// Logging tier resolves org → machine, same chain as everything
 // else — `source` is "org" when the machine has no override of its own,
 // "machine" when it does (never "template" in v1 — the layer is inert).
 const effectiveLoggingTierSchema = Schema.Struct({
@@ -79,12 +79,12 @@ const createMachinePayloadSchema = Schema.Struct({
   name: Schema.String.pipe(Schema.minLength(1)),
   // Optional — omitted, `MachineService.create` resolves the org's
   // configured default region instead of requiring the caller to always
-  // supply one (docs/inheritance.md, spec.md §5).
+  // supply one.
   region: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   sizeSku: Schema.String.pipe(Schema.minLength(1)),
   image: Schema.String.pipe(Schema.minLength(1)),
-  // Required, never omitted: CLAUDE.md invariant #3 — a machine always has
-  // exactly one owner, always a person. See docs/inheritance.md.
+  // Required, never omitted — a machine always has exactly one owner,
+  // always a person.
   ownerPersonId: Schema.UUID,
   templateId: Schema.optional(Schema.NullOr(Schema.UUID)),
 });
@@ -117,7 +117,7 @@ const updateMachinePackagesResponseSchema = Schema.Struct({
 });
 
 /**
- * Machine desired-state API — spec.md §5-7. All endpoints live under
+ * Machine desired-state API. All endpoints live under
  * `/api/v1/machines`; `.prefix()` is called last (after every `.add()`) since
  * `HttpApiGroup#prefix` only prefixes endpoints already added to the group.
  */

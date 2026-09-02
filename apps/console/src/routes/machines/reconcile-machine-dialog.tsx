@@ -19,7 +19,7 @@ export interface ReconcileMachineDialogProps {
 
 /**
  * Real `POST /api/v1/config/machines/:id/reconcile` — the ONLY operation
- * that mutates a live machine (spec §16). Editing desired state (package
+ * that mutates a live machine. Editing desired state (package
  * manifest overrides, org/machine settings) is always inert on its own;
  * nothing takes effect on the real machine until this runs, and the agent
  * picks it up on its next ~30s poll, not instantly.
@@ -52,8 +52,8 @@ export function ReconcileMachineDialog({
           <DialogTitle>Reconcile {machine.name}?</DialogTitle>
           <DialogDescription>
             Bumps this machine's desired-state version. The agent applies it on its next poll (~30s)
-            — this doesn't happen instantly, and doesn't install anything not already declared
-            (invariant #4: reconcile only closes gaps).
+            — this doesn't happen instantly, and doesn't install anything not already declared.
+            Reconcile only closes gaps.
           </DialogDescription>
         </DialogHeader>
 

@@ -29,15 +29,15 @@ function extractUndeclaredPackages(payload: unknown): string[] {
 }
 
 /**
- * Check #3 — "No undeclared software" (docs/spec.md §19).
+ * Check #3 — "No undeclared software".
  *
  * Fails when installed packages diverge from the resolved manifest.
  * Rather than diffing `undeclaredPackages` sets across events, this uses
- * the "simplest" approach the unit brief explicitly allows: a machine is
+ * the simplest approach: a machine is
  * currently drifted if the *latest* drift-related event recorded for it is
  * `machine.drift_detected` rather than `machine.drift_resolved`. Reconcile
- * only closes gaps (invariant 4) and drift is never auto-corrected
- * (invariant 5), so an open `drift_detected` genuinely stays open until an
+ * only closes gaps and drift is never auto-corrected,
+ * so an open `drift_detected` genuinely stays open until an
  * explicit `drift_resolved` is recorded for that machine.
  *
  * `detailKey` for `upsertFindingFirstSeen` is the machine id — one finding
@@ -46,10 +46,9 @@ function extractUndeclaredPackages(payload: unknown): string[] {
  * drifts again (even on a different package set) is treated as the same
  * finding key rather than a fresh incident. Per-incident granularity
  * (keying by the drift-detected event's id instead) is a reasonable
- * alternative if per-incident finding age is ever wanted; this unit picked
- * machine-level for consistency with check #2 and because the dashboard
- * story (docs/spec.md §19 "Finding age") is per open finding, not per
- * historical incident.
+ * alternative if per-incident finding age is ever wanted; this picks
+ * machine-level for consistency with check #2 and because the "Finding
+ * age" dashboard story is per open finding, not per historical incident.
  *
  * Like check #2, this excludes archived machines from producing findings —
  * a machine that drifted and was later archived (with no `drift_resolved`

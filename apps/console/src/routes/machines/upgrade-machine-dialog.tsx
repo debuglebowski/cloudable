@@ -42,8 +42,8 @@ function outcomeVariant(outcome: string): BadgeProps["variant"] {
 
 /**
  * Real `POST /api/v1/machines/:id/upgrade` — snapshot -> apply -> verify ->
- * roll back to the pre-upgrade snapshot on verification failure (spec §19).
- * Any outcome besides "success" still means the request succeeded — the
+ * roll back to the pre-upgrade snapshot on verification failure. Any
+ * outcome besides "success" still means the request succeeded — the
  * machine's own upgrade attempt failed and was (or wasn't) rolled back;
  * that's rendered, not thrown as an error.
  */

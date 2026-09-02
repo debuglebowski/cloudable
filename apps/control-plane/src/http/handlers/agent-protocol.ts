@@ -13,9 +13,9 @@ import { AgentUnauthorized, AttestRejected } from "../routes/agent-protocol";
 /**
  * Attributed to `agent.attestation_failed` when the rejected credential had
  * no decodable claim to attribute it to (`events.org_id` is `NOT NULL` and
- * this failure is, by definition, from a caller we can't identify —
- * spec §24's envelope table has no "unknown tenant" concept, and this
- * sentinel is the pragmatic stand-in for one).
+ * this failure is, by definition, from a caller we can't identify — the
+ * envelope table has no "unknown tenant" concept, and this sentinel is
+ * the pragmatic stand-in for one).
  */
 const UNATTRIBUTED_ORG_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -91,7 +91,7 @@ const detectChange = (
   if (!arraysEqual(previous.openPorts, report.openPorts)) {
     changes.openPorts = { from: previous.openPorts, to: report.openPorts };
   }
-  // `configState.runningAccessMethods` (spec §8.1's "config state") — diffed the
+  // `configState.runningAccessMethods` — diffed the
   // same way as `installedPackages`/`openPorts` above: report-over-report equality,
   // surfaced as part of one `machine.state_reported`, never on a no-op report.
   if (!arraysEqual(previous.runningAccessMethods, report.runningAccessMethods)) {
@@ -227,7 +227,7 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
           return yield* Effect.fail(new AgentUnauthorized({ reason: "machine_not_found" }));
         }
 
-        // Sleeping machines: never fake liveness (spec §8.1). `lastVerifiedAt` records the
+        // Sleeping machines: never fake liveness. `lastVerifiedAt` records the
         // moment the control plane actually heard from this machine, not when it wakes up
         // claiming to.
         const wasFirstSeen = machine.lastVerifiedAt === null;

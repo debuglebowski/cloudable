@@ -13,7 +13,7 @@ export interface TerminalSessionProps {
 
 type ConnectionState = "connecting" | "attached" | "closed" | "rejected";
 
-/** Binary-safe base64 <-> bytes, matching `TunnelFrame`'s `data` kind (spec §11.1's wire
+/** Binary-safe base64 <-> bytes, matching `TunnelFrame`'s `data` kind (the wire
  * protocol — see `packages/contracts/src/domains/tunnel.ts`). Plain `atob`/`btoa` on a raw
  * string would corrupt any multi-byte UTF-8 the shell emits (box-drawing characters, unicode
  * filenames, etc.) — going through bytes first keeps this correct. */
@@ -43,7 +43,7 @@ function attachUrl(sessionId: string, cols: number, rows: number): string {
 }
 
 /**
- * The browser leg of the web terminal (spec §11.1): opens a websocket straight to
+ * The browser leg of the web terminal: opens a websocket straight to
  * `http/handlers/tunnel.ts`'s `AccessAttachRouteLive`, which replays this session's
  * already-minted, already-persisted token to the tunnel daemon server-side — the browser
  * itself never sees or resends that token (see the token-handling reasoning in

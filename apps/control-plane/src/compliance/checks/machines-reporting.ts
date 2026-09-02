@@ -11,9 +11,9 @@ export const CHECK_ID = "machines-reporting";
  * How stale `lastVerifiedAt` must be before a machine is flagged as no
  * longer reporting.
  *
- * The control agent polls roughly every 30s (docs/spec.md §8.1: "Poll ~30s
- * with ETag / version check"), backing off exponentially with jitter up to
- * a ~10 minute cap on failure. Five minutes is comfortably more than a
+ * The control agent polls roughly every 30s with an ETag/version check,
+ * backing off exponentially with jitter up to a ~10 minute cap on failure.
+ * Five minutes is comfortably more than a
  * single missed poll or a short burst of jittered backoff would explain,
  * but still well inside the ~10 minute backoff cap — so a machine that has
  * genuinely stopped reporting (not just backing off from one transient
@@ -34,8 +34,8 @@ const thresholdCutoff = (now: Date): Date =>
   new Date(now.getTime() - REPORTING_STALENESS_THRESHOLD_MINUTES * 60_000);
 
 /**
- * Check #6 — "Machines are reporting" (docs/spec.md §19). Deliberately NOT
- * an event query: it reads current state directly off the `machines` table,
+ * Check #6 — "Machines are reporting". Deliberately NOT an event query: it
+ * reads current state directly off the `machines` table,
  * since a machine that has *stopped* emitting anything is exactly the
  * failure mode an events-only query would miss.
  */

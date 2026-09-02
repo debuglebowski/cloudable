@@ -7,17 +7,17 @@ import { Effect } from "effect";
 type DbHandle = PostgresJsDatabase<typeof schema>;
 
 /**
- * Org-configurable default region for new machines — spec.md §5 lists
- * region among "every setting" that must flow org → machine through
+ * Org-configurable default region for new machines — region is
+ * among every setting that must flow org → machine through
  * `resolveSetting()`, the same mechanism `domain/archive/org-policy.ts`
  * uses for retention days, rather than a client-side prefill that copies a
- * value and forgets its origin (docs/inheritance.md — "No wizard prefill").
+ * value and forgets its origin (no wizard prefill).
  *
  * Unlike retention (re-resolved on every read), region only ever gets
  * resolved once: at `MachineService.create` time. A live machine's region
  * is a physical fact about a provisioned Azure resource, not a policy that
- * can change underneath it (CLAUDE.md invariant #10 — live machines
- * aren't edited) — so there's no "machine-scoped region override" to
+ * can change underneath it — live machines
+ * aren't edited — so there's no "machine-scoped region override" to
  * resolve against later, only the org default at the moment of creation.
  */
 export const DEFAULT_REGION_KEY = "machine.defaultRegion";

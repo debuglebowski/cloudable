@@ -17,10 +17,10 @@ import { type FederationClaims, assembleJws, encodeSigningInput } from "./jwt";
 /** Key id the federation signing key is stored under in the `Signer` port. Distinct from any CA/SSH-cert signing key another unit may add. */
 export const FEDERATION_KEY_ID = "federation-oidc-v1";
 
-/** ~1h per docs/spec.md §10 ("Azure validates and returns an access token (~1h)") — the minted OIDC token itself is short-lived to match. */
+/** ~1h, matching how long Azure validates and returns an access token for — the minted OIDC token itself is short-lived to match. */
 const TOKEN_TTL_SECONDS = 60 * 60;
 
-/** The exact subject format from docs/spec.md §10 — this string is the tenant isolation boundary, see `FakeAzureTrustRule.ts`. */
+/** The exact subject format — this string is the tenant isolation boundary, see `FakeAzureTrustRule.ts`. */
 export const subjectForCustomer = (customerId: string): string => `cloudable:tenant:${customerId}`;
 
 export class FederationError extends Data.TaggedError("FederationError")<{
@@ -60,7 +60,7 @@ export interface FederationOutcome {
 }
 
 /**
- * Workload identity federation (docs/spec.md §10, `docs/cloud-auth.md`):
+ * Workload identity federation (see `docs/cloud-auth.md`):
  * the OIDC issuer (discovery doc + JWKS) and per-customer token minting.
  * One eventual real implementation, not a swappable port — modeled
  * directly as an `Effect.Service`, same as `ApprovalService`.
@@ -89,7 +89,7 @@ export class FederationService extends Effect.Service<FederationService>()("Fede
         return { keys: [ed25519SpkiDerToJwk(der, FEDERATION_KEY_ID)] };
       });
 
-    /** Mints a short-lived, per-customer-subject federation token. See docs/spec.md §10 point 2. */
+    /** Mints a short-lived, per-customer-subject federation token. */
     const mintFederationToken = (customerId: string): Effect.Effect<string, FederationError> =>
       Effect.gen(function* () {
         const now = Math.floor(Date.now() / 1000);

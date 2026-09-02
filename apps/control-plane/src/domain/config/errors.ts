@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
 /**
- * Domain errors for the config editor + GitOps path (docs/spec.md §16).
+ * Domain errors for the config editor + GitOps path.
  * Each is a `Schema.TaggedError` so it can be attached directly to an
  * `HttpApiEndpoint` via `.addError(SomeError, { status })` — the same class
  * is both the Effect failure type and the wire error schema.
@@ -23,8 +23,8 @@ export class MachineNotFoundError extends Schema.TaggedError<MachineNotFoundErro
 
 /**
  * A machine (or template) tried to override a package-manifest entry that
- * is pinned at a level above it (docs/spec.md §6: "Attempting to override
- * one is a validation error at edit time, not a silent no-op at reconcile").
+ * is pinned at a level above it — attempting to override
+ * one is a validation error at edit time, not a silent no-op at reconcile.
  */
 export class PinnedSettingError extends Schema.TaggedError<PinnedSettingError>(
   "PinnedSettingError",

@@ -18,7 +18,7 @@ export interface FindingKey {
 }
 
 /**
- * Finding-age persistence (spec §19 "Finding age"). Returns the persisted
+ * Finding-age persistence. Returns the persisted
  * `firstSeenAt` for `key` — an open finding that keeps recurring across
  * evaluations keeps its ORIGINAL detection time, never "now". If this is
  * the first time the finding has been seen, it's inserted stamped `now`
@@ -80,7 +80,7 @@ export const upsertFindingFirstSeen = (
  * still-open, after calling `upsertFindingFirstSeen` for each of them.
  *
  * Only ever touches this bookkeeping table — never `events`, which stays
- * append-only (invariant #2).
+ * append-only.
  */
 export const clearResolvedFindings = (
   checkId: string,
@@ -113,10 +113,9 @@ export const ageInDays = (firstSeen: Date, now: Date = new Date()): number =>
 
 /**
  * Median age in whole days across a set of open findings' `firstSeenAt`
- * timestamps (spec §19 "Finding age": "surface median age and trend across
- * the audit window, not just the current count") — the "N open · oldest
- * Nd" line callers already compute only shows one end of the distribution;
- * this is the other one.
+ * timestamps — surfaces the median age and trend across the audit window,
+ * not just the current count. The "N open · oldest Nd" line callers already
+ * compute only shows one end of the distribution; this is the other one.
  *
  * A pure function over already-fetched timestamps rather than its own DB
  * read: every check's `evaluate()` now calls `clearResolvedFindings` right

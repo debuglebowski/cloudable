@@ -48,14 +48,14 @@ const resolveArchiveActor = (approvalId: string | undefined, machine: MachineRow
  * and emits `machine.archived` with `{snapshotId, retentionExpiresAt}`.
  *
  * `approvalId` is optional and passed through, not requested here — archiving a machine
- * directly is not itself on the §13 approval-consumer list (offboarding is; unit 16
- * builds the approval-gated offboarding flow on top of this primitive and passes the
- * approval id it already obtained).
+ * directly is not itself on the approval-consumer list (offboarding is; the approval-gated
+ * offboarding flow builds on top of this primitive and passes the approval id it already
+ * obtained).
  *
- * Signature is exact and load-bearing — units 16/18 call this directly. Do not add
+ * Signature is exact and load-bearing — callers depend on it directly. Do not add
  * required parameters.
  *
- * Archiving is a one-way transition (spec §14 "live -> archived"): a machine already in
+ * Archiving is a one-way transition (live -> archived): a machine already in
  * `"archived_restorable"` or `"archived_expired"` fails with `MachineAlreadyArchivedError`
  * rather than being archived a second time (which would duplicate the snapshot and the
  * `machine.archived` event for one logical action).

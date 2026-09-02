@@ -9,8 +9,8 @@ import { connectWake } from "./wake";
 import type { AgentReportRequest, AgentReportResponse, DesiredStateResponse } from "./wire-types";
 
 /**
- * The agent's own build version, reported as part of observed state (spec
- * §8.1). `bun build`'s `--env 'AGENT_VERSION*'` flag (see package.json's
+ * The agent's own build version, reported as part of observed state.
+ * `bun build`'s `--env 'AGENT_VERSION*'` flag (see package.json's
  * `build`/`build:arm64` scripts) inlines `process.env.AGENT_VERSION` — set
  * from this package's own `package.json` `version` field at build time,
  * see those scripts — as a literal into the compiled binary, so a released
@@ -114,8 +114,8 @@ async function reportObservedState(
 }
 
 /**
- * The control agent's main loop (spec §8.1/§23): attest, poll desired
- * state, reconcile locally, report observed state, sleep ~30s, repeat. On
+ * The control agent's main loop: attest, poll desired state, reconcile
+ * locally, report observed state, sleep ~30s, repeat. On
  * any failure it backs off with full jitter (see `backoff.ts`) instead of
  * retrying immediately or on a fixed schedule — that's the invariant that
  * keeps a fleet-wide control-plane outage from ending in a synchronised
@@ -128,7 +128,7 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
   let lastEtag: string | null = null;
   const waker = makeWaker(options.signal);
 
-  // Optional fast path (spec §8.1): wakes this loop's sleep the instant the control plane has
+  // Optional fast path: wakes this loop's sleep the instant the control plane has
   // fresh desired state, instead of it always waiting out the full interval/backoff. Purely an
   // optimization — `getBearerToken` re-attesting on every (re)connect, and this loop polling on
   // a plain timer regardless, means a wake that never connects (or never arrives) changes
@@ -163,9 +163,9 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
             `poll: desired state changed (version=${poll.desiredState?.version ?? "unknown"})`,
           );
           // Reconcile locally against `poll.desiredState` here once there's a real package
-          // manifest to reconcile against (spec §8.1: "reconcile only closes gaps — it removes
-          // undeclared software, never installs"). `poll.desiredState` is a stub today (see
-          // docs/agents.md and this unit's PR description), so there's nothing to reconcile yet.
+          // manifest to reconcile against ("reconcile only closes gaps — it removes undeclared
+          // software, never installs"). `poll.desiredState` is a stub today, so there's nothing
+          // to reconcile yet.
         }
 
         // Real observed state: `installedPackages`, `openPorts`, and `configState`

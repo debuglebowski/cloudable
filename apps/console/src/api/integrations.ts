@@ -28,14 +28,14 @@ export interface IdpConfig {
   metadataUrl: string;
 }
 
-/** Workload identity federation identifiers only — see docs/spec.md §10. Never a client secret. */
+/** Workload identity federation identifiers only. Never a client secret. */
 export interface CloudConfig {
   tenantId: string;
   applicationId: string;
   subscriptionId: string;
 }
 
-/** A pointer at the customer's own store. Never a secret value — see docs/spec.md §12. */
+/** A pointer at the customer's own store. Never a secret value. */
 export interface SecretStoreConfig {
   provider: "azure_key_vault" | "1password";
   vaultUrl: string;

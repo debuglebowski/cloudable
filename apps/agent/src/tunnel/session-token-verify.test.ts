@@ -65,7 +65,7 @@ describe("verifySessionToken", () => {
     expect(claims.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
-  // REQUIRED FAILURE PATH (spec §11.1 / this unit's brief): a tampered-signature token
+  // REQUIRED FAILURE PATH (this unit's brief): a tampered-signature token
   // must be refused. Valid claims, valid expiry, wrong signature.
   test("REQUIRED FAILURE PATH: a token with a tampered signature is refused", () => {
     const { publicKeyDer, privateKey } = generateSigningKeys();
@@ -255,7 +255,7 @@ describe("getSessionTokenPublicKey", () => {
     expect(requestCount).toBe(2);
   });
 
-  // REQUIRED per this unit's thundering-herd concern (spec §11.1, "under load"): two callers
+  // REQUIRED per this unit's thundering-herd concern ("under load"): two callers
   // racing in before anything is cached must share one outstanding request, not fire two.
   test("concurrent callers before the first fetch resolves share one in-flight request", async () => {
     const [first, second] = await Promise.all([

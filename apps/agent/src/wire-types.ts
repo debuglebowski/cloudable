@@ -22,7 +22,7 @@ export type {
 // apps/control-plane/src/http/routes/tunnel-signal.ts for the server side.
 export type { TunnelSignalMessage, TunnelSignalResponse } from "@cloudable/contracts";
 
-// Tunnel / session-token verification (spec §11.1) — see docs/access.md §4.
-// Consumed by `./tunnel/session-token-verify.ts`'s `getSessionTokenPublicKey`,
+// Tunnel / session-token verification. Consumed by
+// `./tunnel/session-token-verify.ts`'s `getSessionTokenPublicKey`,
 // fetched from `GET /api/v1/access/session-token-public-key`.
 export type { SessionTokenPublicKeyResponse } from "@cloudable/contracts";

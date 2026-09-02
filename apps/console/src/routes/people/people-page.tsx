@@ -38,7 +38,7 @@ function formatAddedAt(iso: string): string {
 }
 
 /**
- * People — the system of record for who can own machines (spec §3/§20). Fully editable while no
+ * People — the system of record for who can own machines. Fully editable while no
  * IdP is connected; `source: "scim"` rows render as read-only. Real backend — see
  * `src/api/people.ts`. "Offboard" (any active person) is distinct from "Deactivate"
  * (manual people only) — see `offboard-person-dialog.tsx`'s own doc comment.

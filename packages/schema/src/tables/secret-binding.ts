@@ -6,16 +6,16 @@ import { orgs } from "./org";
  * Records WHICH secret ref (a pointer into the customer's own Azure Key
  * Vault or 1Password store) is bound to which scope — org, template,
  * machine, or a specific person. Metadata only: the pointer/reference is
- * stored here, NEVER the secret value itself (CLAUDE.md invariant #8,
- * "Cloudable injects secrets, never stores them.") — fetching happens at
- * runtime via `SecretsProvider`/`injectSecretsForSession`
+ * stored here, NEVER the secret value itself — Cloudable injects secrets,
+ * never stores them. Fetching happens at runtime via
+ * `SecretsProvider`/`injectSecretsForSession`
  * (`apps/control-plane/src/services/secrets/inject.ts`), and the fetched
  * value never comes back through this table.
  *
  * Scope precedence/resolution mirrors `setting_values`
  * (`resolve-setting.ts`), extended with a `person` scope for secrets bound
- * to an individual user rather than an org/template/machine (spec §12:
- * "per template or per user").
+ * to an individual user rather than an org/template/machine — per template
+ * or per user.
  */
 export const secretBindings = pgTable(
   "secret_bindings",

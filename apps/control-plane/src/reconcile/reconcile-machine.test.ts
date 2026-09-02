@@ -23,7 +23,7 @@ describe("diffUndeclaredPackages", () => {
   test("never reports declared-but-missing packages", () => {
     // A package the manifest declares but that isn't running at all is not
     // "drift" in the sense this function cares about — reconcile never
-    // installs (invariant #4), so there's nothing to say about it here.
+    // installs, so there's nothing to say about it here.
     expect(diffUndeclaredPackages(["docker", "nodejs 20"], [])).toEqual([]);
   });
 
@@ -100,7 +100,7 @@ describe("reconcileMachine", () => {
       if (first.action.kind !== "drifted") throw new Error("unreachable");
 
       // Reconciling again must keep reporting the same drift — nothing was
-      // removed by the previous pass (invariant #5: never auto-corrected).
+      // removed by the previous pass; drift is never auto-corrected.
       const second = yield* reconcileMachine(desired(), first.action.status);
       return { first, second };
     });

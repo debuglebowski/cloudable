@@ -5,7 +5,7 @@ import { apiGet, apiPost } from "@/lib/api-client";
 import { listMachines } from "./machines";
 
 /**
- * Restore modes, escalating approval (spec §14): data < config < full including secret
+ * Restore modes, escalating approval: data < config < full including secret
  * bindings (deliberately hardest to reach). Mirrors
  * `SnapshotEvent["snapshot.restored"].payload.mode` in
  * `packages/events/src/domains/snapshot.ts`.
@@ -144,8 +144,8 @@ export function useSetLegalHold() {
 export interface RestoreSnapshotInput {
   snapshotId: string;
   mode: RestoreMode;
-  /** Every restore is backed by an approval object (spec §13: reason is "required free text,
-   * never optional") — the real endpoint rejects an empty reason regardless of mode. */
+  /** Every restore is backed by an approval object — reason is "required free text, never
+   * optional" — the real endpoint rejects an empty reason regardless of mode. */
   reason: string;
 }
 
@@ -170,7 +170,7 @@ export function useRestoreSnapshot() {
           mode: input.mode,
           // Restoring onto the same machine record the snapshot was taken from — the
           // dialog has no "restore to a different machine" picker, and that's the
-          // common case (spec §7: disposable machines, reimage-in-place).
+          // common case (disposable machines, reimage-in-place).
           targetMachineId: snapshot.machineId,
           reason: input.reason,
           ...(input.mode === "full" ? { confirmSecretBindings: true } : {}),

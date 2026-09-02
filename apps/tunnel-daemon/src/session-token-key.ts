@@ -2,8 +2,8 @@
 // Caches the session-token signer's public key
 // (`GET /api/v1/tunnel/session-token-key`) so the daemon can verify a
 // session token's signature locally (`@cloudable/session-token`) on every
-// attach without round-tripping through the control plane each time — spec
-// §11.1's "validate the signature on every session, including under load"
+// attach without round-tripping through the control plane each time —
+// "validate the signature on every session, including under load"
 // would make a network call per attach a real bottleneck otherwise.
 //
 // Not `apiRequest` (http-client.ts) — that's documented pre-attestation-only

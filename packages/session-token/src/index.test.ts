@@ -49,7 +49,7 @@ describe("verifySessionToken (pure)", () => {
     expect(claims.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
-  // REQUIRED FAILURE PATH (CLAUDE.md / docs/spec.md §25): a session token with a broken
+  // REQUIRED FAILURE PATH: a session token with a broken
   // signature must be refused. Valid claims, valid expiry, wrong signature.
   test("REQUIRED FAILURE PATH: a token with a tampered signature is refused", () => {
     const { token } = mint();

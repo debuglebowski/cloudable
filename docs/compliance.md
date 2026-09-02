@@ -1,12 +1,12 @@
 # Compliance
 
-Implementation detail for `docs/spec.md` §19 ("Compliance surface"). Read that section first — this file is the "how", not the "why".
+How the compliance surface is implemented.
 
 **Computed live from current fleet state, not stored.** There is no `compliance_findings` table. Every request to the endpoints below re-runs the registered checks against the database at request time.
 
 ## The three-layer model
 
-1. **Events** — facts Cloudable emits (`packages/events`, catalogued in `docs/events.md`). Not interpretations, never customer-configurable. Public, versioned, additive-only (invariant #11).
+1. **Events** — facts Cloudable emits (`packages/events`, catalogued in `docs/events.md`). Not interpretations, never customer-configurable. Public, versioned, additive-only.
 2. **Checks** (`ComplianceCheck`, `apps/control-plane/src/domain/compliance/types.ts`) — procedures run over events *or* current state, evaluated continuously. Registered in `apps/control-plane/src/compliance/registry.ts`.
 3. **Controls** (`apps/control-plane/src/compliance/control-map.ts`) — judgements about what a check evidences. Cloudable ships one default mapping; per-control customer override is future work.
 
@@ -43,7 +43,7 @@ AND (
 
 The `createdAt` branch matters: a machine defaults to `state = 'provisioning'`, `lastVerifiedAt = NULL` until the control agent's first successful poll. Without it, every machine would fail this check for the first few minutes of its life, before the agent has had any chance to report. A machine still stuck in `provisioning` past the threshold, with no report ever recorded, is correctly flagged — that's a real signal, not a startup artifact.
 
-**Threshold**: `REPORTING_STALENESS_THRESHOLD_MINUTES = 5`, a named constant in `machines-reporting.ts`. The control agent polls roughly every 30s with exponential backoff up to a ~10 minute cap on failure (`docs/spec.md` §8.1). Five minutes is ~10x the happy-path poll interval — comfortably past a single missed poll or a short burst of jittered backoff, but well inside the ~10 minute cap, so a machine that has genuinely gone dark is flagged before an auditor would notice on their own, rather than only after the cap is reached.
+**Threshold**: `REPORTING_STALENESS_THRESHOLD_MINUTES = 5`, a named constant in `machines-reporting.ts`. The control agent polls roughly every 30s with exponential backoff up to a ~10 minute cap on failure. Five minutes is ~10x the happy-path poll interval — comfortably past a single missed poll or a short burst of jittered backoff, but well inside the ~10 minute cap, so a machine that has genuinely gone dark is flagged before an auditor would notice on their own, rather than only after the cap is reached.
 
 `appliesTo` always returns `true` — any org with a live machine expects it to check in, and an org with no live machines simply produces zero findings.
 
@@ -61,13 +61,13 @@ Each open finding needs a stable "first seen" timestamp so the UI can show "open
 
 `apps/control-plane/src/compliance/finding-store.ts` is the durable bridge, backed by a real table (`complianceFindingState`, `packages/schema/src/tables/compliance-finding-state.ts`) — **it survives a control-plane restart.** `upsertFindingFirstSeen(key)` does a single atomic `INSERT ... ON CONFLICT DO UPDATE` keyed on `(checkId, orgId, machineId, detailKey)`: the first time a finding is seen the row is inserted stamped `now`; on every repeat sighting only `lastSeenAt` refreshes — `firstSeenAt` is deliberately absent from the update `set`, so a finding that keeps recurring across evaluations keeps its ORIGINAL detection time, never "now". Being one atomic upsert rather than a select-then-insert means two overlapping evaluations of the same finding can't race each other into duplicate rows or a `firstSeenAt` read that isn't really the first. `machineId: null` maps to a reserved constant (`NO_MACHINE_SENTINEL`) so the column stays real `NOT NULL` and can back a genuine unique index. `clearResolvedFindings(checkId, orgId, stillOpenDetailKeys)` deletes rows whose `detailKey` is no longer in the still-open set, so a finding that closes and later reopens is treated as newly opened rather than carrying its old age. `ageInDays(firstSeen, now)` derives the whole-day age for display.
 
-This table is bookkeeping only, not evidence — it never substitutes for re-running a check against `events`/current state (compliance is still "computed live", above), and writes/deletes to it never touch `events` itself, which stays append-only (invariant #2).
+This table is bookkeeping only, not evidence — it never substitutes for re-running a check against `events`/current state (compliance is still "computed live", above), and writes/deletes to it never touch `events` itself, which stays append-only.
 
 ## Control map
 
 `GET /api/v1/compliance/control-map` — `apps/control-plane/src/compliance/control-map.ts`.
 
-A small static taxonomy of controls, each mapped to a framework clause (placeholder mapping; org-level override is future work, per `docs/spec.md` §19: "Organisation-level configuration, overridable per control"):
+A small static taxonomy of controls, each mapped to a framework clause (placeholder mapping; org-level override is future work — organisation-level configuration, overridable per control):
 
 | id | framework | in scope? |
 |---|---|---|
@@ -81,15 +81,15 @@ Status, computed purely from `COMPLIANCE_CHECKS` (no DB access needed for this e
 
 - **`implemented`** — an in-scope control with at least one registered check whose `controlRefs` includes it.
 - **`manual_action_required`** — an in-scope control with zero registered checks evidencing it right now (e.g. before another unit's check merges). Cloudable claims this control matters but currently has nothing automated backing it — a human needs to attest to it manually.
-- **`not_covered`** — a control that is structurally out of scope for this product and will never be computed from `COMPLIANCE_CHECKS`, however many checks get registered. Per `docs/spec.md` §19: "Most of ISO Annex A — physical security, HR screening, supplier contracts — has no bearing on the product and must not be claimed as evidenced." `hr-screening`, `physical-security`, and `supplier-management` above are examples, not an exhaustive list of everything Cloudable doesn't cover.
+- **`not_covered`** — a control that is structurally out of scope for this product and will never be computed from `COMPLIANCE_CHECKS`, however many checks get registered. Most of ISO Annex A — physical security, HR screening, supplier contracts — has no bearing on the product and must not be claimed as evidenced. `hr-screening`, `physical-security`, and `supplier-management` above are examples, not an exhaustive list of everything Cloudable doesn't cover.
 
 ## Evidence export
 
-`GET /api/v1/compliance/findings/export` — CSV, **grouped by control, not by time** (`docs/spec.md` §19). For every in-scope control with at least one evidencing check, lists that check's current open findings. Columns: `control, control_label, framework, check, check_label, machine_id, first_seen_at, open_days, severity, detail`.
+`GET /api/v1/compliance/findings/export` — CSV, **grouped by control, not by time**. For every in-scope control with at least one evidencing check, lists that check's current open findings. Columns: `control, control_label, framework, check, check_label, machine_id, first_seen_at, open_days, severity, detail`.
 
 `severity` is real, sourced from `ComplianceCheck.severity` (`apps/control-plane/src/domain/compliance/types.ts`) — a fixed, per-check editorial classification (which of the six v1 checks tends to matter more if it fails: `access-revoked-on-offboarding` and `elevated-access-approved` are `high`; `active-owner`, `no-undeclared-software`, and `retention-honoured` are `medium`; `machines-reporting` is `low`). Every finding under the same check shares its check's severity — there is no finer-grained per-finding score. This is the one place severity is defined: both evidence CSVs and `GET /api/v1/compliance/findings` (as `ComplianceCheckResult.severity`) read it from here, rather than each keeping an independent classification.
 
-Two named exports (`docs/spec.md` §19, "Exports"):
+Two named exports:
 
 - `GET /api/v1/compliance/exports/findings.csv` — same underlying open-findings data as the main export, narrower columns: `control, check, machine_id, severity, open_since`.
 - `GET /api/v1/compliance/exports/asset-inventory.csv` — one row per machine in the org: `machine_id, machine_name, owner, state, encryption_status, drift_status, patch_status`.

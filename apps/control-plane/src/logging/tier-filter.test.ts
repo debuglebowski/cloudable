@@ -114,7 +114,7 @@ const settingChangedEvent = (orgId: string, machineId: string, key: string): Dom
 const run = (batch: ReadonlyArray<DomainEvent>) =>
   Effect.runPromise(filterByLoggingTier(db, batch));
 
-describe("filterByLoggingTier (spec §17)", () => {
+describe("filterByLoggingTier", () => {
   test("tier-1 events are never dropped, even for a machine whose own override is below tier 1's requirement", async () => {
     const orgId = freshOrgId();
     const machineId = freshMachineId();

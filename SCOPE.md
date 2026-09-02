@@ -5,7 +5,7 @@ behind every decision referenced below.
 
 ## In v1
 
-Everything in the build order (`docs/spec.md` §22) except the items listed under "Not in v1" there:
+Everything in the build order in `docs/spec.md` except the items listed under "Not in v1" there:
 control plane + reconciliation loop (fake Azure provider — no real Azure account is used in this
 build), agent with join-token and managed-identity attestation, generic approval object, all six
 compliance checks with finding age and control mapping, package manifest with org→machine
@@ -20,4 +20,4 @@ Template layer, Tailscale integration, in-tenant provisioning worker. See `CLAUD
 ## Explicitly out of this repository
 
 `cloudable-deploy` (image digests, deploy pipeline, break-glass via Entra PIM) is a **separate,
-private** repository per `docs/spec.md` §26 — it is not part of this monorepo.
+private** repository — it is not part of this monorepo.

@@ -1,7 +1,7 @@
 /**
  * Common envelope shared by every event in the catalogue.
  *
- * Events are append-only (invariant 2): once recorded, an envelope + payload
+ * Events are append-only: once recorded, an envelope + payload
  * is never updated or deleted. Retention is handled by expiry, not deletion.
  */
 export interface EventEnvelope {

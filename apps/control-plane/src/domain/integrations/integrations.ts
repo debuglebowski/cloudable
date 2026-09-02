@@ -4,7 +4,7 @@ import { Data, Effect } from "effect";
 import { Db } from "../../db/layer";
 
 /**
- * Real backend for the Integrations page (spec §12/§20: IdP/cloud/secret-
+ * Real backend for the Integrations page (IdP/cloud/secret-
  * store connection pointers — never a credential, see the `integrations`
  * table's own doc comment "Federation only — no credentials stored here").
  * At most one live (non-removed) integration per `kind` per org: connecting

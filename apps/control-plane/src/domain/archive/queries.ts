@@ -119,8 +119,8 @@ const decodeSnapshotCursor = (cursor: string): SnapshotCursor | null => {
 };
 
 /**
- * Org-scoped, cursor-paginated snapshot list — backs the Archive page (spec
- * §14/§20 "Archive is separate from Machines... governs retention"), which
+ * Org-scoped, cursor-paginated snapshot list — backs the Archive page
+ * ("Archive is separate from Machines... governs retention"), which
  * needs to render every snapshot for an org, not just one by id. Same
  * `createdAt`+`id` composite-cursor pattern as `ApprovalService.list`.
  */

@@ -1,5 +1,5 @@
 /**
- * `wake`: the optional CP → agent websocket fast path (spec §23/§8.1).
+ * `wake`: the optional CP → agent websocket fast path.
  * Exactly one possible message, `{"type":"pull_now"}`, no payload, and it
  * cannot carry instructions — receiving it only ever means "poll now
  * instead of waiting out the rest of the interval/backoff"; the agent
@@ -7,8 +7,8 @@
  * `poll-report-loop.ts`, which wires `connectWake`'s `onPullNow` into the
  * sleep between cycles).
  *
- * The agent dials out (invariant #7: no inbound access to a machine ever —
- * the control plane accepts this connection, it never opens one) with the
+ * The agent dials out — no inbound access to a machine ever;
+ * the control plane accepts this connection, it never opens one — with the
  * cached bearer token. On any drop — server restart, network blip, the
  * bearer session it authenticated with expiring — this reconnects with the
  * same full-jitter backoff as the poll/report loop (`backoff.ts`), since

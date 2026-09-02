@@ -1,5 +1,5 @@
-// Explicit test for CLAUDE.md invariant #8 ("Cloudable injects secrets,
-// never stores them.") on the fetch-and-inject path: spy on every
+// Explicit test that Cloudable injects secrets, never stores them,
+// on the fetch-and-inject path: spy on every
 // disk-write primitive Bun/Node expose and run a full fetch-and-inject
 // cycle through `injectSecretsForSession`, asserting none of them were ever
 // called.
@@ -11,7 +11,7 @@ import type { SecretRef } from "../SecretsProvider";
 import { FakeSecretsProviderLive } from "../SecretsProvider.fake";
 import { injectSecretsForSession } from "./inject";
 
-describe("invariant #8: secrets are injected, never stored", () => {
+describe("secrets are injected, never stored", () => {
   test("a full fetch-and-inject cycle makes zero disk-write calls", async () => {
     const writeFileSyncSpy = spyOn(fs, "writeFileSync");
     const appendFileSyncSpy = spyOn(fs, "appendFileSync");

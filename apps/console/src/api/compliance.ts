@@ -11,8 +11,8 @@ import { CURRENT_ORG_ID } from "@/lib/current-org";
  * each control's DEFAULT status purely from which compliance checks are
  * currently registered; `useSetControlOverride` below layers this org's
  * explicit choice on top of that default without replacing it
- * (docs/spec.md §19: "organisation-level configuration, overridable per
- * control... customers adjust for their own framework or auditor").
+ * ("organisation-level configuration, overridable per control...
+ * customers adjust for their own framework or auditor").
  */
 
 export type ControlStatus = "implemented" | "manual_action_required" | "not_covered";

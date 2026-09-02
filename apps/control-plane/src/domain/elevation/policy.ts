@@ -2,12 +2,12 @@ import type { SettingRow } from "@cloudable/schema";
 import { resolveSetting } from "@cloudable/schema";
 import type { AdminAccessPolicy, ApprovalMode, ElevationLevel } from "./types";
 
-/** Org policy for an admin connecting to a machine they do not own (spec §15). Resolved via `resolveSetting`. */
+/** Org policy for an admin connecting to a machine they do not own. Resolved via `resolveSetting`. */
 export const ADMIN_ACCESS_POLICY_SETTING_KEY = "admin_access_policy";
 
 /**
- * The approval mode (spec §13: none/single/dual) the org has generically
- * configured for `admin_access`-type approvals. This unit resolves it
+ * The approval mode (none/single/dual) the org has generically
+ * configured for `admin_access`-type approvals. This function resolves it
  * itself (rather than relying on `ApprovalService` to expose it) because
  * `ApprovalService.request()`'s interface (owned by unit 5) has no `mode`
  * input or output — see `requiredApprovalModeFloor` below for why that
@@ -23,7 +23,7 @@ export const DEFAULT_ADMIN_ACCESS_POLICY: AdminAccessPolicy = "with_approval";
 
 export const DEFAULT_APPROVAL_MODE: ApprovalMode = "single";
 
-/** Spec §15: "time-boxed grant (e.g. 1h)". */
+/** A time-boxed grant (e.g. 1h). */
 export const DEFAULT_ELEVATION_TTL_MINUTES = 60;
 
 const APPROVAL_MODE_RANK: Record<ApprovalMode, number> = { none: 0, single: 1, dual: 2 };
@@ -33,8 +33,9 @@ export function approvalModeSatisfiesFloor(configured: ApprovalMode, floor: Appr
 }
 
 /**
- * Two elevation levels, two approval requirements (spec §15). `shell` can
- * read live injected secrets on a machine, so — mirroring unit 15's
+ * Two elevation levels, two approval requirements. `shell` can
+ * read live injected secrets on a machine, so — mirroring the
+ * restore flow's
  * escalating restore-mode design, where "full restore including secret
  * bindings" is "deliberately hardest to reach" — it must never settle for
  * less than dual control. `file_recovery` is lower risk and may proceed at

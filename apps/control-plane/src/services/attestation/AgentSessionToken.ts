@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Short-lived bearer session minted by `POST /attest` and required on every
-// subsequent `/poll` and `/report` call (spec §23). Deliberately separate
+// subsequent `/poll` and `/report` call. Deliberately separate
 // from `AttestationMethod`: *which credential method proved the machine's
 // identity* is a pluggable concern (join token today, managed identity
 // later), but *how long the resulting session lasts and how it's carried
@@ -20,7 +20,7 @@ export class AgentSessionError extends Data.TaggedError("AgentSessionError")<{
 }> {}
 
 const PURPOSE = "as";
-const DEFAULT_TTL_SECONDS = 900; // 15 min — comfortably longer than the ~30s poll interval (spec §8.1)
+const DEFAULT_TTL_SECONDS = 900; // 15 min — comfortably longer than the ~30s poll interval
 
 const secret = (): string => process.env.AGENT_SESSION_SECRET ?? "dev-only-change-me";
 const ttlSeconds = (): number =>

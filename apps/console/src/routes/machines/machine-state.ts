@@ -2,9 +2,9 @@ import type { MachineState } from "@/api/machines";
 import type { BadgeProps } from "@/components/ui/badge";
 
 /**
- * Spec §7 lists six machine states; the console's badge vocabulary only has three
+ * The machine model has six states; the console's badge vocabulary only has three
  * semantic buckets (`ok` / `drift` / `stale`), so mapping six down to three is this
- * unit's call:
+ * component's call:
  *   running              -> ok         healthy, in service
  *   error                -> drift      needs attention — same visual weight as open drift
  *   provisioning         -> stale      not yet verified/settled

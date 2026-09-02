@@ -2,10 +2,9 @@ import { Context, Data, type Effect } from "effect";
 
 /**
  * A verified machine identity, established by exchanging an opaque
- * credential through an `AttestationMethod` (spec §9: "an attestation
- * interface with two methods, both taking opaque strings — agent: give me
- * a credential; control plane: verify this credential, return a machine
- * identity").
+ * credential through an `AttestationMethod` — an attestation interface with
+ * two methods, both taking opaque strings: agent gives a credential, control
+ * plane verifies that credential and returns a machine identity.
  */
 export interface MachineIdentity {
   readonly orgId: string;
@@ -82,8 +81,8 @@ export class AttestationMethodTag extends Context.Tag("AttestationMethod")<
  * multi-adapter ports" per the shared conventions — just a Tag over a
  * registry rather than over a single swapped-in adapter.
  *
- * A future bare-metal implementation (spec §9: "another provider
- * implementation, not a special case") plugs into this same registry under
+ * A future bare-metal implementation — another provider implementation, not
+ * a special case — plugs into this same registry under
  * `method: "bare_metal"` — no interface change needed.
  */
 export class AttestationRegistryTag extends Context.Tag("AttestationRegistry")<

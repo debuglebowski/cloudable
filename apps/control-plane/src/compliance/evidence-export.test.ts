@@ -74,7 +74,7 @@ describe("evidence-export CSVs (pure rendering)", () => {
   });
 });
 
-describe("evidence-export (spec §19, live DB)", () => {
+describe("evidence-export (live DB)", () => {
   let db: PostgresJsDatabase<typeof schema>;
   let close: () => Promise<void>;
 

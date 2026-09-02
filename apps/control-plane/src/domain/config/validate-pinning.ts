@@ -1,5 +1,5 @@
 /**
- * Pin validation for the package manifest (docs/spec.md §6).
+ * Pin validation for the package manifest.
  *
  * STUB: unit 2 (package manifest / inheritance) owns the real manifest
  * schema (a list of `{ package, version? }` entries) and its own

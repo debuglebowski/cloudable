@@ -6,7 +6,7 @@
 // and live-verified independently, but nothing ever actually called
 // `runConnectionLoop` from the daemon's real entrypoint before this — the
 // compiled binary attested once and then did nothing else, never opening
-// the reverse tunnel spec §8.2 describes, so no session could ever attach
+// the reverse tunnel this daemon is meant to open, so no session could ever attach
 // to a machine running it.
 import { AttestationRejectedError, attest, currentBearerToken } from "./attestation";
 import { config } from "./config";
@@ -32,7 +32,7 @@ attest()
       }),
     );
 
-    // Never resolves under normal operation (spec §8.2: the tunnel stays open, reconnecting
+    // Never resolves under normal operation (the tunnel stays open, reconnecting
     // with full-jitter backoff on drop — see `connection.ts`'s own doc comment) — this
     // `.then` exists only so a genuinely unexpected rejection (there is currently no
     // `signal` passed here to ever trigger the "aborted" rejection path) still reaches the

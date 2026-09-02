@@ -3,9 +3,9 @@ import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 /**
  * An in-app/console notification to a machine owner. Currently the only
  * producer is `domain/elevation/notify.ts`, fired on every elevation grant
- * against a machine with a live owner (spec §15: "owner notified") — an
- * explicit product decision to notify in-app/console only, never email or
- * Slack, so no new external provider or secret is introduced for this.
+ * against a machine with a live owner. An explicit product decision to
+ * notify in-app/console only, never email or Slack, so no new external
+ * provider or secret is introduced for this.
  *
  * Deliberately lightweight: no delivery channel/status, no notification
  * "kind" enum, just a plain message and a nullable `readAt`. `elevationId`

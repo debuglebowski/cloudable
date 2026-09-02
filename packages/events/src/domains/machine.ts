@@ -6,8 +6,8 @@ import type { EventEnvelope } from "../envelope";
  * offboarding, and archival.
  *
  * Reconcile only closes gaps — it removes undeclared software, never
- * installs (invariant 4). Drift is flagged, never auto-corrected
- * (invariant 5). Machines are archived, never deleted (invariant 6).
+ * installs. Drift is flagged, never auto-corrected.
+ * Machines are archived, never deleted.
  */
 export type MachineEvent =
   | (EventEnvelope & {
@@ -83,9 +83,8 @@ export type MachineEvent =
       payload: { changes: Record<string, unknown> };
     })
   | (EventEnvelope & {
-      // Additive extension: not in the original spec table, but needed by
-      // the event-derivation-engine unit and consistent with the rest of
-      // the machine domain (invariant 11 — additive only).
+      // Additive extension, consistent with the rest of
+      // the machine domain — additive only.
       type: "machine.first_seen";
       payload: { agentVersion: string };
     });

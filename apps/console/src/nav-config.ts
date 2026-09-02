@@ -111,7 +111,7 @@ export const NAV_ITEMS: NavItem[] = [
 
 /**
  * Optional live-badge hooks, keyed by NavItem.to. A feature unit whose nav badge
- * needs to poll (spec §20: Approvals is a "badged queue") registers a hook here
+ * needs to poll (Approvals is a "badged queue") registers a hook here
  * instead of relying on the static NavItem.badgeCount above. root.tsx calls
  * whichever hook is registered for a given item — it carries no per-domain query
  * knowledge itself. One entry per feature unit, same append-only convention as
@@ -121,7 +121,7 @@ export type NavBadgeHook = () => number | undefined;
 
 export const NAV_BADGE_HOOKS: Record<string, NavBadgeHook> = {
   "/approvals": usePendingApprovalsCount,
-  // Unread owner notifications (spec §15: "owner notified") — Access is
+  // Unread owner notifications ("owner notified") — Access is
   // where elevation grants against a machine you own are visible, so that's
   // where the unread count surfaces. Same badge mechanism as Approvals
   // above, not a new one — see apps/console/src/api/notifications.ts.

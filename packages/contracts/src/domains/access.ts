@@ -23,7 +23,7 @@ export interface IssueCertificateRequest {
    * Base64 of the raw 32-byte Ed25519 public key point of the ephemeral
    * keypair `cloudable login` generated locally. The control plane never
    * generates or holds a user's private key — it only ever signs a public
-   * key it is handed (CLAUDE.md invariant #9).
+   * key it is handed.
    */
   publicKeyBase64: string;
 }
@@ -84,10 +84,9 @@ export interface AccessApiErrorBody {
  * `Signer.publicKey(SESSION_TOKEN_KEY_ID)` — see
  * `apps/control-plane/src/tunnel/session-token.ts`. Not secret: this is the
  * PUBLIC half of the session-token signing key, which is exactly what the
- * agent needs to validate a session token's signature before attaching
- * (spec §11.1) — CLAUDE.md invariant #9 is about the private key, never
- * entering the control plane beyond the `Signer` port; this response never
- * carries private key material at all.
+ * agent needs to validate a session token's signature before attaching.
+ * The private key never enters the control plane beyond the `Signer` port;
+ * this response never carries private key material at all.
  */
 export interface SessionTokenPublicKeyResponse {
   keyId: string;

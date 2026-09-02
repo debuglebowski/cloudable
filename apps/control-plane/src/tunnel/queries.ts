@@ -65,7 +65,7 @@ export interface ActiveSessionRow {
 /**
  * Currently-open sessions for an org (`endedAt IS NULL`), joined against
  * `machines` for a display name — the Access page's "active sessions" table
- * (spec §20) has no other way to show which machine a session is on. Small,
+ * has no other way to show which machine a session is on. Small,
  * ungrown-yet dataset (real sessions are short-lived), so no cursor
  * pagination unlike `listSnapshotsByOrg`/`ApprovalService.list`.
  */

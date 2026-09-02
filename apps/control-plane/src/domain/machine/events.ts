@@ -20,13 +20,13 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  * Diffs `previous` (the control plane's last-known state for a machine)
  * against `reported` (what the agent just reported) and returns the
  * `MachineEvent`s that fact warrants — the server-side "diff-and-emit"
- * pattern from spec §23 ("the control plane derives events; the agent does
- * not submit them", CLAUDE.md invariant #12).
+ * pattern where the control plane derives events and the agent
+ * never submits them itself.
  *
  * Pure and I/O-free by design: no Effect, no Db, no EventBus. That's
  * deliberate — this is meant to be a drop-in for anywhere that has a
- * before/after machine-state pair, including this unit's own
- * `services/reconcile-diff.ts`, unit 1's reconcile loop, and unit 3's agent
+ * before/after machine-state pair, including
+ * `services/reconcile-diff.ts`, the reconcile loop, and the agent
  * `/report` handler.
  *
  * Rules (all required — see this file's colocated test for the full table):
@@ -36,7 +36,7 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  *   against yet.
  * - `machine.state_reported` is emitted with a `changes` payload only when
  *   something in `reported` actually differs from `previous` — never on a
- *   no-op report. Per spec §24 ("What is not an event"): successful no-op
+ *   no-op report: successful no-op
  *   reconciles would otherwise dominate the catalogue.
  * - `machine.drift_detected` is emitted when `reported.undeclaredPackages`
  *   is non-empty AND that set differs from `previous.undeclaredPackages` —
@@ -45,7 +45,7 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  *   while the same drift persists unchanged.
  * - `machine.drift_resolved` is emitted when `previous.undeclaredPackages`
  *   was non-empty and `reported.undeclaredPackages` is now empty.
- * - `runningAccessMethods` (the config-state half of spec §8.1, alongside
+ * - `runningAccessMethods` (the config-state half of what the agent reports, alongside
  *   `packagesHash`) folds into `machine.state_reported`'s `changes` the
  *   same way the other snapshot fields do — order-independent, and only
  *   when the set actually differs from `previous`. No dedicated
@@ -71,8 +71,8 @@ export function deriveEvents(
     machineId: ctx.machineId,
     correlationId: ctx.correlationId,
     // The agent's machine identity is the actor for every event derived
-    // from one of its reports — spec §9's attestation yields "a machine
-    // identity", and there's no separate agent-principal concept yet.
+    // from one of its reports — attestation yields a machine
+    // identity, and there's no separate agent-principal concept yet.
     actorType: "agent" as const,
     actorId: ctx.machineId,
   };
@@ -113,7 +113,7 @@ export function deriveEvents(
       to: reported.undeclaredPackages,
     };
   }
-  // Config state (spec §8.1), diffed the same way as `undeclaredPackages` above —
+  // Config state, diffed the same way as `undeclaredPackages` above —
   // an order-independent set — rather than `packagesHash`'s hash-equality, since
   // this list is small enough that comparing it directly is cheap and, unlike a
   // hash, keeps the actual before/after values in the `changes` payload below.
@@ -221,7 +221,7 @@ export interface MachineOwnerAssignedInput extends ActorContext {
 }
 
 /**
- * CLAUDE.md invariant #3: a machine always has exactly one owner. Emitted
+ * A machine always has exactly one owner. Emitted
  * alongside `machine.created` (with `previousPersonId: null`) since
  * `MachineService.create` requires an owner up front, and again on any
  * future ownership transfer.

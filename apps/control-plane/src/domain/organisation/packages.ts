@@ -9,8 +9,7 @@ import { PackagePinConflictError } from "../machine/errors";
 import { type MachinePackageRow, findPinConflicts } from "../machine/manifest";
 
 /**
- * Org-scope write path for the package manifest (spec.md §6,
- * docs/inheritance.md "Package manifest"). `domain/machine/MachineService
+ * Org-scope write path for the package manifest. `domain/machine/MachineService
  * .updatePackages` is the only other writer of `machine_packages`, and is
  * always `machine`-scoped — see its own file's header comment. This module
  * is the org-scope sibling: it writes `machine_packages` rows with
@@ -145,10 +144,10 @@ function orgPackageSettingChangedEvent(input: {
 
 /**
  * Upserts/removes org-scoped `machine_packages` rows. Runs through the exact
- * same `findPinConflicts` the machine-scope editor does (spec.md §6: a pin
- * conflict is a 422 at edit time, never a silent no-op at reconcile) — see
- * docs/inheritance.md: "the pin check... [is] already scope-generic and
- * need[s] no changes when [org editing] lands". Nothing sits above `org` in
+ * same `findPinConflicts` the machine-scope editor does — a pin
+ * conflict is a 422 at edit time, never a silent no-op at reconcile. The pin
+ * check is already scope-generic and needs no changes for org editing.
+ * Nothing sits above `org` in
  * the chain, so `findPinConflicts(existingRows, "org", ...)` can never
  * actually report a conflict today; it's wired anyway so this path shares
  * one validation function with the machine-scope path rather than a second

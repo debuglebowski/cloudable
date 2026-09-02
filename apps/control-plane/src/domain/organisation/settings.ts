@@ -20,9 +20,8 @@ import { applySettingChange } from "../config/apply-setting-change";
 import { DEFAULT_REGION_KEY, resolveOrgDefaultRegion } from "../machine/region-policy";
 
 /**
- * Aggregate read/write for the Organisation page (spec §20's "Organisation"
- * settings: approval mode per action type, logging tier, retention default
- * and location). Every one of these settings ALREADY has a real, correct
+ * Aggregate read/write for the Organisation page (approval mode per action type,
+ * logging tier, retention default and location). Every one of these settings ALREADY has a real, correct
  * home — `logging/settings.ts` (tier/residency), `ApprovalService.ts`
  * (per-action-type approval mode), `domain/archive/org-policy.ts` (default
  * retention days) — built by the units that actually consume each value.
@@ -33,8 +32,8 @@ import { DEFAULT_REGION_KEY, resolveOrgDefaultRegion } from "../machine/region-p
  *
  * Writes go through `applySettingChange` (`domain/config/apply-setting-change.ts`)
  * — the same single code path the UI-facing `PATCH /api/v1/config/settings`
- * and the Git-sourced `POST /api/v1/config/import` endpoints use (docs/spec.md
- * §16: "Same path whether the change came from the UI or a Git commit") —
+ * and the Git-sourced `POST /api/v1/config/import` endpoints use (the same
+ * path whether the change came from the UI or a Git commit) —
  * rather than each duplicating its own settingValues upsert + event-emission
  * logic. `updateOrgSettings` shares one `correlationId` across every key it
  * changes in a single PATCH, matching the "one PATCH is one logical
@@ -69,11 +68,11 @@ export interface OrgSettingsView {
   name: string;
   approvalModes: Record<ApprovalActionType, ApprovalMode>;
   loggingTier: LoggingTier;
-  /** How many of this org's machines have their own machine-level logging-tier override (spec §17). Purely informational — the org page has nothing to do about a machine's override besides know it exists; see the machine detail page for the actual override control. */
+  /** How many of this org's machines have their own machine-level logging-tier override. Purely informational — the org page has nothing to do about a machine's override besides know it exists; see the machine detail page for the actual override control. */
   loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
-  /** Default Azure region for a new machine that doesn't specify one — spec.md §5.
+  /** Default Azure region for a new machine that doesn't specify one.
    * Resolved through `resolveSetting()` (`../machine/region-policy.ts`), same mechanism
    * as retention, rather than a client-side prefill. */
   regionDefault: string;
@@ -226,8 +225,8 @@ const writeOrgSetting = (
 /**
  * Every field is independently optional — the page sends one changed field
  * (or a handful) per save, not the whole settings object every time,
- * mirroring the generic config editor's own one-key-at-a-time model (spec
- * §16) even though this is a dedicated endpoint rather than routing through
+ * mirroring the generic config editor's own one-key-at-a-time model
+ * even though this is a dedicated endpoint rather than routing through
  * `PATCH /api/v1/config/settings` (that endpoint's `key`/`value` shape
  * would need four separate calls for the four approval-mode entries alone,
  * and doesn't touch `orgs.name` at all since that's a table column, not a

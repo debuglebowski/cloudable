@@ -1,23 +1,23 @@
 // ---------------------------------------------------------------------------
 // Agent-side counterpart to `apps/control-plane/src/tunnel/session-token.ts`'s
-// `verifySessionToken` — spec §11.1: "The agent validates the signature
-// before attaching [a session]." Until this file existed there was zero
-// agent-side implementation of that check at all; this provides the tested
-// crypto primitive a tunnel daemon MUST call on every session attach.
+// `verifySessionToken` — "The agent validates the signature before attaching
+// [a session]." Until this file existed there was zero agent-side
+// implementation of that check at all; this provides the tested crypto
+// primitive a tunnel daemon MUST call on every session attach.
 //
 // It does not by itself close the gap end-to-end: `apps/agent` has no
-// tunnel daemon / session-attach transport yet to call it from (see
-// docs/agents.md's "Tunnel daemon (spec-level only — not implemented in
-// this build)" and docs/access.md §4 — wiring an actual reverse-tunnel
-// process into `apps/agent` is explicitly future work for whichever unit
-// builds that half). Today, only this file's own test calls
-// `verifySessionToken`. Whichever unit adds the session-attach path must
-// call it there, synchronously, before doing anything else with the token.
+// tunnel daemon / session-attach transport yet to call it from (the tunnel
+// daemon is spec-level only — not implemented in this build; wiring an
+// actual reverse-tunnel process into `apps/agent` is explicitly future work
+// for whichever unit builds that half). Today, only this file's own test
+// calls `verifySessionToken`. Whichever unit adds the session-attach path
+// must call it there, synchronously, before doing anything else with the
+// token.
 //
 // This file only ever touches the session-token signer's PUBLIC key (fetched
 // from `GET /api/v1/access/session-token-public-key`, see
 // `getSessionTokenPublicKey` below) — it never generates, holds, or receives
-// private key material (CLAUDE.md invariant #9). Unlike the control plane,
+// private key material. Unlike the control plane,
 // the agent has no `Signer` port to call: the public key is not sensitive,
 // so it is fetched once over the same bearer-authenticated `apiRequest`
 // wrapper as every other control-plane call and cached in memory.
@@ -186,8 +186,8 @@ async function fetchPublicKeyFromControlPlane(): Promise<SessionTokenPublicKeyRe
 }
 
 let cachedPublicKeyDer: Uint8Array | undefined;
-// De-dupes concurrent first callers into a single outstanding request — spec §11.1 calls out
-// verification running "on every session attach, including under load"; without this, several
+// De-dupes concurrent first callers into a single outstanding request — verification runs
+// "on every session attach, including under load"; without this, several
 // session attaches racing in before anything is cached would each fire their own request
 // against the control plane (a latent thundering herd of exactly the kind that matters here).
 let inFlightFetch: Promise<Uint8Array> | undefined;
@@ -196,7 +196,7 @@ let inFlightFetch: Promise<Uint8Array> | undefined;
  * Fetches the session-token signer's public key from the control plane
  * (`GET /api/v1/access/session-token-public-key`) and caches it in-process
  * for the remainder of this agent's lifetime. This is a public key, not
- * secret material (CLAUDE.md invariant #9) — there is no expiry to track,
+ * secret material — there is no expiry to track,
  * unlike `attestation.ts`'s bearer-token cache, so a plain in-memory cache
  * with an explicit invalidation escape hatch (`clearCachedSessionTokenPublicKey`)
  * is enough.

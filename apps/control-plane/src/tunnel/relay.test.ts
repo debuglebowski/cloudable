@@ -256,7 +256,7 @@ describe("TunnelRelay (against local dev Postgres)", () => {
     });
   });
 
-  // Spec §15: mint-time authorization (access-authorization.ts) isn't enough on its own — a
+  // Mint-time authorization (access-authorization.ts) isn't enough on its own — a
   // session opened on the strength of a valid elevation must not keep running once that
   // elevation lapses. These tests seed `sessions`/`elevations` rows directly (not through
   // `TunnelServer.mintSession`) so each one exercises `closeSessionsWithLapsedAuthorization`'s

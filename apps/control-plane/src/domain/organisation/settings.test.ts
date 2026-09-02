@@ -72,7 +72,7 @@ const seedMachineOverride = (machineId: string, tier: 1 | 2 | 3) =>
     source: "machine",
   });
 
-describe("getOrgSettings — loggingTierOverrideCount (spec §17)", () => {
+describe("getOrgSettings — loggingTierOverrideCount", () => {
   test("is 0 when no machine in the org has its own logging-tier override", async () => {
     const orgId = await seedOrg();
     await seedMachine(orgId);

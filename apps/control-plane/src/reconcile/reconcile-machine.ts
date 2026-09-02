@@ -18,7 +18,7 @@ export class ReconcileError extends Data.TaggedError("ReconcileError")<{
  * "missing") are never surfaced here, because surfacing them alongside
  * "undeclared" would invite a caller to treat this as a to-install list.
  * Reconcile only closes gaps by removing/flagging the undeclared — it never
- * installs (invariant #4).
+ * installs.
  */
 export const diffUndeclaredPackages = (
   declared: ReadonlyArray<string>,

@@ -70,7 +70,7 @@ export interface ElevationRepo {
     status: "denied" | "expired",
   ): Effect.Effect<Elevation, Error>;
   /**
-   * Persists an in-app owner notification (spec §15: "owner notified") —
+   * Persists an in-app owner notification —
    * see `../notify.ts`. Idempotent per `elevationId` (the table enforces a
    * unique constraint on it — see `packages/schema/src/tables/
    * notification.ts`): calling this again for an elevation that already has

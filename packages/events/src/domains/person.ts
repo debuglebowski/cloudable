@@ -1,8 +1,8 @@
 import type { EventEnvelope } from "../envelope";
 
 /**
- * Person events: a machine has exactly one owner, always a person
- * (invariant 3). These events track person lifecycle and role changes.
+ * Person events: a machine has exactly one owner, always a person.
+ * These events track person lifecycle and role changes.
  */
 export type PersonEvent =
   | (EventEnvelope & {

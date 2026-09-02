@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
-// Signed session tokens (spec §11.1): "The control plane mints a short-lived
+// Signed session tokens: the control plane mints a short-lived
 // token carrying IdP identity, target machine and target OS user, signed
 // via the same Key Vault sign operation as the SSH CA. The agent validates
-// the signature before attaching."
+// the signature before attaching.
 //
 // This file only ever calls `Signer.sign()` / `Signer.publicKey()` — it
-// never generates or holds key material itself (CLAUDE.md invariant #9).
+// never generates or holds key material itself.
 // The actual signature check (`@cloudable/session-token`) runs against the
 // CA's PUBLIC key only (returned by `Signer.publicKey()`), which is not
 // sensitive material — verification is deliberately done locally rather
@@ -101,8 +101,8 @@ export const mintSessionToken = (
 
 /**
  * Verifies a session token's signature and expiry. This is the exact check
- * the tunnel daemon must run "on every session, including under load" (spec
- * §11.1) before attaching a terminal — there is no code path here that
+ * the tunnel daemon must run "on every session, including under load"
+ * before attaching a terminal — there is no code path here that
  * returns claims without a passing signature check first, including for
  * expired tokens (an expired-but-validly-signed token still fails, but only
  * *after* the signature is confirmed genuine — an attacker must not be able

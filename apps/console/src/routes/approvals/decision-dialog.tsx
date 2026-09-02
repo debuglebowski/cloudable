@@ -35,7 +35,7 @@ export interface ApprovalDecisionDialogProps {
  *
  * Both decisions require a deliberate confirming click inside a dialog rather than
  * acting on the row button directly, so a stray click can't grant or deny anything.
- * Per spec §13, "a confirmation dialog is self-approval and is not an approval" — so
+ * "A confirmation dialog is self-approval and is not an approval" — so
  * the dialog itself only guards against accidental clicks; the confirm button is what
  * actually calls `decideApproval`, which is what creates the real decision record.
  *

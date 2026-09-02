@@ -1,6 +1,6 @@
 import { machines, sessions } from "@cloudable/schema";
 // ---------------------------------------------------------------------------
-// Control-plane side of session brokering (spec §11.1 web terminal, and the
+// Control-plane side of session brokering (web terminal, and the
 // SSH-certificate path's session accounting). Mints signed session tokens,
 // persists `sessions` rows, and emits the `access.session_*` events.
 //
@@ -67,7 +67,7 @@ export interface EndSessionInput {
   sessionId: string;
   orgId: string;
   /** `sessions.terminationReason` / `access.session_ended.payload.reason` — both additive,
-   * optional fields (invariant #11), so omitting this preserves the original
+   * optional fields, so omitting this preserves the original
    * person-initiated-end shape exactly. See `docs/access.md`. */
   reason?: string;
   /** Defaults to `{actorType: "person", actorId: <the session's own personId>}` — the one
@@ -85,7 +85,7 @@ const durationSecondsSince = (startedAt: Date, now: Date): number =>
  * reason) a request against a machine that does not exist or is not
  * `running` — an archived or stopped machine has no live tunnel daemon
  * connection to attach a session to. `terminateSessionsForMachine` is the
- * "disabling terminates live sessions" path from spec §11.1, callable
+ * "disabling terminates live sessions" path, callable
  * independent of whether the transport that would carry the disconnect
  * signal to a real tunnel daemon exists yet.
  */
@@ -120,11 +120,11 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
               ? "invalid_target_os_user"
               : null;
 
-        // spec.md §11.1/§11: "Admin-disablable at any level" — refusing new
+        // Admin-disablable at any level — refusing new
         // sessions once a method is disabled is the other half of the gap
         // alongside `applySettingChange`'s termination of already-live ones
-        // (docs/access.md's "disabling terminates live sessions, not
-        // merely refuses new ones"). Checked only once the machine is known
+        // (disabling terminates live sessions, not
+        // merely refuses new ones). Checked only once the machine is known
         // to exist and be running, above.
         if (!denialReason && machine) {
           const accessMethods = yield* resolveAccessMethodsEnabled(db, {
@@ -139,7 +139,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
           }
         }
 
-        // spec §15: admin access to a machine you don't own needs the owner
+        // Admin access to a machine you don't own needs the owner
         // themselves, or a granted, unexpired, shell-level elevation — see
         // `access-authorization.ts`'s own doc comment for the exact rule and
         // why this was, until now, the one check `mintSession` skipped.
@@ -308,7 +308,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
       });
 
     /**
-     * "Disabling terminates live sessions" (spec §11.1) / policy-change
+     * "Disabling terminates live sessions" / policy-change
      * termination. Ends every still-open session against `machineId`,
      * regardless of how it started, and emits `access.session_ended` for
      * each. `reason` is persisted on both `sessions.terminationReason` and

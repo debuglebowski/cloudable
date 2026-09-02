@@ -32,7 +32,7 @@ const LEVEL_LABEL: Record<ElevationGrant["level"], string> = {
 
 /**
  * Real `POST /api/v1/elevations` — admin access to a machine the signed-in
- * person does NOT own (spec §15). The requester is always the caller's own
+ * person does NOT own. The requester is always the caller's own
  * session, never picked — see `api/access.ts`'s doc comment. Rejected with
  * `SelfOwnedMachineError` server-side if the picked machine is actually
  * theirs; that comes back as a plain error message, not a client-side

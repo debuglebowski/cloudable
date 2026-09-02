@@ -23,10 +23,10 @@ export type ApprovalActionType =
   | "admin_access"
   | "offboarding";
 
-/** Matches `approvals.mode` — see docs/spec.md §13. */
+/** Matches `approvals.mode`. */
 export type ApprovalMode = "none" | "single" | "dual";
 
-/** See docs/spec.md §17. Tier 3 puts Cloudable on the plaintext path — stated, not hidden. */
+/** Tier 3 puts Cloudable on the plaintext path — stated, not hidden. */
 export type LoggingTier = 1 | 2 | 3;
 
 /** Matches `logging/settings.ts`'s `RetentionLocation` — the real setting values,
@@ -43,7 +43,7 @@ export interface OrgSettings {
   loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
-  /** Default Azure region for a new machine that doesn't specify one (docs/spec.md §5) —
+  /** Default Azure region for a new machine that doesn't specify one —
    * live-resolved server-side, not a client-side prefill. */
   regionDefault: string;
 }

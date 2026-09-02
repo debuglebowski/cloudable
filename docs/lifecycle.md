@@ -1,9 +1,7 @@
 # Machine lifecycle
 
-Implementation detail for spec §14. Read `CLAUDE.md`'s invariants first — in particular
-invariant 6 ("Machines are archived, never deleted") and invariant 5 ("Drift is flagged,
-never auto-corrected" — irrelevant here except as a reminder that nothing in this
-lifecycle silently "fixes" anything either).
+How machine lifecycle is implemented. Machines are archived, never deleted, and drift is
+flagged, never auto-corrected — nothing in this lifecycle silently "fixes" anything either.
 
 Domain code: `apps/control-plane/src/domain/archive/*`. HTTP surface:
 `apps/control-plane/src/http/routes/archive.ts` (+ handlers in `http/handlers/archive.ts`),
@@ -24,7 +22,7 @@ wire types in `packages/contracts/src/domains/archive.ts`.
 
 `machines.state` only ever moves in this direction — there is no code path back to
 `live`. A restore (see below) writes data/config back onto a machine; it never flips
-`machines.state`. `machines` rows are never deleted (invariant 6): the two archived
+`machines.state`. `machines` rows are never deleted: the two archived
 states, `archivedAt`, and the full event history are permanent.
 
 `archiveMachine(machineId, approvalId?)` (`domain/archive/archive.ts`) drives the `live →
@@ -35,7 +33,7 @@ archived_restorable` transition:
 3. Calls `createSnapshot(machineId, "archive")` for the final snapshot.
 4. Emits `machine.archived` with `{snapshotId, retentionExpiresAt}`.
 
-Archiving a machine directly is **not** itself on the §13 approval-consumer list —
+Archiving a machine directly is **not** itself on the approval-consumer list —
 `approvalId` is optional and only used for actor attribution on the emitted event (see
 "Actor attribution" below). Offboarding (unit 16) is the approval-gated flow that calls
 this primitive after obtaining its own approval.
@@ -75,7 +73,7 @@ scheduler; this unit only guarantees the candidate query is correct and legal-ho
 `setLegalHold(snapshotId, reason)` / `clearLegalHold(snapshotId, reason)` toggle
 `snapshots.legalHold` (+ `legalHoldReason`) and emit `snapshot.legal_hold_set` /
 `snapshot.legal_hold_cleared`. Both require a non-empty `reason` — a legal hold with no
-stated reason is rejected (`InvalidLegalHoldReasonError`, `400`), mirroring §13's "reason
+stated reason is rejected (`InvalidLegalHoldReasonError`, `400`), mirroring the "reason
 required, never optional" rule for approvals even though a legal hold is not itself an
 approval object.
 
@@ -94,7 +92,7 @@ this unit; the columns exist as booleans rather than being hardcoded so a future
 snapshot type — e.g. a config-only manual snapshot — has somewhere to record that).
 Region is inherited from the machine's own region, never independently chosen.
 
-Per invariant 8 ("Cloudable never stores customer secrets"), secret bindings are
+Cloudable never stores customer secrets: secret bindings are
 injected at runtime and never written to disk — so a snapshot's "config" never includes
 secret *values*, only the *bindings* (which secret store, which pointer) a machine's
 desired state declares. See "Restore modes" below for why reattaching those bindings is
@@ -109,7 +107,7 @@ confirmSecretBindings?)` (`domain/archive/restore.ts`) is gated by `ApprovalServ
 `snapshot.restored` — once that request's `status` is `"approved"`.
 
 **The escalation problem this unit had to solve:** approval mode (`none` / `single` /
-`dual`) is policy resolved *per action type* (§13), and every restore — data, config, or
+`dual`) is policy resolved *per action type*, and every restore — data, config, or
 full — shares the single action type `"snapshot_restore"`. `ApprovalService.request()`
 has no parameter for *which* restore mode is being requested, so the generic service
 cannot by itself make a full restore harder to approve than a data-only one.
@@ -195,8 +193,8 @@ otherwise.
 ## BYOC cost estimate — not billing
 
 An archived snapshot is a real Azure disk snapshot billed to the customer directly by
-Azure for the hold period (invariant-adjacent: "Not in v1: billing... a rough sizing
-estimate at creation is fine — do not call it billing"). `estimateSnapshotCost()`
+Azure for the hold period. Billing itself is not in v1 — a rough sizing
+estimate at creation is fine, but it must not be called billing. `estimateSnapshotCost()`
 (`domain/archive/pricing.ts`) is a **pure, synchronous** function:
 `sizeBytes * pricePerGbPerDay * daysRemaining`, using a placeholder Azure managed-disk
 snapshot price (`$0.05`/GB-month, LRS pay-as-you-go — not pulled from a live price list;
