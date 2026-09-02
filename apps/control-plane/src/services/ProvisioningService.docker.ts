@@ -28,11 +28,18 @@ import {
 } from "./ProvisioningService";
 import { joinTokenAttestation } from "./attestation/JoinTokenAttestation";
 
-/** `apps/agent`'s directory, resolved relative to this file rather than `process.cwd()` — the control-plane's own dev script runs with `--cwd apps/control-plane`, which is not where the agent's build script lives. */
+/** Resolved relative to this file rather than `process.cwd()` — the control-plane's own dev
+ * script runs with `--cwd apps/control-plane`, which is neither the agent's nor the tunnel
+ * daemon's build directory. */
 const AGENT_DIR = path.join(import.meta.dir, "../../../agent");
+const TUNNEL_DAEMON_DIR = path.join(import.meta.dir, "../../../tunnel-daemon");
 
 const CONTAINER_NAME_PREFIX = "cloudable-machine-";
-const IMAGE_NAME = "cloudable-local-machine";
+// Bumped from "cloudable-local-machine" when the tunnel daemon was added to
+// the image — `ensureImageBuilt` skips building whenever a tag already
+// exists, so keeping the old name would have silently kept reusing a
+// pre-existing cached image with no tunnel daemon in it at all.
+const IMAGE_NAME = "cloudable-local-machine-v2";
 const DEFAULT_UBUNTU_VERSION = "22.04";
 const PACKAGES_LABEL = "cloudable.packages";
 
@@ -113,7 +120,13 @@ const inspectContainer = (
 const statusToMachineState = (dockerStatus: string): MachineStatus["state"] =>
   dockerStatus === "running" ? "running" : "error";
 
-/** Builds the per-Ubuntu-version image the first time it's needed; a no-op once it exists. Can take ~10-30s on first use (apt-get in the build). */
+/** Builds the per-Ubuntu-version image the first time it's needed; a no-op once it exists. Can
+ * take ~10-30s on first use (apt-get in the build). Build context stays `apps/agent` (not the
+ * monorepo root) specifically to avoid the repo root's `.dockerignore` (which excludes every
+ * dist directory, top-level and nested, needed by other Dockerfiles) excluding the very
+ * binaries this build needs to `COPY` — the tunnel-daemon binary is staged into
+ * `apps/agent/dist/` by `ensureTunnelDaemonBinaryBuilt` before this runs, rather than moving
+ * the build context and punching a hole in a shared ignore file. */
 const ensureImageBuilt = (ubuntuVersion: string): Effect.Effect<string, ProvisioningError> =>
   Effect.gen(function* () {
     const tag = `${IMAGE_NAME}:${ubuntuVersion}`;
@@ -133,6 +146,8 @@ const ensureImageBuilt = (ubuntuVersion: string): Effect.Effect<string, Provisio
             `BASE_IMAGE=ubuntu:${ubuntuVersion}`,
             "--build-arg",
             `AGENT_BINARY=dist/cloudable-agent-linux-${arch}`,
+            "--build-arg",
+            `TUNNEL_DAEMON_BINARY=dist/cloudable-tunnel-daemon-linux-${arch}`,
             "-t",
             tag,
             "-f",
@@ -192,6 +207,63 @@ const ensureAgentBinaryBuilt = (): Effect.Effect<void, ProvisioningError> =>
     }
   });
 
+/** Same shape as `ensureAgentBinaryBuilt` — `bun build --compile`s the tunnel-daemon binary
+ * this image's build needs, if it isn't already there, then stages a copy into
+ * `apps/agent/dist/` (see `ensureImageBuilt`'s own comment on why the Docker build context
+ * stays `apps/agent` rather than the monorepo root). Rebuilding after tunnel-daemon source
+ * changes is a manual `bun run --cwd apps/tunnel-daemon build[:arm64]` (and re-running this,
+ * which will then re-stage it) — this only covers "never built yet". */
+const ensureTunnelDaemonBinaryBuilt = (): Effect.Effect<void, ProvisioningError> =>
+  Effect.gen(function* () {
+    const arch = process.arch === "arm64" ? "arm64" : "x64";
+    const binaryName = `cloudable-tunnel-daemon-linux-${arch}`;
+    const sourcePath = path.join(TUNNEL_DAEMON_DIR, `dist/${binaryName}`);
+    const stagedPath = path.join(AGENT_DIR, `dist/${binaryName}`);
+
+    const staged = yield* Effect.tryPromise({
+      try: () => Bun.file(stagedPath).exists(),
+      catch: (cause) => new ProvisioningError({ reason: "provider_error", cause }),
+    });
+    if (staged) return;
+
+    const built = yield* Effect.tryPromise({
+      try: () => Bun.file(sourcePath).exists(),
+      catch: (cause) => new ProvisioningError({ reason: "provider_error", cause }),
+    });
+    if (!built) {
+      const buildScript = arch === "arm64" ? "build:arm64" : "build";
+      const proc = Bun.spawn(["bun", "run", buildScript], {
+        cwd: TUNNEL_DAEMON_DIR,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stderr, exitCode] = yield* Effect.tryPromise({
+        try: async () => {
+          const [, stderrText, code] = await Promise.all([
+            new Response(proc.stdout).text(),
+            new Response(proc.stderr).text(),
+            proc.exited,
+          ]);
+          return [stderrText, code] as const;
+        },
+        catch: (cause) => new ProvisioningError({ reason: "provider_error", cause }),
+      });
+      if (exitCode !== 0) {
+        return yield* Effect.fail(
+          new ProvisioningError({
+            reason: "provider_error",
+            cause: `bun run ${buildScript} (apps/tunnel-daemon) failed: ${stderr.trim()}`,
+          }),
+        );
+      }
+    }
+
+    yield* Effect.tryPromise({
+      try: () => Bun.write(stagedPath, Bun.file(sourcePath)),
+      catch: (cause) => new ProvisioningError({ reason: "provider_error", cause }),
+    });
+  });
+
 export const makeDockerProvisioningServiceLive = (options: {
   /** e.g. "http://host.docker.internal:4780" — where the container's agent reaches this control-plane. */
   controlPlaneUrl: string;
@@ -210,6 +282,7 @@ export const makeDockerProvisioningServiceLive = (options: {
         }
 
         yield* ensureAgentBinaryBuilt();
+        yield* ensureTunnelDaemonBinaryBuilt();
         const tag = yield* ensureImageBuilt(ubuntuVersion);
 
         const token = yield* joinTokenAttestation.issueCredential({
@@ -315,6 +388,7 @@ export const makeDockerProvisioningServiceLive = (options: {
         yield* runDocker(["rm", "-f", containerName(desc.machineId)]);
 
         yield* ensureAgentBinaryBuilt();
+        yield* ensureTunnelDaemonBinaryBuilt();
         const tag = yield* ensureImageBuilt(ubuntuVersion);
         const token = yield* joinTokenAttestation.issueCredential({
           orgId: desc.orgId,

@@ -16,4 +16,12 @@ if [ -n "${CLOUDABLE_PACKAGES:-}" ]; then
   done
 fi
 
+# The tunnel daemon opens the real persistent connection web-terminal/SSH
+# sessions attach through (see docs/agents.md's "two separate agents"
+# design) — started in the background, not `exec`'d, so the agent below can
+# still be this container's PID 1. Reads the same CONTROL_PLANE_URL/
+# MACHINE_TOKEN/ATTESTATION_METHOD env vars already set for the agent — it
+# needs no others.
+/usr/local/bin/cloudable-tunnel-daemon &
+
 exec /usr/local/bin/cloudable-agent
