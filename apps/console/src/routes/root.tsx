@@ -249,7 +249,16 @@ export function RootLayout() {
           grow past the row's own h-screen instead of clipping and scrolling —
           the exact bug this whole shell fix is for. */}
       <main className="min-h-0 flex-1 overflow-y-auto p-8">
-        <Outlet />
+        {/* Centered column, not full-bleed: every page (forms, tables, detail
+            views alike) renders through this one wrapper rather than each
+            picking its own width. max-w-7xl (1280px) is wide enough that the
+            denser tables (audit, machines) still have room to breathe; h-full
+            so height-driven pages (e.g. approvals-page.tsx's `h-full min-h-0
+            flex-col`) keep filling `main`'s actual available height instead
+            of losing that percentage chain through an extra wrapper level. */}
+        <div className="mx-auto h-full w-full max-w-7xl">
+          <Outlet />
+        </div>
       </main>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>
