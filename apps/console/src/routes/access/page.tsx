@@ -144,9 +144,9 @@ export function AccessPage() {
   const [sessionToTerminate, setSessionToTerminate] = useState<ActiveSession | null>(null);
 
   return (
-    // h-full min-h-0: the Tabs block below is flex-1, so it fills whatever
-    // height `main` actually has left under the header instead of capping at
-    // a flat vh fraction — see machines-page.tsx's comment on the same
+    // h-full min-h-0: bounds this page to `main`'s real available height so
+    // the Tabs block below has a real ceiling to shrink against instead of
+    // an arbitrary vh fraction — see machines-page.tsx's comment on the same
     // pattern for a single-table page. Certificates/sessions/elevations were
     // three stacked sections before; a tab only makes sense for one row of
     // "who currently has access" at a time, not all three glued together.
@@ -162,7 +162,7 @@ export function AccessPage() {
       <Tabs
         value={activeTab}
         onValueChange={(value) => setActiveTab(value as AccessTab)}
-        className="flex min-h-0 flex-1 flex-col gap-3"
+        className="flex min-h-0 flex-col gap-3"
       >
         <TabsList className="w-fit shrink-0">
           <TabsTrigger value="certificates">Live certificates</TabsTrigger>
@@ -170,11 +170,13 @@ export function AccessPage() {
           <TabsTrigger value="elevations">Elevation requests</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="certificates" className="mt-0 flex min-h-0 flex-1 flex-col">
+        <TabsContent value="certificates" className="mt-0 flex min-h-0 flex-col">
           {/* Shadow on all three of this page's table wrappers, not a bare
             bg-card box — see Card's own comment for the exact value and why
-            there's no border alongside it. */}
-          <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+            there's no border alongside it. min-h-0, no flex-1: shrinks to
+            the real available space when content overflows, collapses to
+            content otherwise. */}
+          <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
             <Table containerClassName="h-full max-h-none">
               <TableHeader>
                 <TableRow>
@@ -232,8 +234,8 @@ export function AccessPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="sessions" className="mt-0 flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+        <TabsContent value="sessions" className="mt-0 flex min-h-0 flex-col">
+          <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
             <Table containerClassName="h-full max-h-none">
               <TableHeader>
                 <TableRow>
@@ -305,11 +307,11 @@ export function AccessPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="elevations" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
+        <TabsContent value="elevations" className="mt-0 flex min-h-0 flex-col gap-2">
           <div className="flex shrink-0 justify-end">
             <RequestElevationDialog />
           </div>
-          <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+          <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
             <Table containerClassName="h-full max-h-none">
               <TableHeader>
                 <TableRow>

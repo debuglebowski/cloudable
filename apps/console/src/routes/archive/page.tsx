@@ -74,9 +74,10 @@ export function ArchivePage() {
   const { data: snapshots, isLoading, isError } = useArchivedSnapshots();
 
   return (
-    // h-full min-h-0 + the Card below being flex-1: fills whatever height
-    // `main` actually has left under the header instead of capping at a flat
-    // vh fraction — see machines-page.tsx's comment on the same pattern.
+    // h-full min-h-0 + the Card below: bounds this page to `main`'s real
+    // available height so the table has a real ceiling to shrink against
+    // instead of an arbitrary vh fraction — see machines-page.tsx's comment
+    // on the same pattern.
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex shrink-0 flex-col gap-1">
         <h1 className="text-xl font-semibold">Archive</h1>
@@ -86,7 +87,7 @@ export function ArchivePage() {
         </p>
       </div>
 
-      <Card className="flex min-h-0 flex-1 flex-col">
+      <Card className="flex min-h-0 flex-col">
         <CardHeader className="shrink-0">
           <CardTitle>Snapshots</CardTitle>
           <CardDescription>
@@ -94,7 +95,7 @@ export function ArchivePage() {
             inherited from the machine.
           </CardDescription>
         </CardHeader>
-        <CardContent className="min-h-0 flex-1">
+        <CardContent className="min-h-0">
           {isLoading && (
             <p className="text-sm text-muted-foreground">Loading archived snapshots…</p>
           )}

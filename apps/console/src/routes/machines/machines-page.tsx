@@ -63,11 +63,9 @@ export function MachinesPage() {
   }
 
   return (
-    // h-full min-h-0: sizes this page against `main`'s own bounded height
-    // (root.tsx) instead of just growing with content — the table wrapper
-    // below is the one flex-1 child, so it fills whatever's left under the
-    // header rather than capping at a flat vh fraction (direct user
-    // feedback: "the table should fill all available space on the screen").
+    // h-full min-h-0: bounds this page to `main`'s real available height
+    // instead of an arbitrary vh fraction, giving the table wrapper below a
+    // real ceiling to shrink against.
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex shrink-0 items-center justify-between gap-4">
         <div>
@@ -98,12 +96,15 @@ export function MachinesPage() {
       {!isError && (
         // Shadow, not a bare table on the page background — same elevation as
         // every other list page's table wrapper (People, Access, Archive,
-        // Audit) now carries, per Card's own comment for the exact value and
-        // why there's no border alongside it. flex-1 min-h-0 makes this the
-        // one child that absorbs whatever height the header didn't use;
-        // `containerClassName` overrides Table's own default max-h-[60vh]
-        // cap with a real fill (see Table's own comment on that prop).
-        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+        // Audit), per Card's own comment for the exact value and why there's
+        // no border alongside it. min-h-0, no flex-1: this shrinks (flex's
+        // default flex-shrink: 1) to whatever's actually left under the
+        // header when content overflows, but never grows past its own
+        // content — a short table just collapses instead of stretching into
+        // empty space. `containerClassName` swaps Table's own flat
+        // max-h-[60vh] cap for a real h-full fill of this bounded box, so the
+        // cap tracks the page's real layout instead of a fixed vh fraction.
+        <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
           <Table containerClassName="h-full max-h-none">
             <TableHeader>
               <TableRow>

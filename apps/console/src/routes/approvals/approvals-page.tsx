@@ -103,9 +103,9 @@ export function ApprovalsPage() {
   const rows = query.data ?? [];
 
   return (
-    // h-full min-h-0 + flex-1 on the table wrapper below: fills whatever
-    // height `main` actually has left instead of capping at a flat vh
-    // fraction — see machines-page.tsx's identical comment.
+    // h-full min-h-0 + the table wrapper below: bounds this page to `main`'s
+    // real available height instead of an arbitrary vh fraction — see
+    // machines-page.tsx's identical comment.
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="flex shrink-0 items-center gap-3">
         <h1 className="text-xl font-semibold">Approvals</h1>
@@ -146,9 +146,10 @@ export function ApprovalsPage() {
       {rows.length > 0 && (
         // Shadow, matching every other list page's table wrapper (People,
         // Access, Archive, Audit, Machines) — see Card's own comment for the
-        // exact value and why there's no border alongside it. flex-1 min-h-0
-        // + the Table override fill remaining height instead of a flat vh cap.
-        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+        // exact value and why there's no border alongside it. min-h-0, no
+        // flex-1: shrinks to the real available space when content
+        // overflows, collapses to content otherwise.
+        <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
           <Table containerClassName="h-full max-h-none">
             <TableHeader>
               <TableRow>
