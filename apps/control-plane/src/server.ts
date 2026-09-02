@@ -11,6 +11,7 @@ import { ApprovalsLive } from "./http/handlers/approvals";
 import { ArchiveLive } from "./http/handlers/archive";
 import { ComplianceLive } from "./http/handlers/compliance";
 import { ConfigLive } from "./http/handlers/config";
+import { DevProvisioningLive } from "./http/handlers/dev-provisioning";
 import { ElevationsLive } from "./http/handlers/elevations";
 import { FederationLive } from "./http/handlers/federation";
 import { HealthLive } from "./http/handlers/health";
@@ -26,9 +27,7 @@ import { UpgradeLive } from "./http/handlers/upgrade";
 import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
 import { AuthRouteLive } from "./http/routes/auth";
 import { buildAppLive } from "./layers";
-import { AzureProvisioningServiceLive } from "./services/ProvisioningService.azure";
-import { makeDockerProvisioningServiceLive } from "./services/ProvisioningService.docker";
-import { FakeProvisioningServiceLive } from "./services/ProvisioningService.fake";
+import { SwitchableProvisioningServiceLive } from "./services/ProvisioningService.switchable";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
 import { LocalSignerLive } from "./services/Signer.local";
 import { TunnelRegistry } from "./tunnel/registry";
@@ -39,19 +38,14 @@ import { TunnelRegistry } from "./tunnel/registry";
 // swappable here at all — see `layers.ts`'s doc comment on `buildAppLive`
 // for why both join-token and managed-identity are always wired in live.
 //
-// `provisioning` is the one adapter actually selectable via env
-// (`PROVISIONING_ADAPTER`, see config.ts) — `"docker"` runs real local
-// containers for dev/demo without an Azure account; never a customer-facing
-// choice, just how this process happens to be booted.
-const provisioningLive =
-  config.provisioningAdapter === "docker"
-    ? makeDockerProvisioningServiceLive({ controlPlaneUrl: config.localDockerControlPlaneUrl })
-    : config.provisioningAdapter === "azure"
-      ? AzureProvisioningServiceLive
-      : FakeProvisioningServiceLive;
-
+// `provisioning` dispatches at call time between fake/docker/azure (see
+// `ProvisioningService.switchable.ts`) rather than picking one for the
+// process's whole lifetime — `PROVISIONING_ADAPTER` (config.ts) only sets
+// which one it *starts* on; `DevProvisioningLive` below lets a running,
+// non-Azure-booted control-plane switch at runtime. Never a customer-facing
+// choice either way, just how/whether this process can be poked in dev.
 const AppLive = buildAppLive({
-  provisioning: provisioningLive,
+  provisioning: SwitchableProvisioningServiceLive,
   signer: LocalSignerLive,
   secrets: FakeSecretsProviderLive,
 });
@@ -83,6 +77,7 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       TunnelSignalLive,
       TunnelLive,
       NotificationsLive,
+      DevProvisioningLive,
     ),
   ),
   Layer.provide(DbLive),
