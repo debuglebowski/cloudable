@@ -6,13 +6,29 @@
 //
 // No path parameters: certificate/session ids travel in the JSON body
 // (`revoke`/`end` take `{ certificateId | sessionId, ... }`) rather than
-// `/:id` segments — a deliberate simplification for this build, since no
-// `CurrentUserTag` auth middleware exists yet to scope `:id` lookups to a
-// caller's own org, and everything here also takes `orgId`/`personId`
-// explicitly in the body for the same reason (see `../middleware/auth.ts`).
+// `/:id` segments — a deliberate simplification for this build.
+//
+// `issueCertificate`/`listCertificates`/`revokeCertificate`/`endSession`/
+// `listSessions` still take `orgId`/`personId` explicitly rather than via
+// `CurrentUserAuthentication`: `issueCertificate` is `cloudable login`'s CLI
+// flow (`apps/cli/src/login.ts`), which has no browser session to carry at
+// all — no real IdP exists yet, so it takes `--dev-person-id`/`--org-id`
+// flags by design (see that file's own header comment); the other four
+// aren't part of this — they just haven't needed migrating (`endSession`/
+// `listSessions` don't gate on `personId` at all, and both scripts in this
+// build share one fixed `orgId`, so that value is never actually wrong).
+//
+// `mintSession` IS `CurrentUserAuthentication`-gated (below): unlike the
+// above, an attacker-supplied `personId` there is a real access-control
+// bypass — `isAuthorizedForInteractiveAccess` (`../tunnel/access-
+// authorization.ts`) decides "may this caller open a shell on this
+// machine" by comparing `personId` against the machine's owner, so a wrong
+// (or client-forgeable) `personId`/`idpIdentity` either wrongly denies the
+// real owner or wrongly authorizes someone else entirely.
 // ---------------------------------------------------------------------------
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 export const MachineScope = Schema.Union(Schema.Literal("all"), Schema.Array(Schema.String));
 
@@ -73,9 +89,6 @@ const RevokeCertificateRequest = Schema.Struct({
 });
 
 const MintSessionTokenRequest = Schema.Struct({
-  orgId: Schema.String,
-  personId: Schema.String,
-  idpIdentity: Schema.String,
   targetMachineId: Schema.String,
   targetOsUser: Schema.String,
   method: Schema.Literal("terminal", "ssh"),
@@ -103,11 +116,11 @@ const ListSessionsResponse = Schema.Struct({ sessions: Schema.Array(SessionSumma
 
 const Ok = Schema.Struct({ ok: Schema.Literal(true) });
 
-// Response for `GET /api/v1/access/session-token-public-key` (§3, §4 of
-// docs/access.md) — wraps `Signer.publicKey(SESSION_TOKEN_KEY_ID)`. Not
-// secret: only the PUBLIC half of the signing key, so the agent can fetch
-// and cache it with no auth/secret involved and validate a session token's
-// signature locally before attaching (spec §11.1).
+// Response for `GET /api/v1/access/session-token-public-key` — wraps
+// `Signer.publicKey(SESSION_TOKEN_KEY_ID)`. Not secret: only the PUBLIC half
+// of the signing key, so the agent can fetch and cache it with no
+// auth/secret involved and validate a session token's signature locally
+// before attaching.
 const SessionTokenPublicKeyResponse = Schema.Struct({
   keyId: Schema.String,
   publicKeyDerBase64: Schema.String,
@@ -148,7 +161,8 @@ export const AccessGroup = HttpApiGroup.make("access")
       .addError(NotFoundError, { status: 404 })
       .addError(DeniedError, { status: 403 })
       .addError(BadRequestError, { status: 400 })
-      .addError(InternalError, { status: 500 }),
+      .addError(InternalError, { status: 500 })
+      .middleware(CurrentUserAuthentication),
   )
   .add(
     HttpApiEndpoint.post("endSession", "/api/v1/access/sessions/end")
