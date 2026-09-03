@@ -536,12 +536,6 @@ export function MachineDetailPage() {
 
         <TabsContent value="activity">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Activity</CardTitle>
-              <CardDescription>
-                Chronological feed of every recorded event for this machine, newest first.
-              </CardDescription>
-            </CardHeader>
             <CardContent className="p-0">
               {timelineQuery.isPending || timelineQuery.isError || machineTimeline.length > 0 ? (
                 <Table>
