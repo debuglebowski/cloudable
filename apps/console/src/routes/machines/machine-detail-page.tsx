@@ -37,7 +37,7 @@ import { SettingRow } from "@/components/setting-row";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -301,11 +301,7 @@ export function MachineDetailPage() {
 
         <TabsContent value="properties">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Properties</CardTitle>
-              <CardDescription>Identity, region, size, and image.</CardDescription>
-            </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
                 {/* Every machine has exactly one owner, always a person, never omitted or
                     shared — required at creation (add-machine-dialog.tsx) but, until now,
@@ -361,14 +357,7 @@ export function MachineDetailPage() {
 
         <TabsContent value="manifest">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Package manifest</CardTitle>
-              <CardDescription>
-                Effective packages after org → template → machine resolution. Lowest level wins; an
-                org-pinned entry cannot be overridden below.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2">
+            <CardContent className="flex flex-col gap-2 pt-4">
               {manifestQuery.isPending && (
                 <div className="flex flex-col gap-3">
                   {Array.from({ length: 3 }, (_, i) => (
@@ -440,21 +429,12 @@ export function MachineDetailPage() {
 
         <TabsContent value="drift">
           <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle className="text-base">Drift</CardTitle>
-                {!driftQuery.isPending && drift && (
-                  <Badge variant={DRIFT_BADGE_VARIANT[drift.status]}>
-                    {DRIFT_STATUS_LABEL[drift.status]}
-                  </Badge>
-                )}
-              </div>
-              <CardDescription>
-                Anything installed outside the manifest, surfaced on reconcile — never
-                auto-corrected.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-2">
+            <CardContent className="flex flex-col gap-2 pt-4">
+              {!driftQuery.isPending && drift && (
+                <Badge variant={DRIFT_BADGE_VARIANT[drift.status]} className="w-fit">
+                  {DRIFT_STATUS_LABEL[drift.status]}
+                </Badge>
+              )}
               {driftQuery.isPending && <Skeleton className="h-4 w-72" />}
               {driftQuery.isError && (
                 <p className="text-sm text-destructive">Failed to load drift status.</p>
@@ -501,14 +481,7 @@ export function MachineDetailPage() {
 
         <TabsContent value="compliance">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Compliance</CardTitle>
-              <CardDescription>
-                Each check's status reflects the org's whole fleet; findings below are filtered to
-                this machine.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
+            <CardContent className="flex flex-col gap-3 pt-4">
               {checksQuery.isPending &&
                 COMPLIANCE_SKELETON_KEYS.map((key) => (
                   <div
@@ -570,13 +543,6 @@ export function MachineDetailPage() {
 
         <TabsContent value="snapshots">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Snapshots</CardTitle>
-              <CardDescription>
-                This machine's full snapshot history — archive, pre-upgrade, and manual. Retention
-                and legal hold are governed fleet-wide from the Archive page.
-              </CardDescription>
-            </CardHeader>
             <CardContent className="p-0">
               {snapshotsQuery.isPending ||
               snapshotsQuery.isError ||
