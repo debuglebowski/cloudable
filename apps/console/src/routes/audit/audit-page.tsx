@@ -88,10 +88,6 @@ function TimelineView() {
 
   return (
     <Card className="flex min-h-0 flex-col">
-      <CardHeader className="shrink-0">
-        <CardTitle className="text-base">Timeline</CardTitle>
-        <CardDescription>Chronological feed of every event, newest first.</CardDescription>
-      </CardHeader>
       <CardContent className="min-h-0 p-0">
         {isLoading || isError || (entries?.length ?? 0) > 0 ? (
           <Table containerClassName="h-full max-h-none">
