@@ -30,15 +30,22 @@ export const RESTORE_MODE_APPROVAL: Record<RestoreMode, "none" | "single" | "dua
   full: "dual",
 };
 
-/** One archived machine's snapshot row, as the Archive page renders it. */
+/** Mirrors `snapshots.trigger` (`packages/schema/src/tables/snapshot.ts`) — `"archive"` is the
+ * final snapshot `archiveMachine()` takes; `"upgrade"`/`"manual"` snapshots can exist against a
+ * still-live machine, which is why a machine's snapshot history isn't 1:1 with its archive state. */
+export type SnapshotTrigger = "archive" | "upgrade" | "manual";
+
+/** One snapshot row — org-wide, not archived-machines-only (see `SnapshotTrigger`). Consumed by
+ * the Archive page (governance: retention/legal hold, filtered to `trigger === "archive"`) and by
+ * a machine's own Snapshots tab (that machine's full history, every trigger). */
 export interface ArchivedSnapshot {
   id: string;
   machineId: string;
   machineName: string;
+  trigger: SnapshotTrigger;
   region: string;
   sizeBytes: number;
-  /** `snapshots.createdAt` — when the snapshot (and archival) happened. */
-  archivedAt: string;
+  createdAt: string;
   retentionDays: number;
   expiresAt: string;
   /** Set once the volume data has been hard-deleted past `expiresAt`. Record persists regardless. */
@@ -71,7 +78,7 @@ interface SnapshotViewWire {
   id: string;
   orgId: string;
   machineId: string;
-  trigger: "archive" | "upgrade" | "manual";
+  trigger: SnapshotTrigger;
   region: string;
   sizeBytes: number | null;
   containsData: boolean;
@@ -95,9 +102,10 @@ export async function fetchArchivedSnapshots(): Promise<ArchivedSnapshot[]> {
     id: s.id,
     machineId: s.machineId,
     machineName: machines.find((m) => m.id === s.machineId)?.name ?? s.machineId,
+    trigger: s.trigger,
     region: s.region,
     sizeBytes: s.sizeBytes ?? 0,
-    archivedAt: s.createdAt,
+    createdAt: s.createdAt,
     retentionDays: s.retentionDays,
     expiresAt: s.expiresAt,
     expiredAt: s.expiredAt,
@@ -111,6 +119,16 @@ export function useArchivedSnapshots() {
   return useQuery({
     queryKey: archiveKeys.snapshots(),
     queryFn: fetchArchivedSnapshots,
+  });
+}
+
+/** One machine's full snapshot history (every trigger), sharing `useArchivedSnapshots()`'s
+ * cache entry via `select` rather than issuing a second fetch — backs a machine's Snapshots tab. */
+export function useMachineSnapshots(machineId: string) {
+  return useQuery({
+    queryKey: archiveKeys.snapshots(),
+    queryFn: fetchArchivedSnapshots,
+    select: (snapshots) => snapshots.filter((s) => s.machineId === machineId),
   });
 }
 
