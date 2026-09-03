@@ -52,27 +52,12 @@ export interface ArchivedSnapshot {
   expiredAt: string | null;
   legalHold: boolean;
   legalHoldReason: string | null;
-  /** Estimated Azure snapshot storage cost for the retention window — an estimate, never a bill. */
-  projectedCostUsd: number;
 }
 
 export const archiveKeys = {
   all: ["archive"] as const,
   snapshots: () => [...archiveKeys.all, "snapshots"] as const,
 };
-
-// Placeholder Azure managed-disk snapshot storage rate (Standard HDD, per GB-month). The real
-// backend has its own cost-estimate endpoint (GET .../cost-estimate) with the same disclaimer
-// contract — not called here since the Archive page shows every snapshot's estimate inline in
-// one table render rather than one request per row; swap to that endpoint if per-row accuracy
-// (it accounts for containsData/containsConfig) matters more than one request per page load.
-const ESTIMATED_USD_PER_GB_MONTH = 0.05;
-
-function estimateProjectedCostUsd(sizeBytes: number | null, retentionDays: number): number {
-  const gb = (sizeBytes ?? 0) / 1_000_000_000;
-  const months = retentionDays / 30;
-  return Math.round(gb * ESTIMATED_USD_PER_GB_MONTH * months * 100) / 100;
-}
 
 interface SnapshotViewWire {
   id: string;
@@ -111,7 +96,6 @@ export async function fetchArchivedSnapshots(): Promise<ArchivedSnapshot[]> {
     expiredAt: s.expiredAt,
     legalHold: s.legalHold,
     legalHoldReason: s.legalHoldReason,
-    projectedCostUsd: estimateProjectedCostUsd(s.sizeBytes, s.retentionDays),
   }));
 }
 

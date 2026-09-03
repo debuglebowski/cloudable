@@ -1,11 +1,29 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Archive, Calendar, Clock, DollarSign, Scale, Server } from "lucide-react";
+import {
+  Archive,
+  Calendar,
+  Clock,
+  Lock,
+  LockOpen,
+  MoreHorizontal,
+  Scale,
+  Server,
+} from "lucide-react";
+import { useState } from "react";
 
 import { type ArchivedSnapshot, useArchivedSnapshots } from "@/api/archive";
 import { type Machine, listMachines, machinesKeys } from "@/api/machines";
 import { TableHeaderIcon } from "@/components/table-header-icon";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   Table,
@@ -19,6 +37,21 @@ import { ARCHIVED_MACHINE_STATES } from "@/routes/machines/machine-state";
 
 import { LegalHoldDialog } from "./legal-hold-dialog";
 import { RetentionStatus, formatBytes, formatDate } from "./snapshot-format";
+
+/** Read-only — placing/clearing a hold is a menu action now, not a button on this cell. */
+function LegalHoldStatus({ legalHold }: { legalHold: boolean }) {
+  return legalHold ? (
+    <Badge variant="secondary">
+      <Lock className="mr-1 size-3" />
+      On hold
+    </Badge>
+  ) : (
+    <Badge variant="outline">
+      <LockOpen className="mr-1 size-3" />
+      Not held
+    </Badge>
+  );
+}
 
 interface ArchivedMachineRow {
   machine: Machine;
@@ -36,6 +69,7 @@ export function ArchivePage() {
     isLoading: snapshotsLoading,
     isError: snapshotsError,
   } = useArchivedSnapshots();
+  const [legalHoldTarget, setLegalHoldTarget] = useState<ArchivedSnapshot | null>(null);
 
   const isLoading = machinesQuery.isPending || snapshotsLoading;
   const isError = machinesQuery.isError || snapshotsError;
@@ -65,14 +99,7 @@ export function ArchivePage() {
       </div>
 
       <Card className="flex min-h-0 flex-col">
-        <CardHeader className="shrink-0">
-          <CardTitle>Archived machines</CardTitle>
-          <CardDescription>
-            One row per archived machine, keyed to the snapshot taken when it was archived. Region
-            and size are inherited from that snapshot.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="min-h-0">
+        <CardContent className="min-h-0 pt-4">
           {isLoading && <p className="text-sm text-muted-foreground">Loading archived machines…</p>}
           {isError && <p className="text-sm text-destructive">Failed to load archived machines.</p>}
           {!isLoading && !isError && rows.length === 0 && (
@@ -110,11 +137,8 @@ export function ArchivePage() {
                       Legal hold
                     </span>
                   </TableHead>
-                  <TableHead>
-                    <span className="flex items-center gap-1.5">
-                      <TableHeaderIcon icon={DollarSign} />
-                      Projected cost
-                    </span>
+                  <TableHead className="w-10">
+                    <span className="sr-only">Actions</span>
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -148,21 +172,35 @@ export function ArchivePage() {
                     </TableCell>
                     <TableCell>
                       {snapshot ? (
-                        <LegalHoldDialog snapshot={snapshot} />
+                        <LegalHoldStatus legalHold={snapshot.legalHold} />
                       ) : (
                         <span className="text-sm text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell>
-                      {snapshot ? (
-                        <div className="flex flex-col">
-                          <span className="text-sm">${snapshot.projectedCostUsd.toFixed(2)}</span>
-                          <span className="text-xs text-muted-foreground">
-                            estimate, not a bill
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">—</span>
+                    <TableCell className="text-right">
+                      {snapshot && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" aria-label="Snapshot actions">
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            <DropdownMenuItem onSelect={() => setLegalHoldTarget(snapshot)}>
+                              {snapshot.legalHold ? (
+                                <>
+                                  <LockOpen />
+                                  Clear legal hold
+                                </>
+                              ) : (
+                                <>
+                                  <Lock />
+                                  Place legal hold
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
                     </TableCell>
                   </TableRow>
@@ -172,6 +210,13 @@ export function ArchivePage() {
           )}
         </CardContent>
       </Card>
+
+      <LegalHoldDialog
+        snapshot={legalHoldTarget}
+        onOpenChange={(open) => {
+          if (!open) setLegalHoldTarget(null);
+        }}
+      />
     </div>
   );
 }
