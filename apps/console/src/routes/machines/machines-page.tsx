@@ -1,17 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import {
-  Activity,
-  Archive,
-  Clock,
-  Cpu,
-  Disc,
-  MapPin,
-  Plus,
-  Server,
-  Type,
-  User,
-} from "lucide-react";
+import { Activity, Archive, Clock, Plus, Server, Type, User } from "lucide-react";
 import { useState } from "react";
 
 import { isMachineStale, listMachines, machinesKeys } from "@/api/machines";
@@ -117,31 +106,13 @@ export function MachinesPage() {
                       Name
                     </span>
                   </TableHead>
-                  {/* Right after Name, ahead of the infra specifics — same ordering as the
-                    detail page's own rail (Owner listed first there too, see its comment):
-                    who's accountable for a machine outranks its region/size/image. */}
+                  {/* Right after Name — same ordering as the detail page's own rail
+                    (Owner listed first there too, see its comment): who's accountable
+                    for a machine outranks its state. */}
                   <TableHead>
                     <span className="flex items-center gap-1.5">
                       <TableHeaderIcon icon={User} />
                       Owner
-                    </span>
-                  </TableHead>
-                  <TableHead>
-                    <span className="flex items-center gap-1.5">
-                      <TableHeaderIcon icon={MapPin} />
-                      Region
-                    </span>
-                  </TableHead>
-                  <TableHead>
-                    <span className="flex items-center gap-1.5">
-                      <TableHeaderIcon icon={Cpu} />
-                      Size
-                    </span>
-                  </TableHead>
-                  <TableHead>
-                    <span className="flex items-center gap-1.5">
-                      <TableHeaderIcon icon={Disc} />
-                      Image
                     </span>
                   </TableHead>
                   <TableHead>
@@ -170,15 +141,6 @@ export function MachinesPage() {
                         <Skeleton className="h-4 w-32" />
                       </TableCell>
                       <TableCell>
-                        <Skeleton className="h-4 w-20" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-4 w-24" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-4 w-28" />
-                      </TableCell>
-                      <TableCell>
                         <Skeleton className="h-5 w-16 rounded-md" />
                       </TableCell>
                       <TableCell>
@@ -192,9 +154,7 @@ export function MachinesPage() {
                       {/* A leading identity glyph before the primary column — same
                       convention as People's PersonAvatar-led Email column, and
                       the reference product's own row-leading company/contact
-                      avatar (companies.png/records.png). Reuses the exact
-                      OsIcon already rendered in this row's own Image column
-                      rather than a second, redundant icon choice. */}
+                      avatar (companies.png/records.png). */}
                       <Link
                         to="/machines/$machineId"
                         params={{ machineId: machine.id }}
@@ -213,14 +173,6 @@ export function MachinesPage() {
                           <span className="truncate">{ownerEmail(machine.ownerPersonId)}</span>
                         </div>
                       )}
-                    </TableCell>
-                    <TableCell>{machine.region}</TableCell>
-                    <TableCell>{machine.sizeSku}</TableCell>
-                    <TableCell>
-                      <span className="flex items-center gap-1.5">
-                        <OsIcon image={machine.image} className="size-3.5 shrink-0" />
-                        {machine.image}
-                      </span>
                     </TableCell>
                     <TableCell>
                       <Badge
