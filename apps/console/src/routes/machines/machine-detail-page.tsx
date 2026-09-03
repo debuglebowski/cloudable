@@ -14,6 +14,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { type ArchivedSnapshot, useMachineSnapshots } from "@/api/archive";
 import { SEVERITY_VARIANT, daysOpen, useAuditTimeline, useComplianceChecks } from "@/api/audit";
 import {
   type DriftStatus,
@@ -49,6 +50,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RestoreDialog } from "@/routes/archive/restore-dialog";
+import { RetentionStatus, formatBytes, formatDate } from "@/routes/archive/snapshot-format";
 
 import { ArchiveMachineDialog } from "./archive-machine-dialog";
 import { ConnectTerminalDialog } from "./connect-terminal-dialog";
@@ -59,6 +62,12 @@ import {
 } from "./machine-state";
 import { ReconcileMachineDialog } from "./reconcile-machine-dialog";
 import { UpgradeMachineDialog } from "./upgrade-machine-dialog";
+
+const SNAPSHOT_TRIGGER_LABEL: Record<ArchivedSnapshot["trigger"], string> = {
+  archive: "Archive",
+  upgrade: "Pre-upgrade",
+  manual: "Manual",
+};
 
 /** Right-rail key/value line — this page's only detail view today, so this stays a
  * local helper rather than a shared component (see collapsible-section.tsx's own
@@ -103,7 +112,7 @@ const DRIFT_STATUS_LABEL: Record<DriftStatus, string> = {
   unknown: "not yet reported",
 };
 
-type DetailTab = "properties" | "manifest" | "drift" | "compliance" | "activity";
+type DetailTab = "properties" | "manifest" | "drift" | "compliance" | "snapshots" | "activity";
 
 // Stable (non-index) keys for the six-check loading skeleton — this app's six v1 checks
 // never reorder, but a plain array index survives biome's own line-wrapping less reliably
@@ -143,6 +152,7 @@ export function MachineDetailPage() {
   // waiting on a dedicated backend projection.
   const checksQuery = useComplianceChecks();
   const timelineQuery = useAuditTimeline();
+  const snapshotsQuery = useMachineSnapshots(machineId);
 
   const [editingPackage, setEditingPackage] = useState<string | null>(null);
   const [draftVersion, setDraftVersion] = useState("");
@@ -203,6 +213,13 @@ export function MachineDetailPage() {
   const machineTimeline =
     timelineQuery.data?.filter((entry) => entry.machineId === machineId) ?? [];
 
+  // The snapshot `archiveMachine()` took when this machine was archived — the header's
+  // Restore action mirrors the header's Archive action, same as the Snapshots tab's own
+  // per-row restore (which also covers any earlier upgrade/manual snapshot).
+  const latestArchiveSnapshot = snapshotsQuery.data
+    ?.filter((s) => s.trigger === "archive")
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -253,6 +270,22 @@ export function MachineDetailPage() {
           >
             Archive
           </Button>
+          {ARCHIVED_MACHINE_STATES.has(machine.state) &&
+            (latestArchiveSnapshot && !latestArchiveSnapshot.expiredAt ? (
+              <RestoreDialog snapshot={latestArchiveSnapshot} />
+            ) : (
+              <Button
+                size="sm"
+                disabled
+                title={
+                  latestArchiveSnapshot?.expiredAt
+                    ? `Restore unavailable — volume data was hard-deleted on ${formatDate(latestArchiveSnapshot.expiredAt)}.`
+                    : "No archive snapshot on record."
+                }
+              >
+                Restore
+              </Button>
+            ))}
         </div>
       </div>
 
@@ -262,6 +295,7 @@ export function MachineDetailPage() {
           <TabsTrigger value="manifest">Manifest</TabsTrigger>
           <TabsTrigger value="drift">Drift</TabsTrigger>
           <TabsTrigger value="compliance">Compliance</TabsTrigger>
+          <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
         </TabsList>
 
@@ -530,6 +564,94 @@ export function MachineDetailPage() {
                   </div>
                 );
               })}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="snapshots">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Snapshots</CardTitle>
+              <CardDescription>
+                This machine's full snapshot history — archive, pre-upgrade, and manual. Retention
+                and legal hold are governed fleet-wide from the Archive page.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              {snapshotsQuery.isPending ||
+              snapshotsQuery.isError ||
+              (snapshotsQuery.data?.length ?? 0) > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Trigger</TableHead>
+                      <TableHead>
+                        <span className="flex items-center gap-1.5">
+                          <TableHeaderIcon icon={Clock} />
+                          Created
+                        </span>
+                      </TableHead>
+                      <TableHead>Retention</TableHead>
+                      <TableHead>Size</TableHead>
+                      <TableHead className="text-right">Restore</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {snapshotsQuery.isPending &&
+                      Array.from({ length: 2 }, (_, i) => (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
+                        <TableRow key={i}>
+                          <TableCell colSpan={5}>
+                            <Skeleton className="h-4 w-full" />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    {snapshotsQuery.isError && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-destructive">
+                          Failed to load snapshots.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {snapshotsQuery.data?.map((snapshot) => (
+                      <TableRow key={snapshot.id}>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {SNAPSHOT_TRIGGER_LABEL[snapshot.trigger]}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatDate(snapshot.createdAt)}
+                        </TableCell>
+                        <TableCell>
+                          <RetentionStatus snapshot={snapshot} />
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatBytes(snapshot.sizeBytes)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {snapshot.expiredAt ? (
+                            <span
+                              className="text-xs text-muted-foreground"
+                              title={`Volume data was hard-deleted on ${formatDate(snapshot.expiredAt)}.`}
+                            >
+                              Data expired
+                            </span>
+                          ) : (
+                            <RestoreDialog snapshot={snapshot} />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <EmptyState
+                  icon={History}
+                  title="No snapshots yet"
+                  description="Archiving, upgrading, or manually snapshotting this machine will list them here."
+                />
+              )}
             </CardContent>
           </Card>
         </TabsContent>

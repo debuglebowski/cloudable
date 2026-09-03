@@ -1,9 +1,10 @@
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Archive, Calendar, Clock, DollarSign, Scale, Server } from "lucide-react";
 
 import { type ArchivedSnapshot, useArchivedSnapshots } from "@/api/archive";
+import { type Machine, listMachines, machinesKeys } from "@/api/machines";
 import { TableHeaderIcon } from "@/components/table-header-icon";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -14,65 +15,40 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ARCHIVED_MACHINE_STATES } from "@/routes/machines/machine-state";
 
 import { LegalHoldDialog } from "./legal-hold-dialog";
-import { RestoreDialog } from "./restore-dialog";
+import { RetentionStatus, formatBytes, formatDate } from "./snapshot-format";
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatBytes(bytes: number): string {
-  const gb = bytes / 1_000_000_000;
-  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1_000_000).toFixed(0)} MB`;
-}
-
-function daysUntil(iso: string): number {
-  // Clamped to zero: once expiresAt has passed there's a documented gap before the hard-delete
-  // job sets expiredAt (see api/archive.ts), and a negative count would be misleading there.
-  return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
-}
-
-/** Retention countdown / expired / legal-hold state for one row. Never hides the "why". */
-function RetentionStatus({ snapshot }: { snapshot: ArchivedSnapshot }) {
-  if (snapshot.legalHold) {
-    return (
-      <div className="flex flex-col gap-0.5">
-        <Badge variant="secondary">Legal hold</Badge>
-        <span className="text-xs text-muted-foreground">Exempt from expiry</span>
-      </div>
-    );
-  }
-
-  if (snapshot.expiredAt) {
-    return (
-      <div className="flex flex-col gap-0.5">
-        <Badge variant="drift">Expired</Badge>
-        <span className="text-xs text-muted-foreground">on {formatDate(snapshot.expiredAt)}</span>
-      </div>
-    );
-  }
-
-  const remaining = daysUntil(snapshot.expiresAt);
-  const urgent = remaining <= 5;
-  return (
-    <div className="flex flex-col gap-0.5">
-      <Badge variant={urgent ? "drift" : "ok"}>
-        {remaining} day{remaining === 1 ? "" : "s"} left
-      </Badge>
-      <span className="text-xs text-muted-foreground">
-        expires {formatDate(snapshot.expiresAt)}
-      </span>
-    </div>
-  );
+interface ArchivedMachineRow {
+  machine: Machine;
+  /** The snapshot `archiveMachine()` took when this machine was archived — this row's
+   * governance object for retention/legal hold. Earlier upgrade/manual snapshots from the
+   * machine's live days (if any) live on its own Snapshots tab, not summarized here. */
+  snapshot: ArchivedSnapshot | undefined;
+  snapshotCount: number;
 }
 
 export function ArchivePage() {
-  const { data: snapshots, isLoading, isError } = useArchivedSnapshots();
+  const machinesQuery = useQuery({ queryKey: machinesKeys.list(), queryFn: listMachines });
+  const {
+    data: snapshots,
+    isLoading: snapshotsLoading,
+    isError: snapshotsError,
+  } = useArchivedSnapshots();
+
+  const isLoading = machinesQuery.isPending || snapshotsLoading;
+  const isError = machinesQuery.isError || snapshotsError;
+
+  const rows: ArchivedMachineRow[] = (machinesQuery.data ?? [])
+    .filter((machine) => ARCHIVED_MACHINE_STATES.has(machine.state))
+    .map((machine) => {
+      const machineSnapshots = (snapshots ?? []).filter((s) => s.machineId === machine.id);
+      const archiveSnapshot = machineSnapshots
+        .filter((s) => s.trigger === "archive")
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      return { machine, snapshot: archiveSnapshot, snapshotCount: machineSnapshots.length };
+    });
 
   return (
     // h-full min-h-0 + the Card below: bounds this page to `main`'s real
@@ -83,34 +59,30 @@ export function ArchivePage() {
       <div className="flex shrink-0 flex-col gap-1">
         <h1 className="text-xl font-semibold">Archive</h1>
         <p className="max-w-prose text-sm text-muted-foreground">
-          Machines are archived, never deleted. This page governs the retention clock and restore
-          for archived snapshots — separate from the live Machines list.
+          Machines are archived, never deleted. This page governs retention and legal hold across
+          the fleet — restoring an archived machine happens from its own machine page.
         </p>
       </div>
 
       <Card className="flex min-h-0 flex-col">
         <CardHeader className="shrink-0">
-          <CardTitle>Snapshots</CardTitle>
+          <CardTitle>Archived machines</CardTitle>
           <CardDescription>
-            Volume data plus machine desired state and configuration, captured on archive. Region is
-            inherited from the machine.
+            One row per archived machine, keyed to the snapshot taken when it was archived. Region
+            and size are inherited from that snapshot.
           </CardDescription>
         </CardHeader>
         <CardContent className="min-h-0">
-          {isLoading && (
-            <p className="text-sm text-muted-foreground">Loading archived snapshots…</p>
-          )}
-          {isError && (
-            <p className="text-sm text-destructive">Failed to load archived snapshots.</p>
-          )}
-          {snapshots && snapshots.length === 0 && (
+          {isLoading && <p className="text-sm text-muted-foreground">Loading archived machines…</p>}
+          {isError && <p className="text-sm text-destructive">Failed to load archived machines.</p>}
+          {!isLoading && !isError && rows.length === 0 && (
             <EmptyState
               icon={Archive}
               title="No archived machines"
               description="Machines you archive will appear here with their retention countdown."
             />
           )}
-          {snapshots && snapshots.length > 0 && (
+          {!isLoading && !isError && rows.length > 0 && (
             <Table containerClassName="h-full max-h-none">
               <TableHeader>
                 <TableRow>
@@ -144,56 +116,53 @@ export function ArchivePage() {
                       Projected cost
                     </span>
                   </TableHead>
-                  <TableHead className="text-right">Restore</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {snapshots.map((snapshot) => (
-                  <TableRow key={snapshot.id}>
+                {rows.map(({ machine, snapshot, snapshotCount }) => (
+                  <TableRow key={machine.id}>
                     <TableCell>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{snapshot.machineName}</span>
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {snapshot.region} · {formatBytes(snapshot.sizeBytes)}
+                      <Link
+                        to="/machines/$machineId"
+                        params={{ machineId: machine.id }}
+                        className="flex flex-col text-primary hover:underline"
+                      >
+                        <span className="font-medium">{machine.name}</span>
+                        <span className="font-mono text-xs text-muted-foreground no-underline">
+                          {snapshot
+                            ? `${snapshot.region} · ${formatBytes(snapshot.sizeBytes)}`
+                            : machine.region}
+                          {snapshotCount > 1 ? ` · ${snapshotCount} snapshots` : ""}
                         </span>
-                      </div>
+                      </Link>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {formatDate(snapshot.archivedAt)}
+                      {snapshot ? formatDate(snapshot.createdAt) : "—"}
                     </TableCell>
                     <TableCell>
-                      <RetentionStatus snapshot={snapshot} />
+                      {snapshot ? (
+                        <RetentionStatus snapshot={snapshot} />
+                      ) : (
+                        <span className="text-sm text-muted-foreground">No snapshot on record</span>
+                      )}
                     </TableCell>
                     <TableCell>
-                      <LegalHoldDialog snapshot={snapshot} />
+                      {snapshot ? (
+                        <LegalHoldDialog snapshot={snapshot} />
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-col">
-                        <span className="text-sm">${snapshot.projectedCostUsd.toFixed(2)}</span>
-                        <span className="text-xs text-muted-foreground">estimate, not a bill</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {snapshot.expiredAt ? (
-                        <div className="flex flex-col items-end gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled
-                            title={`Restore unavailable — volume data was hard-deleted on ${formatDate(snapshot.expiredAt)}`}
-                          >
-                            Restore
-                          </Button>
-                          <p className="max-w-[220px] text-right text-xs text-muted-foreground">
-                            Data hard-deleted after the {snapshot.retentionDays}-day retention
-                            period elapsed on {formatDate(snapshot.expiredAt)}. Record and audit
-                            history remain.
-                          </p>
+                      {snapshot ? (
+                        <div className="flex flex-col">
+                          <span className="text-sm">${snapshot.projectedCostUsd.toFixed(2)}</span>
+                          <span className="text-xs text-muted-foreground">
+                            estimate, not a bill
+                          </span>
                         </div>
                       ) : (
-                        <div className="flex justify-end">
-                          <RestoreDialog snapshot={snapshot} />
-                        </div>
+                        <span className="text-sm text-muted-foreground">—</span>
                       )}
                     </TableCell>
                   </TableRow>
