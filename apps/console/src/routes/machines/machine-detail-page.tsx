@@ -1,6 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { Clock, Cpu, Disc, FileText, type LucideIcon, MapPin, User, Zap } from "lucide-react";
+import {
+  Clock,
+  Cpu,
+  Disc,
+  FileText,
+  History,
+  type LucideIcon,
+  MapPin,
+  User,
+  Zap,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -27,6 +37,7 @@ import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -532,80 +543,91 @@ export function MachineDetailPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>
-                      <span className="flex items-center gap-1.5">
-                        <TableHeaderIcon icon={Zap} />
-                        Event
-                      </span>
-                    </TableHead>
-                    <TableHead>
-                      <span className="flex items-center gap-1.5">
-                        <TableHeaderIcon icon={FileText} />
-                        Summary
-                      </span>
-                    </TableHead>
-                    <TableHead>
-                      <span className="flex items-center gap-1.5">
-                        <TableHeaderIcon icon={User} />
-                        Actor
-                      </span>
-                    </TableHead>
-                    <TableHead>
-                      <span className="flex items-center gap-1.5">
-                        <TableHeaderIcon icon={Clock} />
-                        When
-                      </span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {timelineQuery.isPending &&
-                    Array.from({ length: 6 }, (_, i) => (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
-                      <TableRow key={i}>
-                        <TableCell>
-                          <Skeleton className="h-4 w-36" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-4 w-64" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-4 w-24" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-4 w-16" />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  {!timelineQuery.isPending && machineTimeline.length === 0 && (
+              {timelineQuery.isPending || timelineQuery.isError || machineTimeline.length > 0 ? (
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={4} className="text-sm text-muted-foreground">
-                        No recorded events for this machine yet.
-                      </TableCell>
+                      <TableHead>
+                        <span className="flex items-center gap-1.5">
+                          <TableHeaderIcon icon={Zap} />
+                          Event
+                        </span>
+                      </TableHead>
+                      <TableHead>
+                        <span className="flex items-center gap-1.5">
+                          <TableHeaderIcon icon={FileText} />
+                          Summary
+                        </span>
+                      </TableHead>
+                      <TableHead>
+                        <span className="flex items-center gap-1.5">
+                          <TableHeaderIcon icon={User} />
+                          Actor
+                        </span>
+                      </TableHead>
+                      <TableHead>
+                        <span className="flex items-center gap-1.5">
+                          <TableHeaderIcon icon={Clock} />
+                          When
+                        </span>
+                      </TableHead>
                     </TableRow>
-                  )}
-                  {!timelineQuery.isPending &&
-                    machineTimeline.map((entry) => (
-                      <TableRow key={entry.id}>
-                        <TableCell className="align-top">
-                          <code className="font-mono text-xs text-muted-foreground">
-                            {entry.type}
-                          </code>
-                        </TableCell>
-                        <TableCell className="max-w-md align-top">{entry.summary}</TableCell>
-                        <TableCell className="whitespace-nowrap align-top text-sm">
-                          <ActorCell entry={entry} people={peopleQuery.data} />
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap align-top">
-                          <Freshness occurredAt={entry.occurredAt} recordedAt={entry.recordedAt} />
+                  </TableHeader>
+                  <TableBody>
+                    {timelineQuery.isPending &&
+                      Array.from({ length: 6 }, (_, i) => (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
+                        <TableRow key={i}>
+                          <TableCell>
+                            <Skeleton className="h-4 w-36" />
+                          </TableCell>
+                          <TableCell>
+                            <Skeleton className="h-4 w-64" />
+                          </TableCell>
+                          <TableCell>
+                            <Skeleton className="h-4 w-24" />
+                          </TableCell>
+                          <TableCell>
+                            <Skeleton className="h-4 w-16" />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    {timelineQuery.isError && (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center text-destructive">
+                          Failed to load activity.
                         </TableCell>
                       </TableRow>
-                    ))}
-                </TableBody>
-              </Table>
+                    )}
+                    {!timelineQuery.isPending &&
+                      machineTimeline.map((entry) => (
+                        <TableRow key={entry.id}>
+                          <TableCell className="align-top">
+                            <code className="font-mono text-xs text-muted-foreground">
+                              {entry.type}
+                            </code>
+                          </TableCell>
+                          <TableCell className="max-w-md align-top">{entry.summary}</TableCell>
+                          <TableCell className="whitespace-nowrap align-top text-sm">
+                            <ActorCell entry={entry} people={peopleQuery.data} />
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap align-top">
+                            <Freshness
+                              occurredAt={entry.occurredAt}
+                              recordedAt={entry.recordedAt}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <EmptyState
+                  icon={History}
+                  title="No recorded events yet"
+                  description="Events for this machine will appear here as they happen."
+                />
+              )}
             </CardContent>
           </Card>
         </TabsContent>

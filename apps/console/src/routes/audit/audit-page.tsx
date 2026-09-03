@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Clock, FileText, Server, User, Zap } from "lucide-react";
+import { Clock, FileText, History, Server, User, Zap } from "lucide-react";
 
 import {
   AUDIT_EXPORT_URLS,
@@ -17,6 +17,7 @@ import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -77,7 +78,7 @@ export function AuditPage() {
 }
 
 function TimelineView() {
-  const { data: entries, isLoading } = useAuditTimeline();
+  const { data: entries, isLoading, isError } = useAuditTimeline();
   // Same query key `machine-detail-page.tsx`/`machines-page.tsx`/`add-machine-dialog.tsx`
   // already use for this exact directory lookup — one shared cache entry app-wide.
   const peopleQuery = useQuery({
@@ -92,90 +93,105 @@ function TimelineView() {
         <CardDescription>Chronological feed of every event, newest first.</CardDescription>
       </CardHeader>
       <CardContent className="min-h-0 p-0">
-        <Table containerClassName="h-full max-h-none">
-          <TableHeader>
-            <TableRow>
-              <TableHead>
-                <span className="flex items-center gap-1.5">
-                  <TableHeaderIcon icon={Zap} />
-                  Event
-                </span>
-              </TableHead>
-              <TableHead>
-                <span className="flex items-center gap-1.5">
-                  <TableHeaderIcon icon={FileText} />
-                  Summary
-                </span>
-              </TableHead>
-              <TableHead>
-                <span className="flex items-center gap-1.5">
-                  <TableHeaderIcon icon={User} />
-                  Actor
-                </span>
-              </TableHead>
-              <TableHead>
-                <span className="flex items-center gap-1.5">
-                  <TableHeaderIcon icon={Server} />
-                  Machine
-                </span>
-              </TableHead>
-              <TableHead>
-                <span className="flex items-center gap-1.5">
-                  <TableHeaderIcon icon={Clock} />
-                  When
-                </span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading &&
-              Array.from({ length: 6 }, (_, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
-                <TableRow key={i}>
-                  <TableCell>
-                    <Skeleton className="h-4 w-36" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-64" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-24" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-20" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-16" />
-                  </TableCell>
-                </TableRow>
-              ))}
-            {!isLoading &&
-              entries?.map((entry) => (
-                // align-top on every cell, not the TableCell default align-middle —
-                // Summary regularly wraps to several lines while Event/Actor/Machine/
-                // When stay single-line; centering those against a multi-line
-                // neighbor left them floating disconnected from their own row's
-                // first line. Harmless everywhere a row's cells already share one
-                // line height (every other table in the app), so scoped to this
-                // table rather than changing TableCell's own default.
-                <TableRow key={entry.id}>
-                  <TableCell className="align-top">
-                    <code className="font-mono text-xs text-muted-foreground">{entry.type}</code>
-                  </TableCell>
-                  <TableCell className="max-w-md align-top">{entry.summary}</TableCell>
-                  <TableCell className="whitespace-nowrap align-top text-sm">
-                    <ActorCell entry={entry} people={peopleQuery.data} />
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap align-top font-mono text-xs text-muted-foreground">
-                    {entry.machineId ?? "—"}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap align-top">
-                    <Freshness occurredAt={entry.occurredAt} recordedAt={entry.recordedAt} />
+        {isLoading || isError || (entries?.length ?? 0) > 0 ? (
+          <Table containerClassName="h-full max-h-none">
+            <TableHeader>
+              <TableRow>
+                <TableHead>
+                  <span className="flex items-center gap-1.5">
+                    <TableHeaderIcon icon={Zap} />
+                    Event
+                  </span>
+                </TableHead>
+                <TableHead>
+                  <span className="flex items-center gap-1.5">
+                    <TableHeaderIcon icon={FileText} />
+                    Summary
+                  </span>
+                </TableHead>
+                <TableHead>
+                  <span className="flex items-center gap-1.5">
+                    <TableHeaderIcon icon={User} />
+                    Actor
+                  </span>
+                </TableHead>
+                <TableHead>
+                  <span className="flex items-center gap-1.5">
+                    <TableHeaderIcon icon={Server} />
+                    Machine
+                  </span>
+                </TableHead>
+                <TableHead>
+                  <span className="flex items-center gap-1.5">
+                    <TableHeaderIcon icon={Clock} />
+                    When
+                  </span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading &&
+                Array.from({ length: 6 }, (_, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
+                  <TableRow key={i}>
+                    <TableCell>
+                      <Skeleton className="h-4 w-36" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-64" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-24" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-20" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-16" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              {isError && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-destructive">
+                    Failed to load audit events.
                   </TableCell>
                 </TableRow>
-              ))}
-          </TableBody>
-        </Table>
+              )}
+              {!isLoading &&
+                entries?.map((entry) => (
+                  // align-top on every cell, not the TableCell default align-middle —
+                  // Summary regularly wraps to several lines while Event/Actor/Machine/
+                  // When stay single-line; centering those against a multi-line
+                  // neighbor left them floating disconnected from their own row's
+                  // first line. Harmless everywhere a row's cells already share one
+                  // line height (every other table in the app), so scoped to this
+                  // table rather than changing TableCell's own default.
+                  <TableRow key={entry.id}>
+                    <TableCell className="align-top">
+                      <code className="font-mono text-xs text-muted-foreground">{entry.type}</code>
+                    </TableCell>
+                    <TableCell className="max-w-md align-top">{entry.summary}</TableCell>
+                    <TableCell className="whitespace-nowrap align-top text-sm">
+                      <ActorCell entry={entry} people={peopleQuery.data} />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap align-top font-mono text-xs text-muted-foreground">
+                      {entry.machineId ?? "—"}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap align-top">
+                      <Freshness occurredAt={entry.occurredAt} recordedAt={entry.recordedAt} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <EmptyState
+            icon={History}
+            title="No events yet"
+            description="Every event Cloudable emits will appear here as it happens."
+          />
+        )}
       </CardContent>
     </Card>
   );

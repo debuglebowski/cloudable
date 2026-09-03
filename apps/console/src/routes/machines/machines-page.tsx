@@ -8,6 +8,7 @@ import {
   Disc,
   MapPin,
   Plus,
+  Server,
   Type,
   User,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -71,8 +73,8 @@ export function MachinesPage() {
         <div>
           <h1 className="text-xl font-semibold">Machines</h1>
           <p className="text-sm text-muted-foreground">
-            Persistent, governed cloud machines this org owns. Archived machines stay here behind
-            a filter — Archive owns retention.
+            Persistent, governed cloud machines this org owns. Archived machines stay here behind a
+            filter — Archive owns retention.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -105,157 +107,158 @@ export function MachinesPage() {
         // max-h-[60vh] cap for a real h-full fill of this bounded box, so the
         // cap tracks the page's real layout instead of a fixed vh fraction.
         <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
-          <Table containerClassName="h-full max-h-none">
-            <TableHeader>
-              <TableRow>
-                <TableHead>
-                  <span className="flex items-center gap-1.5">
-                    <TableHeaderIcon icon={Type} />
-                    Name
-                  </span>
-                </TableHead>
-                {/* Right after Name, ahead of the infra specifics — same ordering as the
+          {isPending || machines.length > 0 ? (
+            <Table containerClassName="h-full max-h-none">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Type} />
+                      Name
+                    </span>
+                  </TableHead>
+                  {/* Right after Name, ahead of the infra specifics — same ordering as the
                     detail page's own rail (Owner listed first there too, see its comment):
                     who's accountable for a machine outranks its region/size/image. */}
-                <TableHead>
-                  <span className="flex items-center gap-1.5">
-                    <TableHeaderIcon icon={User} />
-                    Owner
-                  </span>
-                </TableHead>
-                <TableHead>
-                  <span className="flex items-center gap-1.5">
-                    <TableHeaderIcon icon={MapPin} />
-                    Region
-                  </span>
-                </TableHead>
-                <TableHead>
-                  <span className="flex items-center gap-1.5">
-                    <TableHeaderIcon icon={Cpu} />
-                    Size
-                  </span>
-                </TableHead>
-                <TableHead>
-                  <span className="flex items-center gap-1.5">
-                    <TableHeaderIcon icon={Disc} />
-                    Image
-                  </span>
-                </TableHead>
-                <TableHead>
-                  <span className="flex items-center gap-1.5">
-                    <TableHeaderIcon icon={Activity} />
-                    State
-                  </span>
-                </TableHead>
-                <TableHead>
-                  <span className="flex items-center gap-1.5">
-                    <TableHeaderIcon icon={Clock} />
-                    Last verified
-                  </span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isPending &&
-                Array.from({ length: 5 }, (_, i) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
-                  <TableRow key={i}>
-                    <TableCell>
-                      <Skeleton className="h-4 w-24" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-32" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-20" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-24" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-28" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-5 w-16 rounded-md" />
-                    </TableCell>
-                    <TableCell>
-                      <Skeleton className="h-4 w-14" />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              {!isPending && machines.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
-                    No machines to show.
-                  </TableCell>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={User} />
+                      Owner
+                    </span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={MapPin} />
+                      Region
+                    </span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Cpu} />
+                      Size
+                    </span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Disc} />
+                      Image
+                    </span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Activity} />
+                      State
+                    </span>
+                  </TableHead>
+                  <TableHead>
+                    <span className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Clock} />
+                      Last verified
+                    </span>
+                  </TableHead>
                 </TableRow>
-              )}
-              {machines.map((machine) => (
-                <TableRow key={machine.id}>
-                  <TableCell>
-                    {/* A leading identity glyph before the primary column — same
+              </TableHeader>
+              <TableBody>
+                {isPending &&
+                  Array.from({ length: 5 }, (_, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
+                    <TableRow key={i}>
+                      <TableCell>
+                        <Skeleton className="h-4 w-24" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-32" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-20" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-24" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-28" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-5 w-16 rounded-md" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-14" />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                {machines.map((machine) => (
+                  <TableRow key={machine.id}>
+                    <TableCell>
+                      {/* A leading identity glyph before the primary column — same
                       convention as People's PersonAvatar-led Email column, and
                       the reference product's own row-leading company/contact
                       avatar (companies.png/records.png). Reuses the exact
                       OsIcon already rendered in this row's own Image column
                       rather than a second, redundant icon choice. */}
-                    <Link
-                      to="/machines/$machineId"
-                      params={{ machineId: machine.id }}
-                      className="flex items-center gap-1.5 font-medium text-primary hover:underline"
-                    >
-                      <OsIcon image={machine.image} className="size-3.5 shrink-0" />
-                      {machine.name}
-                    </Link>
-                  </TableCell>
-                  <TableCell>
-                    {peopleQuery.isPending ? (
-                      <Skeleton className="h-4 w-32" />
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <PersonAvatar name={ownerEmail(machine.ownerPersonId)} />
-                        <span className="truncate">{ownerEmail(machine.ownerPersonId)}</span>
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>{machine.region}</TableCell>
-                  <TableCell>{machine.sizeSku}</TableCell>
-                  <TableCell>
-                    <span className="flex items-center gap-1.5">
-                      <OsIcon image={machine.image} className="size-3.5 shrink-0" />
-                      {machine.image}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={MACHINE_STATE_BADGE_VARIANT[machine.state]}
-                      dot={machine.state === "stopped"}
-                    >
-                      {MACHINE_STATE_LABEL[machine.state]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {machine.lastVerifiedAt ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        {/* Machine model only has one timestamp (`lastVerifiedAt`); Freshness
-                         * wants an occurred/recorded pair to flag late reporting, so both are
-                         * set to the same value here — a deliberate simplification, not real data. */}
-                        <Freshness
-                          occurredAt={machine.lastVerifiedAt}
-                          recordedAt={machine.lastVerifiedAt}
-                        />
-                        {isMachineStale(machine.lastVerifiedAt) && (
-                          <Badge variant="stale">Not reporting</Badge>
-                        )}
+                      <Link
+                        to="/machines/$machineId"
+                        params={{ machineId: machine.id }}
+                        className="flex items-center gap-1.5 font-medium text-primary hover:underline"
+                      >
+                        <OsIcon image={machine.image} className="size-3.5 shrink-0" />
+                        {machine.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      {peopleQuery.isPending ? (
+                        <Skeleton className="h-4 w-32" />
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <PersonAvatar name={ownerEmail(machine.ownerPersonId)} />
+                          <span className="truncate">{ownerEmail(machine.ownerPersonId)}</span>
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>{machine.region}</TableCell>
+                    <TableCell>{machine.sizeSku}</TableCell>
+                    <TableCell>
+                      <span className="flex items-center gap-1.5">
+                        <OsIcon image={machine.image} className="size-3.5 shrink-0" />
+                        {machine.image}
                       </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">not yet verified</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={MACHINE_STATE_BADGE_VARIANT[machine.state]}
+                        dot={machine.state === "stopped"}
+                      >
+                        {MACHINE_STATE_LABEL[machine.state]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {machine.lastVerifiedAt ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          {/* Machine model only has one timestamp (`lastVerifiedAt`); Freshness
+                           * wants an occurred/recorded pair to flag late reporting, so both are
+                           * set to the same value here — a deliberate simplification, not real data. */}
+                          <Freshness
+                            occurredAt={machine.lastVerifiedAt}
+                            recordedAt={machine.lastVerifiedAt}
+                          />
+                          {isMachineStale(machine.lastVerifiedAt) && (
+                            <Badge variant="stale">Not reporting</Badge>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">not yet verified</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <EmptyState
+              icon={Server}
+              title="No machines yet"
+              description="Add a machine to bring it under management."
+            />
+          )}
         </div>
       )}
       <AddMachineDialog open={addOpen} onOpenChange={setAddOpen} />

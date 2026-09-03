@@ -31,6 +31,7 @@ import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -177,133 +178,147 @@ export function AccessPage() {
             the real available space when content overflows, collapses to
             content otherwise. */}
           <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
-            <Table containerClassName="h-full max-h-none">
-              <TableHeader>
-                <TableRow>
-                  <Th icon={User}>Person</Th>
-                  <Th icon={Server}>Machine scope</Th>
-                  <Th icon={FingerprintGlyph}>Fingerprint</Th>
-                  <Th icon={Calendar}>Issued</Th>
-                  <Th icon={Clock}>Expires</Th>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {certificatesQuery.isLoading && (
-                  <SkeletonRows
-                    widths={["w-24", "w-28", "w-40", "w-32", "w-32", "w-16"]}
-                    lastColRight
-                  />
-                )}
-                {certificatesQuery.isError && (
-                  <TableStatusRow colSpan={6} tone="error">
-                    Couldn't load certificates.
-                  </TableStatusRow>
-                )}
-                {certificatesQuery.data?.length === 0 && (
-                  <TableStatusRow colSpan={6}>No live certificates.</TableStatusRow>
-                )}
-                {certificatesQuery.data?.map((cert) => (
-                  <TableRow key={cert.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <PersonAvatar name={cert.personName} />
-                        {cert.personName}
-                      </div>
-                    </TableCell>
-                    <TableCell>{cert.machineScopeLabel}</TableCell>
-                    <TableCell>
-                      <FingerprintCell fingerprint={cert.fingerprint} />
-                    </TableCell>
-                    <TableCell>{formatDateTime(cert.issuedAt)}</TableCell>
-                    <TableCell>{formatDateTime(cert.expiresAt)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCertificateToRevoke(cert)}
-                      >
-                        Revoke
-                      </Button>
-                    </TableCell>
+            {certificatesQuery.isLoading ||
+            certificatesQuery.isError ||
+            (certificatesQuery.data?.length ?? 0) > 0 ? (
+              <Table containerClassName="h-full max-h-none">
+                <TableHeader>
+                  <TableRow>
+                    <Th icon={User}>Person</Th>
+                    <Th icon={Server}>Machine scope</Th>
+                    <Th icon={FingerprintGlyph}>Fingerprint</Th>
+                    <Th icon={Calendar}>Issued</Th>
+                    <Th icon={Clock}>Expires</Th>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {certificatesQuery.isLoading && (
+                    <SkeletonRows
+                      widths={["w-24", "w-28", "w-40", "w-32", "w-32", "w-16"]}
+                      lastColRight
+                    />
+                  )}
+                  {certificatesQuery.isError && (
+                    <TableStatusRow colSpan={6} tone="error">
+                      Couldn't load certificates.
+                    </TableStatusRow>
+                  )}
+                  {certificatesQuery.data?.map((cert) => (
+                    <TableRow key={cert.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <PersonAvatar name={cert.personName} />
+                          {cert.personName}
+                        </div>
+                      </TableCell>
+                      <TableCell>{cert.machineScopeLabel}</TableCell>
+                      <TableCell>
+                        <FingerprintCell fingerprint={cert.fingerprint} />
+                      </TableCell>
+                      <TableCell>{formatDateTime(cert.issuedAt)}</TableCell>
+                      <TableCell>{formatDateTime(cert.expiresAt)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCertificateToRevoke(cert)}
+                        >
+                          Revoke
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <EmptyState
+                icon={FingerprintGlyph}
+                title="No live certificates"
+                description="Certificates issued for terminal or SSH access will appear here."
+              />
+            )}
           </div>
         </TabsContent>
 
         <TabsContent value="sessions" className="mt-0 flex min-h-0 flex-col">
           <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
-            <Table containerClassName="h-full max-h-none">
-              <TableHeader>
-                <TableRow>
-                  <Th icon={User}>Person</Th>
-                  <Th icon={Server}>Machine</Th>
-                  <Th icon={Terminal}>Method</Th>
-                  <Th icon={UserCog}>OS user</Th>
-                  <Th icon={Clock}>Started</Th>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sessionsQuery.isLoading && (
-                  <SkeletonRows
-                    widths={["w-24", "w-24", "w-16", "w-16", "w-32", "w-20"]}
-                    lastColRight
-                  />
-                )}
-                {sessionsQuery.isError && (
-                  <TableStatusRow colSpan={6} tone="error">
-                    Couldn't load active sessions.
-                  </TableStatusRow>
-                )}
-                {sessionsQuery.data?.length === 0 && (
-                  <TableStatusRow colSpan={6}>No active sessions.</TableStatusRow>
-                )}
-                {sessionsQuery.data?.map((session) => (
-                  <TableRow key={session.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <PersonAvatar name={session.personName} />
-                        {session.personName}
-                      </div>
-                    </TableCell>
-                    <TableCell>{session.machineName}</TableCell>
-                    <TableCell className="capitalize">{session.method}</TableCell>
-                    <TableCell className="font-mono text-xs">{session.osUser}</TableCell>
-                    <TableCell>{formatDateTime(session.startedAt)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {session.method === "terminal" && (
-                          // Rejoining an existing session, not a fresh mint — the attach
-                          // endpoint replays the token already stored on this row (see
-                          // `api/access.ts`'s `useMintSession` doc comment), so this is a
-                          // plain link straight to the terminal page, no dialog needed.
-                          <Button type="button" variant="outline" size="sm" asChild>
-                            <Link
-                              to="/access/sessions/$sessionId/terminal"
-                              params={{ sessionId: session.id }}
-                            >
-                              Connect
-                            </Link>
-                          </Button>
-                        )}
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSessionToTerminate(session)}
-                        >
-                          Terminate
-                        </Button>
-                      </div>
-                    </TableCell>
+            {sessionsQuery.isLoading ||
+            sessionsQuery.isError ||
+            (sessionsQuery.data?.length ?? 0) > 0 ? (
+              <Table containerClassName="h-full max-h-none">
+                <TableHeader>
+                  <TableRow>
+                    <Th icon={User}>Person</Th>
+                    <Th icon={Server}>Machine</Th>
+                    <Th icon={Terminal}>Method</Th>
+                    <Th icon={UserCog}>OS user</Th>
+                    <Th icon={Clock}>Started</Th>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {sessionsQuery.isLoading && (
+                    <SkeletonRows
+                      widths={["w-24", "w-24", "w-16", "w-16", "w-32", "w-20"]}
+                      lastColRight
+                    />
+                  )}
+                  {sessionsQuery.isError && (
+                    <TableStatusRow colSpan={6} tone="error">
+                      Couldn't load active sessions.
+                    </TableStatusRow>
+                  )}
+                  {sessionsQuery.data?.map((session) => (
+                    <TableRow key={session.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <PersonAvatar name={session.personName} />
+                          {session.personName}
+                        </div>
+                      </TableCell>
+                      <TableCell>{session.machineName}</TableCell>
+                      <TableCell className="capitalize">{session.method}</TableCell>
+                      <TableCell className="font-mono text-xs">{session.osUser}</TableCell>
+                      <TableCell>{formatDateTime(session.startedAt)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {session.method === "terminal" && (
+                            // Rejoining an existing session, not a fresh mint — the attach
+                            // endpoint replays the token already stored on this row (see
+                            // `api/access.ts`'s `useMintSession` doc comment), so this is a
+                            // plain link straight to the terminal page, no dialog needed.
+                            <Button type="button" variant="outline" size="sm" asChild>
+                              <Link
+                                to="/access/sessions/$sessionId/terminal"
+                                params={{ sessionId: session.id }}
+                              >
+                                Connect
+                              </Link>
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSessionToTerminate(session)}
+                          >
+                            Terminate
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <EmptyState
+                icon={Terminal}
+                title="No active sessions"
+                description="Sessions people start will appear here while connected."
+              />
+            )}
           </div>
         </TabsContent>
 
@@ -312,85 +327,94 @@ export function AccessPage() {
             <RequestElevationDialog />
           </div>
           <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
-            <Table containerClassName="h-full max-h-none">
-              <TableHeader>
-                <TableRow>
-                  <Th icon={User}>Person</Th>
-                  <Th icon={Server}>Machine</Th>
-                  <Th icon={Gauge}>Level</Th>
-                  <Th icon={MessageSquare}>Reason</Th>
-                  <Th icon={Tag}>Status</Th>
-                  <Th icon={Clock}>Expires</Th>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {elevationsQuery.isLoading && (
-                  <SkeletonRows widths={["w-24", "w-24", "w-16", "w-48", "w-16", "w-32", "w-20"]} />
-                )}
-                {elevationsQuery.isError && (
-                  <TableStatusRow colSpan={7} tone="error">
-                    Couldn't load elevation requests.
-                  </TableStatusRow>
-                )}
-                {elevationsQuery.data?.length === 0 && (
-                  <TableStatusRow colSpan={7}>No elevation requests.</TableStatusRow>
-                )}
-                {elevationsQuery.data?.map((elevation: ElevationGrant) => (
-                  <TableRow key={elevation.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <PersonAvatar name={elevation.personName} />
-                        {elevation.personName}
-                      </div>
-                    </TableCell>
-                    <TableCell>{elevation.machineName}</TableCell>
-                    <TableCell>
-                      <Badge variant={ELEVATION_LEVEL_BADGE_VARIANT[elevation.level]}>
-                        {ELEVATION_LEVEL_LABEL[elevation.level]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell title={elevation.reason}>
-                      {truncateReason(elevation.reason)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={ELEVATION_STATUS_BADGE_VARIANT[elevation.status]}>
-                        {elevation.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {elevation.expiresAt ? formatDateTime(elevation.expiresAt) : "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {elevation.status === "requested" && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={syncElevation.isPending}
-                            onClick={() => syncElevation.mutate(elevation.id)}
-                          >
-                            Sync
-                          </Button>
-                        )}
-                        {elevation.status === "granted" && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            disabled={expireElevation.isPending}
-                            onClick={() => expireElevation.mutate(elevation.id)}
-                          >
-                            Expire
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
+            {elevationsQuery.isLoading ||
+            elevationsQuery.isError ||
+            (elevationsQuery.data?.length ?? 0) > 0 ? (
+              <Table containerClassName="h-full max-h-none">
+                <TableHeader>
+                  <TableRow>
+                    <Th icon={User}>Person</Th>
+                    <Th icon={Server}>Machine</Th>
+                    <Th icon={Gauge}>Level</Th>
+                    <Th icon={MessageSquare}>Reason</Th>
+                    <Th icon={Tag}>Status</Th>
+                    <Th icon={Clock}>Expires</Th>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {elevationsQuery.isLoading && (
+                    <SkeletonRows
+                      widths={["w-24", "w-24", "w-16", "w-48", "w-16", "w-32", "w-20"]}
+                    />
+                  )}
+                  {elevationsQuery.isError && (
+                    <TableStatusRow colSpan={7} tone="error">
+                      Couldn't load elevation requests.
+                    </TableStatusRow>
+                  )}
+                  {elevationsQuery.data?.map((elevation: ElevationGrant) => (
+                    <TableRow key={elevation.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <PersonAvatar name={elevation.personName} />
+                          {elevation.personName}
+                        </div>
+                      </TableCell>
+                      <TableCell>{elevation.machineName}</TableCell>
+                      <TableCell>
+                        <Badge variant={ELEVATION_LEVEL_BADGE_VARIANT[elevation.level]}>
+                          {ELEVATION_LEVEL_LABEL[elevation.level]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell title={elevation.reason}>
+                        {truncateReason(elevation.reason)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={ELEVATION_STATUS_BADGE_VARIANT[elevation.status]}>
+                          {elevation.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {elevation.expiresAt ? formatDateTime(elevation.expiresAt) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {elevation.status === "requested" && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={syncElevation.isPending}
+                              onClick={() => syncElevation.mutate(elevation.id)}
+                            >
+                              Sync
+                            </Button>
+                          )}
+                          {elevation.status === "granted" && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={expireElevation.isPending}
+                              onClick={() => expireElevation.mutate(elevation.id)}
+                            >
+                              Expire
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <EmptyState
+                icon={Gauge}
+                title="No elevation requests"
+                description="Requests for elevated access will appear here."
+              />
+            )}
           </div>
         </TabsContent>
       </Tabs>
