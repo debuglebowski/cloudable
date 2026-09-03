@@ -1,4 +1,3 @@
-import { Lock, LockOpen } from "lucide-react";
 import { useState } from "react";
 
 import { type ArchivedSnapshot, useSetLegalHold } from "@/api/archive";
@@ -11,68 +10,67 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export interface LegalHoldDialogProps {
-  snapshot: ArchivedSnapshot;
+  /** `null` closes the dialog — same "target row or null" convention as
+   * `access/revoke-certificate-dialog.tsx`, rather than a separate `open` boolean. */
+  snapshot: ArchivedSnapshot | null;
+  onOpenChange: (open: boolean) => void;
 }
 
 /**
  * Legal-hold toggle for a single snapshot. Both placing and clearing a hold require a reason
  * string — `snapshot.legal_hold_set` and `snapshot.legal_hold_cleared` both carry one, and it's
  * the audit trail for why a snapshot was, or stopped being, exempt from retention expiry.
+ *
+ * One instance rendered per page (not per row), targeted via `snapshot` — opened from the row's
+ * actions menu (`archive/page.tsx`), which is the only thing that toggles hold state; the Legal
+ * hold column itself is a read-only status badge.
  */
-export function LegalHoldDialog({ snapshot }: LegalHoldDialogProps) {
-  const [open, setOpen] = useState(false);
+export function LegalHoldDialog({ snapshot, onOpenChange }: LegalHoldDialogProps) {
   const [reason, setReason] = useState("");
   const setLegalHold = useSetLegalHold();
 
-  const nextValue = !snapshot.legalHold;
-
-  function handleOpenChange(next: boolean) {
-    setOpen(next);
-    if (!next) {
+  function handleOpenChange(open: boolean) {
+    onOpenChange(open);
+    if (!open) {
       setReason("");
     }
   }
 
   function handleConfirm() {
+    if (!snapshot) return;
     setLegalHold.mutate(
-      { snapshotId: snapshot.id, legalHold: nextValue, reason: reason.trim() },
+      { snapshotId: snapshot.id, legalHold: !snapshot.legalHold, reason: reason.trim() },
       { onSuccess: () => handleOpenChange(false) },
     );
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          {snapshot.legalHold ? <Lock /> : <LockOpen />}
-          {snapshot.legalHold ? "On hold" : "Place hold"}
-        </Button>
-      </DialogTrigger>
+    <Dialog open={snapshot != null} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{snapshot.legalHold ? "Clear legal hold" : "Place legal hold"}</DialogTitle>
+          <DialogTitle>{snapshot?.legalHold ? "Clear legal hold" : "Place legal hold"}</DialogTitle>
           <DialogDescription>
-            {snapshot.legalHold ? (
-              <>
-                Clearing the hold on <strong>{snapshot.machineName}</strong> resumes its retention
-                clock — the snapshot will expire on schedule again.
-              </>
-            ) : (
-              <>
-                A legal hold exempts <strong>{snapshot.machineName}</strong>'s snapshot from
-                retention expiry entirely, and renders as a documented exception, not an error.
-              </>
-            )}
+            {snapshot &&
+              (snapshot.legalHold ? (
+                <>
+                  Clearing the hold on <strong>{snapshot.machineName}</strong> resumes its retention
+                  clock — the snapshot will expire on schedule again.
+                </>
+              ) : (
+                <>
+                  A legal hold exempts <strong>{snapshot.machineName}</strong>'s snapshot from
+                  retention expiry entirely, and renders as a documented exception, not an error.
+                </>
+              ))}
           </DialogDescription>
         </DialogHeader>
 
-        {snapshot.legalHold && snapshot.legalHoldReason && (
+        {snapshot?.legalHold && snapshot.legalHoldReason && (
           <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/50 p-3 text-xs">
             <span className="font-medium text-muted-foreground">Current hold reason</span>
             <span>{snapshot.legalHoldReason}</span>
@@ -88,7 +86,7 @@ export function LegalHoldDialog({ snapshot }: LegalHoldDialogProps) {
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder={
-              snapshot.legalHold ? "Why is the hold being lifted?" : "Why is this snapshot held?"
+              snapshot?.legalHold ? "Why is the hold being lifted?" : "Why is this snapshot held?"
             }
           />
           <p className="text-xs text-muted-foreground">
@@ -104,7 +102,7 @@ export function LegalHoldDialog({ snapshot }: LegalHoldDialogProps) {
             onClick={handleConfirm}
             disabled={reason.trim().length === 0 || setLegalHold.isPending}
           >
-            {setLegalHold.isPending ? "Saving…" : snapshot.legalHold ? "Clear hold" : "Place hold"}
+            {setLegalHold.isPending ? "Saving…" : snapshot?.legalHold ? "Clear hold" : "Place hold"}
           </Button>
         </DialogFooter>
       </DialogContent>
