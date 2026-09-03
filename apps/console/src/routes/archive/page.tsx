@@ -1,10 +1,11 @@
-import { Calendar, Clock, DollarSign, Scale, Server } from "lucide-react";
+import { Archive, Calendar, Clock, DollarSign, Scale, Server } from "lucide-react";
 
 import { type ArchivedSnapshot, useArchivedSnapshots } from "@/api/archive";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Table,
   TableBody,
@@ -103,7 +104,11 @@ export function ArchivePage() {
             <p className="text-sm text-destructive">Failed to load archived snapshots.</p>
           )}
           {snapshots && snapshots.length === 0 && (
-            <p className="text-sm text-muted-foreground">No archived machines yet.</p>
+            <EmptyState
+              icon={Archive}
+              title="No archived machines"
+              description="Machines you archive will appear here with their retention countdown."
+            />
           )}
           {snapshots && snapshots.length > 0 && (
             <Table containerClassName="h-full max-h-none">

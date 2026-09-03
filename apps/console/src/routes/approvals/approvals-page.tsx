@@ -22,6 +22,7 @@ import { Freshness } from "@/components/freshness";
 import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Table,
   TableBody,
@@ -137,94 +138,103 @@ export function ApprovalsPage() {
         <p className="shrink-0 text-sm text-destructive">Failed to load approvals.</p>
       )}
 
-      {!query.isLoading && rows.length === 0 && (
-        <p className="shrink-0 text-sm text-muted-foreground">
-          {view === "pending" ? "No approvals waiting on a decision." : "No decided approvals yet."}
-        </p>
-      )}
-
-      {rows.length > 0 && (
+      {!query.isLoading && !query.isError && (
         // Shadow, matching every other list page's table wrapper (People,
         // Access, Archive, Audit, Machines) — see Card's own comment for the
         // exact value and why there's no border alongside it. min-h-0, no
         // flex-1: shrinks to the real available space when content
         // overflows, collapses to content otherwise.
         <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
-          <Table containerClassName="h-full max-h-none">
-            <TableHeader>
-              <TableRow>
-                <Th icon={User}>Requester</Th>
-                <Th icon={Zap}>Action</Th>
-                <Th icon={TargetGlyph}>Target</Th>
-                <Th icon={MessageSquare}>Reason</Th>
-                <Th icon={Gauge}>Mode</Th>
-                <Th icon={CheckSquare}>Decisions</Th>
-                {view === "pending" ? (
-                  <Th icon={Clock}>Expires</Th>
-                ) : (
-                  <>
-                    <Th icon={Tag}>Status</Th>
-                    <Th icon={Clock}>Decided</Th>
-                  </>
-                )}
-                {view === "pending" && <TableHead>Decide</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((approval) => {
-                const expiry = formatExpiry(approval.expiresAt);
-                return (
-                  <TableRow key={approval.id}>
-                    <TableCell>
-                      {/* Every other person-identifying column in the app leads with a
+          {rows.length === 0 ? (
+            <EmptyState
+              icon={CheckSquare}
+              title={
+                view === "pending"
+                  ? "No approvals waiting on a decision"
+                  : "No decided approvals yet"
+              }
+            />
+          ) : (
+            <Table containerClassName="h-full max-h-none">
+              <TableHeader>
+                <TableRow>
+                  <Th icon={User}>Requester</Th>
+                  <Th icon={Zap}>Action</Th>
+                  <Th icon={TargetGlyph}>Target</Th>
+                  <Th icon={MessageSquare}>Reason</Th>
+                  <Th icon={Gauge}>Mode</Th>
+                  <Th icon={CheckSquare}>Decisions</Th>
+                  {view === "pending" ? (
+                    <Th icon={Clock}>Expires</Th>
+                  ) : (
+                    <>
+                      <Th icon={Tag}>Status</Th>
+                      <Th icon={Clock}>Decided</Th>
+                    </>
+                  )}
+                  {view === "pending" && <TableHead>Decide</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((approval) => {
+                  const expiry = formatExpiry(approval.expiresAt);
+                  return (
+                    <TableRow key={approval.id}>
+                      <TableCell>
+                        {/* Every other person-identifying column in the app leads with a
                           PersonAvatar (People's Email, Access's Person/Elevation columns,
                           Machines' Owner) — Requester was the one still plain text. */}
-                      <div className="flex items-center gap-2">
-                        <PersonAvatar name={approval.requestedByName} />
-                        {approval.requestedByName}
-                      </div>
-                    </TableCell>
-                    <TableCell>{ACTION_TYPE_LABELS[approval.actionType]}</TableCell>
-                    <TableCell className="font-mono text-xs">{approval.targetLabel}</TableCell>
-                    <TableCell className="max-w-xs truncate" title={approval.reason}>
-                      {approval.reason}
-                    </TableCell>
-                    <TableCell>{MODE_LABELS[approval.mode]}</TableCell>
-                    <TableCell>{decisionSummary(approval)}</TableCell>
-                    {view === "pending" ? (
-                      <TableCell className={expiry.urgent ? "text-drift" : "text-muted-foreground"}>
-                        {expiry.label}
-                      </TableCell>
-                    ) : (
-                      <>
-                        <TableCell>
-                          <Badge variant={STATUS_VARIANT[approval.status]}>{approval.status}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          {approval.decidedAt ? (
-                            <Freshness
-                              occurredAt={approval.decidedAt}
-                              recordedAt={approval.decidedAt}
-                            />
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                      </>
-                    )}
-                    {view === "pending" && (
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <ApprovalDecisionDialog approval={approval} decision="approved" />
-                          <ApprovalDecisionDialog approval={approval} decision="rejected" />
+                        <div className="flex items-center gap-2">
+                          <PersonAvatar name={approval.requestedByName} />
+                          {approval.requestedByName}
                         </div>
                       </TableCell>
-                    )}
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                      <TableCell>{ACTION_TYPE_LABELS[approval.actionType]}</TableCell>
+                      <TableCell className="font-mono text-xs">{approval.targetLabel}</TableCell>
+                      <TableCell className="max-w-xs truncate" title={approval.reason}>
+                        {approval.reason}
+                      </TableCell>
+                      <TableCell>{MODE_LABELS[approval.mode]}</TableCell>
+                      <TableCell>{decisionSummary(approval)}</TableCell>
+                      {view === "pending" ? (
+                        <TableCell
+                          className={expiry.urgent ? "text-drift" : "text-muted-foreground"}
+                        >
+                          {expiry.label}
+                        </TableCell>
+                      ) : (
+                        <>
+                          <TableCell>
+                            <Badge variant={STATUS_VARIANT[approval.status]}>
+                              {approval.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {approval.decidedAt ? (
+                              <Freshness
+                                occurredAt={approval.decidedAt}
+                                recordedAt={approval.decidedAt}
+                              />
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                        </>
+                      )}
+                      {view === "pending" && (
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <ApprovalDecisionDialog approval={approval} decision="approved" />
+                            <ApprovalDecisionDialog approval={approval} decision="rejected" />
+                          </div>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
         </div>
       )}
     </div>
