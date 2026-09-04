@@ -72,7 +72,7 @@ Read the relevant file before working in that area.
 | :-------------------- | :------------------------------------------------------------- |
 | `docs/inheritance.md` | org → template → machine, package manifest, overrides, pinning |
 | `docs/agents.md`      | Control agent, tunnel daemon, wire protocol, attestation       |
-| `docs/cloud-auth.md`  | Self-hosted managed identity (the real path), RBAC scope, OIDC federation (unimplemented BYOC) |
+| `docs/cloud-auth.md`  | Self-hosted managed identity (the real path), RBAC scope, why BYOC federation was removed |
 | `docs/access.md`      | Web terminal, SSH certificates, session tokens                 |
 | `docs/lifecycle.md`   | Archive, snapshots, restore, offboarding, break-glass          |
 | `docs/compliance.md`  | Events → checks → controls, the six v1 checks, evidence export |

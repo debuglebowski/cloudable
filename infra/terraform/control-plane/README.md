@@ -1,10 +1,8 @@
 # Cloudable control plane — self-hosted deploy (Terraform)
 
-**This is for self-hosters only.** If you're running Cloudable BYOC or fully-managed
-(Cloudable hosts the control plane for you), you don't need this — see
-`infra/terraform/federated-credential/` instead, which is the artefact BYOC customers
-run to federate their tenant so a Cloudable-hosted control plane can manage machines
-in it.
+**This is the only deployment mode Cloudable ships.** Cloudable is open-source and
+self-hosted only — there is no Cloudable-hosted, multi-tenant BYOC mode
+(`docs/cloud-auth.md`).
 
 Self-hosted is the simplest deployment mode (`docs/spec.md` §2): one trust boundary,
 one Azure tenant, a system-assigned managed identity, no federation. This module

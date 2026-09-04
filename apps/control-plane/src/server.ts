@@ -13,7 +13,6 @@ import { CatalogLive } from "./http/handlers/catalog";
 import { ComplianceLive } from "./http/handlers/compliance";
 import { ConfigLive } from "./http/handlers/config";
 import { ElevationsLive } from "./http/handlers/elevations";
-import { FederationLive } from "./http/handlers/federation";
 import { HealthLive } from "./http/handlers/health";
 import { IntegrationsLive } from "./http/handlers/integrations";
 import { MachinesLive } from "./http/handlers/machines";
@@ -73,7 +72,6 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       EvidenceLive,
       ArchiveLive,
       ConfigLive,
-      FederationLive,
       AccessLive,
       PeopleLive,
       OrganisationLive,

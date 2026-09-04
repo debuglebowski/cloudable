@@ -75,6 +75,11 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 
 ## Cloud
 
+`cloud.credential_federated`/`cloud.credential_rejected` are currently dormant — the
+customer-federated (BYOC) code that emitted them was removed (`docs/cloud-auth.md`). They stay
+declared here per the catalogue's additive-only invariant (#11 in `CLAUDE.md`); nothing emits
+them in the shipped self-host path.
+
 | Type | Tier | Description |
 | :--- | :--- | :--- |
 | `cloud.credential_federated` | 1 | The org's Azure subscription was federated via OIDC for a subject. |

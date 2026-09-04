@@ -19,7 +19,6 @@ import { CatalogLive } from "../src/http/handlers/catalog";
 import { ComplianceLive } from "../src/http/handlers/compliance";
 import { ConfigLive } from "../src/http/handlers/config";
 import { ElevationsLive } from "../src/http/handlers/elevations";
-import { FederationLive } from "../src/http/handlers/federation";
 import { HealthLive } from "../src/http/handlers/health";
 import { IntegrationsLive } from "../src/http/handlers/integrations";
 import { MachinesLive } from "../src/http/handlers/machines";
@@ -41,7 +40,6 @@ import { AgentSessionToken } from "../src/services/attestation/AgentSessionToken
 import { AttestationRegistryTag } from "../src/services/attestation/AttestationMethod";
 import { joinTokenAttestation } from "../src/services/attestation/JoinTokenAttestation";
 import { MachineDirectory } from "../src/services/attestation/MachineDirectory";
-import { FederationService } from "../src/services/federation/FederationService";
 import { SshCaService } from "../src/services/ssh-ca/SshCaService";
 import { TunnelRegistry } from "../src/tunnel/registry";
 import { TunnelRelay } from "../src/tunnel/relay";
@@ -113,7 +111,6 @@ describe("agent-protocol handlers (integration)", () => {
           UpgradeLive,
           ElevationsLive,
           ConfigLive,
-          FederationLive,
           AccessLive,
           PeopleLive,
           OrganisationLive,
@@ -167,12 +164,6 @@ describe("agent-protocol handlers (integration)", () => {
         Layer.provide(EventBus.Default),
         Layer.provide(ApprovalService.Default),
         Layer.provide(ElevationRepoLive),
-      ),
-      // Same wiring as `layers.ts`: FederationService needs EventBus (a
-      // sibling here) and Signer/AppConfig (ambient below) provided
-      // explicitly — `Layer.mergeAll` doesn't wire siblings automatically.
-      FederationService.Default.pipe(
-        Layer.provide(Layer.mergeAll(EventBus.Default, LocalSignerLive)),
       ),
       // Same wiring as `layers.ts`: SshCaService/TunnelServer read
       // Signer/EventBus/Db lazily when their methods are called, not only

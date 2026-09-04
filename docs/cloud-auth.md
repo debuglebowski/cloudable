@@ -22,36 +22,40 @@ three: no tenant ID, no application ID, no subscription ID. `GET /api/v1/provisi
 capabilities` reports whether Azure is even *available* on this deployment at all (i.e. whether
 the three env vars above are set) — enabling it is refused client-side when it isn't.
 
-## The customer-federated (BYOC) path — not implemented
+## The customer-federated (BYOC) path — removed
 
 An **earlier design** for this unit described per-customer OIDC federation: Cloudable running
 its own OIDC issuer, minting a short-lived token with a per-customer subject
 (`cloudable:tenant:<customer-id>`), and a customer's own Azure AD trusting that issuer+subject
 via a federated identity credential they configure — the classic "Cloudable-hosted control
-plane manages many customers' separate Azure tenants" shape. **This is not what shipped.** The
-strategic pivot to open-source, self-hosted-only distribution (`CLAUDE.md`) made the
-self-managed-identity path above the only one worth building for v1 — there is no
-Cloudable-hosted control plane for a federated identity to matter to.
+plane manages many customers' separate Azure tenants" shape. **This never shipped**, and as of
+2026-09 the dormant plumbing for it has been deleted outright rather than left unwired: the
+strategic pivot to open-source, self-hosted-only distribution (`CLAUDE.md`) means there is no
+Cloudable-hosted control plane for a federated identity to matter to, and carrying real,
+security-sensitive code (a JWT-signing OIDC issuer, a mint endpoint, a fake trust-rule verifier)
+for a product shape that isn't being built was a maintenance and audit-surface cost with no
+offsetting benefit.
 
-The plumbing for it still exists and still works in isolation — it just isn't wired into real
-machine provisioning:
+What was removed: `apps/control-plane/src/services/federation/` (`FederationService.ts`,
+`FakeAzureTrustRule.ts`, `jwt.ts`, `jwk.ts`), the `GET /.well-known/openid-configuration` /
+`GET /.well-known/jwks.json` / `POST /api/v1/federation/mint` routes and handler, and the
+customer-side `infra/terraform/federated-credential/` module.
 
-- `GET /.well-known/openid-configuration` / `GET /.well-known/jwks.json` — a real OIDC issuer
-  (`FEDERATION_ISSUER_URL`, `Signer`/`services/federation/jwt.ts`), Ed25519-signed.
-- `POST /api/v1/federation/mint` — mints a token and validates it against a trust rule, but
-  through `FakeAzureTrustRule.ts` (a stand-in for a real Azure token exchange, which nothing in
-  this build performs) — see that file's own doc comment.
-- `docs/events.md`'s `cloud.credential_federated`/`cloud.credential_rejected` events, and the
-  `integrations` table's original `kind: "cloud"` config shape (`{tenantId, applicationId,
-  subscriptionId}`) — superseded on the console side, but the shape these events describe was
-  never deleted from the schema.
+What's still around, on purpose:
+
+- `docs/events.md`'s `cloud.credential_federated`/`cloud.credential_rejected` event types —
+  `packages/events`' catalogue is additive-only, never renamed or removed (invariant #11), so
+  these stay declared (and their `evidence/projection.ts` rendering stays too) even though
+  nothing emits them anymore. If BYOC federation is ever rebuilt, it re-emits these same two
+  types rather than inventing new ones.
+- The `integrations` table's `kind: "cloud"` shape and the console's fieldless "Enable" button
+  per provider — both are the real, shipped self-host story, not federation leftovers.
 
 Reviving this as a real feature (letting a Cloudable-hosted control plane manage a customer's
-own tenant) would mean: a real Azure AD token exchange in place of `FakeAzureTrustRule`,
-`ProvisioningService.azure.ts` picking a credential per-org instead of one ambient identity, and
-the Integrations page's Azure card growing a real connect form again instead of a fieldless
-"Enable." None of that is scoped or planned — this section exists so the dormant code isn't
-mistaken for a security gap or misread as the primary story.
+own tenant) would mean rebuilding: a real Azure AD token exchange, `ProvisioningService.azure.ts`
+picking a credential per-org instead of one ambient identity, and the Integrations page's Azure
+card growing a real connect form again instead of a fieldless "Enable." None of that is scoped
+or planned.
 
 ## RBAC scope (real, used by the self-hosted path too)
 
@@ -60,9 +64,9 @@ Never Contributor. Never subscription scope.** `infra/terraform/control-plane/ma
 `enable_self_managed_machines = true`, the default) creates the resource group, subnet, and
 deny-all-inbound NSG the control plane's machines live in, and grants its own managed identity
 the "Cloudable Machine Operator" role scoped to just that resource group — read/write/delete/
-start/stop/restart on a VM plus its disk, NIC, and public IP, nothing else. The sibling
-`infra/terraform/federated-credential/` module defines the same role for the (currently unused)
-BYOC path above, kept in sync by hand — see that main.tf's own comment.
+start/stop/restart on a VM plus its disk, NIC, and public IP, nothing else. (The now-removed
+`infra/terraform/federated-credential/` module defined the same role for the BYOC path above —
+gone along with the rest of it, see above.)
 
 **Certificate credentials** only where federation is impossible. **Client secrets: never.**
 
@@ -74,9 +78,7 @@ Cloudable-specific flow, since there's no Cloudable-side credential to revoke ei
 
 ## Related
 
-- `docs/events.md` — `cloud.credential_federated`/`cloud.credential_rejected` (BYOC path only —
-  see above).
-- `apps/control-plane/src/services/Signer.ts` — the signing port the (unused) OIDC issuer reuses.
+- `docs/events.md` — `cloud.credential_federated`/`cloud.credential_rejected` (dormant, BYOC
+  path only — see above).
 - `apps/control-plane/src/services/CloudCatalogService.ts` — syncs the org-facing Azure region
   catalog from the real ARM `SubscriptionClient`, using the same ambient managed identity.
-- `apps/control-plane/src/services/federation/` — the BYOC implementation described above.
