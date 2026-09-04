@@ -152,7 +152,7 @@ Implementations:
 
 The signing key is Cloudable's own, in Cloudable's Key Vault. Not supplied by the customer, unrelated to the customer's IdP.
 
-**Customer provides three non-secret identifiers:** tenant ID, application (client) ID, subscription ID. Ship a Bicep template that performs their side in one command.
+**Customer provides three non-secret identifiers:** tenant ID, application (client) ID, subscription ID. Ship a Terraform template that performs their side in one command.
 
 **Revocation:** the customer deletes the federated credential. Unilateral, immediate.
 
@@ -437,7 +437,7 @@ See `docs/frontend.md` for implementation detail (tokens, routing/nav convention
 3. **Generic approval object** — before any action that consumes it
 4. **One compliance check end to end** — *access revoked on offboarding*. Forces event fields, query, finding age and control mapping through the whole stack before the other five are built against an unvalidated shape
 5. Package manifest, desired state, allowlist detection
-6. **Cloud provider federation** — OIDC issuer, per-customer subject, customer-side Bicep template
+6. **Cloud provider federation** — OIDC issuer, per-customer subject, customer-side Terraform template
 7. Azure managed identity attestation
 8. Tunnel daemon + web terminal, with signed session tokens and termination on policy change
 9. SSH CA with Key Vault sign operations + `cloudable login`
@@ -602,7 +602,7 @@ The three things a customer executes in their own tenant:
 2. **Control plane deployment** — self-hosters only
 3. The documentation accompanying both
 
-**Terraform is the primary format; Bicep is the one-click alternative.** The rejection of Terraform above applies to provisioning machines — hundreds of independently-lifecycled instances with state files and drift. It does not apply to one-shot infrastructure a customer runs occasionally, which is what Terraform is good at. Most infrastructure teams already have it in their pipeline, so shipping Bicep alone means they translate it themselves at exactly the wrong moment.
+**Terraform only — no Bicep.** The rejection of Terraform above applies to provisioning machines — hundreds of independently-lifecycled instances with state files and drift. It does not apply to one-shot infrastructure a customer runs occasionally, which is what Terraform is good at, and most infrastructure teams already have it in their pipeline. A one-click alternative format was considered and dropped: this project is open source and self-hosted only, and a second IaC format to keep in sync is maintenance cost without a paying-customer onboarding-friction problem to justify it.
 
 Use **OpenTofu** in Cloudable's own CI to stay licence-clean; publish HCL that works with either.
 
@@ -627,7 +627,6 @@ cloudable/                    (this repo — currently private)
     terraform/
       federated-credential/   customer runs this
       control-plane/          self-hosters run this
-    bicep/                    one-click equivalents
   docs/
   SCOPE.md
 ```
@@ -642,7 +641,7 @@ A snapshot test (`packages/events/src/__tests__/catalogue.snapshot.test.ts`) fai
 
 ### `cloudable-deploy` — separate, private
 
-Holds Bicep/Terraform values and **image digests, pinned by SHA rather than tag**. A tag can be repointed upstream, which makes *"what is running right now"* unanswerable — and that question is the whole of change management.
+Holds Terraform values and **image digests, pinned by SHA rather than tag**. A tag can be repointed upstream, which makes *"what is running right now"* unanswerable — and that question is the whole of change management.
 
 It must be a separate repository: merging it into the public monorepo means either the config becomes public or the code becomes private. **This repository does not exist in this build** — it is out of scope for this batch (see `SCOPE.md`).
 

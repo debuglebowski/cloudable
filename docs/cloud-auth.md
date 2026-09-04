@@ -13,7 +13,7 @@ they configure themselves.
    short-lived (~1h) token with a **per-customer subject**: `cloudable:tenant:<customer-id>`.
 3. The customer creates an app registration (or reuses one) and adds a federated identity
    credential trusting Cloudable's issuer **and that specific subject** — see
-   `infra/terraform/federated-credential/` or `infra/bicep/federated-credential.bicep`.
+   `infra/terraform/federated-credential/`.
 4. Azure validates the token against that trust rule and returns an access token (~1h),
    scoped by the custom RBAC role assigned to Cloudable's service principal.
 
@@ -30,9 +30,8 @@ Cloudable's OIDC issuer is **shared across every customer**. The `iss` claim alo
 about which tenant a token was minted for — only the `sub` claim (`cloudable:tenant:<customer-id>`)
 does. A customer's federated identity credential that trusts Cloudable's issuer but leaves
 `subject` unset, wildcarded, or approximate would accept a token minted for **any** Cloudable
-customer, not just them. Both `infra/terraform/federated-credential/main.tf` and
-`infra/bicep/federated-credential.bicep` require an exact `subject`/`cloudableExpectedSubject`
-value for exactly this reason — read the warning on that variable before changing either file.
+customer, not just them. `infra/terraform/federated-credential/main.tf` requires an exact
+`subject` value for exactly this reason — read the warning on that variable before changing it.
 
 This is also this unit's canonical test:
 `apps/control-plane/src/services/federation/FederationService.test.ts` mints a token for tenant
@@ -167,9 +166,8 @@ annotated as always-alert: a rejected federation attempt is a security event, no
 ## RBAC scope
 
 **A custom role listing only required actions, assigned to a single dedicated resource group.
-Never Contributor. Never subscription scope.** Both `infra/terraform/federated-credential/main.tf`
-(`azurerm_role_definition` + `azurerm_role_assignment`) and `infra/bicep/federated-credential.bicep`
-(`Microsoft.Authorization/roleDefinitions`/`roleAssignments`) define the same "Cloudable Machine
+Never Contributor. Never subscription scope.** `infra/terraform/federated-credential/main.tf`
+(`azurerm_role_definition` + `azurerm_role_assignment`) defines the "Cloudable Machine
 Operator" role: read/write/delete/start/stop/restart on a VM plus its disk, NIC, and public IP —
 nothing else — assigned only to that one resource group.
 
@@ -183,7 +181,9 @@ Cloudable's side that needs to happen for access to stop.
 
 ## Running the customer-side automation
 
-**Terraform** (the customer-facing format):
+Terraform only — no Bicep. (Managing Azure AD resources directly from ARM/Bicep is still an
+extension-gated capability that isn't uniformly available yet; the `azuread`/`azurerm` Terraform
+provider is the mature path for that half.)
 
 ```sh
 cd infra/terraform/federated-credential
@@ -199,14 +199,6 @@ terraform plan \
 Outputs the application (client) ID — combined with `tenant_id` and `subscription_id`, this is
 the three non-secret identifiers the customer gives Cloudable. No secret is ever
 produced.
-
-**Bicep** (the one-click alternative): see the header comment in
-`infra/bicep/federated-credential.bicep` for the exact `az` commands — two short `az ad`
-commands for the app registration + federated credential, then one `az deployment group create`
-for the resource group's custom role. (Managing Azure AD resources directly from ARM/Bicep is
-still an extension-gated capability that isn't uniformly available yet; the `azuread`/`azurerm`
-Terraform provider is the mature path for that half, which is why Terraform — not Bicep — is the
-primary customer-facing format per `CLAUDE.md`.)
 
 ## Related
 

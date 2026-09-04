@@ -1,12 +1,9 @@
 # Cloudable — self-hosted control plane deploy (Docker Compose, non-Azure path)
 #
-# For self-hosters who are not on Azure. The Terraform/Bicep templates in
-# `infra/terraform/control-plane/` and `infra/bicep/control-plane.bicep` are the
-# primary self-host artefacts (docs/spec.md §25: Terraform is the primary format,
-# Bicep the one-click alternative); this Compose file is the equivalent for anyone
-# who just wants a single host running the same two things — one stateless
-# container plus PostgreSQL (docs/spec.md §25: "No Helm chart in v1 ... Azure
-# Container Apps or Compose").
+# For self-hosters who are not on Azure. `infra/terraform/control-plane/` is the
+# primary self-host artefact (Terraform only — no Bicep, no one-click alternative);
+# this Compose file is the equivalent for anyone who just wants a single host
+# running the same two things — one stateless container plus PostgreSQL.
 #
 # NOTE: this is about where the CONTROL PLANE runs, which is unconstrained per
 # docs/spec.md §2. The MACHINES Cloudable manages are Azure-only regardless of
@@ -14,10 +11,9 @@
 #
 # Prerequisites:
 #   - Docker + the Compose plugin (`docker compose version`)
-#   - The default CONTROL_PLANE_IMAGE (ghcr.io/debuglebowski/cloudable/control-plane,
-#     the path .github/workflows/rebuild-base-image.yml publishes to) is PRIVATE —
-#     run `docker login ghcr.io -u <you> -p <a GitHub PAT with read:packages>` first,
-#     or set CONTROL_PLANE_IMAGE to one you built and pushed yourself:
+#   - Nothing else for the image: the default CONTROL_PLANE_IMAGE
+#     (ghcr.io/debuglebowski/cloudable/control-plane) is public — or set
+#     CONTROL_PLANE_IMAGE to one you built and pushed yourself:
 #       docker build -t <your-image> -f apps/control-plane/Dockerfile .
 #       docker push <your-image>
 #   - A copy of control-plane.self-host.env.example as .env in this directory,

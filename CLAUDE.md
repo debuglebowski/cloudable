@@ -39,14 +39,21 @@ Never violate these. If one seems wrong, stop and say so — do not work around 
 
 TypeScript + Bun throughout. Control plane: Effect v3, Drizzle, PostgreSQL, BetterAuth. Frontend: React, Vite, TanStack Router + Query, shadcn/ui, Tailwind. Agent and CLI compiled via `bun build --compile`.
 
-Terraform is the customer-facing format; Bicep is the one-click alternative. No Terraform for provisioning machines — direct ARM SDK calls and a reconciliation loop.
+Terraform only for deploy infrastructure — no Bicep. No Terraform for provisioning machines — direct ARM SDK calls and a reconciliation loop.
+
+## Distribution
+
+Open source, self-hosted only. There is no Cloudable-hosted production environment. The only
+release artifact is the control-plane container image, built and published (publicly, no pull
+credential required) by CI on every push to main — that is the entire CD story. A published npm
+package for the image to depend on is a possible later addition, not v1.
 
 ## Layout
 
 ```
 apps/         control-plane, console, agent, cli
 packages/     events, contracts, schema
-infra/        terraform, bicep
+infra/        terraform
 docs/
 
 ```
