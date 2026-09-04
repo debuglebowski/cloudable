@@ -179,7 +179,7 @@ signing secret and `agent-protocol.ts`'s `lastObserved` diff cache,
 only exists on whichever replica it happened to connect to; a `wake()` call
 handled by a *different* replica finds nothing registered and reports "not
 delivered," even though the machine is connected — to a sibling. This is a
-real gap against `infra/bicep/control-plane.bicep` and
+real gap against
 `infra/terraform/control-plane/variables.tf`'s default multi-replica
 autoscaling, not just a theoretical one, and there's no metric today that
 distinguishes "machine not connected anywhere" from "connected to the wrong

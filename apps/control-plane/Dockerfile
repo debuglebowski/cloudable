@@ -11,8 +11,8 @@
 # docs/spec.md §26 "Minimum internal compliance posture". Bump the tag here
 # deliberately; don't let the scheduled rebuild silently drift it.
 #
-# Keep EXPOSE 3000 and the CMD entrypoint stable: infra unit 27 references
-# this image from terraform/bicep once merged.
+# Keep EXPOSE 3000 and the CMD entrypoint stable: infra/terraform/control-plane
+# references this image.
 
 # Single source of truth for the pinned base image tag — both stages
 # below build FROM the same version. Redeclared after each FROM because

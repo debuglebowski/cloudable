@@ -1,10 +1,9 @@
 name: OpenTofu validate
 
-# docs/spec.md §25: "Terraform is the primary format; Bicep is the one-click
-# alternative... Use OpenTofu in Cloudable's own CI to stay licence-clean;
-# publish HCL that works with either." This runs the OpenTofu CLI (never
-# plain Terraform, per that licensing rationale) against every HCL module
-# under infra/terraform/.
+# docs/spec.md §25: "Terraform only — no Bicep... Use OpenTofu in Cloudable's
+# own CI to stay licence-clean; publish HCL that works with either." This runs
+# the OpenTofu CLI (never plain Terraform, per that licensing rationale)
+# against every HCL module under infra/terraform/.
 #
 # `infra/terraform/control-plane` gets both `validate` and an offline `plan`
 # against its committed `dummy.tfvars` (see that module's README — never

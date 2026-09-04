@@ -17,7 +17,9 @@ provisions:
 - A system-assigned managed identity on the container app (no credential is ever
   stored — invariant 1)
 
-The equivalent one-click template is `infra/bicep/control-plane.bicep`.
+Terraform only — no Bicep, no one-click alternative. This is open source and self-hosted
+only; there's no paying-customer onboarding-friction problem to justify keeping a second IaC
+format in sync.
 
 ## Prerequisites
 
@@ -25,13 +27,11 @@ The equivalent one-click template is `infra/bicep/control-plane.bicep`.
   the `azurerm` provider — see the [azurerm provider auth docs][azurerm-auth])
 - Terraform >= 1.5, or [OpenTofu](https://opentofu.org/) (this HCL works with either)
 - A generated `BETTER_AUTH_SECRET` (e.g. `openssl rand -base64 32`)
-- A pull credential for the control-plane image. `.github/workflows/rebuild-base-image.yml`
-  publishes it to `ghcr.io/debuglebowski/cloudable/control-plane` (the default for
-  `control_plane_image`/`control_plane_image_tag`) — that package is **private**, so
-  set `control_plane_image_registry_username`/`control_plane_image_registry_password`
-  to a GitHub username + PAT with `read:packages` scope. Alternatively, build and push
-  your own image (see the Dockerfile note below) and leave the registry variables
-  unset if it's public.
+- Nothing else for the image: `.github/workflows/rebuild-base-image.yml` publishes it
+  publicly to `ghcr.io/debuglebowski/cloudable/control-plane` (the default for
+  `control_plane_image`/`control_plane_image_tag`) — no registry credential needed.
+  `control_plane_image_registry_username`/`control_plane_image_registry_password` exist
+  only for pointing at a private image of your own (see the Dockerfile note below).
 
 [azurerm-auth]: https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/guides/service_principal_client_secret
 
@@ -60,19 +60,14 @@ terraform init
 # Required: postgres_admin_password, better_auth_secret (both sensitive — pass via
 # a *.tfvars file (this directory's .gitignore excludes *.tfvars except the
 # committed dummy.tfvars used for validation), -var, or TF_VAR_* env vars —
-# never commit real values). control_plane_image_registry_password is also
-# required unless you're pointing control_plane_image at a public image.
+# never commit real values).
 terraform plan \
   -var="postgres_admin_password=<a strong password>" \
-  -var="better_auth_secret=$(openssl rand -base64 32)" \
-  -var="control_plane_image_registry_username=<your GitHub username>" \
-  -var="control_plane_image_registry_password=<a GitHub PAT with read:packages>"
+  -var="better_auth_secret=$(openssl rand -base64 32)"
 
 terraform apply \
   -var="postgres_admin_password=<a strong password>" \
-  -var="better_auth_secret=$(openssl rand -base64 32)" \
-  -var="control_plane_image_registry_username=<your GitHub username>" \
-  -var="control_plane_image_registry_password=<a GitHub PAT with read:packages>"
+  -var="better_auth_secret=$(openssl rand -base64 32)"
 ```
 
 After `apply`, the deployed URL is the `control_plane_url` output.
@@ -92,10 +87,10 @@ signal this module is safe to `apply` anywhere).
 
 ## Notes
 
-- `control_plane_image_tag` defaults to `latest`. Cloudable's own production deploys
-  pin by image digest instead (see the comment on that variable, and `docs/spec.md`
-  §26 on `cloudable-deploy`) — that discipline is on you once you have a release
-  process; swap `control_plane_image` for `<repo>@sha256:<digest>` when you do.
+- `control_plane_image_tag` defaults to `main`, the tag `rebuild-base-image.yml` moves
+  on every push to main. Pinning by image digest instead (see the comment on that
+  variable) is on you once you have a release process; swap `control_plane_image` for
+  `<repo>@sha256:<digest>` when you do.
 - Postgres is reachable from the container app via Azure's "allow Azure services"
   firewall rule (`0.0.0.0`–`0.0.0.0`), not a VNet/private-endpoint setup. Per
   Microsoft's own docs that rule admits traffic from **any** Azure customer's
@@ -105,6 +100,4 @@ signal this module is safe to `apply` anywhere).
 - `min_replicas = 1` keeps the control plane always warm. Set it to `0` if you'd
   rather it scale to zero when idle (cold starts will apply).
 - This module creates its own resource group (`resource_group_name`) rather than
-  adopting an existing one — `infra/bicep/control-plane.bicep` mirrors this by
-  deploying at subscription scope and creating the same resource group itself, so
-  the two templates stay consistent about who owns it.
+  adopting an existing one.

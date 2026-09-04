@@ -20,7 +20,7 @@ React, Vite, TanStack Router + Query, shadcn/ui, Tailwind. Agent and CLI compile
 ```
 apps/         control-plane, console, agent, cli
 packages/     events, contracts, schema
-infra/        terraform, bicep
+infra/        terraform
 docs/
 ```
 

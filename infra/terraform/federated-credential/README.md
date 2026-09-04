@@ -23,12 +23,6 @@ and `docs/spec.md` §10 for the reasoning. This module provisions:
   assigned to Cloudable's service principal, scoped **only** to that resource group.
   Never Contributor. Never subscription scope.
 
-The equivalent one-click template is `infra/bicep/federated-credential.bicep` — it
-covers the resource group and custom role natively, paired with two short `az` CLI
-commands for the Azure AD half (app registration + federated credential), since
-managing those resource types from ARM/Bicep isn't uniformly available yet. See that
-file's own header comment for the exact commands.
-
 ## Prerequisites
 
 - Your own Azure account, with `az login` already run against your own tenant (or

@@ -134,7 +134,7 @@ export function CloudConnectDialog() {
           <DialogTitle>Connect Azure</DialogTitle>
           <DialogDescription>
             Workload identity federation. Three non-secret identifiers — Cloudable never receives a
-            client secret. Run Cloudable's Bicep template on your side to create the app
+            client secret. Run Cloudable's Terraform template on your side to create the app
             registration and federated credential, scoped to a single resource group.
           </DialogDescription>
         </DialogHeader>
