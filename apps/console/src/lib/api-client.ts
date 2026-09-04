@@ -2,6 +2,38 @@
 export const BASE_URL: string = import.meta.env.VITE_API_URL ?? "http://localhost:4780";
 
 /**
+ * Fires on a 401 whose body is the control plane's own `AuthenticationRequired`
+ * with `reason: "no_session"` — a session that was valid when `root.tsx`'s
+ * guard last checked it (or was never checked yet on this exact call) but has
+ * since expired or gone stale server-side. `main.tsx` wires this to clearing
+ * the session query, which flips that guard and sends the whole app to
+ * `/login`, same as an explicit sign-out.
+ *
+ * Deliberately narrower than "any 401": the middleware's other reason,
+ * `"no_matching_person"`, means the signed-in BetterAuth session is valid but
+ * that account has no `people` row — re-checking the session (what clearing
+ * it here triggers) always succeeds again, since the session itself never
+ * expired, which flips `root.tsx`'s guard straight back to authenticated and
+ * the next machines fetch straight back to 401 — a "home ⇄ /login" loop
+ * instead of the intended one-time redirect. That case surfaces as this
+ * page's own inline error instead, same as any other 401 not covered here.
+ */
+let onUnauthorized: (() => void) | undefined;
+
+export function setUnauthorizedHandler(handler: () => void): void {
+  onUnauthorized = handler;
+}
+
+function isExpiredSession(body: unknown): boolean {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    (body as Record<string, unknown>)._tag === "AuthenticationRequired" &&
+    (body as Record<string, unknown>).reason === "no_session"
+  );
+}
+
+/**
  * Thrown on any non-2xx response. `body` carries the parsed JSON error body
  * when the response actually returned one (every real control-plane
  * endpoint's `{ error: { code, message, ... } }` shape, or a handler-
@@ -58,6 +90,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       .clone()
       .json()
       .catch(() => undefined);
+    if (res.status === 401 && isExpiredSession(body)) {
+      onUnauthorized?.();
+    }
     throw new ApiError(res.status, path, method, body);
   }
 
