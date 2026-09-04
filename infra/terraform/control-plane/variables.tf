@@ -140,3 +140,15 @@ variable "tags" {
     mode    = "self-hosted"
   }
 }
+
+variable "enable_self_managed_machines" {
+  description = "Whether to provision the network shell (resource group, VNet, subnet, NSG) and RBAC role that let this control plane's own managed identity provision real Azure VMs in this same tenant (self-hosted mode: no federation — see docs/cloud-auth.md, ProvisioningService.azure.ts). Set false to deploy the control plane without machine-provisioning capability."
+  type        = bool
+  default     = true
+}
+
+variable "machines_resource_group_name" {
+  description = "Name of the single, dedicated resource group machines are provisioned into. Matches infra/terraform/federated-credential/'s default naming convention. Only used when enable_self_managed_machines is true."
+  type        = string
+  default     = "rg-cloudable-managed"
+}

@@ -77,6 +77,39 @@ export interface AppConfig {
    * the container itself.
    */
   readonly localDockerControlPlaneUrl: string;
+  /**
+   * Azure subscription `ProvisioningService.azure.ts` provisions real
+   * machines into. Self-hosted mode only (docs/cloud-auth.md's "fully
+   * managed mode uses a managed identity ... same provisioning-layer code
+   * path") — `DefaultAzureCredential` supplies the actual credential
+   * (Container App managed identity in production, `az login` locally),
+   * this is only the target subscription. Required when
+   * `provisioningAdapter === "azure"`; the adapter fails closed at
+   * construction if unset rather than guessing a subscription.
+   */
+  readonly azureSubscriptionId: string | null;
+  /**
+   * The single dedicated resource group (`infra/terraform/control-plane`'s
+   * `machines_resource_group_name` output) machines are provisioned into.
+   * Matches the BYOC module's naming convention.
+   */
+  readonly azureMachinesResourceGroup: string;
+  /**
+   * Full ARM resource id of the pre-created subnet
+   * (`infra/terraform/control-plane`'s `machines_subnet_id` output) new
+   * machines' NICs join. `ProvisioningService.azure.ts` never creates or
+   * modifies the VNet/subnet/NSG itself — see that Terraform module's
+   * comment on why the RBAC role grants join-only, not write, access.
+   */
+  readonly azureMachinesSubnetId: string | null;
+  /**
+   * Directory the compiled agent + tunnel-daemon binaries live in —
+   * `GET /_internal/binaries/:target` (`http/routes/binaries.ts`) serves
+   * them from here. Matches where `Dockerfile` copies them to in the
+   * published image; irrelevant in local dev (the docker/fake adapters
+   * don't need this route at all).
+   */
+  readonly agentBinariesDir: string;
 }
 
 const readConfig = (): AppConfig => {
@@ -98,6 +131,11 @@ const readConfig = (): AppConfig => {
     provisioningAdapter: readProvisioningAdapter(),
     localDockerControlPlaneUrl:
       process.env["LOCAL_DOCKER_CONTROL_PLANE_URL"] ?? `http://host.docker.internal:${port}`,
+    azureSubscriptionId: process.env["AZURE_SUBSCRIPTION_ID"] ?? null,
+    azureMachinesResourceGroup:
+      process.env["AZURE_MACHINES_RESOURCE_GROUP"] ?? "rg-cloudable-managed",
+    azureMachinesSubnetId: process.env["AZURE_MACHINES_SUBNET_ID"] ?? null,
+    agentBinariesDir: process.env["AGENT_BINARIES_DIR"] ?? "/app/binaries",
   };
 };
 

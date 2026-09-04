@@ -22,3 +22,13 @@ output "container_app_identity_principal_id" {
   description = "Principal ID of the control plane's system-assigned managed identity, for granting it access to other Azure resources (e.g. Key Vault) if desired."
   value       = azurerm_container_app.this.identity[0].principal_id
 }
+
+output "machines_resource_group_name" {
+  description = "Resource group real Azure machines are provisioned into. Null when enable_self_managed_machines is false."
+  value       = var.enable_self_managed_machines ? azurerm_resource_group.machines[0].name : null
+}
+
+output "machines_subnet_id" {
+  description = "Full ARM resource id of the subnet ProvisioningService.azure.ts joins new machines' NICs to. Null when enable_self_managed_machines is false."
+  value       = var.enable_self_managed_machines ? azurerm_subnet.machines[0].id : null
+}

@@ -21,6 +21,10 @@ const testConfig: AppConfig = {
   consoleOrigin: "unused",
   provisioningAdapter: "fake",
   localDockerControlPlaneUrl: "unused",
+  azureSubscriptionId: null,
+  azureMachinesResourceGroup: "unused",
+  azureMachinesSubnetId: null,
+  agentBinariesDir: "unused",
 };
 
 /** Captures every batch published through `EventBus`, without touching Postgres. */

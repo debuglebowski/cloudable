@@ -86,9 +86,55 @@ resource "azurerm_resource_group" "cloudable_managed" {
   location = var.location
 }
 
+# --- Network shell the role below can join but never create or modify: a
+# VNet + subnet + NSG (deny all inbound — invariant 7, no inbound access to
+# any machine). The role's own action list deliberately grants no NSG
+# actions and only "subnets/join/action", never "subnets/write" — the
+# runtime identity can attach a NIC to this subnet, never touch its rules.
+
+resource "azurerm_virtual_network" "cloudable_managed" {
+  name                = "${var.resource_group_name}-vnet"
+  resource_group_name = azurerm_resource_group.cloudable_managed.name
+  location            = azurerm_resource_group.cloudable_managed.location
+  address_space       = ["10.90.0.0/16"]
+}
+
+resource "azurerm_subnet" "cloudable_managed" {
+  name                 = "machines"
+  resource_group_name  = azurerm_resource_group.cloudable_managed.name
+  virtual_network_name = azurerm_virtual_network.cloudable_managed.name
+  address_prefixes     = ["10.90.1.0/24"]
+}
+
+resource "azurerm_network_security_group" "cloudable_managed" {
+  name                = "${var.resource_group_name}-nsg"
+  resource_group_name = azurerm_resource_group.cloudable_managed.name
+  location            = azurerm_resource_group.cloudable_managed.location
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "cloudable_managed" {
+  subnet_id                 = azurerm_subnet.cloudable_managed.id
+  network_security_group_id = azurerm_network_security_group.cloudable_managed.id
+}
+
 # --- Access: a custom role listing only what a Cloudable machine's
 # lifecycle actually needs (create/start/stop/reimage/archive a small VM +
 # its disk/NIC/public IP) — never Contributor, never subscription scope.
+# Keep in sync by hand with infra/terraform/control-plane/main.tf's
+# identical self-hosted-mode role — no shared module exists to enforce that
+# mechanically.
 
 resource "azurerm_role_definition" "cloudable_machine_operator" {
   name        = "Cloudable Machine Operator"
@@ -104,9 +150,13 @@ resource "azurerm_role_definition" "cloudable_machine_operator" {
       "Microsoft.Compute/virtualMachines/start/action",
       "Microsoft.Compute/virtualMachines/deallocate/action",
       "Microsoft.Compute/virtualMachines/restart/action",
+      "Microsoft.Compute/virtualMachines/instanceView/read",
       "Microsoft.Compute/disks/read",
       "Microsoft.Compute/disks/write",
       "Microsoft.Compute/disks/delete",
+      "Microsoft.Compute/snapshots/read",
+      "Microsoft.Compute/snapshots/write",
+      "Microsoft.Compute/snapshots/delete",
       "Microsoft.Network/networkInterfaces/read",
       "Microsoft.Network/networkInterfaces/write",
       "Microsoft.Network/networkInterfaces/delete",

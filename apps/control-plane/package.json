@@ -15,6 +15,9 @@
     "test:integration-check": "bun test $(find . -path './node_modules/*' -prune -o -name '*.integration-check.ts' -print)"
   },
   "dependencies": {
+    "@azure/arm-compute": "25.1.1",
+    "@azure/arm-network": "38.0.0",
+    "@azure/identity": "4.13.2",
     "@cloudable/contracts": "workspace:*",
     "@cloudable/events": "workspace:*",
     "@cloudable/schema": "workspace:*",

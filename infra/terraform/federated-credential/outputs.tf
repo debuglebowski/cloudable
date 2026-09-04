@@ -17,3 +17,8 @@ output "role_definition_id" {
   description = "The custom RBAC role's resource ID."
   value       = azurerm_role_definition.cloudable_machine_operator.role_definition_resource_id
 }
+
+output "subnet_id" {
+  description = "Full ARM resource id of the subnet the role's principal can join a machine's NIC to."
+  value       = azurerm_subnet.cloudable_managed.id
+}

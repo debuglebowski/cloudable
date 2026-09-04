@@ -40,6 +40,16 @@ locals {
   # also append a tag — "<repo>@sha256:<digest>:<tag>" is not a valid image
   # reference.
   container_image = strcontains(var.control_plane_image, "@sha256:") ? var.control_plane_image : "${var.control_plane_image}:${var.control_plane_image_tag}"
+
+  # Env vars ProvisioningService.azure.ts needs to manage real machines in
+  # this tenant — only wired when enable_self_managed_machines actually
+  # created the resource group/subnet/role below for them to point at.
+  machine_provisioning_env = var.enable_self_managed_machines ? [
+    { name = "PROVISIONING_ADAPTER", value = "azure" },
+    { name = "AZURE_SUBSCRIPTION_ID", value = data.azurerm_client_config.current.subscription_id },
+    { name = "AZURE_MACHINES_RESOURCE_GROUP", value = azurerm_resource_group.machines[0].name },
+    { name = "AZURE_MACHINES_SUBNET_ID", value = azurerm_subnet.machines[0].id },
+  ] : []
 }
 
 resource "azurerm_resource_group" "this" {
@@ -105,6 +115,122 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_service
 }
 
 # ---------------------------------------------------------------------------
+# Machine provisioning — network shell + RBAC for the control plane's own
+# managed identity to manage real Azure VMs in this same tenant (self-hosted
+# mode: no federation, the control plane IS the trusted identity — see
+# docs/cloud-auth.md's "fully managed mode uses a managed identity ... same
+# provisioning-layer code path"). Mirrors the shell + role
+# infra/terraform/federated-credential/main.tf grants a BYOC customer's
+# trust — same "Cloudable Machine Operator" action list (keep both in sync
+# by hand; no shared module exists to enforce that mechanically), same
+# no-NSG-actions-granted boundary: the NSG below is a Terraform-level,
+# pre-created fact, never something ProvisioningService.azure.ts's runtime
+# identity can touch — it can only ever join the subnet it's already
+# attached to.
+# ---------------------------------------------------------------------------
+
+data "azurerm_client_config" "current" {}
+
+resource "azurerm_resource_group" "machines" {
+  count    = var.enable_self_managed_machines ? 1 : 0
+  name     = var.machines_resource_group_name
+  location = var.location
+  tags     = var.tags
+}
+
+resource "azurerm_virtual_network" "machines" {
+  count               = var.enable_self_managed_machines ? 1 : 0
+  name                = "${var.name_prefix}-machines-vnet"
+  resource_group_name = azurerm_resource_group.machines[0].name
+  location            = azurerm_resource_group.machines[0].location
+  address_space       = ["10.90.0.0/16"]
+  tags                = var.tags
+}
+
+resource "azurerm_subnet" "machines" {
+  count                = var.enable_self_managed_machines ? 1 : 0
+  name                 = "machines"
+  resource_group_name  = azurerm_resource_group.machines[0].name
+  virtual_network_name = azurerm_virtual_network.machines[0].name
+  address_prefixes     = ["10.90.1.0/24"]
+}
+
+# No inbound access to any machine (invariant 7) — agents poll, tunnels are
+# outbound. Nothing in this module opens any inbound port; outbound reaches
+# the internet via Azure's default outbound access for the subnet.
+resource "azurerm_network_security_group" "machines" {
+  count               = var.enable_self_managed_machines ? 1 : 0
+  name                = "${var.name_prefix}-machines-nsg"
+  resource_group_name = azurerm_resource_group.machines[0].name
+  location            = azurerm_resource_group.machines[0].location
+  tags                = var.tags
+
+  security_rule {
+    name                       = "DenyAllInbound"
+    priority                   = 4096
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "machines" {
+  count                     = var.enable_self_managed_machines ? 1 : 0
+  subnet_id                 = azurerm_subnet.machines[0].id
+  network_security_group_id = azurerm_network_security_group.machines[0].id
+}
+
+resource "azurerm_role_definition" "machine_operator" {
+  count       = var.enable_self_managed_machines ? 1 : 0
+  name        = "Cloudable Machine Operator (${var.name_prefix})"
+  scope       = azurerm_resource_group.machines[0].id
+  description = "Least-privilege role for the control plane's own provisioning code, scoped to a single dedicated resource group. Never Contributor, never subscription scope (docs/spec.md §10)."
+
+  permissions {
+    actions = [
+      "Microsoft.Resources/subscriptions/resourceGroups/read",
+      "Microsoft.Compute/virtualMachines/read",
+      "Microsoft.Compute/virtualMachines/write",
+      "Microsoft.Compute/virtualMachines/delete",
+      "Microsoft.Compute/virtualMachines/start/action",
+      "Microsoft.Compute/virtualMachines/deallocate/action",
+      "Microsoft.Compute/virtualMachines/restart/action",
+      "Microsoft.Compute/virtualMachines/instanceView/read",
+      "Microsoft.Compute/disks/read",
+      "Microsoft.Compute/disks/write",
+      "Microsoft.Compute/disks/delete",
+      "Microsoft.Compute/snapshots/read",
+      "Microsoft.Compute/snapshots/write",
+      "Microsoft.Compute/snapshots/delete",
+      "Microsoft.Network/networkInterfaces/read",
+      "Microsoft.Network/networkInterfaces/write",
+      "Microsoft.Network/networkInterfaces/delete",
+      "Microsoft.Network/networkInterfaces/join/action",
+      "Microsoft.Network/virtualNetworks/read",
+      "Microsoft.Network/virtualNetworks/subnets/join/action",
+      "Microsoft.Network/publicIPAddresses/read",
+      "Microsoft.Network/publicIPAddresses/write",
+      "Microsoft.Network/publicIPAddresses/delete",
+      "Microsoft.Network/publicIPAddresses/join/action",
+    ]
+    not_actions = []
+  }
+
+  assignable_scopes = [azurerm_resource_group.machines[0].id]
+}
+
+resource "azurerm_role_assignment" "machine_operator" {
+  count              = var.enable_self_managed_machines ? 1 : 0
+  scope              = azurerm_resource_group.machines[0].id
+  role_definition_id = azurerm_role_definition.machine_operator[0].role_definition_resource_id
+  principal_id       = azurerm_container_app.this.identity[0].principal_id
+}
+
+# ---------------------------------------------------------------------------
 # Container Apps — the control plane, one stateless container
 # ---------------------------------------------------------------------------
 
@@ -136,9 +262,10 @@ resource "azurerm_container_app" "this" {
   # (docs/spec.md §2/§10) — that's a BYOC-only concern
   # (infra/terraform/federated-credential/). This identity exists so the
   # control plane can authenticate to other Azure resources in the same
-  # tenant (e.g. Key Vault, if a self-hoster later moves secrets there)
-  # without ever holding a stored credential (invariant 1) — nothing is
-  # granted to it by this module today.
+  # tenant without ever holding a stored credential (invariant 1) — granted
+  # the "Cloudable Machine Operator" role below (when
+  # enable_self_managed_machines is true) so ProvisioningService.azure.ts
+  # can manage real VMs; otherwise nothing is granted to it.
   identity {
     type = "SystemAssigned"
   }
@@ -198,6 +325,14 @@ resource "azurerm_container_app" "this" {
       env {
         name  = "PORT"
         value = tostring(var.port)
+      }
+
+      dynamic "env" {
+        for_each = local.machine_provisioning_env
+        content {
+          name  = env.value.name
+          value = env.value.value
+        }
       }
     }
   }
