@@ -61,6 +61,7 @@ import {
   MACHINE_STATE_LABEL,
 } from "./machine-state";
 import { ReconcileMachineDialog } from "./reconcile-machine-dialog";
+import { RestartMachineDialog } from "./restart-machine-dialog";
 import { UpgradeMachineDialog } from "./upgrade-machine-dialog";
 
 const SNAPSHOT_TRIGGER_LABEL: Record<ArchivedSnapshot["trigger"], string> = {
@@ -161,6 +162,7 @@ export function MachineDetailPage() {
   const [reconcileOpen, setReconcileOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [restartOpen, setRestartOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("properties");
 
   const overrideMutation = useMutation({
@@ -254,6 +256,15 @@ export function MachineDetailPage() {
             onClick={() => setConnectOpen(true)}
           >
             Connect
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={machine.state !== "running"}
+            title={machine.state !== "running" ? "Only a running machine can be restarted." : undefined}
+            onClick={() => setRestartOpen(true)}
+          >
+            Restart
           </Button>
           <Button variant="outline" size="sm" onClick={() => setReconcileOpen(true)}>
             Reconcile
@@ -722,6 +733,7 @@ export function MachineDetailPage() {
         onOpenChange={setReconcileOpen}
       />
       <ConnectTerminalDialog machine={machine} open={connectOpen} onOpenChange={setConnectOpen} />
+      <RestartMachineDialog machine={machine} open={restartOpen} onOpenChange={setRestartOpen} />
       <ArchiveMachineDialog machine={machine} open={archiveOpen} onOpenChange={setArchiveOpen} />
     </div>
   );

@@ -72,6 +72,7 @@ export const SwitchableProvisioningServiceLive: Layer.Layer<ProvisioningServiceT
       archive: (machineId) => implFor(currentAdapter).archive(machineId),
       reconcile: (machineId) => implFor(currentAdapter).reconcile(machineId),
       reimage: (desc) => implFor(currentAdapter).reimage(desc),
+      restart: (machineId) => implFor(currentAdapter).restart(machineId),
     } satisfies ProvisioningService;
   }),
 );

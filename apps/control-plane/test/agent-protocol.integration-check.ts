@@ -27,6 +27,7 @@ import { NotificationsLive } from "../src/http/handlers/notifications";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
 import { OrganisationLive } from "../src/http/handlers/organisation";
 import { PeopleLive } from "../src/http/handlers/people";
+import { RestartLive } from "../src/http/handlers/restart";
 import { TunnelLive } from "../src/http/handlers/tunnel";
 import { TunnelSignalLive } from "../src/http/handlers/tunnel-signal";
 import { UpgradeLive } from "../src/http/handlers/upgrade";
@@ -120,6 +121,7 @@ describe("agent-protocol handlers (integration)", () => {
           TunnelLive,
           NotificationsLive,
           DevProvisioningLive,
+          RestartLive,
         ),
       ),
     );

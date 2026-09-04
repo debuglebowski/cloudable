@@ -150,7 +150,18 @@ export const makeFakeProvisioningServiceLive = (
           return settled.status;
         });
 
-      return { create, archive, reconcile, reimage } satisfies ProvisioningService;
+      const restart: ProvisioningService["restart"] = (machineId: string) =>
+        Effect.gen(function* () {
+          const existing = yield* require(machineId);
+          const restarted: FakeMachineEntry = {
+            ...existing,
+            status: { ...existing.status, state: "running" },
+          };
+          yield* Ref.update(state, (map) => new Map(map).set(machineId, restarted));
+          return restarted.status;
+        });
+
+      return { create, archive, reconcile, reimage, restart } satisfies ProvisioningService;
     }),
   );
 
