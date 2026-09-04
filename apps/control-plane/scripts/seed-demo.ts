@@ -363,14 +363,15 @@ async function main() {
   console.log("certificates: 2 issued");
 
   // --- Active session (real POST /api/v1/access/sessions) ------------------
-  await api("POST", "/api/v1/access/sessions", {
-    orgId: org.id,
-    personId: marcus.id,
-    idpIdentity: marcus.email,
-    targetMachineId: buildRunner.id,
-    targetOsUser: "marcus",
-    method: "terminal",
-  });
+  // `mintSession` derives orgId/personId/idpIdentity from the caller's own
+  // session now (`561ef49`), not the payload — needs marcus's own cookie,
+  // same as every other authenticated call in this script.
+  await api(
+    "POST",
+    "/api/v1/access/sessions",
+    { targetMachineId: buildRunner.id, targetOsUser: "marcus", method: "terminal" },
+    marcusCookie,
+  );
   console.log("sessions: 1 minted (active)");
 
   // --- Elevation request (real POST /api/v1/elevations) --------------------
