@@ -254,6 +254,20 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           if (!imageEnabled) {
             return yield* invalid(`image "${input.image}" is not enabled for this org`);
           }
+          const sizeSkuEnabled = yield* isCatalogEntryEnabled(
+            input.orgId,
+            "azure",
+            "sku",
+            input.sizeSku,
+          ).pipe(
+            Effect.provideService(Db, db),
+            Effect.mapError(
+              (cause) => new MachineServiceError({ reason: "catalog_read_failed", cause }),
+            ),
+          );
+          if (!sizeSkuEnabled) {
+            return yield* invalid(`size "${input.sizeSku}" is not enabled for this org`);
+          }
           region = trimmedRegion;
         } else {
           if (trimmedRegion.length > 0) {

@@ -4,13 +4,14 @@ import { toast } from "sonner";
 import { apiGet, apiPatch, apiPost } from "@/lib/api-client";
 
 /**
- * Org-curated region/image catalog for machine creation — see
+ * Org-curated region/image/size catalog for machine creation — see
  * `apps/control-plane/src/domain/organisation/catalog.ts`. Azure only today
- * (docker/fake are regionless and freeform-image, per `PROVIDER_CAPABILITIES`
- * in `add-machine-dialog.tsx`), but the path is provider-generic.
+ * (docker/fake are regionless and freeform-image/size, per
+ * `PROVIDER_CAPABILITIES` in `add-machine-dialog.tsx`), but the path is
+ * provider-generic.
  */
 
-export type CatalogKind = "region" | "image";
+export type CatalogKind = "region" | "image" | "sku";
 
 export interface CatalogItem {
   code: string;
@@ -63,6 +64,21 @@ export function useSyncAzureRegions() {
     },
     onError: (error) => {
       toast.error("Couldn't sync regions from Azure", { description: error.message });
+    },
+  });
+}
+
+export function useSyncAzureSizes() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiPost<{ items: CatalogItem[] }>("/api/v1/organisation/catalog/azure/sizes/sync", {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: providerCatalogKeys.list("azure", "sku") });
+      toast.success("Synced sizes from Azure");
+    },
+    onError: (error) => {
+      toast.error("Couldn't sync sizes from Azure", { description: error.message });
     },
   });
 }

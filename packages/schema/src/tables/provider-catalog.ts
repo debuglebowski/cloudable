@@ -5,18 +5,18 @@ import { pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core
  * Azure actually offer," not what any one org has chosen to allow. Not
  * org-scoped (there's exactly one Azure subscription per self-hosted
  * deployment, per `config.ts`'s `azureSubscriptionId` — no per-org variance
- * to model). Regions are synced from the real Azure SDK
- * (`services/CloudCatalogService.ts`'s `syncRegions`); images are seeded
- * from `ProvisioningService.azure.ts`'s own `UBUNTU_IMAGES` map, since Azure
- * has no API enumerating "images compatible with our cloud-init setup" the
- * way it does for regions.
+ * to model). Regions and sizes are synced from the real Azure SDK
+ * (`services/CloudCatalogService.ts`'s `syncAzureRegions`/`syncAzureSizes`);
+ * images are seeded from `ProvisioningService.azure.ts`'s own `UBUNTU_IMAGES`
+ * map, since Azure has no API enumerating "images compatible with our
+ * cloud-init setup" the way it does for regions/sizes.
  */
 export const providerCatalogEntries = pgTable(
   "provider_catalog_entries",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     provider: text("provider", { enum: ["azure", "docker", "fake"] }).notNull(),
-    kind: text("kind", { enum: ["region", "image"] }).notNull(),
+    kind: text("kind", { enum: ["region", "image", "sku"] }).notNull(),
     code: text("code").notNull(),
     displayName: text("display_name").notNull(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
@@ -44,7 +44,7 @@ export const orgCatalogSelections = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     orgId: uuid("org_id").notNull(),
     provider: text("provider", { enum: ["azure", "docker", "fake"] }).notNull(),
-    kind: text("kind", { enum: ["region", "image"] }).notNull(),
+    kind: text("kind", { enum: ["region", "image", "sku"] }).notNull(),
     code: text("code").notNull(),
     enabledAt: timestamp("enabled_at", { withTimezone: true }).notNull().defaultNow(),
   },

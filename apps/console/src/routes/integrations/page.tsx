@@ -129,6 +129,7 @@ export function IntegrationsPage() {
                     )}
                     <CatalogChecklist title="Regions" kind="region" showSync />
                     <CatalogChecklist title="Images" kind="image" />
+                    <CatalogChecklist title="Sizes" kind="sku" showSync />
                   </div>
                 )}
               </IntegrationCard>

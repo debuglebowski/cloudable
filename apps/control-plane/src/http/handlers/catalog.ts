@@ -5,7 +5,7 @@ import {
   listOrgCatalog,
   toggleOrgCatalogEntry,
 } from "../../domain/organisation/catalog";
-import { syncAzureRegions } from "../../services/CloudCatalogService";
+import { syncAzureRegions, syncAzureSizes } from "../../services/CloudCatalogService";
 import { Api } from "../api";
 import { CurrentUserTag } from "../middleware/auth";
 
@@ -44,6 +44,12 @@ export const CatalogLive = HttpApiBuilder.group(Api, "catalog", (handlers) =>
     .handle("syncRegions", () =>
       Effect.gen(function* () {
         const entries = yield* syncAzureRegions();
+        return { items: entries.map((entry) => ({ ...entry, enabled: false })) };
+      }).pipe(Effect.catchTag("CloudCatalogError", (e) => Effect.die(e))),
+    )
+    .handle("syncSizes", () =>
+      Effect.gen(function* () {
+        const entries = yield* syncAzureSizes();
         return { items: entries.map((entry) => ({ ...entry, enabled: false })) };
       }).pipe(Effect.catchTag("CloudCatalogError", (e) => Effect.die(e))),
     ),
