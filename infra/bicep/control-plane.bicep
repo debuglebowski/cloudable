@@ -33,16 +33,11 @@
 //     --template-file infra/bicep/control-plane.bicep \
 //     --parameters postgresAdminPassword=<dummy> betterAuthSecret=<dummy>
 //
-// A minimal reference Dockerfile for the control-plane image (no Dockerfile exists
-// yet in this build — a separate, not-yet-merged unit adds
-// apps/control-plane/Dockerfile; use that once it merges):
-//
-//   FROM oven/bun:1 AS base
-//   WORKDIR /app
-//   COPY . .
-//   RUN bun install --frozen-lockfile
-//   ENV NODE_ENV=production
-//   CMD ["bun", "run", "apps/control-plane/src/server.ts"]
+// The control-plane image is built from apps/control-plane/Dockerfile and
+// published by .github/workflows/rebuild-base-image.yml to
+// ghcr.io/debuglebowski/cloudable/control-plane (private — pass
+// controlPlaneImageRegistryUsername/Password, e.g. a GitHub PAT with
+// read:packages, or build and push your own to a registry you control).
 
 targetScope = 'subscription'
 
@@ -55,11 +50,13 @@ param resourceGroupName string = 'cloudable-control-plane'
 @description('Short prefix used to derive resource names. Keep it short, lowercase alphanumeric and hyphens.')
 param namePrefix string = 'cloudable'
 
-@description('Container image reference for the control plane, without tag (e.g. "ghcr.io/debuglebowski/cloudable-control-plane").')
-param controlPlaneImage string = 'ghcr.io/debuglebowski/cloudable-control-plane'
+@description('Container image reference for the control plane, without tag (e.g. "ghcr.io/debuglebowski/cloudable/control-plane", the path rebuild-base-image.yml actually publishes to).')
+param controlPlaneImage string = 'ghcr.io/debuglebowski/cloudable/control-plane'
 
 @description('''
-Tag to deploy. Defaults to "latest" for a self-hoster's first run.
+Tag to deploy. Defaults to "main", the tag rebuild-base-image.yml moves on every
+push to main — "latest" is never pushed by that workflow, so it is not a usable
+default here.
 
 Cloudable's own production deploys (`cloudable-deploy`, a separate private repo per
 docs/spec.md §26) pin by image *digest* rather than tag, because a tag can be
@@ -68,7 +65,17 @@ pinning discipline is out of scope for this self-host template — move to a pin
 digest yourself once you have a release process, by setting controlPlaneImage to
 "<repo>@sha256:<digest>" (this tag parameter is then ignored).
 ''')
-param controlPlaneImageTag string = 'latest'
+param controlPlaneImageTag string = 'main'
+
+@description('Registry hostname the control-plane image is pulled from. Only used when controlPlaneImageRegistryPassword is set.')
+param controlPlaneImageRegistryServer string = 'ghcr.io'
+
+@description('Registry username for pulling controlPlaneImage, if it is private. For GHCR this is any GitHub username with read:packages on the image.')
+param controlPlaneImageRegistryUsername string = ''
+
+@description('Registry password/PAT for pulling controlPlaneImage, if it is private (ghcr.io/debuglebowski/cloudable/control-plane is private by default — a GitHub PAT with read:packages works). Leave empty for a public image.')
+@secure()
+param controlPlaneImageRegistryPassword string = ''
 
 @description('vCPU allocated to the control plane container (Container Apps billing unit).')
 param containerCpu string = '0.5'
@@ -131,6 +138,9 @@ module resources 'control-plane.resources.bicep' = {
     namePrefix: namePrefix
     controlPlaneImage: controlPlaneImage
     controlPlaneImageTag: controlPlaneImageTag
+    controlPlaneImageRegistryServer: controlPlaneImageRegistryServer
+    controlPlaneImageRegistryUsername: controlPlaneImageRegistryUsername
+    controlPlaneImageRegistryPassword: controlPlaneImageRegistryPassword
     containerCpu: containerCpu
     containerMemory: containerMemory
     minReplicas: minReplicas

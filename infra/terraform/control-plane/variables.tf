@@ -17,14 +17,16 @@ variable "name_prefix" {
 }
 
 variable "control_plane_image" {
-  description = "Container image reference for the control plane, without tag (e.g. \"ghcr.io/debuglebowski/cloudable-control-plane\"). Pair with control_plane_image_tag."
+  description = "Container image reference for the control plane, without tag (e.g. \"ghcr.io/debuglebowski/cloudable/control-plane\", the path .github/workflows/rebuild-base-image.yml actually publishes to: ghcr.io/<github.repository>/control-plane). Pair with control_plane_image_tag."
   type        = string
-  default     = "ghcr.io/debuglebowski/cloudable-control-plane"
+  default     = "ghcr.io/debuglebowski/cloudable/control-plane"
 }
 
 variable "control_plane_image_tag" {
   description = <<-EOT
-    Tag to deploy. Defaults to "latest" for a self-hoster's first run.
+    Tag to deploy. Defaults to "main", the tag rebuild-base-image.yml moves on
+    every push to main — "latest" is never pushed by that workflow, so it is
+    not a usable default here.
 
     Cloudable's own production deploys (`cloudable-deploy`, a separate private
     repo per docs/spec.md §26) pin by image *digest* rather than tag, because a
@@ -32,10 +34,30 @@ variable "control_plane_image_tag" {
     answerable. That pinning discipline is out of scope for this self-host
     module — a self-hoster is expected to move to a pinned digest themselves
     once they have a release process, by setting control_plane_image to
-    "<repo>@sha256:<digest>" and leaving this tag variable unused.
+    "<repo>@sha256:<digest>" (or "<repo>@sha-<commit>") and leaving this tag
+    variable unused.
   EOT
   type        = string
-  default     = "latest"
+  default     = "main"
+}
+
+variable "control_plane_image_registry_server" {
+  description = "Registry hostname the control-plane image is pulled from. Only used when control_plane_image_registry_password is set — a public image (or one on a registry the Container Apps environment can already reach, e.g. via managed identity) needs no registry credential at all."
+  type        = string
+  default     = "ghcr.io"
+}
+
+variable "control_plane_image_registry_username" {
+  description = "Registry username for pulling control_plane_image, if it's private. For GHCR this is any GitHub username with read:packages on the image (a PAT is passed as the password)."
+  type        = string
+  default     = ""
+}
+
+variable "control_plane_image_registry_password" {
+  description = "Registry password/PAT for pulling control_plane_image, if it's private (e.g. a GitHub PAT with read:packages scope for ghcr.io/debuglebowski/cloudable/control-plane, which is private by default). Leave empty for a public image. Marked sensitive; supply via *.tfvars, -var, or TF_VAR_control_plane_image_registry_password — never commit a real value."
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "container_cpu" {
