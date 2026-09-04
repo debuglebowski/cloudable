@@ -67,7 +67,7 @@ const SnapshotViewSuccess = Schema.Struct({
   orgId: Schema.String,
   machineId: Schema.String,
   trigger: SnapshotTrigger,
-  region: Schema.String,
+  region: Schema.NullOr(Schema.String),
   sizeBytes: Schema.NullOr(Schema.Number),
   containsData: Schema.Boolean,
   containsConfig: Schema.Boolean,

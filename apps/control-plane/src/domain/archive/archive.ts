@@ -79,11 +79,13 @@ export const archiveMachine = (machineId: string, approvalId?: string) =>
     // ("no live infra for this machine") already holds. Treat only that specific
     // reason as a no-op; any other `ProvisioningError` (docker/cloud API genuinely
     // unreachable, etc.) still fails through to the HTTP layer's `Effect.die`.
-    yield* provisioning.archive(machineId).pipe(
-      Effect.catchTag("ProvisioningError", (error) =>
-        error.reason === "not_found" ? Effect.void : Effect.fail(error),
-      ),
-    );
+    yield* provisioning
+      .archive(machineId, machine.provider)
+      .pipe(
+        Effect.catchTag("ProvisioningError", (error) =>
+          error.reason === "not_found" ? Effect.void : Effect.fail(error),
+        ),
+      );
 
     const now = new Date();
     yield* dbTry(

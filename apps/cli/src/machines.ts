@@ -35,7 +35,7 @@ export async function runMachinesListCommand(): Promise<void> {
   console.log(`${"NAME".padEnd(nameWidth)}  STATE                 REGION      IMAGE`);
   for (const m of machines) {
     console.log(
-      `${m.name.padEnd(nameWidth)}  ${STATE_LABEL[m.state].padEnd(20)}  ${m.region.padEnd(10)}  ${m.image}`,
+      `${m.name.padEnd(nameWidth)}  ${STATE_LABEL[m.state].padEnd(20)}  ${(m.region ?? "—").padEnd(10)}  ${m.image}`,
     );
   }
 }

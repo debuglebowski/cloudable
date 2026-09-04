@@ -58,6 +58,7 @@ describe.skipIf(!dbReachable)("compliance checks: appliesTo (requires Postgres)"
       .values({
         orgId,
         name: "m1",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
         image: "ubuntu-24.04",
@@ -97,6 +98,7 @@ describe.skipIf(!dbReachable)("compliance checks: appliesTo (requires Postgres)"
     await db.insert(machines).values({
       orgId: org.id,
       name: "archived-m1",
+      provider: "fake",
       region: "eastus",
       sizeSku: "Standard_B2s",
       image: "ubuntu-24.04",

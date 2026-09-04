@@ -155,8 +155,8 @@ export function ArchivePage() {
                         <span className="font-medium">{machine.name}</span>
                         <span className="font-mono text-xs text-muted-foreground no-underline">
                           {snapshot
-                            ? `${snapshot.region} · ${formatBytes(snapshot.sizeBytes)}`
-                            : machine.region}
+                            ? `${snapshot.region ?? "no region"} · ${formatBytes(snapshot.sizeBytes)}`
+                            : (machine.region ?? "no region")}
                           {snapshotCount > 1 ? ` · ${snapshotCount} snapshots` : ""}
                         </span>
                       </Link>

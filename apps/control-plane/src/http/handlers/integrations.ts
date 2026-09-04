@@ -13,6 +13,7 @@ const toWire = (row: IntegrationRow) => ({
   id: row.id,
   orgId: row.orgId,
   kind: row.kind,
+  provider: row.provider,
   identifier: row.identifier,
   connectedAt: row.connectedAt.toISOString(),
   removedAt: row.removedAt ? row.removedAt.toISOString() : null,

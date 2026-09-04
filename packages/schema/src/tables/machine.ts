@@ -16,7 +16,14 @@ export const machines = pgTable("machines", {
   // a machine's history must survive its owner leaving.
   ownerPersonId: uuid("owner_person_id").references(() => people.id),
   name: text("name").notNull(),
-  region: text("region").notNull(),
+  // Which ProvisioningService backend this machine was created on — a
+  // physical fact fixed at creation, same as region/image below, never
+  // edited afterward (a machine's underlying provisioning backend isn't
+  // something you switch a live machine between).
+  provider: text("provider", { enum: ["azure", "docker", "fake"] }).notNull(),
+  // Nullable: only azure-provisioned machines have a region — see
+  // packages/contracts/src/domains/providers.ts's PROVIDER_CAPABILITIES.
+  region: text("region"),
   sizeSku: text("size_sku").notNull(),
   image: text("image").notNull(),
   state: text("state", {

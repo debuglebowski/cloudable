@@ -1,207 +1,82 @@
 # Cloud provider authentication
 
-Workload identity federation to the customer's Azure subscription. No cloud credential is ever
-stored — Cloudable runs its own OIDC issuer, mints a short-lived, per-customer-subject
-token, and the customer's Azure AD (Entra ID) validates it against a federated identity credential
-they configure themselves.
+**Self-hosted mode is the real, shipped path.** The control plane manages machines in its
+**own** Azure tenant/subscription, via its **own** managed identity — never a customer's,
+never federation. `ProvisioningService.azure.ts` calls `DefaultAzureCredential()` (an Azure
+Container App's managed identity in production, `az login` locally) against exactly one
+subscription, resource group, and subnet: `AZURE_SUBSCRIPTION_ID` /
+`AZURE_MACHINES_RESOURCE_GROUP` / `AZURE_MACHINES_SUBNET_ID` (`apps/control-plane/src/
+config.ts`), all set once for the whole deployment by `infra/terraform/control-plane`. There is
+only ever one credential; `desc.orgId` on a provisioning call is used only to tag the resulting
+Azure resources, never to pick which tenant/subscription to act against.
 
-## The flow
+This still satisfies invariant #1 ("no cloud credential is ever stored, federation only, never
+client secrets") — a managed identity has no credential to store at all; it's ambient, resolved
+by the Azure platform itself at call time.
 
-1. Cloudable runs an OIDC issuer at a public URL: `GET /.well-known/openid-configuration`
-   (discovery document) and `GET /.well-known/jwks.json` (public signing key, JWK format).
-2. At provisioning time — or on demand, via the mint endpoint below — Cloudable mints a
-   short-lived (~1h) token with a **per-customer subject**: `cloudable:tenant:<customer-id>`.
-3. The customer creates an app registration (or reuses one) and adds a federated identity
-   credential trusting Cloudable's issuer **and that specific subject** — see
-   `infra/terraform/federated-credential/`.
-4. Azure validates the token against that trust rule and returns an access token (~1h),
-   scoped by the custom RBAC role assigned to Cloudable's service principal.
+**Enabling Azure for an org is therefore a plain policy toggle, not a connection.** The
+Integrations page's "Cloud provider" section (`docs/frontend.md`) lets an org turn Azure,
+Docker, or Fake on or off — several can be enabled at once, since a machine now picks one
+per-creation from whatever the org has enabled. There is nothing to fill in for any of the
+three: no tenant ID, no application ID, no subscription ID. `GET /api/v1/provisioning/
+capabilities` reports whether Azure is even *available* on this deployment at all (i.e. whether
+the three env vars above are set) — enabling it is refused client-side when it isn't.
 
-**Fully managed mode** uses a managed identity in Cloudable's own tenant instead — same
-provisioning-layer code path, it does not know the difference.
+## The customer-federated (BYOC) path — not implemented
 
-## ⚠️ The subject binding is the tenant isolation boundary
+An **earlier design** for this unit described per-customer OIDC federation: Cloudable running
+its own OIDC issuer, minting a short-lived token with a per-customer subject
+(`cloudable:tenant:<customer-id>`), and a customer's own Azure AD trusting that issuer+subject
+via a federated identity credential they configure — the classic "Cloudable-hosted control
+plane manages many customers' separate Azure tenants" shape. **This is not what shipped.** The
+strategic pivot to open-source, self-hosted-only distribution (`CLAUDE.md`) made the
+self-managed-identity path above the only one worth building for v1 — there is no
+Cloudable-hosted control plane for a federated identity to matter to.
 
-> The subject binding is the tenant isolation boundary. A trust rule naming only the issuer
-> accepts a token minted for any customer. This is a single-line mistake with cross-tenant
-> consequences.
+The plumbing for it still exists and still works in isolation — it just isn't wired into real
+machine provisioning:
 
-Cloudable's OIDC issuer is **shared across every customer**. The `iss` claim alone proves nothing
-about which tenant a token was minted for — only the `sub` claim (`cloudable:tenant:<customer-id>`)
-does. A customer's federated identity credential that trusts Cloudable's issuer but leaves
-`subject` unset, wildcarded, or approximate would accept a token minted for **any** Cloudable
-customer, not just them. `infra/terraform/federated-credential/main.tf` requires an exact
-`subject` value for exactly this reason — read the warning on that variable before changing it.
+- `GET /.well-known/openid-configuration` / `GET /.well-known/jwks.json` — a real OIDC issuer
+  (`FEDERATION_ISSUER_URL`, `Signer`/`services/federation/jwt.ts`), Ed25519-signed.
+- `POST /api/v1/federation/mint` — mints a token and validates it against a trust rule, but
+  through `FakeAzureTrustRule.ts` (a stand-in for a real Azure token exchange, which nothing in
+  this build performs) — see that file's own doc comment.
+- `docs/events.md`'s `cloud.credential_federated`/`cloud.credential_rejected` events, and the
+  `integrations` table's original `kind: "cloud"` config shape (`{tenantId, applicationId,
+  subscriptionId}`) — superseded on the console side, but the shape these events describe was
+  never deleted from the schema.
 
-This is also this unit's canonical test:
-`apps/control-plane/src/services/federation/FederationService.test.ts` mints a token for tenant
-A's subject and asserts it is **rejected** by a trust rule bound to tenant B's subject, even
-though both trust the same issuer.
+Reviving this as a real feature (letting a Cloudable-hosted control plane manage a customer's
+own tenant) would mean: a real Azure AD token exchange in place of `FakeAzureTrustRule`,
+`ProvisioningService.azure.ts` picking a credential per-org instead of one ambient identity, and
+the Integrations page's Azure card growing a real connect form again instead of a fieldless
+"Enable." None of that is scoped or planned — this section exists so the dormant code isn't
+mistaken for a security gap or misread as the primary story.
 
-## Endpoints
-
-| Method | Path                               | Purpose                                              |
-| :----- | :---------------------------------- | :---------------------------------------------------- |
-| GET    | `/.well-known/openid-configuration` | OIDC discovery document                               |
-| GET    | `/.well-known/jwks.json`            | Public signing key(s), JWK format                     |
-| POST   | `/api/v1/federation/mint`           | Mint a token, attempt federation, persist + emit events |
-
-The `.well-known/...` paths are spec-mandated OIDC convention, not versioned `/api/v1/...` routes.
-
-### Discovery document
-
-```
-GET /.well-known/openid-configuration
-```
-
-```json
-{
-  "issuer": "https://auth.cloudable.example",
-  "jwks_uri": "https://auth.cloudable.example/.well-known/jwks.json",
-  "response_types_supported": ["id_token"],
-  "subject_types_supported": ["public"],
-  "id_token_signing_alg_values_supported": ["EdDSA"]
-}
-```
-
-`issuer` comes from the `FEDERATION_ISSUER_URL` config value (`apps/control-plane/src/config.ts`)
-— it must be the exact, publicly reachable URL every customer's federated identity credential is
-configured to trust.
-
-### JWKS
-
-```
-GET /.well-known/jwks.json
-```
-
-```json
-{ "keys": [{ "kty": "OKP", "crv": "Ed25519", "x": "...", "use": "sig", "alg": "EdDSA", "kid": "federation-oidc-v1" }] }
-```
-
-One Ed25519 key, `alg: EdDSA`. See "Signing key" below.
-
-### Mint
-
-Requires a real BetterAuth session (`CurrentUserAuthentication`, applied per-endpoint — see
-`../apps/control-plane/src/http/routes/federation.ts`), unlike `discovery`/`jwks` above. `orgId`
-comes from that session, never from the request body: this endpoint mints a real,
-production-Key-Vault-signed credential and persists an `integrations` row for whatever org it's
-told to, so trusting a client-supplied `orgId` here would let any caller mint a credential for,
-and overwrite the stored cloud integration of, an org they don't belong to.
-
-```
-POST /api/v1/federation/mint
-{
-  "customerId": "acme-corp",
-  "subscriptionId": "...",
-  "trustRule": { "issuer": "https://auth.cloudable.example", "boundSubject": "cloudable:tenant:acme-corp" }
-}
-```
-
-Success (`200`):
-
-```json
-{ "subject": "cloudable:tenant:acme-corp", "subscriptionId": "...", "token": "<jwt>" }
-```
-
-Rejection (`422`, `kind: "rejected"`, structured `reason`):
-
-```json
-{ "kind": "rejected", "error": { "code": "federation_subject_mismatch", "message": "...", "requestId": "..." }, "reason": "subject_mismatch" }
-```
-
-`trustRule` stands in for the customer's actual Azure-side configuration — no Azure account
-exists in this build, so `mint` exercises the fake validator described below instead of a real
-OIDC token exchange. Infra-level failures (signing, persistence) come back as a plain `500`
-(`kind: "infra_error"`, no `reason`) instead.
-
-## Token claims
-
-| Claim | Value                                    |
-| :---- | :---------------------------------------- |
-| `iss` | `federationIssuerUrl` (config)            |
-| `sub` | `cloudable:tenant:<customer-id>` — exact  |
-| `aud` | `api://AzureADTokenExchange` (default; the fixed audience Entra ID expects for OIDC workload identity federation) |
-| `iat` | mint time                                 |
-| `exp` | `iat` + 1h                                |
-
-`alg: EdDSA`, `kid: federation-oidc-v1`.
-
-## Signing key
-
-Reuses the `Signer` port (`apps/control-plane/src/services/Signer.ts`) that the CA/SSH-cert
-signing path also uses, under its own key id (`FEDERATION_KEY_ID = "federation-oidc-v1"`) so the
-two never collide. `Signer.local.ts` and `Signer.azure.ts` remain the only two files anywhere
-that touch raw private key material — `services/federation/jwk.ts` only
-ever parses the **public** half (the SPKI DER bytes `Signer.publicKey()` already returns) into JWK
-form for the JWKS endpoint, and `services/federation/jwt.ts` is pure base64url/JSON plumbing
-around the port's `sign`/`publicKey` methods. No JWT library is used: `alg: EdDSA` over Ed25519 is
-just "sign these exact bytes" (Ed25519 hashes internally), which is exactly what the `Signer` port
-already exposes.
-
-## The fake Azure validator — test harness, not a real integration
-
-No Azure account exists in this build, so `services/federation/FakeAzureTrustRule.ts` simulates
-the one property this unit exists to protect: does a token's `iss`/`sub` match a trust rule's
-configured `issuer`/`boundSubject`? It does **not** perform real cryptographic verification against
-Entra ID — the real check happens entirely inside Azure when Cloudable's provisioning layer later
-exchanges the minted JWT for an access token. `FederationService.federateCredential` wires this
-fake validator in as the current stand-in for that exchange (mirroring how `ProvisioningService.fake.ts`
-stands in for `ProvisioningService.azure.ts` elsewhere in this codebase) purely so the tenant-isolation
-property has somewhere to be exercised end-to-end, including through the HTTP mint endpoint. Swap the
-one `validateAgainstTrustRule` call for a real token-exchange request once a real Azure account exists;
-the persist/emit contract on either side of it does not change.
-
-## Persistence and events
-
-On successful (fake) validation, `federateCredential`:
-
-- persists an `integrations` row (`kind: "cloud"`, `identifier` = the subject, `config` = `{issuer, subject, subscriptionId}`)
-- emits `cloud.credential_federated` (`{subject, subscriptionId}`)
-
-On rejection, it **always** emits `cloud.credential_rejected` (`{subject, reason}`) before failing
-— never swallowed. Per `docs/events.md`, both are tier-1 (always audited) events, and rejection is
-annotated as always-alert: a rejected federation attempt is a security event, not a log line.
-
-## RBAC scope
+## RBAC scope (real, used by the self-hosted path too)
 
 **A custom role listing only required actions, assigned to a single dedicated resource group.
-Never Contributor. Never subscription scope.** `infra/terraform/federated-credential/main.tf`
-(`azurerm_role_definition` + `azurerm_role_assignment`) defines the "Cloudable Machine
-Operator" role: read/write/delete/start/stop/restart on a VM plus its disk, NIC, and public IP —
-nothing else — assigned only to that one resource group.
+Never Contributor. Never subscription scope.** `infra/terraform/control-plane/main.tf` (when
+`enable_self_managed_machines = true`, the default) creates the resource group, subnet, and
+deny-all-inbound NSG the control plane's machines live in, and grants its own managed identity
+the "Cloudable Machine Operator" role scoped to just that resource group — read/write/delete/
+start/stop/restart on a VM plus its disk, NIC, and public IP, nothing else. The sibling
+`infra/terraform/federated-credential/` module defines the same role for the (currently unused)
+BYOC path above, kept in sync by hand — see that main.tf's own comment.
 
 **Certificate credentials** only where federation is impossible. **Client secrets: never.**
 
 ## Revocation
 
-Unilateral and immediate: the customer deletes the federated identity credential (or the app
-registration) on their side. Cloudable holds no credential to revoke — there is nothing on
-Cloudable's side that needs to happen for access to stop.
-
-## Running the customer-side automation
-
-Terraform only — no Bicep. (Managing Azure AD resources directly from ARM/Bicep is still an
-extension-gated capability that isn't uniformly available yet; the `azuread`/`azurerm` Terraform
-provider is the mature path for that half.)
-
-```sh
-cd infra/terraform/federated-credential
-terraform init
-terraform validate   # never `apply` from this repo — this runs in the CUSTOMER's tenant/subscription
-terraform plan \
-  -var tenant_id=<customer-tenant-id> \
-  -var subscription_id=<customer-subscription-id> \
-  -var cloudable_issuer_url=https://auth.cloudable.example \
-  -var cloudable_expected_subject=cloudable:tenant:<customer-id>
-```
-
-Outputs the application (client) ID — combined with `tenant_id` and `subscription_id`, this is
-the three non-secret identifiers the customer gives Cloudable. No secret is ever
-produced.
+For the real (self-hosted) path: revoking the control plane's own managed identity, or removing
+the RBAC role assignment, in the customer's own tenant — ordinary Azure AD administration, not a
+Cloudable-specific flow, since there's no Cloudable-side credential to revoke either way.
 
 ## Related
 
-- `docs/events.md` — `cloud.credential_federated`/`cloud.credential_rejected` in the full catalogue.
-- `apps/control-plane/src/services/Signer.ts` — the signing port this unit reuses.
-- `apps/control-plane/src/services/federation/` — the implementation.
+- `docs/events.md` — `cloud.credential_federated`/`cloud.credential_rejected` (BYOC path only —
+  see above).
+- `apps/control-plane/src/services/Signer.ts` — the signing port the (unused) OIDC issuer reuses.
+- `apps/control-plane/src/services/CloudCatalogService.ts` — syncs the org-facing Azure region
+  catalog from the real ARM `SubscriptionClient`, using the same ambient managed identity.
+- `apps/control-plane/src/services/federation/` — the BYOC implementation described above.

@@ -74,7 +74,13 @@ const tier1Event = (orgId: string, machineId: string | null): DomainEvent => ({
   machineId,
   correlationId: crypto.randomUUID(),
   schemaVersion: 1,
-  payload: { name: "dev-box", region: "eastus", size: "Standard_B2s", image: "ubuntu-24.04" },
+  payload: {
+    name: "dev-box",
+    provider: "fake",
+    region: "eastus",
+    size: "Standard_B2s",
+    image: "ubuntu-24.04",
+  },
 });
 
 // Tier 2 — the catalogue's real machine-scoped tier-2 type, same one

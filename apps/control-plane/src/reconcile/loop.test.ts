@@ -8,6 +8,7 @@ import type { DesiredMachineState } from "./types";
 const machineA: DesiredMachineState = {
   machineId: "m-a",
   orgId: "org-1",
+  provider: "fake",
   region: "eastus",
   sizeSku: "Standard_B2s",
   packages: ["docker"],
@@ -17,6 +18,7 @@ const machineA: DesiredMachineState = {
 const machineB: DesiredMachineState = {
   machineId: "m-b",
   orgId: "org-1",
+  provider: "fake",
   region: "eastus",
   sizeSku: "Standard_B2s",
   packages: [],

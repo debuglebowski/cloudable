@@ -6,7 +6,9 @@ export const snapshots = pgTable("snapshots", {
   orgId: uuid("org_id").notNull(),
   machineId: uuid("machine_id").notNull(),
   trigger: text("trigger", { enum: ["archive", "upgrade", "manual"] }).notNull(),
-  region: text("region").notNull(),
+  // Nullable: inherited from the machine's own region, which is itself
+  // nullable for providers with no region concept (docker/fake).
+  region: text("region"),
   sizeBytes: bigint("size_bytes", { mode: "number" }),
   containsData: boolean("contains_data").notNull().default(true),
   containsConfig: boolean("contains_config").notNull().default(true),

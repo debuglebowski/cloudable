@@ -61,7 +61,7 @@ function buildTestLayers(opts: {
     findOwnedMachines: () =>
       Effect.sync(() => {
         calls.push("repo.findOwnedMachines");
-        return ownedMachines.map((id) => ({ id }));
+        return ownedMachines.map((id) => ({ id, provider: "fake" as const }));
       }),
     findLiveCertificateIds: () =>
       Effect.sync(() => {

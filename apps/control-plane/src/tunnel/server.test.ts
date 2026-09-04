@@ -58,6 +58,7 @@ async function withOrgAndMachine<T>(
         .values({
           orgId: org.id,
           name: "m-1",
+          provider: "fake",
           region: "eastus",
           sizeSku: "Standard_B2s",
           image: "ubuntu-24.04",
@@ -420,6 +421,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
               .values({
                 orgId: org.id,
                 name: "m-1",
+                provider: "fake",
                 region: "eastus",
                 sizeSku: "Standard_B2s",
                 image: "ubuntu-24.04",

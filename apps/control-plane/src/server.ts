@@ -1,6 +1,6 @@
 import { HttpApiBuilder, HttpMiddleware } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { config } from "./config";
 import { DbLive } from "./db/layer";
 import { EvidenceLive } from "./evidence/handler";
@@ -9,9 +9,9 @@ import { AccessLive } from "./http/handlers/access";
 import { AgentProtocolLive } from "./http/handlers/agent-protocol";
 import { ApprovalsLive } from "./http/handlers/approvals";
 import { ArchiveLive } from "./http/handlers/archive";
+import { CatalogLive } from "./http/handlers/catalog";
 import { ComplianceLive } from "./http/handlers/compliance";
 import { ConfigLive } from "./http/handlers/config";
-import { DevProvisioningLive } from "./http/handlers/dev-provisioning";
 import { ElevationsLive } from "./http/handlers/elevations";
 import { FederationLive } from "./http/handlers/federation";
 import { HealthLive } from "./http/handlers/health";
@@ -21,6 +21,7 @@ import { NotificationsLive } from "./http/handlers/notifications";
 import { OffboardingHttpLive } from "./http/handlers/offboarding";
 import { OrganisationLive } from "./http/handlers/organisation";
 import { PeopleLive } from "./http/handlers/people";
+import { ProvisioningCapabilitiesLive } from "./http/handlers/provisioning-capabilities";
 import { RestartLive } from "./http/handlers/restart";
 import { AccessAttachRouteLive, TunnelConnectRouteLive, TunnelLive } from "./http/handlers/tunnel";
 import { TunnelSignalLive } from "./http/handlers/tunnel-signal";
@@ -29,6 +30,7 @@ import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
 import { AuthRouteLive } from "./http/routes/auth";
 import { BinariesRouteLive } from "./http/routes/binaries";
 import { buildAppLive } from "./layers";
+import { seedAzureImages } from "./services/CloudCatalogService";
 import { SwitchableProvisioningServiceLive } from "./services/ProvisioningService.switchable";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
 import { LocalSignerLive } from "./services/Signer.local";
@@ -40,12 +42,11 @@ import { TunnelRegistry } from "./tunnel/registry";
 // swappable here at all — see `layers.ts`'s doc comment on `buildAppLive`
 // for why both join-token and managed-identity are always wired in live.
 //
-// `provisioning` dispatches at call time between fake/docker/azure (see
-// `ProvisioningService.switchable.ts`) rather than picking one for the
-// process's whole lifetime — `PROVISIONING_ADAPTER` (config.ts) only sets
-// which one it *starts* on; `DevProvisioningLive` below lets a running,
-// non-Azure-booted control-plane switch at runtime. Never a customer-facing
-// choice either way, just how/whether this process can be poked in dev.
+// `provisioning` dispatches at call time between fake/docker/azure, per the
+// `provider` each call carries — no more single process-wide adapter choice
+// (see `ProvisioningService.switchable.ts`). Which providers an org may
+// actually pick is real product state now (`GET /api/v1/integrations`,
+// `kind: "cloud"`), not a boot-time env var.
 const AppLive = buildAppLive({
   provisioning: SwitchableProvisioningServiceLive,
   signer: LocalSignerLive,
@@ -80,8 +81,9 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       TunnelSignalLive,
       TunnelLive,
       NotificationsLive,
-      DevProvisioningLive,
       RestartLive,
+      CatalogLive,
+      ProvisioningCapabilitiesLive,
     ),
   ),
   Layer.provide(DbLive),
@@ -116,4 +118,22 @@ const ServerLive = HttpApiBuilder.serve(
   Layer.provide(BunHttpServer.layer({ port: config.port })),
 );
 
-Layer.launch(ServerLive).pipe(BunRuntime.runMain);
+// Unlike the Azure region catalog (a real ARM call, only ever triggered by
+// an admin's "Sync from Azure" click — see `CloudCatalogService.ts`), the
+// image catalog has no external dependency at all: it's a static mirror of
+// `ProvisioningService.azure.ts`'s own `UBUNTU_IMAGES` map. Nothing else
+// ever called `seedAzureImages()` — without this, an org's Azure image
+// catalog would stay permanently empty (no button, no boot hook) and every
+// azure machine-creation request would fail image validation forever.
+// Idempotent upsert, safe to run unconditionally on every boot; logged and
+// swallowed on failure (e.g. a fresh DB whose migrations haven't run yet)
+// rather than blocking the server from starting over a non-essential seed.
+const seedCatalogDefaults = seedAzureImages().pipe(
+  Effect.provide(DbLive),
+  Effect.tap(() => Effect.logInfo("seeded Azure image catalog from UBUNTU_IMAGES")),
+  Effect.catchAll((cause) => Effect.logWarning(`Azure image catalog seed skipped: ${cause}`)),
+);
+
+Effect.runPromise(seedCatalogDefaults).then(() => {
+  Layer.launch(ServerLive).pipe(BunRuntime.runMain);
+});

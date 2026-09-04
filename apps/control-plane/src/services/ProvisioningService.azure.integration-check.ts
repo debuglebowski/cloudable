@@ -7,14 +7,15 @@ import { AzureProvisioningServiceLive } from "./ProvisioningService.azure";
 // Exercises the real Azure ARM SDK against a real subscription — creates,
 // reconciles, and archives one real (small) VM. Requires AZURE_SUBSCRIPTION_ID
 // and AZURE_MACHINES_SUBNET_ID to already be set in the environment *before*
-// `bun test` starts (same convention as PROVISIONING_ADAPTER — config.ts
-// reads process.env once at module load, so setting them from inside a test
-// file would be too late). Deliberately not run in CI or by default — this
-// creates and bills real cloud resources. Run explicitly:
+// `bun test` starts — config.ts reads process.env once at module load, so
+// setting them from inside a test file would be too late. Deliberately not
+// run in CI or by default — this creates and bills real cloud resources.
+// Run explicitly:
 //
 //   AZURE_SUBSCRIPTION_ID=... AZURE_MACHINES_RESOURCE_GROUP=... \
 //   AZURE_MACHINES_SUBNET_ID=... bun test ProvisioningService.azure.integration-check.ts
-const azureConfigured = config.azureSubscriptionId !== null && config.azureMachinesSubnetId !== null;
+const azureConfigured =
+  config.azureSubscriptionId !== null && config.azureMachinesSubnetId !== null;
 
 describe.skipIf(!azureConfigured)(
   "AzureProvisioningService (requires a real Azure subscription)",
@@ -30,7 +31,7 @@ describe.skipIf(!azureConfigured)(
       await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          yield* provisioning.archive(machineId);
+          yield* provisioning.archive(machineId, "azure");
         }),
       ).catch(() => {});
     });
@@ -42,6 +43,7 @@ describe.skipIf(!azureConfigured)(
           return yield* provisioning.create({
             machineId,
             orgId: "integration-check",
+            provider: "azure",
             region: "eastus",
             sizeSku: "Standard_B1s",
             image: "ubuntu-22.04",
@@ -60,7 +62,7 @@ describe.skipIf(!azureConfigured)(
       const reconciled = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* provisioning.reconcile(machineId);
+          return yield* provisioning.reconcile(machineId, "azure");
         }),
       );
       expect(["running", "error"]).toContain(reconciled.state);
@@ -68,7 +70,7 @@ describe.skipIf(!azureConfigured)(
       const archived = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* provisioning.archive(machineId);
+          return yield* provisioning.archive(machineId, "azure");
         }),
       );
       expect(archived.state).toBe("archived");
@@ -78,7 +80,7 @@ describe.skipIf(!azureConfigured)(
       const result = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* Effect.either(provisioning.reconcile(crypto.randomUUID()));
+          return yield* Effect.either(provisioning.reconcile(crypto.randomUUID(), "azure"));
         }),
       );
       expect(result._tag).toBe("Left");

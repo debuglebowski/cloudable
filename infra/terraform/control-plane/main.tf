@@ -44,8 +44,12 @@ locals {
   # Env vars ProvisioningService.azure.ts needs to manage real machines in
   # this tenant — only wired when enable_self_managed_machines actually
   # created the resource group/subnet/role below for them to point at.
+  # Which providers a machine can pick is per-org/per-machine state now
+  # (the Integrations page), not a boot-time adapter choice — there is no
+  # `PROVISIONING_ADAPTER` env var to set here any more; setting
+  # `AZURE_SUBSCRIPTION_ID` etc. is what makes Azure a *selectable* provider
+  # at all (see `GET /api/v1/provisioning/capabilities`).
   machine_provisioning_env = var.enable_self_managed_machines ? [
-    { name = "PROVISIONING_ADAPTER", value = "azure" },
     { name = "AZURE_SUBSCRIPTION_ID", value = data.azurerm_client_config.current.subscription_id },
     { name = "AZURE_MACHINES_RESOURCE_GROUP", value = azurerm_resource_group.machines[0].name },
     { name = "AZURE_MACHINES_SUBNET_ID", value = azurerm_subnet.machines[0].id },

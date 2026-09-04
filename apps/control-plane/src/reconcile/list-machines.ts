@@ -68,6 +68,7 @@ export const listReconcilableMachines: Effect.Effect<
             desired: {
               machineId: detail.id,
               orgId: detail.orgId,
+              provider: detail.provider,
               region: detail.region,
               sizeSku: detail.sizeSku,
               packages: detail.manifest.map((entry) => entry.packageName),

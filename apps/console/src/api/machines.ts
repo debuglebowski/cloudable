@@ -9,13 +9,17 @@ export type MachineState =
   | "archived_expired"
   | "error";
 
+export type MachineProvider = "azure" | "docker" | "fake";
+
 export interface Machine {
   id: string;
   orgId: string;
   templateId: string | null;
   ownerPersonId: string | null;
   name: string;
-  region: string;
+  provider: MachineProvider;
+  /** `null` for a provider with no region concept (docker/fake). */
+  region: string | null;
   sizeSku: string;
   image: string;
   state: MachineState;
@@ -99,7 +103,8 @@ interface MachineSummaryWire {
   templateId: string | null;
   ownerPersonId: string | null;
   name: string;
-  region: string;
+  provider: MachineProvider;
+  region: string | null;
   sizeSku: string;
   image: string;
   state: MachineState;
@@ -114,6 +119,7 @@ function toMachine(wire: MachineSummaryWire): Machine {
     templateId: wire.templateId,
     ownerPersonId: wire.ownerPersonId,
     name: wire.name,
+    provider: wire.provider,
     region: wire.region,
     sizeSku: wire.sizeSku,
     image: wire.image,
@@ -154,7 +160,9 @@ export async function listMachines(): Promise<Machine[]> {
 
 export interface CreateMachineInput {
   name: string;
-  region: string;
+  provider: MachineProvider;
+  /** Required iff `provider === "azure"` — omitted for docker/fake, which have no region. */
+  region?: string;
   sizeSku: string;
   image: string;
   /** A machine always has exactly one owner, always a person. */

@@ -17,6 +17,23 @@ export class MachineNotFoundError extends Schema.TaggedError<MachineNotFoundErro
   }),
 }) {}
 
+/**
+ * A create-machine request whose provider/region/image combination doesn't
+ * hold — region supplied for a provider that has none, region missing for
+ * one that requires it, or a region/image that isn't in the org's enabled
+ * catalog. The dropdown already restricts the happy path client-side; this
+ * is what stops a raw API call from bypassing it.
+ */
+export class InvalidMachineRequestError extends Schema.TaggedError<InvalidMachineRequestError>(
+  "InvalidMachineRequestError",
+)("InvalidMachineRequestError", {
+  error: Schema.Struct({
+    code: Schema.Literal("invalid_machine_request"),
+    message: Schema.String,
+    requestId: Schema.String,
+  }),
+}) {}
+
 /** A malformed `cursor` query param on `GET /api/v1/machines` — a client input error, not an infra failure. */
 export class InvalidCursorError extends Schema.TaggedError<InvalidCursorError>(
   "InvalidCursorError",

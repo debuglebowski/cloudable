@@ -40,7 +40,8 @@ describe.skipIf(!dockerReachable)(
           return yield* provisioning.create({
             machineId,
             orgId: "org-1",
-            region: "local",
+            provider: "docker",
+            region: null,
             sizeSku: "dev",
             image: "ubuntu-22.04",
             packages: ["curl"],
@@ -67,7 +68,7 @@ describe.skipIf(!dockerReachable)(
       const reconciled = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* provisioning.reconcile(machineId);
+          return yield* provisioning.reconcile(machineId, "docker");
         }),
       );
       expect(reconciled.state).toBe("running");
@@ -76,7 +77,7 @@ describe.skipIf(!dockerReachable)(
       const archived = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* provisioning.archive(machineId);
+          return yield* provisioning.archive(machineId, "docker");
         }),
       );
       expect(archived.state).toBe("archived");
@@ -102,7 +103,9 @@ describe.skipIf(!dockerReachable)(
       const result = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* Effect.either(provisioning.reconcile(`unknown-${crypto.randomUUID()}`));
+          return yield* Effect.either(
+            provisioning.reconcile(`unknown-${crypto.randomUUID()}`, "docker"),
+          );
         }),
       );
       expect(result._tag).toBe("Left");

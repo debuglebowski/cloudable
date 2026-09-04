@@ -1,7 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import net from "node:net";
 import type * as schema from "@cloudable/schema";
-import { machines, orgs, people, settingValues } from "@cloudable/schema";
+import {
+  integrations,
+  machines,
+  orgCatalogSelections,
+  orgs,
+  people,
+  settingValues,
+} from "@cloudable/schema";
 import { inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
@@ -10,7 +17,6 @@ import { EventBus } from "../../services/EventBus";
 import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { connectAndMigrate } from "../../test-support/db";
 import { MachineService } from "./MachineService";
-import { DEFAULT_REGION, DEFAULT_REGION_KEY, resolveOrgDefaultRegion } from "./region-policy";
 
 // Real Postgres, not a fake — same convention/skip-guard as
 // `../config/config.test.ts`: `bun test`/`test:unit` must stay green with no
@@ -72,6 +78,10 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     if (!close) return;
     if (createdOrgIds.length > 0) {
       await db.delete(settingValues).where(inArray(settingValues.scopeId, createdOrgIds));
+      await db
+        .delete(orgCatalogSelections)
+        .where(inArray(orgCatalogSelections.orgId, createdOrgIds));
+      await db.delete(integrations).where(inArray(integrations.orgId, createdOrgIds));
       await db.delete(machines).where(inArray(machines.orgId, createdOrgIds));
       await db.delete(people).where(inArray(people.orgId, createdOrgIds));
       await db.delete(orgs).where(inArray(orgs.id, createdOrgIds));
@@ -102,9 +112,41 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     return person;
   }
 
-  test("create with no region falls back to DEFAULT_REGION when the org hasn't configured one", async () => {
+  async function enableCatalogEntry(orgId: string, kind: "region" | "image", code: string) {
+    await db.insert(orgCatalogSelections).values({ orgId, provider: "azure", kind, code });
+  }
+
+  async function enableProvider(orgId: string, provider: "azure" | "docker" | "fake") {
+    await db.insert(integrations).values({ orgId, kind: "cloud", provider, identifier: provider });
+  }
+
+  test("provider not enabled for the org is rejected", async () => {
     const org = await seedOrg();
     const owner = await seedPerson(org.id);
+
+    const outcome = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* Effect.either(
+          svc.create({
+            orgId: org.id,
+            name: "db-prod-00",
+            provider: "fake",
+            sizeSku: "Standard_D2s_v5",
+            image: "ubuntu-24.04",
+            ownerPersonId: owner.id,
+          }),
+        );
+      }),
+    );
+
+    expect(outcome._tag).toBe("Left");
+  });
+
+  test("provider fake/docker: region is null, no catalog check", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "fake");
 
     const machine = await run(
       Effect.gen(function* () {
@@ -112,6 +154,7 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
         return yield* svc.create({
           orgId: org.id,
           name: "db-prod-01",
+          provider: "fake",
           sizeSku: "Standard_D2s_v5",
           image: "ubuntu-24.04",
           ownerPersonId: owner.id,
@@ -119,36 +162,99 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
       }),
     );
 
-    expect(machine.region).toBe(DEFAULT_REGION);
-
-    const resolved = await Effect.runPromise(resolveOrgDefaultRegion(db, org.id));
-    expect(resolved).toEqual({ value: DEFAULT_REGION, source: "default" });
+    expect(machine.provider).toBe("fake");
+    expect(machine.region).toBeNull();
   });
 
-  test("create with no region resolves the org's configured default, with source: org", async () => {
+  test("provider fake/docker: a supplied region is rejected — the provider has none", async () => {
     const org = await seedOrg();
     const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "docker");
 
-    await db.insert(settingValues).values({
-      scopeType: "org",
-      scopeId: org.id,
-      key: DEFAULT_REGION_KEY,
-      value: "westeurope",
-      source: "org",
-    });
+    const outcome = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* Effect.either(
+          svc.create({
+            orgId: org.id,
+            name: "db-prod-02",
+            provider: "docker",
+            region: "eastus",
+            sizeSku: "Standard_D2s_v5",
+            image: "ubuntu-24.04",
+            ownerPersonId: owner.id,
+          }),
+        );
+      }),
+    );
 
-    // Resolution itself carries the right `source` — this is the
-    // `resolveSetting()` contract docs/inheritance.md describes: which
-    // scope's row won, not just the raw value.
-    const resolved = await Effect.runPromise(resolveOrgDefaultRegion(db, org.id));
-    expect(resolved).toEqual({ value: "westeurope", source: "org" });
+    expect(outcome._tag).toBe("Left");
+  });
+
+  test("provider azure: region required, rejected when omitted", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "azure");
+
+    const outcome = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* Effect.either(
+          svc.create({
+            orgId: org.id,
+            name: "db-prod-03",
+            provider: "azure",
+            sizeSku: "Standard_D2s_v5",
+            image: "ubuntu-24.04",
+            ownerPersonId: owner.id,
+          }),
+        );
+      }),
+    );
+
+    expect(outcome._tag).toBe("Left");
+  });
+
+  test("provider azure: a region/image not in the org's catalog is rejected", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "azure");
+
+    const outcome = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* Effect.either(
+          svc.create({
+            orgId: org.id,
+            name: "db-prod-04",
+            provider: "azure",
+            region: "westeurope",
+            sizeSku: "Standard_D2s_v5",
+            image: "ubuntu-24.04",
+            ownerPersonId: owner.id,
+          }),
+        );
+      }),
+    );
+
+    expect(outcome._tag).toBe("Left");
+  });
+
+  test("provider azure: an enabled region/image is accepted", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "azure");
+    await enableCatalogEntry(org.id, "region", "westeurope");
+    await enableCatalogEntry(org.id, "image", "ubuntu-24.04");
 
     const machine = await run(
       Effect.gen(function* () {
         const svc = yield* MachineService;
         return yield* svc.create({
           orgId: org.id,
-          name: "db-prod-02",
+          name: "db-prod-05",
+          provider: "azure",
+          region: "westeurope",
           sizeSku: "Standard_D2s_v5",
           image: "ubuntu-24.04",
           ownerPersonId: owner.id,
@@ -156,60 +262,21 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
       }),
     );
 
-    // The new machine's stored region matches what the org resolved to —
-    // resolved at creation time, not copied from a client-side prefill.
+    expect(machine.provider).toBe("azure");
     expect(machine.region).toBe("westeurope");
   });
 
-  test("create honors an explicit region over the org default", async () => {
-    const org = await seedOrg();
-    const owner = await seedPerson(org.id);
-
-    await db.insert(settingValues).values({
-      scopeType: "org",
-      scopeId: org.id,
-      key: DEFAULT_REGION_KEY,
-      value: "westeurope",
-      source: "org",
-    });
-
-    const machine = await run(
-      Effect.gen(function* () {
-        const svc = yield* MachineService;
-        return yield* svc.create({
-          orgId: org.id,
-          name: "db-prod-03",
-          region: "northeurope",
-          sizeSku: "Standard_D2s_v5",
-          image: "ubuntu-24.04",
-          ownerPersonId: owner.id,
-        });
-      }),
-    );
-
-    expect(machine.region).toBe("northeurope");
-  });
-
-  test("two orgs configuring different defaults each get their own — no cross-org leakage", async () => {
+  test("two orgs' catalogs don't leak into each other", async () => {
     const orgA = await seedOrg();
     const orgB = await seedOrg();
     const ownerA = await seedPerson(orgA.id);
     const ownerB = await seedPerson(orgB.id);
-
-    await db.insert(settingValues).values({
-      scopeType: "org",
-      scopeId: orgA.id,
-      key: DEFAULT_REGION_KEY,
-      value: "westeurope",
-      source: "org",
-    });
-    await db.insert(settingValues).values({
-      scopeType: "org",
-      scopeId: orgB.id,
-      key: DEFAULT_REGION_KEY,
-      value: "japaneast",
-      source: "org",
-    });
+    await enableProvider(orgA.id, "azure");
+    await enableProvider(orgB.id, "azure");
+    await enableCatalogEntry(orgA.id, "region", "westeurope");
+    await enableCatalogEntry(orgA.id, "image", "ubuntu-24.04");
+    await enableCatalogEntry(orgB.id, "region", "japaneast");
+    await enableCatalogEntry(orgB.id, "image", "ubuntu-24.04");
 
     const machineA = await run(
       Effect.gen(function* () {
@@ -217,26 +284,34 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
         return yield* svc.create({
           orgId: orgA.id,
           name: "a-1",
+          provider: "azure",
+          region: "westeurope",
           sizeSku: "Standard_D2s_v5",
           image: "ubuntu-24.04",
           ownerPersonId: ownerA.id,
         });
       }),
     );
-    const machineB = await run(
+
+    const outcomeB = await run(
       Effect.gen(function* () {
         const svc = yield* MachineService;
-        return yield* svc.create({
-          orgId: orgB.id,
-          name: "b-1",
-          sizeSku: "Standard_D2s_v5",
-          image: "ubuntu-24.04",
-          ownerPersonId: ownerB.id,
-        });
+        // orgB never enabled "westeurope" — orgA's catalog must not leak in.
+        return yield* Effect.either(
+          svc.create({
+            orgId: orgB.id,
+            name: "b-1",
+            provider: "azure",
+            region: "westeurope",
+            sizeSku: "Standard_D2s_v5",
+            image: "ubuntu-24.04",
+            ownerPersonId: ownerB.id,
+          }),
+        );
       }),
     );
 
     expect(machineA.region).toBe("westeurope");
-    expect(machineB.region).toBe("japaneast");
+    expect(outcomeB._tag).toBe("Left");
   });
 });

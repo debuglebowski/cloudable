@@ -14,6 +14,7 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
           .create({
             orgId: currentUser.orgId,
             name: payload.name,
+            provider: payload.provider,
             region: payload.region ?? null,
             sizeSku: payload.sizeSku,
             image: payload.image,

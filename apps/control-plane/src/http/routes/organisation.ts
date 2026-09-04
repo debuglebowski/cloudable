@@ -31,7 +31,6 @@ const OrgSettingsResource = Schema.Struct({
   loggingTierOverrideCount: Schema.Number,
   retentionDefaultDays: Schema.Number,
   retentionLocation: RetentionLocation,
-  regionDefault: Schema.String,
 });
 
 const GetOrgSettingsUrlParams = Schema.Struct({ orgId: Schema.String });
@@ -48,7 +47,6 @@ const UpdateOrgSettingsPayload = Schema.Struct({
   loggingTier: Schema.optional(LoggingTier),
   retentionDefaultDays: Schema.optional(Schema.Number),
   retentionLocation: Schema.optional(RetentionLocation),
-  regionDefault: Schema.optional(Schema.String),
   actor: ConfigActor,
 });
 

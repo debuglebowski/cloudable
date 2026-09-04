@@ -35,8 +35,12 @@ const DATA_DISK_LUN = 0;
 
 /** Canonical's Ubuntu Server gallery images. "ubuntu-XX.YY" only — an honest
  * rejection rather than guessing at an unrelated base image, same
- * convention as ProvisioningService.docker.ts's `ubuntuVersionFor`. */
-const UBUNTU_IMAGES: Record<string, { offer: string; sku: string }> = {
+ * convention as ProvisioningService.docker.ts's `ubuntuVersionFor`. Exported
+ * as the one source of truth `services/CloudCatalogService.ts` seeds the
+ * org-facing image catalog from — Azure has no API enumerating "images
+ * compatible with our cloud-init setup" the way it does for regions, so this
+ * hand-maintained map doubles as that catalog rather than drifting from it. */
+export const UBUNTU_IMAGES: Record<string, { offer: string; sku: string }> = {
   "ubuntu-22.04": { offer: "0001-com-ubuntu-server-jammy", sku: "22_04-lts-gen2" },
   "ubuntu-24.04": { offer: "ubuntu-24_04-lts", sku: "server" },
 };
@@ -231,7 +235,11 @@ const createDataDisk = (
     }),
   );
 
-const dataDiskIdFor = (clients: ArmClients, resourceGroup: string, names: ReturnType<typeof namesFor>): string =>
+const dataDiskIdFor = (
+  clients: ArmClients,
+  resourceGroup: string,
+  names: ReturnType<typeof namesFor>,
+): string =>
   `/subscriptions/${clients.subscriptionId}/resourceGroups/${resourceGroup}/providers/Microsoft.Compute/disks/${names.dataDisk}`;
 
 const service: ProvisioningService = {
@@ -246,6 +254,17 @@ const service: ProvisioningService = {
           }),
         );
       }
+      // `MachineDescriptor.region` is nullable at the port level (docker/fake
+      // have no region concept) — the org/machine-creation layer above
+      // always supplies one for provider "azure" (see
+      // `MachineService.create`'s catalog validation), so this is a
+      // fail-closed sanity check, not the primary enforcement.
+      if (!desc.region) {
+        return yield* Effect.fail(
+          new ProvisioningError({ reason: "provider_error", cause: "azure requires a region" }),
+        );
+      }
+      const region = desc.region;
       const clients = yield* getClients();
       const names = namesFor(desc.machineId);
       const tags = { "cloudable-machine-id": desc.machineId, "cloudable-org-id": desc.orgId };
@@ -253,13 +272,13 @@ const service: ProvisioningService = {
       const nic = yield* createNetworking(
         clients,
         config.azureMachinesResourceGroup,
-        desc.region,
+        region,
         names,
       );
       const dataDisk = yield* createDataDisk(
         clients,
         config.azureMachinesResourceGroup,
-        desc.region,
+        region,
         names,
       );
 
@@ -268,7 +287,7 @@ const service: ProvisioningService = {
           config.azureMachinesResourceGroup,
           names.vm,
           {
-            location: desc.region,
+            location: region,
             tags,
             identity: { type: "SystemAssigned" },
             hardwareProfile: { vmSize: desc.sizeSku },
@@ -374,6 +393,12 @@ const service: ProvisioningService = {
           }),
         );
       }
+      if (!desc.region) {
+        return yield* Effect.fail(
+          new ProvisioningError({ reason: "provider_error", cause: "azure requires a region" }),
+        );
+      }
+      const region = desc.region;
       const clients = yield* getClients();
       const names = namesFor(desc.machineId);
       const rg = config.azureMachinesResourceGroup;
@@ -397,7 +422,7 @@ const service: ProvisioningService = {
       // attestation identity"). The agent re-attests from scratch on boot.
       const vm = yield* runArm(() =>
         clients.compute.virtualMachines.beginCreateOrUpdateAndWait(rg, names.vm, {
-          location: desc.region,
+          location: region,
           tags: { "cloudable-machine-id": desc.machineId, "cloudable-org-id": desc.orgId },
           identity: { type: "SystemAssigned" },
           hardwareProfile: { vmSize: desc.sizeSku },
@@ -421,7 +446,13 @@ const service: ProvisioningService = {
             adminUsername: "cloudable",
             adminPassword: throwawayAdminPassword(),
             customData: cloudInitFor(
-              { machineId: desc.machineId, orgId: desc.orgId, region: desc.region, sizeSku: desc.sizeSku },
+              {
+                machineId: desc.machineId,
+                orgId: desc.orgId,
+                provider: "azure",
+                region,
+                sizeSku: desc.sizeSku,
+              },
               DATA_DISK_LUN,
             ),
           },
@@ -439,9 +470,7 @@ const service: ProvisioningService = {
   // Not this session's file — a concurrent change owns `restart`, left
   // exactly as found.
   restart: () =>
-    Effect.fail(
-      new ProvisioningError({ reason: "provider_error", cause: "not implemented" }),
-    ),
+    Effect.fail(new ProvisioningError({ reason: "provider_error", cause: "not implemented" })),
 };
 
 export const AzureProvisioningServiceLive = Layer.succeed(ProvisioningServiceTag, service);

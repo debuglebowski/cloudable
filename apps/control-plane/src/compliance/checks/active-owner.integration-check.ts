@@ -59,6 +59,7 @@ describe("activeOwnerCheck", () => {
           orgId,
           ownerPersonId: opts.ownerPersonId,
           name: "m",
+          provider: "fake",
           region: "eastus",
           sizeSku: "Standard_B2s",
           image: "ubuntu-24.04",

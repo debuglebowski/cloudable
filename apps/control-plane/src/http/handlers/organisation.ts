@@ -20,7 +20,6 @@ const VALIDATION_REASONS = new Set([
   "org_not_found",
   "org_name_required",
   "retention_days_must_be_a_positive_integer",
-  "region_default_required",
 ]);
 
 const rethrowInfraAsDefect = (e: OrgSettingsError) =>
@@ -49,7 +48,6 @@ export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handl
         loggingTier: payload.loggingTier,
         retentionDefaultDays: payload.retentionDefaultDays,
         retentionLocation: payload.retentionLocation,
-        regionDefault: payload.regionDefault,
         actor: { actorType: payload.actor.type, actorId: payload.actor.id },
       }).pipe(Effect.catchTag("OrgSettingsError", rethrowInfraAsDefect)),
     )
