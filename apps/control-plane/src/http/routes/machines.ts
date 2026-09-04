@@ -2,10 +2,13 @@ import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import {
   InvalidCursorError,
+  InvalidMachineRequestError,
   MachineNotFoundError,
   PackagePinConflictError,
 } from "../../domain/machine/errors";
 import { CurrentUserAuthentication } from "../middleware/auth";
+
+const machineProviderSchema = Schema.Literal("azure", "docker", "fake");
 
 const machineStateSchema = Schema.Literal(
   "provisioning",
@@ -44,7 +47,8 @@ const machineSummaryFields = {
   templateId: Schema.NullOr(Schema.UUID),
   ownerPersonId: Schema.NullOr(Schema.UUID),
   name: Schema.String,
-  region: Schema.String,
+  provider: machineProviderSchema,
+  region: Schema.NullOr(Schema.String),
   sizeSku: Schema.String,
   image: Schema.String,
   state: machineStateSchema,
@@ -77,9 +81,11 @@ const pageInfoSchema = Schema.Struct({
 
 const createMachinePayloadSchema = Schema.Struct({
   name: Schema.String.pipe(Schema.minLength(1)),
-  // Optional — omitted, `MachineService.create` resolves the org's
-  // configured default region instead of requiring the caller to always
-  // supply one.
+  provider: machineProviderSchema,
+  // Required iff provider === "azure" (and must name an org-enabled
+  // region); forbidden otherwise — enforced in `MachineService.create`,
+  // not at the wire-schema level, since it needs the org's catalog to check
+  // against.
   region: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   sizeSku: Schema.String.pipe(Schema.minLength(1)),
   image: Schema.String.pipe(Schema.minLength(1)),
@@ -125,7 +131,8 @@ export const MachinesGroup = HttpApiGroup.make("machines")
   .add(
     HttpApiEndpoint.post("create", "/")
       .setPayload(createMachinePayloadSchema)
-      .addSuccess(machineSummarySchema, { status: 201 }),
+      .addSuccess(machineSummarySchema, { status: 201 })
+      .addError(InvalidMachineRequestError, { status: 422 }),
   )
   .add(
     HttpApiEndpoint.get("list", "/")

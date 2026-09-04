@@ -12,7 +12,13 @@ import type { EventEnvelope } from "../envelope";
 export type MachineEvent =
   | (EventEnvelope & {
       type: "machine.created";
-      payload: { name: string; region: string; size: string; image: string };
+      payload: {
+        name: string;
+        provider: "azure" | "docker" | "fake";
+        region: string | null;
+        size: string;
+        image: string;
+      };
     })
   | (EventEnvelope & {
       type: "machine.provisioned";

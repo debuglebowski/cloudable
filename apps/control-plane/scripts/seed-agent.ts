@@ -28,7 +28,8 @@ const [machine] = await db
   .values({
     orgId: org.id,
     name: "dev-seed-machine",
-    region: "local",
+    provider: "fake",
+    region: null,
     sizeSku: "dev",
     image: "dev",
   })

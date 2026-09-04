@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import type { CloudProvider } from "@/api/integrations";
+import { useIntegrations } from "@/api/integrations";
 import { createMachine, machinesKeys } from "@/api/machines";
 import { listPeople } from "@/api/people-directory";
+import { useProviderCatalog } from "@/api/provider-catalog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,7 +30,24 @@ export interface AddMachineDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const DEFAULTS = { region: "eastus", sizeSku: "Standard_D2s_v5", image: "ubuntu-24.04" };
+const PROVIDER_LABEL: Record<CloudProvider, string> = {
+  azure: "Azure",
+  docker: "Docker",
+  fake: "Fake",
+};
+
+/** Only Azure has a region concept or a curated image catalog — Docker/Fake
+ * are regionless (the Region field is omitted outright, not disabled) and
+ * take a freeform image string (Docker further constrains it to
+ * "ubuntu-XX.YY" at the adapter level; Fake accepts anything). */
+function supportsRegion(provider: CloudProvider): boolean {
+  return provider === "azure";
+}
+function hasImageCatalog(provider: CloudProvider): boolean {
+  return provider === "azure";
+}
+
+const DEFAULTS = { sizeSku: "Standard_D2s_v5", image: "ubuntu-24.04" };
 
 /**
  * Real `POST /api/v1/machines` — no scope-2 template picker (templates
@@ -39,7 +59,8 @@ const DEFAULTS = { region: "eastus", sizeSku: "Standard_D2s_v5", image: "ubuntu-
 export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
-  const [region, setRegion] = useState(DEFAULTS.region);
+  const [provider, setProvider] = useState<CloudProvider | "">("");
+  const [region, setRegion] = useState("");
   const [sizeSku, setSizeSku] = useState(DEFAULTS.sizeSku);
   const [image, setImage] = useState(DEFAULTS.image);
   const [ownerPersonId, setOwnerPersonId] = useState("");
@@ -51,15 +72,35 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
   });
   const activePeople = (peopleQuery.data ?? []).filter((p) => p.active);
 
+  const integrationsQuery = useIntegrations();
+  const enabledProviders = (integrationsQuery.data ?? [])
+    .filter((integration) => integration.kind === "cloud" && integration.removedAt === null)
+    .map((integration) => integration.provider)
+    .filter((p): p is CloudProvider => p !== null);
+
+  const regionCatalogQuery = useProviderCatalog("azure", "region");
+  const enabledRegions = (regionCatalogQuery.data ?? []).filter((entry) => entry.enabled);
+  const imageCatalogQuery = useProviderCatalog("azure", "image");
+  const enabledImages = (imageCatalogQuery.data ?? []).filter((entry) => entry.enabled);
+
+  function handleProviderChange(next: CloudProvider) {
+    setProvider(next);
+    setRegion("");
+    setImage(hasImageCatalog(next) ? "" : DEFAULTS.image);
+  }
+
   const mutation = useMutation({
-    mutationFn: () =>
-      createMachine({
+    mutationFn: () => {
+      if (!provider) throw new Error("Provider is required");
+      return createMachine({
         name: name.trim(),
-        region: region.trim(),
+        provider,
+        ...(supportsRegion(provider) ? { region } : {}),
         sizeSku: sizeSku.trim(),
         image: image.trim(),
         ownerPersonId,
-      }),
+      });
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: machinesKeys.lists() });
       reset();
@@ -69,14 +110,21 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
 
   function reset() {
     setName("");
-    setRegion(DEFAULTS.region);
+    setProvider("");
+    setRegion("");
     setSizeSku(DEFAULTS.sizeSku);
     setImage(DEFAULTS.image);
     setOwnerPersonId("");
     mutation.reset();
   }
 
-  const canSubmit = name.trim().length > 0 && ownerPersonId.length > 0 && !mutation.isPending;
+  const canSubmit =
+    name.trim().length > 0 &&
+    provider !== "" &&
+    (!supportsRegion(provider) || region !== "") &&
+    image.trim().length > 0 &&
+    ownerPersonId.length > 0 &&
+    !mutation.isPending;
 
   return (
     <Dialog
@@ -111,16 +159,58 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
               placeholder="db-prod-04"
             />
           </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="add-machine-provider">Provider</Label>
+            <Select
+              value={provider}
+              onValueChange={(value) => handleProviderChange(value as CloudProvider)}
+            >
+              <SelectTrigger id="add-machine-provider">
+                <SelectValue
+                  placeholder={
+                    integrationsQuery.isLoading
+                      ? "Loading…"
+                      : enabledProviders.length === 0
+                        ? "No providers enabled — see Integrations"
+                        : "Select a provider"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {enabledProviders.map((candidate) => (
+                  <SelectItem key={candidate} value={candidate}>
+                    {PROVIDER_LABEL[candidate]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="add-machine-region">Region</Label>
-              <Input
-                id="add-machine-region"
-                required
-                value={region}
-                onChange={(event) => setRegion(event.target.value)}
-              />
-            </div>
+            {provider && supportsRegion(provider) && (
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="add-machine-region">Region</Label>
+                <Select value={region} onValueChange={setRegion}>
+                  <SelectTrigger id="add-machine-region">
+                    <SelectValue
+                      placeholder={
+                        regionCatalogQuery.isLoading
+                          ? "Loading…"
+                          : enabledRegions.length === 0
+                            ? "No regions enabled"
+                            : "Select a region"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {enabledRegions.map((entry) => (
+                      <SelectItem key={entry.code} value={entry.code}>
+                        {entry.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="flex flex-col gap-1">
               <Label htmlFor="add-machine-size">Size SKU</Label>
               <Input
@@ -133,12 +223,35 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="add-machine-image">Image</Label>
-            <Input
-              id="add-machine-image"
-              required
-              value={image}
-              onChange={(event) => setImage(event.target.value)}
-            />
+            {provider && hasImageCatalog(provider) ? (
+              <Select value={image} onValueChange={setImage}>
+                <SelectTrigger id="add-machine-image">
+                  <SelectValue
+                    placeholder={
+                      imageCatalogQuery.isLoading
+                        ? "Loading…"
+                        : enabledImages.length === 0
+                          ? "No images enabled"
+                          : "Select an image"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {enabledImages.map((entry) => (
+                    <SelectItem key={entry.code} value={entry.code}>
+                      {entry.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id="add-machine-image"
+                required
+                value={image}
+                onChange={(event) => setImage(event.target.value)}
+              />
+            )}
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="add-machine-owner">

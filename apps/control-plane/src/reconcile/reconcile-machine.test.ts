@@ -8,6 +8,7 @@ import type { DesiredMachineState } from "./types";
 const desired = (overrides: Partial<DesiredMachineState> = {}): DesiredMachineState => ({
   machineId: "m-1",
   orgId: "org-1",
+  provider: "fake",
   region: "eastus",
   sizeSku: "Standard_B2s",
   packages: ["docker", "nodejs 20"],

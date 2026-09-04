@@ -65,6 +65,7 @@ describe("org-scope package manifest write path", () => {
       .values({
         orgId,
         name: "m1",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
         image: "ubuntu-24.04",

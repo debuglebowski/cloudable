@@ -5,9 +5,9 @@ import { AccessGroup } from "./routes/access";
 import { AgentProtocolGroup } from "./routes/agent-protocol";
 import { ApprovalsGroup } from "./routes/approvals";
 import { ArchiveGroup } from "./routes/archive";
+import { CatalogGroup } from "./routes/catalog";
 import { ComplianceGroup } from "./routes/compliance";
 import { ConfigGroup } from "./routes/config";
-import { DevProvisioningGroup } from "./routes/dev-provisioning";
 import { ElevationsGroup } from "./routes/elevations";
 import { FederationGroup } from "./routes/federation";
 import { IntegrationsGroup } from "./routes/integrations";
@@ -16,6 +16,7 @@ import { NotificationsGroup } from "./routes/notifications";
 import { OffboardingGroup } from "./routes/offboarding";
 import { OrganisationGroup } from "./routes/organisation";
 import { PeopleGroup } from "./routes/people";
+import { ProvisioningCapabilitiesGroup } from "./routes/provisioning-capabilities";
 import { RestartGroup } from "./routes/restart";
 import { TunnelGroup } from "./routes/tunnel";
 import { TunnelSignalGroup } from "./routes/tunnel-signal";
@@ -47,7 +48,8 @@ export class Api extends HttpApi.make("cloudable")
   .add(TunnelSignalGroup)
   .add(TunnelGroup)
   .add(NotificationsGroup)
-  .add(DevProvisioningGroup)
-  .add(RestartGroup) {}
+  .add(RestartGroup)
+  .add(CatalogGroup)
+  .add(ProvisioningCapabilitiesGroup) {}
 // Feature units: import your HttpApiGroup and append `.add(YourGroup)` to the chain above.
 // Never reorder existing `.add()` calls.

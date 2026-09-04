@@ -15,20 +15,21 @@ describe("ProvisioningService.fake", () => {
       const created = yield* provisioning.create({
         machineId: "m-1",
         orgId: "org-1",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
       });
       expect(created.state).toBe("running");
       expect(created.externalId).toBe("fake-m-1");
 
-      const reconciledBeforeArchive = yield* provisioning.reconcile("m-1");
+      const reconciledBeforeArchive = yield* provisioning.reconcile("m-1", "fake");
       expect(reconciledBeforeArchive).toEqual(created);
 
-      const archived = yield* provisioning.archive("m-1");
+      const archived = yield* provisioning.archive("m-1", "fake");
       expect(archived.state).toBe("archived");
       expect(archived.externalId).toBe("fake-m-1");
 
-      const reconciledAfterArchive = yield* provisioning.reconcile("m-1");
+      const reconciledAfterArchive = yield* provisioning.reconcile("m-1", "fake");
       expect(reconciledAfterArchive).toEqual(archived);
     });
 
@@ -38,8 +39,8 @@ describe("ProvisioningService.fake", () => {
   test("archive and reconcile fail with not_found for an unknown machine", async () => {
     const program = Effect.gen(function* () {
       const provisioning = yield* ProvisioningServiceTag;
-      const archiveError = yield* Effect.flip(provisioning.archive("does-not-exist"));
-      const reconcileError = yield* Effect.flip(provisioning.reconcile("does-not-exist"));
+      const archiveError = yield* Effect.flip(provisioning.archive("does-not-exist", "fake"));
+      const reconcileError = yield* Effect.flip(provisioning.reconcile("does-not-exist", "fake"));
       return { archiveError, reconcileError };
     });
 
@@ -60,11 +61,12 @@ describe("ProvisioningService.fake", () => {
       const created = yield* provisioning.create({
         machineId: "m-1",
         orgId: "org-1",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
         packages: ["docker"],
       });
-      const reconciled = yield* provisioning.reconcile("m-1");
+      const reconciled = yield* provisioning.reconcile("m-1", "fake");
       return { created, reconciled };
     });
 
@@ -80,11 +82,12 @@ describe("ProvisioningService.fake", () => {
       yield* provisioning.create({
         machineId: "m-2",
         orgId: "org-1",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
         packages: ["docker", "nodejs 20"],
       });
-      return yield* provisioning.reconcile("m-2");
+      return yield* provisioning.reconcile("m-2", "fake");
     });
 
     const reconciled = await Effect.runPromise(
@@ -99,6 +102,7 @@ describe("ProvisioningService.fake", () => {
       yield* provisioning.create({
         machineId: "m-reimage-1",
         orgId: "org-1",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
       });
@@ -106,13 +110,14 @@ describe("ProvisioningService.fake", () => {
       const reimaged = yield* provisioning.reimage({
         machineId: "m-reimage-1",
         orgId: "org-1",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
         targetImage: "ubuntu-24.04",
       });
       expect(reimaged.state).toBe("running");
 
-      const reconciled = yield* provisioning.reconcile("m-reimage-1");
+      const reconciled = yield* provisioning.reconcile("m-reimage-1", "fake");
       expect(reconciled.state).toBe("running");
     });
 
@@ -125,6 +130,7 @@ describe("ProvisioningService.fake", () => {
       yield* provisioning.create({
         machineId: "m-reimage-2",
         orgId: "org-1",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
       });
@@ -132,13 +138,14 @@ describe("ProvisioningService.fake", () => {
       const reimaged = yield* provisioning.reimage({
         machineId: "m-reimage-2",
         orgId: "org-1",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
         targetImage: FAKE_VERIFICATION_FAILURE_IMAGE,
       });
       expect(reimaged.state).toBe("error");
 
-      const reconciled = yield* provisioning.reconcile("m-reimage-2");
+      const reconciled = yield* provisioning.reconcile("m-reimage-2", "fake");
       expect(reconciled.state).toBe("error");
     });
 
@@ -152,6 +159,7 @@ describe("ProvisioningService.fake", () => {
         provisioning.reimage({
           machineId: "does-not-exist",
           orgId: "org-1",
+          provider: "fake",
           region: "eastus",
           sizeSku: "Standard_B2s",
           targetImage: "ubuntu-24.04",

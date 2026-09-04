@@ -101,7 +101,7 @@ export const makeFakeProvisioningServiceLive = (
           return running.status;
         });
 
-      const archive: ProvisioningService["archive"] = (machineId: string) =>
+      const archive: ProvisioningService["archive"] = (machineId: string, _provider) =>
         Effect.gen(function* () {
           const existing = yield* require(machineId);
           const archived: FakeMachineEntry = {
@@ -112,7 +112,7 @@ export const makeFakeProvisioningServiceLive = (
           return archived.status;
         });
 
-      const reconcile: ProvisioningService["reconcile"] = (machineId: string) =>
+      const reconcile: ProvisioningService["reconcile"] = (machineId: string, _provider) =>
         Effect.gen(function* () {
           const existing = yield* require(machineId);
           if (existing.status.state === "archived") {
@@ -150,7 +150,7 @@ export const makeFakeProvisioningServiceLive = (
           return settled.status;
         });
 
-      const restart: ProvisioningService["restart"] = (machineId: string) =>
+      const restart: ProvisioningService["restart"] = (machineId: string, _provider) =>
         Effect.gen(function* () {
           const existing = yield* require(machineId);
           const restarted: FakeMachineEntry = {

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import {
   Clock,
+  Cloud,
   Cpu,
   Disc,
   FileText,
@@ -262,7 +263,9 @@ export function MachineDetailPage() {
             variant="outline"
             size="sm"
             disabled={machine.state !== "running"}
-            title={machine.state !== "running" ? "Only a running machine can be restarted." : undefined}
+            title={
+              machine.state !== "running" ? "Only a running machine can be restarted." : undefined
+            }
             onClick={() => setRestartOpen(true)}
           >
             Restart
@@ -330,7 +333,10 @@ export function MachineDetailPage() {
                     )
                   }
                 />
-                <PropertyRow icon={MapPin} label="Region" value={machine.region} />
+                <PropertyRow icon={Cloud} label="Provider" value={machine.provider} />
+                {machine.region && (
+                  <PropertyRow icon={MapPin} label="Region" value={machine.region} />
+                )}
                 <PropertyRow icon={Cpu} label="Size" value={machine.sizeSku} />
                 <PropertyRow
                   icon={Disc}

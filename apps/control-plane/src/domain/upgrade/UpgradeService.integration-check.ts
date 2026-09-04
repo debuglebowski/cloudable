@@ -52,6 +52,7 @@ describe("UpgradeService", () => {
       .values({
         orgId: org!.id,
         name: "test-machine",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
         image: initialImage,
@@ -75,6 +76,7 @@ describe("UpgradeService", () => {
         yield* provisioning.create({
           machineId: machine!.id,
           orgId: org!.id,
+          provider: "fake",
           region: "eastus",
           sizeSku: "Standard_B2s",
         });

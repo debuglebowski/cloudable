@@ -13,10 +13,9 @@
  * Mutually exclusive with that script's dataset (same org id): run one or
  * the other, `--reset` between switches.
  *
- * Flips this control-plane's provisioning adapter to "docker" via the
- * dev-only runtime toggle (`services/ProvisioningService.switchable.ts`,
- * `PATCH /api/v1/dev/provisioning-adapter`) so machines you create next
- * actually get real containers. Everything else — machines, approvals,
+ * Enables the "docker" provider for the seeded org (`POST /api/v1/
+ * integrations`, `kind: "cloud"`) so a machine you create with
+ * `provider: "docker"` next gets a real container. Everything else — machines, approvals,
  * elevations, access sessions — is deliberately left for you to create
  * live through the console/CLI: pre-seeding those would just be testing
  * the seed script's fabricated data again, not the real flow.
@@ -207,17 +206,15 @@ async function main() {
     );
   }
 
-  const adapter = await api<{ current: string; overridable: boolean }>(
-    "PATCH",
-    "/api/v1/dev/provisioning-adapter",
-    { adapter: "docker" },
+  await api(
+    "POST",
+    "/api/v1/integrations",
+    { kind: "cloud", provider: "docker", identifier: "Docker", config: { provider: "docker" } },
     cookie,
   ).catch((cause) => {
-    throw new Error(
-      `couldn't switch to the docker provisioning adapter — if this control-plane booted with PROVISIONING_ADAPTER=azure it can never be switched at runtime (by design). Restart it without that set, or with PROVISIONING_ADAPTER=docker/fake, then re-run this script.\n${cause}`,
-    );
+    throw new Error(`couldn't enable the docker provider for the seeded org\n${cause}`);
   });
-  console.log(`provisioning adapter: switched to ${adapter.current}`);
+  console.log("provider: enabled docker for the seeded org");
 
   console.log("\nDone. Sign in at the console with:");
   console.log(`  email:    ${OWNER_EMAIL}`);

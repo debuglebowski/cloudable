@@ -59,6 +59,7 @@ describe("runDiffAndPublish (integration)", () => {
       .values({
         orgId: org.id,
         name: "diff-test-machine",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
         image: "ubuntu-24.04",

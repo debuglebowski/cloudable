@@ -1,5 +1,5 @@
 import { people } from "@cloudable/schema";
-import { HttpApiMiddleware, HttpServerRequest } from "@effect/platform";
+import { HttpApiMiddleware, HttpApiSchema, HttpServerRequest } from "@effect/platform";
 import { eq } from "drizzle-orm";
 import { Context, Effect, Layer, Schema } from "effect";
 import { auth } from "../../auth";
@@ -16,10 +16,18 @@ export interface CurrentUser {
 
 export class CurrentUserTag extends Context.Tag("CurrentUser")<CurrentUserTag, CurrentUser>() {}
 
-/** 401: no valid BetterAuth session, or the session's email has no matching `people` row. */
+/**
+ * 401: no valid BetterAuth session, or the session's email has no matching
+ * `people` row. The `status: 401` annotation is required here — unlike an
+ * endpoint's own `.addError(Err, { status })`, a middleware failure has no
+ * per-endpoint call site to carry the status, so it must live on the error
+ * schema itself; without it, `HttpApiSchema.getStatusError` falls back to
+ * 500 for every authentication failure.
+ */
 export class AuthenticationRequired extends Schema.TaggedError<AuthenticationRequired>()(
   "AuthenticationRequired",
   { reason: Schema.Literal("no_session", "no_matching_person") },
+  HttpApiSchema.annotations({ status: 401 }),
 ) {}
 
 /**

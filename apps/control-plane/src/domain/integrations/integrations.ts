@@ -7,14 +7,18 @@ import { Db } from "../../db/layer";
  * Real backend for the Integrations page (IdP/cloud/secret-
  * store connection pointers — never a credential, see the `integrations`
  * table's own doc comment "Federation only — no credentials stored here").
- * At most one live (non-removed) integration per `kind` per org: connecting
- * a new one of a kind soft-removes any prior one of that kind, mirroring
- * `apps/console/src/api/integrations.ts`'s mock exactly (that mock's
- * "connect" already replaced-by-kind, correctly, from the start).
+ *
+ * `idp`/`secret_store` stay single-slot per org: connecting a new one
+ * soft-removes any prior one of that kind. `cloud` is multi-slot, keyed by
+ * `provider` — azure/docker/fake can all be connected simultaneously (a
+ * per-machine choice needs real alternatives to choose between), so
+ * connecting one only replaces a prior row for that *same* provider, never
+ * a different one.
  */
 
 export type IntegrationRow = typeof integrations.$inferSelect;
 export type IntegrationKind = "idp" | "cloud" | "secret_store";
+export type IntegrationProvider = "azure" | "docker" | "fake";
 
 export class IntegrationsDbError extends Data.TaggedError("IntegrationsDbError")<{
   reason: string;
@@ -39,9 +43,43 @@ export const listActiveIntegrations = (
     );
   });
 
+/** Whether `provider` is one of this org's enabled `kind: "cloud"` rows —
+ * the real enforcement behind the machine-creation Provider dropdown,
+ * called from `MachineService.create` so a raw API call can't pick a
+ * provider the org never enabled just because the UI only ever offers
+ * enabled ones (same posture as the region/image catalog check). */
+export const isProviderEnabled = (
+  orgId: string,
+  provider: IntegrationProvider,
+): Effect.Effect<boolean, IntegrationsDbError, Db> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rows = yield* dbTry(
+      () =>
+        db
+          .select({ id: integrations.id })
+          .from(integrations)
+          .where(
+            and(
+              eq(integrations.orgId, orgId),
+              eq(integrations.kind, "cloud"),
+              eq(integrations.provider, provider),
+              isNull(integrations.removedAt),
+            ),
+          )
+          .limit(1),
+      "read_provider_enabled_failed",
+    );
+    return rows.length > 0;
+  });
+
 export interface ConnectIntegrationInput {
   orgId: string;
   kind: IntegrationKind;
+  /** Required (and only meaningful) when `kind === "cloud"` — see this
+   * module's header comment on why cloud is multi-slot by provider while
+   * idp/secret_store stay single-slot per kind. */
+  provider?: IntegrationProvider | undefined;
   identifier: string;
   config: Record<string, unknown>;
 }
@@ -51,28 +89,33 @@ export const connectIntegration = (
 ): Effect.Effect<IntegrationRow, IntegrationsDbError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
-    // Replace-by-kind, in one transaction: soft-remove whatever was
-    // connected for this kind, then insert the new one. Not just an
+    // Replace-by-(kind, provider) when a provider is given (cloud), else
+    // replace-by-kind (idp/secret_store) — in one transaction: soft-remove
+    // whatever matched, then insert the new one. Not just an
     // insert-then-cleanup pair, so a mid-write crash can never leave two
-    // live rows of the same kind.
+    // live rows of the same slot.
     const row = yield* dbTry(
       () =>
         db.transaction(async (tx) => {
-          await tx
-            .update(integrations)
-            .set({ removedAt: new Date() })
-            .where(
-              and(
+          const replaceScope = input.provider
+            ? and(
+                eq(integrations.orgId, input.orgId),
+                eq(integrations.kind, input.kind),
+                eq(integrations.provider, input.provider),
+                isNull(integrations.removedAt),
+              )
+            : and(
                 eq(integrations.orgId, input.orgId),
                 eq(integrations.kind, input.kind),
                 isNull(integrations.removedAt),
-              ),
-            );
+              );
+          await tx.update(integrations).set({ removedAt: new Date() }).where(replaceScope);
           const [inserted] = await tx
             .insert(integrations)
             .values({
               orgId: input.orgId,
               kind: input.kind,
+              provider: input.provider ?? null,
               identifier: input.identifier,
               config: input.config,
             })

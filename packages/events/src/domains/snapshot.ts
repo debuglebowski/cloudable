@@ -9,7 +9,7 @@ export type SnapshotEvent =
       type: "snapshot.created";
       payload: {
         trigger: "archive" | "upgrade" | "manual";
-        region: string;
+        region: string | null;
         sizeBytes: number;
       };
     })

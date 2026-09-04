@@ -120,7 +120,10 @@ const runOffboardingSequence = (
     const machinesOffboarded: string[] = [];
     const machineFailures: MachineOffboardFailure[] = [];
 
-    const offboardOneMachine = (machineId: string): Effect.Effect<void, OffboardingError> =>
+    const offboardOneMachine = (
+      machineId: string,
+      provider: "azure" | "docker" | "fake",
+    ): Effect.Effect<void, OffboardingError> =>
       Effect.gen(function* () {
         // "Stop" the machine. `ProvisioningService` has no bare `stop()` —
         // its `archive()` is the closest cloud-level equivalent (see this
@@ -129,7 +132,7 @@ const runOffboardingSequence = (
         // `provisioning.create` — no machine-creation flow exists yet);
         // that is treated as already-stopped rather than a hard failure, so
         // offboarding a machine seeded directly in Postgres still completes.
-        yield* provisioning.archive(machineId).pipe(
+        yield* provisioning.archive(machineId, provider).pipe(
           Effect.catchTag("ProvisioningError", (error: ProvisioningError) =>
             error.reason === "not_found" ? Effect.void : Effect.fail(error),
           ),
@@ -189,7 +192,7 @@ const runOffboardingSequence = (
       });
 
     for (const machine of ownedMachines) {
-      const result = yield* Effect.either(offboardOneMachine(machine.id));
+      const result = yield* Effect.either(offboardOneMachine(machine.id, machine.provider));
       if (result._tag === "Right") {
         machinesOffboarded.push(machine.id);
       } else {

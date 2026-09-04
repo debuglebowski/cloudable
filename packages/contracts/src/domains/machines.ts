@@ -11,13 +11,21 @@ export type MachineState =
 /** Where a resolved manifest entry's value came from — org → template → machine, lowest wins. */
 export type ManifestScope = "org" | "template" | "machine";
 
+/** Which `ProvisioningService` backend a machine runs on — a per-machine,
+ * org-enabled choice (see `docs/frontend.md`'s Integrations page). Not every
+ * provider supports every field: only `"azure"` has regions, and only
+ * `"azure"`'s image is a curated catalog rather than free text. */
+export type MachineProvider = "azure" | "docker" | "fake";
+
 export interface MachineSummary {
   id: string;
   orgId: string;
   templateId: string | null;
   ownerPersonId: string | null;
   name: string;
-  region: string;
+  provider: MachineProvider;
+  /** `null` for providers with no region concept (docker/fake). */
+  region: string | null;
   sizeSku: string;
   image: string;
   state: MachineState;
@@ -27,8 +35,9 @@ export interface MachineSummary {
 
 export interface CreateMachineRequest {
   name: string;
-  /** Optional — omitted, the control plane resolves the org's configured default region
-   * instead of the caller always supplying one. */
+  provider: MachineProvider;
+  /** Required iff `provider === "azure"` (and must name one of the org's
+   * enabled Azure regions) — omitted/ignored for every other provider. */
   region?: string;
   sizeSku: string;
   image: string;

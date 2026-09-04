@@ -17,6 +17,7 @@
   "dependencies": {
     "@azure/arm-compute": "25.1.1",
     "@azure/arm-network": "38.0.0",
+    "@azure/arm-subscriptions": "5.1.1",
     "@azure/identity": "4.13.2",
     "@cloudable/contracts": "workspace:*",
     "@cloudable/events": "workspace:*",

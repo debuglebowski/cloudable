@@ -6,7 +6,14 @@ import { Db } from "../../db/layer";
 import { type EffectiveLoggingTier, getEffectiveLoggingTier } from "../../logging/settings";
 import { EventBus } from "../../services/EventBus";
 import { ProvisioningServiceTag } from "../../services/ProvisioningService";
-import { InvalidCursorError, MachineNotFoundError, PackagePinConflictError } from "./errors";
+import { isProviderEnabled } from "../integrations/integrations";
+import { isCatalogEntryEnabled } from "../organisation/catalog";
+import {
+  InvalidCursorError,
+  InvalidMachineRequestError,
+  MachineNotFoundError,
+  PackagePinConflictError,
+} from "./errors";
 import {
   machineCreatedEvent,
   machineOwnerAssignedEvent,
@@ -18,7 +25,6 @@ import {
   findPinConflicts,
   resolveManifest,
 } from "./manifest";
-import { resolveOrgDefaultRegion } from "./region-policy";
 import {
   type AccessMethodsEnabled,
   type PersistentPaths,
@@ -38,18 +44,19 @@ type MachinePackageTableRow = typeof machinePackages.$inferSelect;
 export interface CreateMachineInput {
   orgId: string;
   name: string;
-  // Optional (and nullable, same convention as `templateId`/`actorPersonId`
-  // below — `exactOptionalPropertyTypes` needs a real "not provided" value
-  // callers can pass through explicitly): region is
-  // among every setting that must flow org → machine through `resolveSetting()`,
-  // not a caller-supplied value. Omitted/null/blank, `create` resolves the
-  // org's configured default region (`region-policy.ts`) rather than
-  // requiring the caller to always supply one. An explicit value is still
-  // honored as-is — this is a one-time resolution at creation, not a live
-  // override channel (see `region-policy.ts`'s doc comment for why region
-  // differs from retention).
+  provider: "azure" | "docker" | "fake";
+  // Required iff `provider === "azure"` (and must name one of the org's
+  // enabled Azure regions — see `isCatalogEntryEnabled`); forbidden for
+  // every other provider. Not resolved from an org default the way it used
+  // to be — a curated org catalog replaced the single-value default (see
+  // `docs/inheritance.md`'s "no wizard prefill": the caller/UI always
+  // supplies an explicit choice from the enabled set, never a silent
+  // server-side fallback).
   region?: string | null;
   sizeSku: string;
+  // Required iff `provider === "azure"` (and must name one of the org's
+  // enabled Azure images); freeform for docker/fake (docker further
+  // constrains it to "ubuntu-XX.YY" itself, at the adapter level).
   image: string;
   // Required, never null — a machine always has
   // exactly one owner, always a person. An owner is cleared only later, by
@@ -192,12 +199,68 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           ),
         );
 
-    const create = (input: CreateMachineInput): Effect.Effect<MachineRow, MachineServiceError> =>
+    const create = (
+      input: CreateMachineInput,
+    ): Effect.Effect<MachineRow, MachineServiceError | InvalidMachineRequestError> =>
       Effect.gen(function* () {
-        const region =
-          input.region && input.region.trim().length > 0
-            ? input.region
-            : (yield* resolveOrgDefaultRegion(db, input.orgId)).value;
+        const trimmedRegion = input.region?.trim() ?? "";
+        const invalid = (message: string) =>
+          Effect.fail(
+            new InvalidMachineRequestError({
+              error: { code: "invalid_machine_request", message, requestId: ulid() },
+            }),
+          );
+
+        const providerEnabled = yield* isProviderEnabled(input.orgId, input.provider).pipe(
+          Effect.provideService(Db, db),
+          Effect.mapError(
+            (cause) => new MachineServiceError({ reason: "integration_read_failed", cause }),
+          ),
+        );
+        if (!providerEnabled) {
+          return yield* invalid(`provider "${input.provider}" is not enabled for this org`);
+        }
+
+        let region: string | null;
+        if (input.provider === "azure") {
+          if (trimmedRegion.length === 0) {
+            return yield* invalid('"region" is required for provider "azure"');
+          }
+          const regionEnabled = yield* isCatalogEntryEnabled(
+            input.orgId,
+            "azure",
+            "region",
+            trimmedRegion,
+          ).pipe(
+            Effect.provideService(Db, db),
+            Effect.mapError(
+              (cause) => new MachineServiceError({ reason: "catalog_read_failed", cause }),
+            ),
+          );
+          if (!regionEnabled) {
+            return yield* invalid(`region "${trimmedRegion}" is not enabled for this org`);
+          }
+          const imageEnabled = yield* isCatalogEntryEnabled(
+            input.orgId,
+            "azure",
+            "image",
+            input.image,
+          ).pipe(
+            Effect.provideService(Db, db),
+            Effect.mapError(
+              (cause) => new MachineServiceError({ reason: "catalog_read_failed", cause }),
+            ),
+          );
+          if (!imageEnabled) {
+            return yield* invalid(`image "${input.image}" is not enabled for this org`);
+          }
+          region = trimmedRegion;
+        } else {
+          if (trimmedRegion.length > 0) {
+            return yield* invalid(`provider "${input.provider}" has no region — omit it`);
+          }
+          region = null;
+        }
 
         const rows = yield* Effect.tryPromise({
           try: () =>
@@ -208,6 +271,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                 templateId: input.templateId ?? null,
                 ownerPersonId: input.ownerPersonId,
                 name: input.name,
+                provider: input.provider,
                 region,
                 sizeSku: input.sizeSku,
                 image: input.image,
@@ -230,6 +294,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             actorType,
             actorId,
             name: machine.name,
+            provider: machine.provider,
             region: machine.region,
             size: machine.sizeSku,
             image: machine.image,
@@ -273,6 +338,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           .create({
             machineId: machine.id,
             orgId: machine.orgId,
+            provider: machine.provider,
             region: machine.region,
             sizeSku: machine.sizeSku,
             image: machine.image,

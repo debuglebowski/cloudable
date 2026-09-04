@@ -43,7 +43,8 @@ export interface ArchivedSnapshot {
   machineId: string;
   machineName: string;
   trigger: SnapshotTrigger;
-  region: string;
+  /** `null` for a machine whose provider has no region concept (docker/fake). */
+  region: string | null;
   sizeBytes: number;
   createdAt: string;
   retentionDays: number;
@@ -64,7 +65,7 @@ interface SnapshotViewWire {
   orgId: string;
   machineId: string;
   trigger: SnapshotTrigger;
-  region: string;
+  region: string | null;
   sizeBytes: number | null;
   containsData: boolean;
   containsConfig: boolean;

@@ -321,7 +321,7 @@ export const makeDockerProvisioningServiceLive = (options: {
         } satisfies MachineStatus;
       }),
 
-    archive: (machineId: string) =>
+    archive: (machineId: string, _provider) =>
       Effect.gen(function* () {
         const observed = yield* inspectContainer(machineId);
         if (!observed) {
@@ -340,7 +340,7 @@ export const makeDockerProvisioningServiceLive = (options: {
         } satisfies MachineStatus;
       }),
 
-    reconcile: (machineId: string) =>
+    reconcile: (machineId: string, _provider) =>
       Effect.gen(function* () {
         const observed = yield* inspectContainer(machineId);
         if (!observed) {
@@ -359,7 +359,7 @@ export const makeDockerProvisioningServiceLive = (options: {
         } satisfies MachineStatus;
       }),
 
-    restart: (machineId: string) =>
+    restart: (machineId: string, _provider) =>
       Effect.gen(function* () {
         const observed = yield* inspectContainer(machineId);
         if (!observed) {

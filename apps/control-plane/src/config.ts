@@ -1,16 +1,5 @@
 import { Context, Layer } from "effect";
 
-export const PROVISIONING_ADAPTERS = ["fake", "docker", "azure"] as const;
-export type ProvisioningAdapter = (typeof PROVISIONING_ADAPTERS)[number];
-
-const readProvisioningAdapter = (): ProvisioningAdapter => {
-  const raw = process.env["PROVISIONING_ADAPTER"];
-  if (raw && (PROVISIONING_ADAPTERS as ReadonlyArray<string>).includes(raw)) {
-    return raw as ProvisioningAdapter;
-  }
-  return "fake";
-};
-
 /**
  * Control-plane configuration, read once from `process.env` with sane dev
  * defaults (see `.env.example` at the repo root).
@@ -62,15 +51,6 @@ export interface AppConfig {
    */
   readonly consoleOrigin: string;
   /**
-   * Which `ProvisioningService` adapter this control-plane runs with.
-   * `"fake"` (default): in-memory, no real infra — CI/tests. `"docker"`:
-   * real local containers running the real agent binary, for local
-   * dev/demo without an Azure account. `"azure"`: the stub — no real
-   * Azure account exists in this build, every method fails immediately.
-   * Never a customer-facing choice; picked once, at boot.
-   */
-  readonly provisioningAdapter: "fake" | "docker" | "azure";
-  /**
    * Where a Local Docker machine's agent reaches this control-plane.
    * Defaults to `host.docker.internal` — the container's own host, from
    * inside the container — not `localhost`, which inside a container means
@@ -83,9 +63,12 @@ export interface AppConfig {
    * managed mode uses a managed identity ... same provisioning-layer code
    * path") — `DefaultAzureCredential` supplies the actual credential
    * (Container App managed identity in production, `az login` locally),
-   * this is only the target subscription. Required when
-   * `provisioningAdapter === "azure"`; the adapter fails closed at
-   * construction if unset rather than guessing a subscription.
+   * this is only the target subscription. Required for a machine to
+   * actually provision on `provider: "azure"` (and for the org-level Azure
+   * region catalog to sync) — the adapter fails closed at construction if
+   * unset rather than guessing a subscription; `null` is also what makes
+   * `GET /api/v1/provisioning/capabilities` report Azure unavailable on
+   * this deployment.
    */
   readonly azureSubscriptionId: string | null;
   /**
@@ -128,7 +111,6 @@ const readConfig = (): AppConfig => {
     federationIssuerUrl: process.env["FEDERATION_ISSUER_URL"] ?? `http://localhost:${port}`,
     federationAudience: process.env["FEDERATION_AUDIENCE"] ?? "api://AzureADTokenExchange",
     consoleOrigin: process.env["CONSOLE_ORIGIN"] ?? "http://localhost:5180",
-    provisioningAdapter: readProvisioningAdapter(),
     localDockerControlPlaneUrl:
       process.env["LOCAL_DOCKER_CONTROL_PLANE_URL"] ?? `http://host.docker.internal:${port}`,
     azureSubscriptionId: process.env["AZURE_SUBSCRIPTION_ID"] ?? null,

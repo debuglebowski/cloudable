@@ -43,9 +43,6 @@ export interface OrgSettings {
   loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: RetentionLocation;
-  /** Default Azure region for a new machine that doesn't specify one —
-   * live-resolved server-side, not a client-side prefill. */
-  regionDefault: string;
 }
 
 export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [

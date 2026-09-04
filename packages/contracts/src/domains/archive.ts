@@ -62,7 +62,8 @@ export interface SnapshotView {
   orgId: string;
   machineId: string;
   trigger: SnapshotTrigger;
-  region: string;
+  /** `null` for a machine whose provider has no region concept (docker/fake). */
+  region: string | null;
   sizeBytes: number | null;
   containsData: boolean;
   containsConfig: boolean;

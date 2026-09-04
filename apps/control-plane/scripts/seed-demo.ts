@@ -236,42 +236,22 @@ async function main() {
   console.log("people: signed in as all 5 (real BetterAuth sessions)");
 
   // --- Machines (real POST /api/v1/machines) -------------------------------
+  // Enable "fake" for the seeded org first — a machine's `provider` must
+  // name one of the org's enabled cloud integrations (`POST /api/v1/
+  // integrations`, `kind: "cloud"`). Fake has no region concept, so none is
+  // sent in the machine payloads below.
+  await api(
+    "POST",
+    "/api/v1/integrations",
+    { kind: "cloud", provider: "fake", identifier: "Fake", config: { provider: "fake" } },
+    priyaCookie,
+  );
   const machineDefs = [
-    {
-      name: "db-prod-03",
-      region: "eastus",
-      sizeSku: "Standard_D4s_v5",
-      image: "ubuntu-22.04",
-      owner: priya,
-    },
-    {
-      name: "build-runner-11",
-      region: "eastus",
-      sizeSku: "Standard_D2s_v5",
-      image: "ubuntu-22.04",
-      owner: marcus,
-    },
-    {
-      name: "analytics-02",
-      region: "westeurope",
-      sizeSku: "Standard_D8s_v5",
-      image: "ubuntu-22.04",
-      owner: elena,
-    },
-    {
-      name: "staging-07",
-      region: "westeurope",
-      sizeSku: "Standard_D2s_v5",
-      image: "ubuntu-22.04",
-      owner: jordan,
-    },
-    {
-      name: "worker-04",
-      region: "eastus",
-      sizeSku: "Standard_D4s_v5",
-      image: "ubuntu-22.04",
-      owner: sam,
-    },
+    { name: "db-prod-03", sizeSku: "Standard_D4s_v5", image: "ubuntu-22.04", owner: priya },
+    { name: "build-runner-11", sizeSku: "Standard_D2s_v5", image: "ubuntu-22.04", owner: marcus },
+    { name: "analytics-02", sizeSku: "Standard_D8s_v5", image: "ubuntu-22.04", owner: elena },
+    { name: "staging-07", sizeSku: "Standard_D2s_v5", image: "ubuntu-22.04", owner: jordan },
+    { name: "worker-04", sizeSku: "Standard_D4s_v5", image: "ubuntu-22.04", owner: sam },
   ];
   const machines: { id: string; name: string; ownerPersonId: string }[] = [];
   for (const m of machineDefs) {
@@ -284,7 +264,7 @@ async function main() {
       "/api/v1/machines",
       {
         name: m.name,
-        region: m.region,
+        provider: "fake",
         sizeSku: m.sizeSku,
         image: m.image,
         ownerPersonId: m.owner.id,

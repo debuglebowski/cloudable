@@ -11,7 +11,8 @@ import type { MachineStatus } from "../services/ProvisioningService";
 export interface DesiredMachineState {
   machineId: string;
   orgId: string;
-  region: string;
+  provider: "azure" | "docker" | "fake";
+  region: string | null;
   sizeSku: string;
   /** Declared package manifest entries. Provisional — see above. */
   packages: ReadonlyArray<string>;

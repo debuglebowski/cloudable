@@ -180,7 +180,8 @@ export interface MachineCreatedInput extends ActorContext {
   orgId: string;
   correlationId: string;
   name: string;
-  region: string;
+  provider: "azure" | "docker" | "fake";
+  region: string | null;
   size: string;
   image: string;
   occurredAt?: Date;
@@ -207,7 +208,13 @@ export function machineCreatedEvent(input: MachineCreatedInput): MachineEvent {
     machineId: input.machineId,
     correlationId: input.correlationId,
     schemaVersion: 1,
-    payload: { name: input.name, region: input.region, size: input.size, image: input.image },
+    payload: {
+      name: input.name,
+      provider: input.provider,
+      region: input.region,
+      size: input.size,
+      image: input.image,
+    },
   };
 }
 

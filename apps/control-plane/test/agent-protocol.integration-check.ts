@@ -15,9 +15,9 @@ import { AccessLive } from "../src/http/handlers/access";
 import { AgentProtocolLive } from "../src/http/handlers/agent-protocol";
 import { ApprovalsLive } from "../src/http/handlers/approvals";
 import { ArchiveLive } from "../src/http/handlers/archive";
+import { CatalogLive } from "../src/http/handlers/catalog";
 import { ComplianceLive } from "../src/http/handlers/compliance";
 import { ConfigLive } from "../src/http/handlers/config";
-import { DevProvisioningLive } from "../src/http/handlers/dev-provisioning";
 import { ElevationsLive } from "../src/http/handlers/elevations";
 import { FederationLive } from "../src/http/handlers/federation";
 import { HealthLive } from "../src/http/handlers/health";
@@ -27,6 +27,7 @@ import { NotificationsLive } from "../src/http/handlers/notifications";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
 import { OrganisationLive } from "../src/http/handlers/organisation";
 import { PeopleLive } from "../src/http/handlers/people";
+import { ProvisioningCapabilitiesLive } from "../src/http/handlers/provisioning-capabilities";
 import { RestartLive } from "../src/http/handlers/restart";
 import { TunnelLive } from "../src/http/handlers/tunnel";
 import { TunnelSignalLive } from "../src/http/handlers/tunnel-signal";
@@ -93,7 +94,7 @@ describe("agent-protocol handlers (integration)", () => {
 
     const [machine] = await testDb.db
       .insert(schema.machines)
-      .values({ orgId, name: "test-machine", region: "local", sizeSku: "dev", image: "dev" })
+      .values({ orgId, name: "test-machine", provider: "fake", sizeSku: "dev", image: "dev" })
       .returning();
     if (!machine) throw new Error("failed to insert test machine");
     machineId = machine.id;
@@ -120,8 +121,9 @@ describe("agent-protocol handlers (integration)", () => {
           TunnelSignalLive,
           TunnelLive,
           NotificationsLive,
-          DevProvisioningLive,
           RestartLive,
+          CatalogLive,
+          ProvisioningCapabilitiesLive,
         ),
       ),
     );

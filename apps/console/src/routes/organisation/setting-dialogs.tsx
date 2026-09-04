@@ -173,47 +173,6 @@ export function RetentionDaysDialog({
   );
 }
 
-export interface RegionDefaultDialogProps {
-  open: boolean;
-  currentRegion: string;
-  onOpenChange: (open: boolean) => void;
-  onSave: (region: string) => void | Promise<void>;
-}
-
-/** Default Azure region for a new machine that doesn't specify one. */
-export function RegionDefaultDialog({
-  open,
-  currentRegion,
-  onOpenChange,
-  onSave,
-}: RegionDefaultDialogProps) {
-  const inputId = useId();
-
-  return (
-    <ValueEditDialog<string>
-      open={open}
-      currentValue={currentRegion}
-      title="Default region"
-      description="Applied to new machines that don't specify a region. Resolved live at creation time — not copied onto the machine as a wizard prefill."
-      onOpenChange={onOpenChange}
-      onSave={onSave}
-      isValid={(region) => region.trim().length > 0}
-    >
-      {(region, setRegion) => (
-        <div className="flex flex-col gap-1">
-          <Label htmlFor={inputId}>Region</Label>
-          <Input
-            id={inputId}
-            value={region}
-            onChange={(event) => setRegion(event.target.value)}
-            placeholder="eastus"
-          />
-        </div>
-      )}
-    </ValueEditDialog>
-  );
-}
-
 const RETENTION_LOCATIONS: RetentionLocation[] = ["customer", "cloudable_sweden_central"];
 
 export interface RetentionLocationDialogProps {

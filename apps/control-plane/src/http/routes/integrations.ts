@@ -3,11 +3,15 @@ import { Schema } from "effect";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
 const IntegrationKind = Schema.Literal("idp", "cloud", "secret_store");
+const IntegrationProvider = Schema.Literal("azure", "docker", "fake");
 
 const Integration = Schema.Struct({
   id: Schema.String,
   orgId: Schema.String,
   kind: IntegrationKind,
+  // Set only on `kind: "cloud"` rows — see `domain/integrations/
+  // integrations.ts`'s header comment on multi-slot cloud providers.
+  provider: Schema.NullOr(IntegrationProvider),
   identifier: Schema.String,
   connectedAt: Schema.String,
   removedAt: Schema.NullOr(Schema.String),
@@ -17,8 +21,11 @@ const Integration = Schema.Struct({
 const ListIntegrationsResponse = Schema.Struct({ items: Schema.Array(Integration) });
 
 // `orgId` is gone from the wire — derived from `CurrentUserTag.orgId`.
+// `provider` is required when `kind === "cloud"` — enforced in the domain
+// layer (`connectIntegration`), not expressed as a wire-schema refinement.
 const ConnectIntegrationPayload = Schema.Struct({
   kind: IntegrationKind,
+  provider: Schema.optional(IntegrationProvider),
   identifier: Schema.String.pipe(Schema.minLength(1)),
   config: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 });

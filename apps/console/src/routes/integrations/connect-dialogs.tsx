@@ -1,5 +1,6 @@
 import { type FormEvent, useId, useState } from "react";
 
+import type { CloudProvider } from "@/api/integrations";
 import { useConnectIntegration } from "@/api/integrations";
 import type { SecretStoreConfig } from "@/api/integrations";
 import { Button } from "@/components/ui/button";
@@ -91,92 +92,45 @@ export function IdpConnectDialog() {
   );
 }
 
-/** Connect form for Azure workload identity federation — three non-secret identifiers only. */
-export function CloudConnectDialog() {
-  const [open, setOpen] = useState(false);
-  const [tenantId, setTenantId] = useState("");
-  const [applicationId, setApplicationId] = useState("");
-  const [subscriptionId, setSubscriptionId] = useState("");
-  const connect = useConnectIntegration();
-  const tenantIdId = useId();
-  const applicationIdId = useId();
-  const subscriptionIdId = useId();
+const CLOUD_PROVIDER_LABEL: Record<CloudProvider, string> = {
+  azure: "Azure",
+  docker: "Docker",
+  fake: "Fake",
+};
 
-  function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    connect.mutate(
-      {
-        kind: "cloud",
-        identifier:
-          subscriptionId.length > 8
-            ? `Azure — subscription ${subscriptionId.slice(0, 8)}…`
-            : `Azure — subscription ${subscriptionId}`,
-        config: { tenantId, applicationId, subscriptionId },
-      },
-      {
-        onSuccess: () => {
-          setOpen(false);
-          setTenantId("");
-          setApplicationId("");
-          setSubscriptionId("");
-        },
-      },
-    );
-  }
+/**
+ * Enables one cloud provider for the org — fieldless. Azure's credential is
+ * this deployment's own ambient managed identity (one subscription for the
+ * whole deployment, see `GET /api/v1/provisioning/capabilities`), not a
+ * per-org federation the console collects — there is nothing to fill in for
+ * any of the three providers, only a policy decision to turn one on.
+ * (Workload-identity BYOC federation, if it becomes a real feature, is the
+ * one that would need a real connect form here — this isn't it.)
+ */
+export function CloudEnableButton({
+  provider,
+  disabled,
+}: {
+  provider: CloudProvider;
+  disabled?: boolean;
+}) {
+  const connect = useConnectIntegration();
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">Connect</Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Connect Azure</DialogTitle>
-          <DialogDescription>
-            Workload identity federation. Three non-secret identifiers — Cloudable never receives a
-            client secret. Run Cloudable's Terraform template on your side to create the app
-            registration and federated credential, scoped to a single resource group.
-          </DialogDescription>
-        </DialogHeader>
-        <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={tenantIdId}>Tenant ID</Label>
-            <Input
-              id={tenantIdId}
-              required
-              className="font-mono"
-              value={tenantId}
-              onChange={(event) => setTenantId(event.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={applicationIdId}>Application (client) ID</Label>
-            <Input
-              id={applicationIdId}
-              required
-              className="font-mono"
-              value={applicationId}
-              onChange={(event) => setApplicationId(event.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={subscriptionIdId}>Subscription ID</Label>
-            <Input
-              id={subscriptionIdId}
-              required
-              className="font-mono"
-              value={subscriptionId}
-              onChange={(event) => setSubscriptionId(event.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button type="submit" disabled={connect.isPending}>
-              {connect.isPending ? "Connecting…" : "Connect"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <Button
+      size="sm"
+      disabled={disabled || connect.isPending}
+      onClick={() =>
+        connect.mutate({
+          kind: "cloud",
+          provider,
+          identifier: CLOUD_PROVIDER_LABEL[provider],
+          config: { provider },
+        })
+      }
+    >
+      {connect.isPending ? "Enabling…" : "Enable"}
+    </Button>
   );
 }
 

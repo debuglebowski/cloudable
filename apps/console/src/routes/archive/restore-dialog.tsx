@@ -152,8 +152,9 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
         <DialogHeader>
           <DialogTitle>Restore {snapshot.machineName}</DialogTitle>
           <DialogDescription>
-            Snapshot from {new Date(snapshot.createdAt).toLocaleDateString()} · {snapshot.region}.
-            Every restore writes an event, whichever mode is chosen.
+            Snapshot from {new Date(snapshot.createdAt).toLocaleDateString()} ·{" "}
+            {snapshot.region ?? "no region"}. Every restore writes an event, whichever mode is
+            chosen.
           </DialogDescription>
         </DialogHeader>
 

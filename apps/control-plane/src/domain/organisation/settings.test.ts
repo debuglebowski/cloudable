@@ -54,7 +54,14 @@ async function seedOrg(): Promise<string> {
 async function seedMachine(orgId: string): Promise<string> {
   const [machine] = await db
     .insert(machines)
-    .values({ orgId, name: "m1", region: "eastus", sizeSku: "Standard_B2s", image: "ubuntu-24.04" })
+    .values({
+      orgId,
+      name: "m1",
+      provider: "fake",
+      region: "eastus",
+      sizeSku: "Standard_B2s",
+      image: "ubuntu-24.04",
+    })
     .returning();
   if (!machine) throw new Error("seed failed");
   return machine.id;

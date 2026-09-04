@@ -75,6 +75,7 @@ describe("ElevationService (live DB) — owner notification", () => {
         orgId: org.id,
         ownerPersonId: owner.id,
         name: "owned-machine",
+        provider: "fake",
         region: "eastus",
         sizeSku: "Standard_B2s",
         image: "ubuntu-22.04",

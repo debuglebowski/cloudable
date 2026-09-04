@@ -71,7 +71,7 @@ export const reconcileMachine = (
         } satisfies ReconcileMachineResult;
       }
 
-      const status = yield* provisioning.archive(desired.machineId);
+      const status = yield* provisioning.archive(desired.machineId, desired.provider);
       return {
         machineId: desired.machineId,
         action: { kind: "archived", status },
@@ -83,6 +83,7 @@ export const reconcileMachine = (
       const status = yield* provisioning.create({
         machineId: desired.machineId,
         orgId: desired.orgId,
+        provider: desired.provider,
         region: desired.region,
         sizeSku: desired.sizeSku,
         packages: desired.packages,
@@ -99,7 +100,7 @@ export const reconcileMachine = (
       );
     }
 
-    const status = yield* provisioning.reconcile(desired.machineId);
+    const status = yield* provisioning.reconcile(desired.machineId, desired.provider);
     const undeclaredPackages = diffUndeclaredPackages(
       desired.packages,
       status.reportedPackages ?? [],
