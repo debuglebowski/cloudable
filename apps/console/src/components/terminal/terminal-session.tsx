@@ -139,19 +139,25 @@ export function TerminalSession({ sessionId }: TerminalSessionProps) {
   }, [sessionId]);
 
   return (
-    <div className="flex flex-col gap-2">
-      {state === "connecting" && <p className="text-sm text-muted-foreground">Connecting…</p>}
+    // flex-1 min-h-0: grows to fill whatever height the page wrapper actually
+    // has instead of guessing a vh fraction (see session-terminal-page.tsx's
+    // comment) — the status lines stay shrink-0 so only the terminal itself
+    // consumes the extra space.
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {state === "connecting" && (
+        <p className="shrink-0 text-sm text-muted-foreground">Connecting…</p>
+      )}
       {state === "rejected" && (
-        <p className="text-sm text-destructive">Connection rejected: {closeReason}</p>
+        <p className="shrink-0 text-sm text-destructive">Connection rejected: {closeReason}</p>
       )}
       {state === "closed" && (
-        <p className="text-sm text-muted-foreground">
+        <p className="shrink-0 text-sm text-muted-foreground">
           Session ended{closeReason ? `: ${closeReason}` : "."}
         </p>
       )}
       <div
         ref={containerRef}
-        className="h-[70vh] w-full overflow-hidden rounded-lg bg-[#000] p-2"
+        className="min-h-0 w-full flex-1 overflow-hidden rounded-lg bg-[#000] p-2"
       />
     </div>
   );

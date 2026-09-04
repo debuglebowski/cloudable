@@ -15,8 +15,11 @@ export function SessionTerminalPage() {
   const { sessionId } = useParams({ from: "/access/sessions/$sessionId/terminal" });
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+    // h-full min-h-0: bounds this page to `main`'s real available height (see
+    // root.tsx's wrapper comment) so TerminalSession's own flex-1 has a
+    // definite size to grow into instead of falling back to a fixed vh guess.
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="flex shrink-0 items-center gap-1.5 text-sm text-muted-foreground">
         <Link to="/access" className="hover:text-foreground hover:underline">
           Access
         </Link>
