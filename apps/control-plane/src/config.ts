@@ -4,7 +4,7 @@ export const PROVISIONING_ADAPTERS = ["fake", "docker", "azure"] as const;
 export type ProvisioningAdapter = (typeof PROVISIONING_ADAPTERS)[number];
 
 const readProvisioningAdapter = (): ProvisioningAdapter => {
-  const raw = process.env["PROVISIONING_ADAPTER"];
+  const raw = process.env.PROVISIONING_ADAPTER;
   if (raw && (PROVISIONING_ADAPTERS as ReadonlyArray<string>).includes(raw)) {
     return raw as ProvisioningAdapter;
   }
@@ -113,29 +113,28 @@ export interface AppConfig {
 }
 
 const readConfig = (): AppConfig => {
-  const port = Number(process.env["PORT"] ?? 4780);
+  const port = Number(process.env.PORT ?? 4780);
   return {
     databaseUrl:
-      process.env["DATABASE_URL"] ?? "postgres://cloudable:cloudable@localhost:5442/cloudable",
+      process.env.DATABASE_URL ?? "postgres://cloudable:cloudable@localhost:5442/cloudable",
     port,
-    betterAuthSecret: process.env["BETTER_AUTH_SECRET"] ?? "dev-only-change-me",
-    betterAuthUrl: process.env["BETTER_AUTH_URL"] ?? "http://localhost:4780",
+    betterAuthSecret: process.env.BETTER_AUTH_SECRET ?? "dev-only-change-me",
+    betterAuthUrl: process.env.BETTER_AUTH_URL ?? "http://localhost:4780",
     managedIdentityJwksUrl:
-      process.env["MANAGED_IDENTITY_JWKS_URL"] ??
+      process.env.MANAGED_IDENTITY_JWKS_URL ??
       "https://login.microsoftonline.com/common/discovery/v2.0/keys",
     managedIdentityAudience:
-      process.env["MANAGED_IDENTITY_AUDIENCE"] ?? "https://management.azure.com/",
-    federationIssuerUrl: process.env["FEDERATION_ISSUER_URL"] ?? `http://localhost:${port}`,
-    federationAudience: process.env["FEDERATION_AUDIENCE"] ?? "api://AzureADTokenExchange",
-    consoleOrigin: process.env["CONSOLE_ORIGIN"] ?? "http://localhost:5180",
+      process.env.MANAGED_IDENTITY_AUDIENCE ?? "https://management.azure.com/",
+    federationIssuerUrl: process.env.FEDERATION_ISSUER_URL ?? `http://localhost:${port}`,
+    federationAudience: process.env.FEDERATION_AUDIENCE ?? "api://AzureADTokenExchange",
+    consoleOrigin: process.env.CONSOLE_ORIGIN ?? "http://localhost:5180",
     provisioningAdapter: readProvisioningAdapter(),
     localDockerControlPlaneUrl:
-      process.env["LOCAL_DOCKER_CONTROL_PLANE_URL"] ?? `http://host.docker.internal:${port}`,
-    azureSubscriptionId: process.env["AZURE_SUBSCRIPTION_ID"] ?? null,
-    azureMachinesResourceGroup:
-      process.env["AZURE_MACHINES_RESOURCE_GROUP"] ?? "rg-cloudable-managed",
-    azureMachinesSubnetId: process.env["AZURE_MACHINES_SUBNET_ID"] ?? null,
-    agentBinariesDir: process.env["AGENT_BINARIES_DIR"] ?? "/app/binaries",
+      process.env.LOCAL_DOCKER_CONTROL_PLANE_URL ?? `http://host.docker.internal:${port}`,
+    azureSubscriptionId: process.env.AZURE_SUBSCRIPTION_ID ?? null,
+    azureMachinesResourceGroup: process.env.AZURE_MACHINES_RESOURCE_GROUP ?? "rg-cloudable-managed",
+    azureMachinesSubnetId: process.env.AZURE_MACHINES_SUBNET_ID ?? null,
+    agentBinariesDir: process.env.AGENT_BINARIES_DIR ?? "/app/binaries",
   };
 };
 

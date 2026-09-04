@@ -261,7 +261,9 @@ export function MachineDetailPage() {
             variant="outline"
             size="sm"
             disabled={machine.state !== "running"}
-            title={machine.state !== "running" ? "Only a running machine can be restarted." : undefined}
+            title={
+              machine.state !== "running" ? "Only a running machine can be restarted." : undefined
+            }
             onClick={() => setRestartOpen(true)}
           >
             Restart

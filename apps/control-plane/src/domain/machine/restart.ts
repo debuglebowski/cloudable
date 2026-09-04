@@ -69,28 +69,30 @@ export const restartMachine = (machineId: string, orgId: string, actorPersonId: 
     });
 
     const correlationId = ulid();
-    yield* eventBus.publish([
-      buildEvent("machine.stopped", {
-        orgId,
-        actorType: "person",
-        actorId: actorPersonId,
-        machineId,
-        correlationId,
-        payload: { initiator: "user" },
-      }),
-      buildEvent("machine.started", {
-        orgId,
-        actorType: "person",
-        actorId: actorPersonId,
-        machineId,
-        correlationId,
-        payload: {},
-      }),
-    ]).pipe(
-      Effect.mapError(
-        (cause) => new MachineRestartDbError({ reason: `event_publish_failed: ${cause.reason}` }),
-      ),
-    );
+    yield* eventBus
+      .publish([
+        buildEvent("machine.stopped", {
+          orgId,
+          actorType: "person",
+          actorId: actorPersonId,
+          machineId,
+          correlationId,
+          payload: { initiator: "user" },
+        }),
+        buildEvent("machine.started", {
+          orgId,
+          actorType: "person",
+          actorId: actorPersonId,
+          machineId,
+          correlationId,
+          payload: {},
+        }),
+      ])
+      .pipe(
+        Effect.mapError(
+          (cause) => new MachineRestartDbError({ reason: `event_publish_failed: ${cause.reason}` }),
+        ),
+      );
 
     return { machineId, state: "running" as const, restartedAt: now.toISOString() };
   });

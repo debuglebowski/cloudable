@@ -14,7 +14,8 @@ import { AzureProvisioningServiceLive } from "./ProvisioningService.azure";
 //
 //   AZURE_SUBSCRIPTION_ID=... AZURE_MACHINES_RESOURCE_GROUP=... \
 //   AZURE_MACHINES_SUBNET_ID=... bun test ProvisioningService.azure.integration-check.ts
-const azureConfigured = config.azureSubscriptionId !== null && config.azureMachinesSubnetId !== null;
+const azureConfigured =
+  config.azureSubscriptionId !== null && config.azureMachinesSubnetId !== null;
 
 describe.skipIf(!azureConfigured)(
   "AzureProvisioningService (requires a real Azure subscription)",

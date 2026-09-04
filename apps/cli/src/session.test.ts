@@ -16,7 +16,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.CLOUDABLE_HOME;
+  process.env.CLOUDABLE_HOME = undefined;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
