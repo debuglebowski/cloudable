@@ -109,7 +109,7 @@ export function PeoplePage() {
           flex-1: shrinks to the real available space when content
           overflows, collapses to content otherwise — see
           machines-page.tsx's identical comment. */}
-      <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+      <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
         {isLoading || isError || (people?.length ?? 0) > 0 ? (
           <Table containerClassName="h-full max-h-none">
             <TableHeader>
