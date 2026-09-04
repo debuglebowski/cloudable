@@ -15,6 +15,18 @@
     "declaration": true,
     "declarationMap": true,
     "composite": true,
+    // Every workspace's package.json points main/types straight at ./src —
+    // nothing anywhere ever imports a compiled dist/*.js (apps that need a
+    // real artifact use `bun build --compile`, a separate bundler, not
+    // tsc's emit). composite:true still needs *some* emit for project
+    // references' incremental cache, so this keeps .d.ts/.d.ts.map, just
+    // not .js. Without it, `tsc -b` (the typecheck step) was writing a
+    // second, gitignored copy of every *.test.ts into dist/ on every CI
+    // run — bun test's default glob then picked that up as a duplicate,
+    // snapshot-less run of packages/events' catalogue.snapshot.test.ts,
+    // which fails outright in CI ("snapshot creation is disabled"). Not
+    // theoretical: this broke CI on every push since 2026-08-31.
+    "emitDeclarationOnly": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true

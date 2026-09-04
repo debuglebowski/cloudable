@@ -20,6 +20,10 @@
     {
       "include": ["apps/console/**"],
       "linter": { "rules": { "a11y": { "recommended": true } } }
+    },
+    {
+      "include": ["tsconfig*.json", "**/tsconfig*.json"],
+      "json": { "parser": { "allowComments": true, "allowTrailingCommas": true } }
     }
   ]
 }

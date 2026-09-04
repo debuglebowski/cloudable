@@ -18,8 +18,7 @@ export interface PageLoaderProps {
  */
 export function PageLoader({ label = "Loading", fullscreen, className }: PageLoaderProps) {
   return (
-    <div
-      role="status"
+    <output
       aria-live="polite"
       className={cn(
         "flex w-full flex-col items-center justify-center gap-5 bg-background",
@@ -58,6 +57,6 @@ export function PageLoader({ label = "Loading", fullscreen, className }: PageLoa
           <span className="size-1 animate-bounce rounded-full bg-muted-foreground/60 [animation-duration:1s]" />
         </span>
       </p>
-    </div>
+    </output>
   );
 }

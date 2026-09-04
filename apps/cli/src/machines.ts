@@ -54,8 +54,7 @@ export async function runMachinesReconcileCommand(argv: ReadonlyArray<string>): 
   }
   const result = await triggerReconcile(machineId);
   console.log(
-    `Desired state for ${result.machineId} is now version ${result.desiredStateVersion}. ` +
-      "The agent applies it on its next poll (~30s) — not instantly.",
+    `Desired state for ${result.machineId} is now version ${result.desiredStateVersion}. The agent applies it on its next poll (~30s) — not instantly.`,
   );
 }
 

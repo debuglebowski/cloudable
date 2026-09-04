@@ -61,8 +61,8 @@ describe("AgentSessionToken", () => {
   });
 
   test("rejects an expired token", async () => {
-    const previous = process.env["AGENT_SESSION_TTL_SECONDS"];
-    process.env["AGENT_SESSION_TTL_SECONDS"] = "-1"; // mint a token already in the past
+    const previous = process.env.AGENT_SESSION_TTL_SECONDS;
+    process.env.AGENT_SESSION_TTL_SECONDS = "-1"; // mint a token already in the past
     try {
       const error = await Effect.runPromise(
         Effect.flip(
@@ -78,8 +78,8 @@ describe("AgentSessionToken", () => {
       );
       expect(error.reason).toBe("expired");
     } finally {
-      if (previous === undefined) delete process.env["AGENT_SESSION_TTL_SECONDS"];
-      else process.env["AGENT_SESSION_TTL_SECONDS"] = previous;
+      if (previous === undefined) process.env.AGENT_SESSION_TTL_SECONDS = undefined;
+      else process.env.AGENT_SESSION_TTL_SECONDS = previous;
     }
   });
 });

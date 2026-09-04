@@ -231,7 +231,11 @@ const createDataDisk = (
     }),
   );
 
-const dataDiskIdFor = (clients: ArmClients, resourceGroup: string, names: ReturnType<typeof namesFor>): string =>
+const dataDiskIdFor = (
+  clients: ArmClients,
+  resourceGroup: string,
+  names: ReturnType<typeof namesFor>,
+): string =>
   `/subscriptions/${clients.subscriptionId}/resourceGroups/${resourceGroup}/providers/Microsoft.Compute/disks/${names.dataDisk}`;
 
 const service: ProvisioningService = {
@@ -421,7 +425,12 @@ const service: ProvisioningService = {
             adminUsername: "cloudable",
             adminPassword: throwawayAdminPassword(),
             customData: cloudInitFor(
-              { machineId: desc.machineId, orgId: desc.orgId, region: desc.region, sizeSku: desc.sizeSku },
+              {
+                machineId: desc.machineId,
+                orgId: desc.orgId,
+                region: desc.region,
+                sizeSku: desc.sizeSku,
+              },
               DATA_DISK_LUN,
             ),
           },
@@ -439,9 +448,7 @@ const service: ProvisioningService = {
   // Not this session's file — a concurrent change owns `restart`, left
   // exactly as found.
   restart: () =>
-    Effect.fail(
-      new ProvisioningError({ reason: "provider_error", cause: "not implemented" }),
-    ),
+    Effect.fail(new ProvisioningError({ reason: "provider_error", cause: "not implemented" })),
 };
 
 export const AzureProvisioningServiceLive = Layer.succeed(ProvisioningServiceTag, service);
