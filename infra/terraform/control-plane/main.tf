@@ -5,9 +5,8 @@
 # self-hosted deployment mode (docs/spec.md §2): one trust boundary, managed
 # identity, no federation — the customer runs this template once in their own
 # tenant and there is nothing further to trust or configure on the Cloudable
-# side. Contrast with `infra/terraform/federated-credential/`, which is the
-# separate BYOC artefact a customer runs to let a Cloudable-hosted control
-# plane manage machines in their tenant.
+# side. This is the only deployment mode Cloudable ships — there is no
+# Cloudable-hosted, multi-tenant BYOC mode (docs/cloud-auth.md).
 #
 # See README.md in this directory for prerequisites and exact commands.
 
@@ -123,14 +122,10 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_service
 # managed identity to manage real Azure VMs in this same tenant (self-hosted
 # mode: no federation, the control plane IS the trusted identity — see
 # docs/cloud-auth.md's "fully managed mode uses a managed identity ... same
-# provisioning-layer code path"). Mirrors the shell + role
-# infra/terraform/federated-credential/main.tf grants a BYOC customer's
-# trust — same "Cloudable Machine Operator" action list (keep both in sync
-# by hand; no shared module exists to enforce that mechanically), same
-# no-NSG-actions-granted boundary: the NSG below is a Terraform-level,
-# pre-created fact, never something ProvisioningService.azure.ts's runtime
-# identity can touch — it can only ever join the subnet it's already
-# attached to.
+# provisioning-layer code path"). The "Cloudable Machine Operator" role below
+# grants no NSG actions: the NSG is a Terraform-level, pre-created fact,
+# never something ProvisioningService.azure.ts's runtime identity can touch —
+# it can only ever join the subnet it's already attached to.
 # ---------------------------------------------------------------------------
 
 data "azurerm_client_config" "current" {}
@@ -263,9 +258,8 @@ resource "azurerm_container_app" "this" {
   tags                         = var.tags
 
   # System-assigned managed identity. Self-hosted mode has no federation
-  # (docs/spec.md §2/§10) — that's a BYOC-only concern
-  # (infra/terraform/federated-credential/). This identity exists so the
-  # control plane can authenticate to other Azure resources in the same
+  # (docs/spec.md §2/§10) — no BYOC mode exists to need it (docs/cloud-auth.md).
+  # This identity exists so the control plane can authenticate to other Azure resources in the same
   # tenant without ever holding a stored credential (invariant 1) — granted
   # the "Cloudable Machine Operator" role below (when
   # enable_self_managed_machines is true) so ProvisioningService.azure.ts

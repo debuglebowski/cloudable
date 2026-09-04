@@ -95,8 +95,8 @@ echo "$DEVICE $MOUNT_POINT ext4 defaults,nofail 0 2" >> /etc/fstab
 mkdir -p /opt/cloudable
 ARCH=$(uname -m)
 [ "$ARCH" = "aarch64" ] && ARCH=arm64 || ARCH=x64
-curl -fsSL "${config.federationIssuerUrl}/_internal/binaries/cloudable-agent-linux-$ARCH" -o /opt/cloudable/agent
-curl -fsSL "${config.federationIssuerUrl}/_internal/binaries/cloudable-tunnel-daemon-linux-$ARCH" -o /opt/cloudable/tunnel-daemon
+curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-agent-linux-$ARCH" -o /opt/cloudable/agent
+curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-tunnel-daemon-linux-$ARCH" -o /opt/cloudable/tunnel-daemon
 chmod +x /opt/cloudable/agent /opt/cloudable/tunnel-daemon
 
 cat > /etc/systemd/system/cloudable-agent.service <<UNIT
@@ -108,7 +108,7 @@ Wants=network-online.target
 [Service]
 ExecStart=/opt/cloudable/agent
 Restart=always
-Environment=CONTROL_PLANE_URL=${config.federationIssuerUrl}
+Environment=CONTROL_PLANE_URL=${config.controlPlaneBaseUrl}
 Environment=ATTESTATION_METHOD=managed_identity
 Environment=CLOUDABLE_PACKAGES=${packages}
 

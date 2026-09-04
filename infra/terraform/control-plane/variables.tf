@@ -148,7 +148,7 @@ variable "enable_self_managed_machines" {
 }
 
 variable "machines_resource_group_name" {
-  description = "Name of the single, dedicated resource group machines are provisioned into. Matches infra/terraform/federated-credential/'s default naming convention. Only used when enable_self_managed_machines is true."
+  description = "Name of the single, dedicated resource group machines are provisioned into. Only used when enable_self_managed_machines is true."
   type        = string
   default     = "rg-cloudable-managed"
 }

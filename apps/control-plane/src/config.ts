@@ -27,20 +27,13 @@ export interface AppConfig {
   /** Expected `aud` claim on an IMDS-issued managed-identity token. */
   readonly managedIdentityAudience: string;
   /**
-   * This control plane's own OIDC issuer URL (see `docs/cloud-auth.md`).
-   * Used both as the `issuer` field of the discovery document and as the
-   * `iss` claim of every minted federation token. Must be the exact,
-   * publicly reachable URL a customer's Azure federated identity
-   * credential is configured to trust.
+   * This control plane's own publicly reachable base URL. Used by
+   * `ProvisioningService.azure.ts` to build the cloud-init script a new
+   * Azure machine curls its agent/tunnel-daemon binaries from
+   * (`GET /_internal/binaries/:target`) and as the `CONTROL_PLANE_URL` the
+   * agent's systemd unit is given.
    */
-  readonly federationIssuerUrl: string;
-  /**
-   * `aud` claim on minted federation tokens. Defaults to
-   * `api://AzureADTokenExchange` — the fixed audience Entra ID expects for
-   * OIDC-based workload identity federation (matches what GitHub Actions,
-   * Terraform Cloud, etc. use for the same mechanism).
-   */
-  readonly federationAudience: string;
+  readonly controlPlaneBaseUrl: string;
   /**
    * Origin of the console dev server (see `apps/console/vite.config.ts`),
    * allowed via CORS — the console and control-plane run on different
@@ -108,8 +101,7 @@ const readConfig = (): AppConfig => {
       "https://login.microsoftonline.com/common/discovery/v2.0/keys",
     managedIdentityAudience:
       process.env.MANAGED_IDENTITY_AUDIENCE ?? "https://management.azure.com/",
-    federationIssuerUrl: process.env.FEDERATION_ISSUER_URL ?? `http://localhost:${port}`,
-    federationAudience: process.env.FEDERATION_AUDIENCE ?? "api://AzureADTokenExchange",
+    controlPlaneBaseUrl: process.env.CONTROL_PLANE_BASE_URL ?? `http://localhost:${port}`,
     consoleOrigin: process.env.CONSOLE_ORIGIN ?? "http://localhost:5180",
     localDockerControlPlaneUrl:
       process.env.LOCAL_DOCKER_CONTROL_PLANE_URL ?? `http://host.docker.internal:${port}`,

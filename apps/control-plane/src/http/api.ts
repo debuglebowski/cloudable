@@ -9,7 +9,6 @@ import { CatalogGroup } from "./routes/catalog";
 import { ComplianceGroup } from "./routes/compliance";
 import { ConfigGroup } from "./routes/config";
 import { ElevationsGroup } from "./routes/elevations";
-import { FederationGroup } from "./routes/federation";
 import { IntegrationsGroup } from "./routes/integrations";
 import { MachinesGroup } from "./routes/machines";
 import { NotificationsGroup } from "./routes/notifications";
@@ -40,7 +39,6 @@ export class Api extends HttpApi.make("cloudable")
   .add(UpgradeGroup)
   .add(ElevationsGroup)
   .add(ConfigGroup)
-  .add(FederationGroup)
   .add(AccessGroup)
   .add(PeopleGroup)
   .add(OrganisationGroup)
