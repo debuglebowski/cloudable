@@ -34,9 +34,11 @@ COPY apps/agent/package.json apps/agent/package.json
 COPY apps/tunnel-daemon/package.json apps/tunnel-daemon/package.json
 COPY apps/cli/package.json apps/cli/package.json
 COPY apps/console/package.json apps/console/package.json
+COPY apps/e2e/package.json apps/e2e/package.json
 COPY packages/schema/package.json packages/schema/package.json
 COPY packages/events/package.json packages/events/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/session-token/package.json packages/session-token/package.json
 
 # --ignore-scripts: several devDependencies (e.g. @testcontainers/postgresql,
 # via ssh2/cpu-features) carry optional native-binding install scripts with
@@ -57,6 +59,7 @@ RUN bun install --frozen-lockfile --ignore-scripts
 COPY packages/contracts packages/contracts
 COPY packages/events packages/events
 COPY packages/schema packages/schema
+COPY packages/session-token packages/session-token
 COPY apps/control-plane apps/control-plane
 COPY apps/agent apps/agent
 COPY apps/tunnel-daemon apps/tunnel-daemon
@@ -64,6 +67,7 @@ COPY apps/tunnel-daemon apps/tunnel-daemon
 RUN bun run --cwd packages/contracts build \
  && bun run --cwd packages/events build \
  && bun run --cwd packages/schema build \
+ && bun run --cwd packages/session-token build \
  && bun run --cwd apps/control-plane build \
  && bun run --cwd apps/agent build \
  && bun run --cwd apps/agent build:arm64 \
@@ -92,6 +96,7 @@ COPY --from=builder --chown=bun:bun /app/package.json ./package.json
 COPY --from=builder --chown=bun:bun /app/packages/contracts ./packages/contracts
 COPY --from=builder --chown=bun:bun /app/packages/events ./packages/events
 COPY --from=builder --chown=bun:bun /app/packages/schema ./packages/schema
+COPY --from=builder --chown=bun:bun /app/packages/session-token ./packages/session-token
 COPY --from=builder --chown=bun:bun /app/apps/control-plane ./apps/control-plane
 
 # The 4 standalone binaries GET /_internal/binaries/:target serves
