@@ -153,6 +153,23 @@ resource "azurerm_container_app" "this" {
     value = var.better_auth_secret
   }
 
+  dynamic "secret" {
+    for_each = var.control_plane_image_registry_password != "" ? [1] : []
+    content {
+      name  = "registry-password"
+      value = var.control_plane_image_registry_password
+    }
+  }
+
+  dynamic "registry" {
+    for_each = var.control_plane_image_registry_password != "" ? [1] : []
+    content {
+      server               = var.control_plane_image_registry_server
+      username             = var.control_plane_image_registry_username
+      password_secret_name = "registry-password"
+    }
+  }
+
   template {
     min_replicas = var.min_replicas
     max_replicas = var.max_replicas

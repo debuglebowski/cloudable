@@ -14,9 +14,10 @@
 #
 # Prerequisites:
 #   - Docker + the Compose plugin (`docker compose version`)
-#   - A published control-plane image. Build it from apps/control-plane/Dockerfile
-#     (a multi-stage oven/bun build) and push it, or use CONTROL_PLANE_IMAGE below
-#     to point at one you built:
+#   - The default CONTROL_PLANE_IMAGE (ghcr.io/debuglebowski/cloudable/control-plane,
+#     the path .github/workflows/rebuild-base-image.yml publishes to) is PRIVATE —
+#     run `docker login ghcr.io -u <you> -p <a GitHub PAT with read:packages>` first,
+#     or set CONTROL_PLANE_IMAGE to one you built and pushed yourself:
 #       docker build -t <your-image> -f apps/control-plane/Dockerfile .
 #       docker push <your-image>
 #   - A copy of control-plane.self-host.env.example as .env in this directory,
@@ -49,7 +50,7 @@ services:
       retries: 10
 
   control-plane:
-    image: ${CONTROL_PLANE_IMAGE:-ghcr.io/debuglebowski/cloudable-control-plane:latest}
+    image: ${CONTROL_PLANE_IMAGE:-ghcr.io/debuglebowski/cloudable/control-plane:main}
     restart: unless-stopped
     depends_on:
       postgres:

@@ -17,6 +17,16 @@ param controlPlaneImage string
 @description('Tag to deploy. Ignored when controlPlaneImage already carries an "@sha256:" digest.')
 param controlPlaneImageTag string
 
+@description('Registry hostname the control-plane image is pulled from. Only used when controlPlaneImageRegistryPassword is set.')
+param controlPlaneImageRegistryServer string
+
+@description('Registry username for pulling controlPlaneImage, if it is private.')
+param controlPlaneImageRegistryUsername string
+
+@description('Registry password/PAT for pulling controlPlaneImage, if it is private. Leave empty for a public image.')
+@secure()
+param controlPlaneImageRegistryPassword string
+
 @description('vCPU allocated to the control plane container (Container Apps billing unit).')
 param containerCpu string
 
@@ -68,6 +78,7 @@ var appName = '${namePrefix}-cp'
 // don't also append a tag — "<repo>@sha256:<digest>:<tag>" is not a valid
 // image reference.
 var containerImage = contains(controlPlaneImage, '@sha256:') ? controlPlaneImage : '${controlPlaneImage}:${controlPlaneImageTag}'
+var usesPrivateRegistry = !empty(controlPlaneImageRegistryPassword)
 // uriComponent both credential parts: a generated password commonly contains
 // URI-reserved characters (/, +, =, @, ...) that would otherwise break
 // connection-string parsing in the `postgres` client / drizzle-orm.
@@ -179,16 +190,35 @@ resource controlPlane 'Microsoft.App/containerApps@2024-03-01' = {
         targetPort: port
         transport: 'auto'
       }
-      secrets: [
-        {
-          name: 'database-url'
-          value: databaseUrl
-        }
-        {
-          name: 'better-auth-secret'
-          value: betterAuthSecret
-        }
-      ]
+      secrets: concat(
+        [
+          {
+            name: 'database-url'
+            value: databaseUrl
+          }
+          {
+            name: 'better-auth-secret'
+            value: betterAuthSecret
+          }
+        ],
+        usesPrivateRegistry
+          ? [
+              {
+                name: 'registry-password'
+                value: controlPlaneImageRegistryPassword
+              }
+            ]
+          : []
+      )
+      registries: usesPrivateRegistry
+        ? [
+            {
+              server: controlPlaneImageRegistryServer
+              username: controlPlaneImageRegistryUsername
+              passwordSecretRef: 'registry-password'
+            }
+          ]
+        : []
     }
     template: {
       containers: [
