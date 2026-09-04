@@ -188,7 +188,7 @@ async function main() {
   // Same bridge-real-logins step as `seed-demo.ts`: without it, whichever real
   // BetterAuth login you're actually using in the browser (e.g. a personal dev
   // account) has no matching `people` row, and every authenticated console
-  // query 500s (`AuthenticationRequired: no_matching_person`).
+  // query 401s (`AuthenticationRequired: no_matching_person`).
   const logins = await db.select({ email: schema.authUser.email }).from(schema.authUser);
   const unprovisioned = logins.filter((u) => u.email !== OWNER_EMAIL);
   if (unprovisioned.length > 0) {
