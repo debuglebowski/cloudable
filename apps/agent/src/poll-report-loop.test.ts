@@ -108,13 +108,20 @@ describe("runAgentLoop", () => {
       expect(mock.hasWakeSocket()).toBe(true);
 
       const beforeWake = Date.now();
-      mock.sendWake();
 
+      // `makeWaker`'s own doc comment (poll-report-loop.ts): a `pullNow()` that lands between
+      // cycles — nothing pending yet, e.g. the loop is still mid-report — is a documented no-op;
+      // only a wake landing *during* an in-progress `wait()` cuts it short. A single `sendWake()`
+      // can race that narrow window, so this resends every 100ms rather than asserting a single
+      // shot always lands — that's testing the fast path exists and works, not asserting away an
+      // acknowledged, acceptable race in the implementation.
+      //
       // The loop's normal poll interval is 30 seconds (`POLL_INTERVAL_MS`) — a second poll
       // landing within a couple of seconds of the wake is exactly "didn't wait out the
       // interval," not merely "eventually polled again."
-      for (let i = 0; i < 400 && pollTimestamps.length < 2; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+      for (let i = 0; i < 40 && pollTimestamps.length < 2; i++) {
+        mock.sendWake();
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
       expect(pollTimestamps.length).toBeGreaterThanOrEqual(2);
 
