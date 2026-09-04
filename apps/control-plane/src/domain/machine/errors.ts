@@ -28,6 +28,18 @@ export class InvalidCursorError extends Schema.TaggedError<InvalidCursorError>(
   }),
 }) {}
 
+/** Restart only makes sense for a live, running machine — a stopped, archived,
+ * errored, or still-provisioning one has nothing to reboot. */
+export class MachineNotRunningError extends Schema.TaggedError<MachineNotRunningError>(
+  "MachineNotRunningError",
+)("MachineNotRunningError", {
+  error: Schema.Struct({
+    code: Schema.Literal("machine_not_running"),
+    message: Schema.String,
+    requestId: Schema.String,
+  }),
+}) {}
+
 const PinConflictSchema = Schema.Struct({
   packageName: Schema.String,
   pinnedAtScope: Schema.Literal("org", "template", "machine"),

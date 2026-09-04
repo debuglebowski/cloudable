@@ -359,6 +359,26 @@ export const makeDockerProvisioningServiceLive = (options: {
         } satisfies MachineStatus;
       }),
 
+    restart: (machineId: string) =>
+      Effect.gen(function* () {
+        const observed = yield* inspectContainer(machineId);
+        if (!observed) {
+          return yield* Effect.fail(
+            new ProvisioningError({
+              reason: "not_found",
+              cause: `unknown machineId: ${machineId}`,
+            }),
+          );
+        }
+        yield* runDocker(["restart", containerName(machineId)]);
+        return {
+          machineId,
+          state: "running",
+          externalId: containerName(machineId),
+          reportedPackages: observed.declaredPackages,
+        } satisfies MachineStatus;
+      }),
+
     reimage: (desc: ReimageDescriptor) =>
       Effect.gen(function* () {
         const ubuntuVersion = ubuntuVersionFor(desc.targetImage);

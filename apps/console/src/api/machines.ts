@@ -279,3 +279,18 @@ export interface ArchiveMachineResult {
 export async function archiveMachine(machineId: string): Promise<ArchiveMachineResult> {
   return apiPost<ArchiveMachineResult>(`/api/v1/archive/machines/${machineId}/archive`, {});
 }
+
+export interface RestartMachineResult {
+  machineId: string;
+  state: "running";
+  restartedAt: string;
+}
+
+/**
+ * Real `POST /api/v1/machines/:id/restart` — reboots the machine's underlying
+ * compute in place (same identity, same declared packages). Only valid for a
+ * `"running"` machine; ends any live terminal/SSH session against it.
+ */
+export async function restartMachine(machineId: string): Promise<RestartMachineResult> {
+  return apiPost<RestartMachineResult>(`/api/v1/machines/${machineId}/restart`, {});
+}

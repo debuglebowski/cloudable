@@ -111,6 +111,7 @@ function buildTestLayers(opts: {
       }),
     reconcile: () => Effect.die("not used in this test"),
     reimage: () => Effect.die("not used in this test"),
+    restart: () => Effect.die("not used in this test"),
   };
 
   const approvalResult: ApprovalResult = {

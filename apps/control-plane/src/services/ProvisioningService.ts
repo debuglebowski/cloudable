@@ -71,12 +71,19 @@ export interface MachineStatus {
  * that don't apply to an in-place OS upgrade of a
  * still-owned, still-live machine. This changes a shared interface — every
  * implementation (`.fake.ts`, `.azure.ts`) is updated alongside it.
+ *
+ * `restart`: reboots the underlying compute in place — same still-owned,
+ * still-live machine, same identity/attestation, just the running process
+ * cycled. Modeled as its own method for the same reason `reimage` is: not
+ * `archive` + `create` (that's destroy + recreate, a much bigger operation
+ * that would also mint a fresh attestation identity for no reason here).
  */
 export interface ProvisioningService {
   create(desc: MachineDescriptor): Effect.Effect<MachineStatus, ProvisioningError>;
   archive(machineId: string): Effect.Effect<MachineStatus, ProvisioningError>;
   reconcile(machineId: string): Effect.Effect<MachineStatus, ProvisioningError>;
   reimage(desc: ReimageDescriptor): Effect.Effect<MachineStatus, ProvisioningError>;
+  restart(machineId: string): Effect.Effect<MachineStatus, ProvisioningError>;
 }
 
 export class ProvisioningServiceTag extends Context.Tag("ProvisioningService")<
