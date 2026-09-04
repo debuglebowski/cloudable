@@ -118,7 +118,7 @@ async function signInAs(email: string, name: string): Promise<string> {
     const text = await res.text().catch(() => "");
     throw new Error(`sign-in failed for ${email} -> ${res.status}: ${text}`);
   }
-  const cookies = res.headers.getSetCookie().map((c) => c.split(";")[0]!);
+  const cookies = res.headers.getSetCookie().map((c) => c.split(";")[0] ?? c);
   if (cookies.length === 0) throw new Error(`sign-in for ${email} returned no session cookie`);
   return cookies.join("; ");
 }

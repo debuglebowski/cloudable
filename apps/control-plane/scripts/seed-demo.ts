@@ -26,7 +26,7 @@ import postgres from "postgres";
 import { config } from "../src/config";
 
 const API_BASE = process.env.SEED_API_BASE ?? `http://localhost:${config.port}`;
-const RESET = process.argv.includes("--reset") || process.env["SEED_RESET"] === "1";
+const RESET = process.argv.includes("--reset") || process.env.SEED_RESET === "1";
 
 /**
  * Every domain table this script (or the real API calls it makes) can write
@@ -127,7 +127,7 @@ async function signInAs(email: string, name: string): Promise<string> {
     const text = await res.text().catch(() => "");
     throw new Error(`sign-in failed for ${email} -> ${res.status}: ${text}`);
   }
-  const cookies = res.headers.getSetCookie().map((c) => c.split(";")[0]!);
+  const cookies = res.headers.getSetCookie().map((c) => c.split(";")[0] ?? c);
   if (cookies.length === 0) throw new Error(`sign-in for ${email} returned no session cookie`);
   return cookies.join("; ");
 }

@@ -15,6 +15,5 @@ const db = drizzle(migrationClient);
 await migrate(db, { migrationsFolder: "./migrations" });
 await migrationClient.end();
 
-// biome-ignore lint/suspicious/noConsole: one-shot CLI script output.
 console.log("Migrations applied.");
 process.exit(0);

@@ -88,8 +88,8 @@ describe("JoinTokenAttestation", () => {
       ),
     );
 
-    const previous = process.env["JOIN_TOKEN_SECRET"];
-    process.env["JOIN_TOKEN_SECRET"] = "a-different-secret";
+    const previous = process.env.JOIN_TOKEN_SECRET;
+    process.env.JOIN_TOKEN_SECRET = "a-different-secret";
     try {
       const error = await Effect.runPromise(
         Effect.flip(
@@ -101,8 +101,8 @@ describe("JoinTokenAttestation", () => {
       );
       expect(error.reason).toBe("invalid_signature");
     } finally {
-      if (previous === undefined) delete process.env["JOIN_TOKEN_SECRET"];
-      else process.env["JOIN_TOKEN_SECRET"] = previous;
+      if (previous === undefined) process.env.JOIN_TOKEN_SECRET = undefined;
+      else process.env.JOIN_TOKEN_SECRET = previous;
     }
   });
 });
