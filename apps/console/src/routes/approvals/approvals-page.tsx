@@ -144,7 +144,7 @@ export function ApprovalsPage() {
         // exact value and why there's no border alongside it. min-h-0, no
         // flex-1: shrinks to the real available space when content
         // overflows, collapses to content otherwise.
-        <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+        <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
           {rows.length === 0 ? (
             <EmptyState
               icon={CheckSquare}

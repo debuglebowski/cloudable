@@ -177,7 +177,7 @@ export function AccessPage() {
             there's no border alongside it. min-h-0, no flex-1: shrinks to
             the real available space when content overflows, collapses to
             content otherwise. */}
-          <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+          <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
             {certificatesQuery.isLoading ||
             certificatesQuery.isError ||
             (certificatesQuery.data?.length ?? 0) > 0 ? (
@@ -243,7 +243,7 @@ export function AccessPage() {
         </TabsContent>
 
         <TabsContent value="sessions" className="mt-0 flex min-h-0 flex-col">
-          <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+          <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
             {sessionsQuery.isLoading ||
             sessionsQuery.isError ||
             (sessionsQuery.data?.length ?? 0) > 0 ? (
@@ -326,7 +326,7 @@ export function AccessPage() {
           <div className="flex shrink-0 justify-end">
             <RequestElevationDialog />
           </div>
-          <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+          <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
             {elevationsQuery.isLoading ||
             elevationsQuery.isError ||
             (elevationsQuery.data?.length ?? 0) > 0 ? (

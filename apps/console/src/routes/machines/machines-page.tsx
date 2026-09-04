@@ -95,7 +95,7 @@ export function MachinesPage() {
         // empty space. `containerClassName` swaps Table's own flat
         // max-h-[60vh] cap for a real h-full fill of this bounded box, so the
         // cap tracks the page's real layout instead of a fixed vh fraction.
-        <div className="min-h-0 overflow-hidden rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+        <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
           {isPending || machines.length > 0 ? (
             <Table containerClassName="h-full max-h-none">
               <TableHeader>

@@ -179,7 +179,7 @@ export function RootLayout() {
             onto an already-dark page; the sidebar hits the exact same
             mechanism as every other Card-shaped surface, since it shares the
             same shadow and the same lack of a light-mode border. */}
-      <aside className="z-10 my-1.5 ml-1.5 flex w-60 shrink-0 flex-col rounded-2xl bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)] dark:border dark:border-border/35">
+      <aside className="z-10 my-1.5 ml-1.5 flex w-60 shrink-0 flex-col rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
         <div className="flex items-center gap-1 px-3 py-4">
           <AccountMenu email={sessionQuery.data.user.email} />
           {/* Search — icon-only (⌘K still opens it, no full pill needed for a
