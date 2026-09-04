@@ -13,6 +13,7 @@ import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ActorCell } from "@/components/actor-cell";
 import { ControlStatus } from "@/components/control-status";
 import { Freshness } from "@/components/freshness";
+import { PageLoader } from "@/components/page-loader";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -280,7 +281,7 @@ function EvidenceExportView() {
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <PageLoader size="sm" />
       ) : (
         <div className="flex flex-col gap-3">
           {groups?.map((group) => (

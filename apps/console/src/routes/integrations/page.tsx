@@ -2,6 +2,7 @@ import { Lock, Network, UserCog } from "lucide-react";
 
 import { pickConnected, useDisconnectIntegration, useIntegrations } from "@/api/integrations";
 import type { Integration } from "@/api/integrations";
+import { PageLoader } from "@/components/page-loader";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 import {
@@ -37,7 +38,7 @@ export function IntegrationsPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <PageLoader />
       ) : (
         <div className="grid gap-4 md:grid-cols-3">
           <IntegrationCard

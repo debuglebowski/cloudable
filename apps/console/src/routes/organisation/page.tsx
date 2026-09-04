@@ -11,6 +11,7 @@ import {
   useUpdateOrgSettings,
 } from "@/api/organisation";
 import { LineageGutter } from "@/components/lineage-gutter";
+import { PageLoader } from "@/components/page-loader";
 import { SettingRow } from "@/components/setting-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,7 +49,7 @@ export function OrganisationPage() {
   const [editingControlId, setEditingControlId] = useState<string | null>(null);
 
   if (isLoading || !settings) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return <PageLoader />;
   }
 
   const editingControl = controlMap?.controls.find((control) => control.id === editingControlId);
@@ -210,7 +211,7 @@ export function OrganisationPage() {
             </CardHeader>
             <CardContent className="flex flex-col">
               {controlMapLoading || !controlMap ? (
-                <p className="text-sm text-muted-foreground">Loading…</p>
+                <PageLoader size="sm" />
               ) : (
                 controlMap.controls.map((control) => (
                   <SettingRow
