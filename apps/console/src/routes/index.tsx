@@ -8,6 +8,7 @@ import { useAuditTimeline, useControlEvidence } from "@/api/audit";
 import { listMachines, machinesKeys } from "@/api/machines";
 import { listPeople, peopleKeys } from "@/api/people";
 import { Freshness } from "@/components/freshness";
+import { PageLoader } from "@/components/page-loader";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -191,7 +192,7 @@ function NeedsAttention() {
         <CardDescription>Machines in error, and approvals closest to expiring.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-2.5">
-        {isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {isPending && <PageLoader size="sm" />}
 
         {!isPending && itemCount === 0 && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -251,7 +252,7 @@ function RecentActivity() {
         <CardDescription>The latest events on the audit timeline.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {isPending && <PageLoader size="sm" />}
         {!isPending && entries.length === 0 && (
           <p className="text-sm text-muted-foreground">No events yet.</p>
         )}

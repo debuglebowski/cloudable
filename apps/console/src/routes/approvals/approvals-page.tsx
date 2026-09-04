@@ -19,6 +19,7 @@ import {
   usePendingApprovalsQuery,
 } from "@/api/approvals";
 import { Freshness } from "@/components/freshness";
+import { PageLoader } from "@/components/page-loader";
 import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
@@ -133,7 +134,7 @@ export function ApprovalsPage() {
         </TabsList>
       </Tabs>
 
-      {query.isLoading && <p className="shrink-0 text-sm text-muted-foreground">Loading…</p>}
+      {query.isLoading && <PageLoader size="sm" className="shrink-0" />}
       {query.isError && (
         <p className="shrink-0 text-sm text-destructive">Failed to load approvals.</p>
       )}

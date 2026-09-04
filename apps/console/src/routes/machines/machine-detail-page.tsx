@@ -33,6 +33,7 @@ import { ControlStatus } from "@/components/control-status";
 import { Freshness } from "@/components/freshness";
 import { LineageGutter } from "@/components/lineage-gutter";
 import { OsIcon } from "@/components/os-icon";
+import { PageLoader } from "@/components/page-loader";
 import { SettingRow } from "@/components/setting-row";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
@@ -199,7 +200,7 @@ export function MachineDetailPage() {
   }
 
   if (machineQuery.isPending) {
-    return <p className="text-sm text-muted-foreground">Loading machine…</p>;
+    return <PageLoader label="Loading machine" />;
   }
   if (machineQuery.isError || !machineQuery.data) {
     return <p className="text-sm text-destructive">Machine not found.</p>;

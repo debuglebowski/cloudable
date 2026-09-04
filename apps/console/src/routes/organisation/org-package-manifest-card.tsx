@@ -6,6 +6,7 @@ import {
   useOrgPackages,
   useRemoveOrgPackage,
 } from "@/api/organisation";
+import { PageLoader } from "@/components/page-loader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,9 +37,7 @@ export function OrgPackageManifestCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {packagesQuery.isPending && (
-          <p className="text-sm text-muted-foreground">Loading package manifest…</p>
-        )}
+        {packagesQuery.isPending && <PageLoader size="sm" label="Loading package manifest" />}
         {packagesQuery.isError && (
           <p className="text-sm text-destructive">Failed to load the org package manifest.</p>
         )}

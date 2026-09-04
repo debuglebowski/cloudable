@@ -14,6 +14,7 @@ import { useState } from "react";
 
 import { type ArchivedSnapshot, useArchivedSnapshots } from "@/api/archive";
 import { type Machine, listMachines, machinesKeys } from "@/api/machines";
+import { PageLoader } from "@/components/page-loader";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,7 +101,7 @@ export function ArchivePage() {
 
       <Card className="flex min-h-0 flex-col">
         <CardContent className="min-h-0 pt-4">
-          {isLoading && <p className="text-sm text-muted-foreground">Loading archived machines…</p>}
+          {isLoading && <PageLoader size="sm" label="Loading archived machines" />}
           {isError && <p className="text-sm text-destructive">Failed to load archived machines.</p>}
           {!isLoading && !isError && rows.length === 0 && (
             <EmptyState
