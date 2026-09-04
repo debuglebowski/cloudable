@@ -31,6 +31,7 @@ WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./
 COPY apps/control-plane/package.json apps/control-plane/package.json
 COPY apps/agent/package.json apps/agent/package.json
+COPY apps/tunnel-daemon/package.json apps/tunnel-daemon/package.json
 COPY apps/cli/package.json apps/cli/package.json
 COPY apps/console/package.json apps/console/package.json
 COPY packages/schema/package.json packages/schema/package.json
@@ -46,18 +47,28 @@ COPY packages/contracts/package.json packages/contracts/package.json
 RUN bun install --frozen-lockfile --ignore-scripts
 
 # Bring in source only for the control plane and the workspace deps it
-# actually needs. apps/agent, apps/cli, apps/console source is never
-# copied in — their package.json above exists only so `bun install` can
-# resolve the whole workspace graph.
+# actually needs — plus apps/agent and apps/tunnel-daemon, compiled below
+# into standalone binaries this image serves over HTTP (services/
+# ProvisioningService.azure.ts's cloud-init curls them at VM boot: a fresh
+# Ubuntu VM has no Bun/Node to run TS source with, only whatever binary it
+# downloads). apps/cli, apps/console source is never copied in — their
+# package.json above exists only so `bun install` can resolve the whole
+# workspace graph.
 COPY packages/contracts packages/contracts
 COPY packages/events packages/events
 COPY packages/schema packages/schema
 COPY apps/control-plane apps/control-plane
+COPY apps/agent apps/agent
+COPY apps/tunnel-daemon apps/tunnel-daemon
 
 RUN bun run --cwd packages/contracts build \
  && bun run --cwd packages/events build \
  && bun run --cwd packages/schema build \
- && bun run --cwd apps/control-plane build
+ && bun run --cwd apps/control-plane build \
+ && bun run --cwd apps/agent build \
+ && bun run --cwd apps/agent build:arm64 \
+ && bun run --cwd apps/tunnel-daemon build \
+ && bun run --cwd apps/tunnel-daemon build:arm64
 
 # Re-resolve node_modules for production only, so devDependencies
 # (typescript, drizzle-kit, @testcontainers/postgresql, ...) never end up
@@ -82,6 +93,14 @@ COPY --from=builder --chown=bun:bun /app/packages/contracts ./packages/contracts
 COPY --from=builder --chown=bun:bun /app/packages/events ./packages/events
 COPY --from=builder --chown=bun:bun /app/packages/schema ./packages/schema
 COPY --from=builder --chown=bun:bun /app/apps/control-plane ./apps/control-plane
+
+# The 4 standalone binaries GET /_internal/binaries/:target serves
+# (http/routes/binaries.ts) — named exactly as that route expects, so it
+# can join `AGENT_BINARY_DIR`/target straight through with no lookup table.
+COPY --from=builder --chown=bun:bun /app/apps/agent/dist/cloudable-agent-linux-x64 /app/binaries/cloudable-agent-linux-x64
+COPY --from=builder --chown=bun:bun /app/apps/agent/dist/cloudable-agent-linux-arm64 /app/binaries/cloudable-agent-linux-arm64
+COPY --from=builder --chown=bun:bun /app/apps/tunnel-daemon/dist/cloudable-tunnel-daemon-linux-x64 /app/binaries/cloudable-tunnel-daemon-linux-x64
+COPY --from=builder --chown=bun:bun /app/apps/tunnel-daemon/dist/cloudable-tunnel-daemon-linux-arm64 /app/binaries/cloudable-tunnel-daemon-linux-arm64
 
 USER bun
 EXPOSE 3000
