@@ -47,10 +47,11 @@ describe("UpgradeService", () => {
       .insert(orgs)
       .values({ name: `org-${crypto.randomUUID()}` })
       .returning();
+    if (!org) throw new Error("failed to insert test org");
     const [machine] = await testDb.db
       .insert(machines)
       .values({
-        orgId: org!.id,
+        orgId: org.id,
         name: "test-machine",
         provider: "fake",
         region: "eastus",
@@ -59,6 +60,7 @@ describe("UpgradeService", () => {
         state: "running",
       })
       .returning();
+    if (!machine) throw new Error("failed to insert test machine");
 
     const DbTestLive = Layer.succeed(Db, testDb.db);
     const layer = Layer.mergeAll(DbTestLive, EventBus.Default, FakeProvisioningServiceLive).pipe(
@@ -74,8 +76,8 @@ describe("UpgradeService", () => {
       Effect.gen(function* () {
         const provisioning = yield* ProvisioningServiceTag;
         yield* provisioning.create({
-          machineId: machine!.id,
-          orgId: org!.id,
+          machineId: machine.id,
+          orgId: org.id,
           provider: "fake",
           region: "eastus",
           sizeSku: "Standard_B2s",
@@ -83,7 +85,7 @@ describe("UpgradeService", () => {
       }),
     );
 
-    return { org: org!, machine: machine!, runtime };
+    return { org, machine, runtime };
   };
 
   test("success: updates machines.image, emits machine.reimaged, and advances nextEligibleAt", async () => {

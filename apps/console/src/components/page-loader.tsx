@@ -28,8 +28,7 @@ export function PageLoader({
   const sm = size === "sm";
 
   return (
-    <div
-      role="status"
+    <output
       aria-live="polite"
       className={cn(
         "flex w-full flex-col items-center justify-center bg-background",
@@ -79,6 +78,6 @@ export function PageLoader({
           <span className="size-1 animate-bounce rounded-full bg-muted-foreground/60 [animation-duration:1s]" />
         </span>
       </p>
-    </div>
+    </output>
   );
 }

@@ -14,7 +14,7 @@ export interface E2eConfig {
 
 export const e2eConfig: E2eConfig = {
   databaseUrl:
-    process.env["DATABASE_URL"] ?? "postgres://cloudable:cloudable@localhost:5442/cloudable",
-  controlPlaneUrl: `http://localhost:${process.env["PORT"] ?? 4780}`,
-  consoleUrl: process.env["CONSOLE_ORIGIN"] ?? "http://localhost:5180",
+    process.env.DATABASE_URL ?? "postgres://cloudable:cloudable@localhost:5442/cloudable",
+  controlPlaneUrl: `http://localhost:${process.env.PORT ?? 4780}`,
+  consoleUrl: process.env.CONSOLE_ORIGIN ?? "http://localhost:5180",
 };

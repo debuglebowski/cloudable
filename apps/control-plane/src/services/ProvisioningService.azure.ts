@@ -325,7 +325,7 @@ const service: ProvisioningService = {
       } satisfies MachineStatus;
     }),
 
-  archive: (machineId: string) =>
+  archive: (machineId: string, _provider) =>
     Effect.gen(function* () {
       const clients = yield* getClients();
       const names = namesFor(machineId);
@@ -366,7 +366,7 @@ const service: ProvisioningService = {
       return { machineId, state: "archived", externalId: null } satisfies MachineStatus;
     }),
 
-  reconcile: (machineId: string) =>
+  reconcile: (machineId: string, _provider) =>
     Effect.gen(function* () {
       const clients = yield* getClients();
       const names = namesFor(machineId);

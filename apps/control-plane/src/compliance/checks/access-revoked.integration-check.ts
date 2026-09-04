@@ -7,16 +7,20 @@ import { startTestDb } from "../../../test/testcontainers";
 import { Db } from "../../db/layer";
 import { CHECK_ID, accessRevokedOnOffboardingCheck } from "./access-revoked";
 
-// KNOWN ISSUE (sandbox-only, not this test's fault): under Bun,
-// `testcontainers-node`'s `.start()` can hang indefinitely — the container
-// starts fine at the Docker level, but the JS promise never resolves
-// (oven-sh/bun#21342, testcontainers-node#974). If this test hangs in a Bun
-// sandbox, that's why. It was verified correct by running the exact same
-// evaluate()/finding-store path against a directly-run (non-testcontainers)
-// Postgres container: still-valid-cert-after-24h fires, revoked-in-time
-// doesn't, firstSeenAt is stable across a second evaluation, and a resolved
-// finding's state row is removed. This test should pass unmodified once the
-// upstream bug is fixed, or in any environment it doesn't reproduce in.
+// The Bun/testcontainers-node hang this comment used to warn about
+// (oven-sh/bun#21342, testcontainers-node#974 — `.start()`'s promise never
+// resolving, even though the container is healthy at the Docker level) is
+// fixed in `startTestDb()` (test/testcontainers.ts): the default wait
+// strategy's internal-port check (`docker exec` + reading Docker's
+// multiplexed exec-attach stream) is what actually hung under Bun — the
+// health check alone, which this now uses instead, was always reliable.
+// This file's own test never actually ran to completion before that fix
+// landed, which is exactly how its `stillValidCert` setup — missing an
+// explicit `issuedAt` predating the offboarding event it's meant to
+// simulate — went uncaught: without one, it defaults to insertion time
+// (now), which evaluate() correctly treats as unrelated fresh access
+// rather than a stale unrevoked cert, so the test asserted a finding that
+// never fired. First real run, first time either bug was actually caught.
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -84,6 +88,8 @@ describe("accessRevokedOnOffboardingCheck", () => {
           personId: longAgoOffboarded.id,
           machineScope: "all",
           fingerprint: "SHA256:stillvalid",
+          // Must predate the 48h-ago offboarding event — see the file header comment.
+          issuedAt: new Date(now - 72 * HOUR_MS),
           expiresAt: new Date(now + 30 * 24 * HOUR_MS),
         })
         .returning();
