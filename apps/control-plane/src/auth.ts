@@ -1,6 +1,7 @@
-import { authAccount, authSession, authUser, authVerification } from "@cloudable/schema";
-import { betterAuth } from "better-auth";
+import { authAccount, authSession, authUser, authVerification, people } from "@cloudable/schema";
+import { APIError, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { config } from "./config";
@@ -47,4 +48,34 @@ export const auth = betterAuth({
   // all 403 "Invalid origin" the moment a cookie is already set).
   trustedOrigins: [config.consoleOrigin],
   emailAndPassword: { enabled: true },
+  // Root-cause fix for the class of bug that produced an orphaned
+  // `dev@cloudable.local`: `emailAndPassword` sign-up on its own creates a
+  // fully working BetterAuth account for any email, entirely independent of
+  // `people` (an org's roster is admin/SCIM-managed — see
+  // `domain/people/people.ts`'s doc comment — with no flow that ever links
+  // the two at creation time). That account authenticates cleanly forever
+  // but can never pass `CurrentUserAuthentication` (`http/middleware/
+  // auth.ts`), since that middleware resolves the caller by matching this
+  // same email against `people` — so it always 401s, no matter how many
+  // times you sign in. Rather than patch that dead end after the fact,
+  // reject the sign-up itself: no `people` row for this email, no account.
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          const [person] = await authDb
+            .select({ id: people.id })
+            .from(people)
+            .where(eq(people.email, user.email))
+            .limit(1);
+          if (!person) {
+            throw new APIError("BAD_REQUEST", {
+              code: "no_matching_person",
+              message: `No person record exists for "${user.email}". An org admin must add you as a person (People page) before you can sign in.`,
+            });
+          }
+        },
+      },
+    },
+  },
 });
