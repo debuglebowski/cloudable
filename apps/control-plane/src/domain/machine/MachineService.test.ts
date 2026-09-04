@@ -112,7 +112,7 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     return person;
   }
 
-  async function enableCatalogEntry(orgId: string, kind: "region" | "image", code: string) {
+  async function enableCatalogEntry(orgId: string, kind: "region" | "image" | "sku", code: string) {
     await db.insert(orgCatalogSelections).values({ orgId, provider: "azure", kind, code });
   }
 
@@ -246,6 +246,7 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     await enableProvider(org.id, "azure");
     await enableCatalogEntry(org.id, "region", "westeurope");
     await enableCatalogEntry(org.id, "image", "ubuntu-24.04");
+    await enableCatalogEntry(org.id, "sku", "Standard_D2s_v5");
 
     const machine = await run(
       Effect.gen(function* () {
@@ -275,8 +276,10 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     await enableProvider(orgB.id, "azure");
     await enableCatalogEntry(orgA.id, "region", "westeurope");
     await enableCatalogEntry(orgA.id, "image", "ubuntu-24.04");
+    await enableCatalogEntry(orgA.id, "sku", "Standard_D2s_v5");
     await enableCatalogEntry(orgB.id, "region", "japaneast");
     await enableCatalogEntry(orgB.id, "image", "ubuntu-24.04");
+    await enableCatalogEntry(orgB.id, "sku", "Standard_D2s_v5");
 
     const machineA = await run(
       Effect.gen(function* () {

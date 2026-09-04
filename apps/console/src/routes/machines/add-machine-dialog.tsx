@@ -39,11 +39,19 @@ const PROVIDER_LABEL: Record<CloudProvider, string> = {
 /** Only Azure has a region concept or a curated image catalog — Docker/Fake
  * are regionless (the Region field is omitted outright, not disabled) and
  * take a freeform image string (Docker further constrains it to
- * "ubuntu-XX.YY" at the adapter level; Fake accepts anything). */
+ * "ubuntu-XX.YY" at the adapter level; Fake accepts anything). Size SKU is
+ * a NOT NULL column for every provider (unlike region, which is genuinely
+ * absent for non-Azure) — Docker/Fake still need a value, so the field is
+ * hidden outright (same as Region) and silently defaults to
+ * `DEFAULTS.sizeSku` rather than asking, since there's no real catalog or
+ * freeform convention to offer them. */
 function supportsRegion(provider: CloudProvider): boolean {
   return provider === "azure";
 }
 function hasImageCatalog(provider: CloudProvider): boolean {
+  return provider === "azure";
+}
+function hasSizeCatalog(provider: CloudProvider): boolean {
   return provider === "azure";
 }
 
@@ -82,11 +90,14 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
   const enabledRegions = (regionCatalogQuery.data ?? []).filter((entry) => entry.enabled);
   const imageCatalogQuery = useProviderCatalog("azure", "image");
   const enabledImages = (imageCatalogQuery.data ?? []).filter((entry) => entry.enabled);
+  const sizeCatalogQuery = useProviderCatalog("azure", "sku");
+  const enabledSizes = (sizeCatalogQuery.data ?? []).filter((entry) => entry.enabled);
 
   function handleProviderChange(next: CloudProvider) {
     setProvider(next);
     setRegion("");
     setImage(hasImageCatalog(next) ? "" : DEFAULTS.image);
+    setSizeSku(hasSizeCatalog(next) ? "" : DEFAULTS.sizeSku);
   }
 
   const mutation = useMutation({
@@ -123,6 +134,7 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
     provider !== "" &&
     (!supportsRegion(provider) || region !== "") &&
     image.trim().length > 0 &&
+    (!hasSizeCatalog(provider) || sizeSku !== "") &&
     ownerPersonId.length > 0 &&
     !mutation.isPending;
 
@@ -211,15 +223,31 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
                 </Select>
               </div>
             )}
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="add-machine-size">Size SKU</Label>
-              <Input
-                id="add-machine-size"
-                required
-                value={sizeSku}
-                onChange={(event) => setSizeSku(event.target.value)}
-              />
-            </div>
+            {provider && hasSizeCatalog(provider) && (
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="add-machine-size">Size SKU</Label>
+                <Select value={sizeSku} onValueChange={setSizeSku}>
+                  <SelectTrigger id="add-machine-size">
+                    <SelectValue
+                      placeholder={
+                        sizeCatalogQuery.isLoading
+                          ? "Loading…"
+                          : enabledSizes.length === 0
+                            ? "No sizes enabled"
+                            : "Select a size"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {enabledSizes.map((entry) => (
+                      <SelectItem key={entry.code} value={entry.code}>
+                        {entry.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="add-machine-image">Image</Label>

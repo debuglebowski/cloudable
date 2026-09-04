@@ -3,14 +3,14 @@ import { Schema } from "effect";
 import { OrgCatalogError } from "../../domain/organisation/catalog";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
-// Org-curated region/image catalog for machine creation — see
+// Org-curated region/image/size catalog for machine creation — see
 // `domain/organisation/catalog.ts`. Only Azure has a real catalog today
-// (Fake/Docker are regionless and freeform-image — see
+// (Fake/Docker are regionless and freeform-image/size — see
 // `PROVIDER_CAPABILITIES` on the console side), but the path is
 // provider-generic so a future provider's catalog needs no route change.
 
 const CatalogProvider = Schema.Literal("azure");
-const CatalogKind = Schema.Literal("region", "image");
+const CatalogKind = Schema.Literal("region", "image", "sku");
 
 const CatalogItem = Schema.Struct({
   code: Schema.String,
@@ -29,6 +29,7 @@ const ToggleCatalogEntryPayload = Schema.Struct({
 });
 
 const SyncRegionsResponse = Schema.Struct({ items: Schema.Array(CatalogItem) });
+const SyncSizesResponse = Schema.Struct({ items: Schema.Array(CatalogItem) });
 
 export const CatalogGroup = HttpApiGroup.make("catalog")
   .add(
@@ -48,5 +49,11 @@ export const CatalogGroup = HttpApiGroup.make("catalog")
       "syncRegions",
       "/api/v1/organisation/catalog/azure/regions/sync",
     ).addSuccess(SyncRegionsResponse),
+  )
+  .add(
+    HttpApiEndpoint.post(
+      "syncSizes",
+      "/api/v1/organisation/catalog/azure/sizes/sync",
+    ).addSuccess(SyncSizesResponse),
   )
   .middleware(CurrentUserAuthentication);

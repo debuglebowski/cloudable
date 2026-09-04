@@ -2,6 +2,7 @@ import {
   type CatalogItem,
   useProviderCatalog,
   useSyncAzureRegions,
+  useSyncAzureSizes,
   useToggleCatalogEntry,
 } from "@/api/provider-catalog";
 import { Button } from "@/components/ui/button";
@@ -21,12 +22,17 @@ export function CatalogChecklist({
   showSync,
 }: {
   title: string;
-  kind: "region" | "image";
+  kind: "region" | "image" | "sku";
   showSync?: boolean;
 }) {
   const catalogQuery = useProviderCatalog("azure", kind);
   const toggle = useToggleCatalogEntry("azure", kind);
-  const sync = useSyncAzureRegions();
+  // Both mutations are cheap to declare (a `useMutation` call sets up a
+  // definition, it doesn't fire anything) — called unconditionally so the
+  // choice below is a plain value pick, not a conditional hook call.
+  const regionSync = useSyncAzureRegions();
+  const sizeSync = useSyncAzureSizes();
+  const sync = kind === "region" ? regionSync : sizeSync;
 
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border p-2.5">
