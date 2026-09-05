@@ -153,21 +153,3 @@ variable "machines_resource_group_name" {
   default     = "rg-cloudable-managed"
 }
 
-variable "custom_domain" {
-  description = "Custom domain to bind to the control plane (e.g. \"cloudable.example.com\"), instead of the auto-generated Azure Container Apps FQDN. Leave null (default) to use the auto-generated FQDN — nothing about custom domains is created in that case. When set, this also becomes CONTROL_PLANE_BASE_URL/BETTER_AUTH_URL, so it must be the exact hostname you'll actually reach the control plane at."
-  type        = string
-  default     = null
-}
-
-variable "cloudflare_zone_id" {
-  description = "Cloudflare zone ID for the DNS zone custom_domain belongs to (e.g. the zone ID for \"example.com\" if custom_domain is \"cloudable.example.com\"). Leave empty (default) if custom_domain's DNS is managed elsewhere or by hand — in that case you're responsible for creating the TXT verification record and CNAME yourself; this module's own outputs/plan output tell you the exact values to use. Only takes effect when custom_domain is also set."
-  type        = string
-  default     = ""
-}
-
-variable "cloudflare_api_token" {
-  description = "Cloudflare API token with DNS edit permission on cloudflare_zone_id's zone. Only needed when cloudflare_zone_id is set. Marked sensitive; supply via -var, a *.tfvars file that is not committed, or TF_VAR_cloudflare_api_token — never commit a real value."
-  type        = string
-  sensitive   = true
-  default     = ""
-}

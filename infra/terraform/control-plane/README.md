@@ -83,25 +83,51 @@ run from (it printed a full 8-resource plan in the environment that produced thi
 module, purely because that shell already had `az login` state — that is not a
 signal this module is safe to `apply` anywhere).
 
-## Custom domain (optional)
+## Custom domain (do it yourself)
 
-By default the control plane is reachable at the auto-generated Azure Container Apps
-FQDN (`<app-name>.<random>.<region>.azurecontainerapps.io`). Set `custom_domain` to
-bind a real hostname instead — this also becomes `CONTROL_PLANE_BASE_URL`/
-`BETTER_AUTH_URL`, so it must be the exact hostname you'll reach the control plane at.
+This module deliberately does **not** take a `custom_domain` variable — a real
+self-hoster's DNS could be Cloudflare, Route53, Azure DNS, GoDaddy, or none at all, and
+this repo is meant to stay a minimal, forkable starting point, not grow a variable and a
+provider dependency for every DNS vendor that exists. If you want a real hostname
+instead of the auto-generated Container Apps FQDN, add this to **your own copy** of
+`main.tf` (validated for real against a live Azure tenant):
 
-Azure requires proof of domain ownership before binding a custom hostname: a `TXT`
-record at `asuid.<domain>` containing the Container App's `custom_domain_verification_id`,
-plus a `CNAME` routing the domain to the app's FQDN. If your DNS is on Cloudflare, set
-`cloudflare_zone_id` (and `cloudflare_api_token`, an API token with DNS-edit permission
-on that zone) and this module creates both records for you. Otherwise, leave those
-empty and create the two records yourself — `terraform plan`'s output for
-`azurerm_container_app.this.custom_domain_verification_id` and this module's own
-`control_plane_url`/FQDN tell you the exact values.
+```hcl
+# Requires bumping the azurerm provider to "~> 4.69" in versions.tf —
+# azurerm_container_app_environment_managed_certificate (the free,
+# auto-renewed TLS cert for a custom domain) doesn't exist before that.
 
-Requires azurerm provider `~> 4.69` (see `versions.tf`) — `azurerm_container_app_environment_managed_certificate`,
-which issues the free TLS certificate Azure auto-renews for the custom domain, doesn't
-exist before that version.
+resource "azurerm_container_app_custom_domain" "this" {
+  name             = "cloudable.example.com" # your real hostname
+  container_app_id = azurerm_container_app.this.id
+
+  # certificate_binding_type is set asynchronously by Azure once the managed
+  # certificate below finishes issuing — without ignoring it, every
+  # subsequent plan sees drift.
+  lifecycle {
+    ignore_changes = [certificate_binding_type]
+  }
+}
+
+resource "azurerm_container_app_environment_managed_certificate" "this" {
+  name                          = "${var.name_prefix}-cp-cert"
+  container_app_environment_id = azurerm_container_app_environment.this.id
+  subject_name                  = "cloudable.example.com" # same hostname as above
+  domain_control_validation     = "CNAME"
+
+  depends_on = [azurerm_container_app_custom_domain.this]
+}
+```
+
+Also point `local.public_url` (used for `BETTER_AUTH_URL`/`CONTROL_PLANE_BASE_URL`) at
+your hostname instead of `local.control_plane_fqdn`.
+
+Azure requires proof of domain ownership before it'll bind the hostname: a `TXT` record
+at `asuid.<your domain>` containing `azurerm_container_app.this.custom_domain_verification_id`
+(visible in `terraform plan`'s output once you add the resource above), plus a `CNAME`
+pointing your domain at `local.control_plane_fqdn`. Create both however you manage DNS —
+by hand, or with your DNS provider's own Terraform resource (e.g. Cloudflare's
+`cloudflare_dns_record`) in your own fork.
 
 ## Notes
 
