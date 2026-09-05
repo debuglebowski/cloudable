@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { classifyAzureError, imageReferenceFor, namesFor } from "./ProvisioningService.azure";
+import { config } from "../config";
+import {
+  classifyAzureError,
+  cloudInitFor,
+  imageReferenceFor,
+  namesFor,
+} from "./ProvisioningService.azure";
 
 describe("imageReferenceFor", () => {
   test("maps known Ubuntu versions to Canonical gallery images", () => {
@@ -43,6 +49,44 @@ describe("namesFor", () => {
   test("is a pure function of machineId — same input, same names", () => {
     const machineId = "11111111-2222-3333-4444-555555555555";
     expect(namesFor(machineId)).toEqual(namesFor(machineId));
+  });
+});
+
+describe("cloudInitFor", () => {
+  const desc = {
+    machineId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    orgId: "org-1",
+    provider: "azure" as const,
+    region: "eastus",
+    sizeSku: "Standard_B2s",
+    image: "ubuntu-24.04",
+    packages: ["docker"],
+  };
+
+  const decode = () => Buffer.from(cloudInitFor(desc, 0), "base64").toString("utf-8");
+
+  test("installs and enables systemd units for BOTH the agent and the tunnel daemon", () => {
+    // Regression test: an earlier version of this script downloaded the
+    // tunnel-daemon binary but never created a systemd unit for it at all —
+    // it sat on disk, executable, never started, so the web terminal / SSH
+    // session-attach path silently never worked on a real machine.
+    const script = decode();
+    expect(script).toContain("cat > /etc/systemd/system/cloudable-agent.service");
+    expect(script).toContain("cat > /etc/systemd/system/cloudable-tunnel-daemon.service");
+    expect(script).toContain("ExecStart=/opt/cloudable/agent");
+    expect(script).toContain("ExecStart=/opt/cloudable/tunnel-daemon");
+    expect(script).toContain("systemctl enable --now cloudable-agent");
+    expect(script).toContain("systemctl enable --now cloudable-tunnel-daemon");
+  });
+
+  test("both binaries are downloaded from this control plane's own public base URL", () => {
+    const script = decode();
+    expect(script).toContain(
+      `curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-agent-linux-$ARCH"`,
+    );
+    expect(script).toContain(
+      `curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-tunnel-daemon-linux-$ARCH"`,
+    );
   });
 });
 
