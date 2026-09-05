@@ -32,7 +32,13 @@ locals {
   # Container App itself is created, so this avoids a self-referential
   # dependency on the app's own (not-yet-created) ingress FQDN.
   control_plane_fqdn = "${local.app_name}.${azurerm_container_app_environment.this.default_domain}"
-  public_url         = "https://${local.control_plane_fqdn}"
+  # The control plane's real public URL: var.custom_domain once bound (see
+  # the "Custom domain" section below), else the auto-generated FQDN above.
+  # Feeds BETTER_AUTH_URL and CONTROL_PLANE_BASE_URL — both need to be the
+  # exact hostname a browser/agent actually reaches this deployment at.
+  public_url = var.custom_domain != null ? "https://${var.custom_domain}" : "https://${local.control_plane_fqdn}"
+
+  manage_dns_in_cloudflare = var.custom_domain != null && var.cloudflare_zone_id != ""
 
   # If control_plane_image already carries a digest ("<repo>@sha256:<digest>",
   # the production-pinning form described on control_plane_image_tag), don't
@@ -355,6 +361,14 @@ resource "azurerm_container_app" "this" {
         value = local.public_url
       }
 
+      # ProvisioningService.azure.ts's cloud-init needs this to be the
+      # control plane's real, publicly reachable URL, not localhost — a
+      # fresh Azure VM curls its agent/tunnel-daemon binaries from here.
+      env {
+        name  = "CONTROL_PLANE_BASE_URL"
+        value = local.public_url
+      }
+
       env {
         name  = "PORT"
         value = tostring(var.port)
@@ -385,4 +399,72 @@ resource "azurerm_container_app" "this" {
     azurerm_postgresql_flexible_server_database.this,
     azurerm_postgresql_flexible_server_firewall_rule.allow_azure_services,
   ]
+}
+
+# ---------------------------------------------------------------------------
+# Custom domain — entirely optional (var.custom_domain defaults to null, in
+# which case none of this exists and the auto-generated Container Apps FQDN
+# is used, same as before this section existed).
+#
+# Azure requires proof of domain ownership before it will bind a custom
+# hostname: a TXT record at "asuid.<domain>" containing the Container App's
+# own custom_domain_verification_id. var.cloudflare_zone_id lets this module
+# create that (and the CNAME routing traffic to the app) for you when your
+# DNS is on Cloudflare; leave it empty to manage those two records yourself
+# on whatever DNS you use — this module's plan output still tells you the
+# exact values to put in them (see README.md).
+# ---------------------------------------------------------------------------
+
+resource "cloudflare_dns_record" "verification" {
+  count   = local.manage_dns_in_cloudflare ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = "asuid.${var.custom_domain}"
+  type    = "TXT"
+  content = azurerm_container_app.this.custom_domain_verification_id
+  ttl     = 300
+  # Domain-ownership verification and Azure's own managed-certificate
+  # issuance below both need to see this record directly, not through
+  # Cloudflare's proxy.
+  proxied = false
+}
+
+resource "cloudflare_dns_record" "cname" {
+  count   = local.manage_dns_in_cloudflare ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = var.custom_domain
+  type    = "CNAME"
+  content = local.control_plane_fqdn
+  ttl     = 300
+  # Same reasoning as the TXT record above — proxying this would put
+  # Cloudflare's edge, not Azure, in the TLS/HTTP path Azure is validating.
+  proxied = false
+}
+
+resource "azurerm_container_app_custom_domain" "this" {
+  count            = var.custom_domain != null ? 1 : 0
+  name             = var.custom_domain
+  container_app_id = azurerm_container_app.this.id
+
+  # certificate_binding_type is set asynchronously by Azure once the managed
+  # certificate below finishes issuing — without ignoring it, every
+  # subsequent plan would see drift. (v3-era docs/examples also list
+  # container_app_environment_certificate_id here; on azurerm v4.81.0 the
+  # renamed equivalent, container_app_environment_managed_certificate_id, is
+  # purely computed — `tofu validate` confirmed it can never appear in a
+  # config diff at all, so listing it here is a no-op, not just redundant.)
+  lifecycle {
+    ignore_changes = [certificate_binding_type]
+  }
+
+  depends_on = [cloudflare_dns_record.verification, cloudflare_dns_record.cname]
+}
+
+resource "azurerm_container_app_environment_managed_certificate" "this" {
+  count                        = var.custom_domain != null ? 1 : 0
+  name                         = "${var.name_prefix}-cp-cert"
+  container_app_environment_id = azurerm_container_app_environment.this.id
+  subject_name                 = var.custom_domain
+  domain_control_validation    = "CNAME"
+
+  depends_on = [azurerm_container_app_custom_domain.this]
 }
