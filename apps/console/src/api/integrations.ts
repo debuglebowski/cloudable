@@ -21,14 +21,17 @@ export type IntegrationKind = "idp" | "cloud" | "secret_store";
 export type CloudProvider = "azure" | "docker" | "fake";
 
 const INTEGRATION_KIND_LABEL: Record<IntegrationKind, string> = {
-  idp: "Identity provider",
+  idp: "Microsoft Entra ID",
   cloud: "Cloud provider",
   secret_store: "Secret store",
 };
 
-/** Non-secret SCIM/OIDC pointer. Cloudable never stores an IdP client secret. */
+/** Non-secret SCIM/OIDC pointer. Cloudable never stores an IdP client secret.
+ * `provider` is a literal (not a free string) since Entra ID is the only
+ * supported IdP — matches `CloudConfig`/`SecretStoreConfig`'s discriminated
+ * shape, so a second IdP later is an added union member, not a rewrite. */
 export interface IdpConfig {
-  provider: string;
+  provider: "entra_id";
   metadataUrl: string;
 }
 

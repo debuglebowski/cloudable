@@ -1,4 +1,5 @@
-import { Boxes, Container, Lock, TestTube2, UserCog } from "lucide-react";
+import { Si1password, SiDocker } from "@icons-pack/react-simple-icons";
+import { Drama } from "lucide-react";
 
 import {
   pickConnected,
@@ -10,7 +11,7 @@ import type { Integration } from "@/api/integrations";
 import { useProvisioningCapabilities } from "@/api/provisioning-capabilities";
 import { PageLoader } from "@/components/page-loader";
 
-import { CatalogChecklist } from "./catalog-checklist";
+import { AzureCatalogDialog } from "./catalog-checklist";
 import {
   CloudEnableButton,
   IdpConnectDialog,
@@ -18,6 +19,35 @@ import {
   SecretStoreConnectDialog,
 } from "./connect-dialogs";
 import { IntegrationCard } from "./integration-card";
+
+/** Self-hosted (public/logos/azure.svg — from github.com/gilbarbara/logos, CC0)
+ * since Microsoft's mark isn't in @icons-pack/react-simple-icons. Used for both
+ * Azure cards (cloud provider + Azure Key Vault secret store). Renders in its
+ * own real colors already (a static multi-color SVG, not `currentColor`-tinted). */
+function AzureLogo({ className }: { className?: string }) {
+  return <img src="/logos/azure.svg" alt="Azure" className={className} />;
+}
+
+/** `@icons-pack/react-simple-icons` components default to `fill="currentColor"`
+ * (so they'd render muted-gray inside `IntegrationCard`'s icon square, like a
+ * lucide icon) — `color="default"` opts into each brand's real hex instead,
+ * matching `AzureLogo`'s already-real-color treatment. */
+function DockerLogo({ className }: { className?: string }) {
+  return <SiDocker className={className} color="default" />;
+}
+
+function OnePasswordLogo({ className }: { className?: string }) {
+  return <Si1password className={className} color="default" />;
+}
+
+/** Self-hosted (public/logos/microsoft.svg — from github.com/gilbarbara/logos, CC0).
+ * The Identity provider integration is Microsoft Entra ID specifically (see
+ * `docs/spec.md` §3) — no dedicated Entra mark exists in either icon source, so
+ * this is the generic four-color Microsoft flag rather than `AzureLogo`, since
+ * Entra isn't the Azure compute brand. */
+function MicrosoftLogo({ className }: { className?: string }) {
+  return <img src="/logos/microsoft.svg" alt="Microsoft" className={className} />;
+}
 
 /** A category header: bold and full-size (not a quiet muted-foreground
  * label like the nav rail's group headers — this is page content, not
@@ -51,6 +81,9 @@ export function IntegrationsPage() {
 
   const idp = pickConnected(integrations, "idp");
   const secretStore = pickConnected(integrations, "secret_store");
+  const azureKeyVault =
+    secretStore?.config.provider === "azure_key_vault" ? secretStore : undefined;
+  const onePassword = secretStore?.config.provider === "1password" ? secretStore : undefined;
   const azure = pickConnectedProvider(integrations, "azure");
   const docker = pickConnectedProvider(integrations, "docker");
   const fake = pickConnectedProvider(integrations, "fake");
@@ -79,20 +112,17 @@ export function IntegrationsPage() {
           <CategorySection title="Identity provider">
             <div className="grid gap-4 md:grid-cols-3">
               <IntegrationCard
-                title="Identity provider"
-                icon={UserCog}
-                description="SCIM 2.0 + OIDC against any IdP. Optional — without one, People stays Cloudable's fully editable system of record."
+                title="Microsoft Entra ID"
+                icon={MicrosoftLogo}
+                description="SCIM 2.0 + OIDC against your Entra tenant. Optional — without one, People stays Cloudable's fully editable system of record."
                 integration={idp}
                 connectForm={<IdpConnectDialog />}
                 onDisconnect={handleDisconnect}
               >
                 {(integration) => (
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-medium">{integration.identifier}</span>
-                    <span className="break-all font-mono text-xs text-muted-foreground">
-                      {integration.config.metadataUrl}
-                    </span>
-                  </div>
+                  <span className="break-all font-mono text-xs text-muted-foreground">
+                    {integration.config.metadataUrl}
+                  </span>
                 )}
               </IntegrationCard>
             </div>
@@ -105,7 +135,7 @@ export function IntegrationsPage() {
             <div className="grid gap-4 md:grid-cols-3">
               <IntegrationCard
                 title="Azure"
-                icon={Boxes}
+                icon={AzureLogo}
                 description={
                   capabilities && !capabilities.azure.available
                     ? "Not available on this deployment — AZURE_SUBSCRIPTION_ID isn't configured."
@@ -119,24 +149,20 @@ export function IntegrationsPage() {
                   />
                 }
                 onDisconnect={handleDisconnect}
+                secondaryAction={<AzureCatalogDialog />}
               >
-                {() => (
-                  <div className="flex flex-col gap-2">
-                    {capabilities?.azure.subscriptionId && (
-                      <span className="break-all font-mono text-xs text-muted-foreground">
-                        Subscription {capabilities.azure.subscriptionId}
-                      </span>
-                    )}
-                    <CatalogChecklist title="Regions" kind="region" showSync />
-                    <CatalogChecklist title="Images" kind="image" />
-                    <CatalogChecklist title="Sizes" kind="sku" showSync />
-                  </div>
-                )}
+                {() =>
+                  capabilities?.azure.subscriptionId ? (
+                    <span className="break-all font-mono text-xs text-muted-foreground">
+                      Subscription {capabilities.azure.subscriptionId}
+                    </span>
+                  ) : null
+                }
               </IntegrationCard>
 
               <IntegrationCard
                 title="Docker"
-                icon={Container}
+                icon={DockerLogo}
                 description="Real local containers running the real agent binary — for self-hosting without a cloud subscription."
                 integration={docker}
                 connectForm={<CloudEnableButton provider="docker" />}
@@ -147,7 +173,7 @@ export function IntegrationsPage() {
 
               <IntegrationCard
                 title="Fake"
-                icon={TestTube2}
+                icon={Drama}
                 description="In-memory, no real infra — for trying Cloudable out before connecting a real provider."
                 integration={fake}
                 connectForm={<CloudEnableButton provider="fake" />}
@@ -158,25 +184,52 @@ export function IntegrationsPage() {
             </div>
           </CategorySection>
 
-          <CategorySection title="Secret store">
+          <CategorySection
+            title="Secret store"
+            description="Cloudable fetches and injects at runtime; it never stores a secret value. Only one can be connected at a time — connecting one replaces the other."
+          >
             <div className="grid gap-4 md:grid-cols-3">
               <IntegrationCard
-                title="Secret store"
-                icon={Lock}
-                description="Cloudable fetches and injects at runtime; it never stores a secret value. Point at your own vault."
-                integration={secretStore}
-                connectForm={<SecretStoreConnectDialog />}
+                title={SECRET_STORE_PROVIDER_LABEL.azure_key_vault}
+                icon={AzureLogo}
+                description="Point at your own vault by URL."
+                integration={azureKeyVault}
+                connectForm={
+                  <SecretStoreConnectDialog
+                    provider="azure_key_vault"
+                    replacesLabel={
+                      onePassword ? SECRET_STORE_PROVIDER_LABEL["1password"] : undefined
+                    }
+                  />
+                }
                 onDisconnect={handleDisconnect}
               >
                 {(integration) => (
-                  <div className="flex flex-col gap-0.5">
-                    <span className="font-medium">
-                      {SECRET_STORE_PROVIDER_LABEL[integration.config.provider]}
-                    </span>
-                    <span className="break-all font-mono text-xs text-muted-foreground">
-                      {integration.config.vaultUrl}
-                    </span>
-                  </div>
+                  <span className="break-all font-mono text-xs text-muted-foreground">
+                    {integration.config.vaultUrl}
+                  </span>
+                )}
+              </IntegrationCard>
+
+              <IntegrationCard
+                title={SECRET_STORE_PROVIDER_LABEL["1password"]}
+                icon={OnePasswordLogo}
+                description="Point at your own vault by URL."
+                integration={onePassword}
+                connectForm={
+                  <SecretStoreConnectDialog
+                    provider="1password"
+                    replacesLabel={
+                      azureKeyVault ? SECRET_STORE_PROVIDER_LABEL.azure_key_vault : undefined
+                    }
+                  />
+                }
+                onDisconnect={handleDisconnect}
+              >
+                {(integration) => (
+                  <span className="break-all font-mono text-xs text-muted-foreground">
+                    {integration.config.vaultUrl}
+                  </span>
                 )}
               </IntegrationCard>
             </div>

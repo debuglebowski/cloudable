@@ -15,31 +15,26 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
-/** Connect form for an identity provider — SCIM 2.0 + OIDC discovery, never a client secret. */
+/** Connect form for Microsoft Entra ID — SCIM 2.0 + OIDC discovery, never a client secret.
+ * Fieldless on provider (there's only one) — just the tenant's own federation metadata URL. */
 export function IdpConnectDialog() {
   const [open, setOpen] = useState(false);
-  const [provider, setProvider] = useState("");
   const [metadataUrl, setMetadataUrl] = useState("");
   const connect = useConnectIntegration();
-  const providerId = useId();
   const metadataId = useId();
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     connect.mutate(
-      { kind: "idp", identifier: provider, config: { provider, metadataUrl } },
+      {
+        kind: "idp",
+        identifier: "Microsoft Entra ID",
+        config: { provider: "entra_id", metadataUrl },
+      },
       {
         onSuccess: () => {
           setOpen(false);
-          setProvider("");
           setMetadataUrl("");
         },
       },
@@ -53,23 +48,13 @@ export function IdpConnectDialog() {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Connect identity provider</DialogTitle>
+          <DialogTitle>Connect Microsoft Entra ID</DialogTitle>
           <DialogDescription>
-            SCIM 2.0 + OIDC against any IdP. Optional — Cloudable never asks for a client secret
-            here; federate it on the IdP's own side.
+            SCIM 2.0 + OIDC against your Entra tenant. Optional — Cloudable never asks for a client
+            secret here; federate it on Entra's own side.
           </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={providerId}>Provider name</Label>
-            <Input
-              id={providerId}
-              required
-              placeholder="Entra ID"
-              value={provider}
-              onChange={(event) => setProvider(event.target.value)}
-            />
-          </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor={metadataId}>Federation metadata / discovery URL</Label>
             <Input
@@ -139,13 +124,21 @@ export const SECRET_STORE_PROVIDER_LABEL: Record<SecretStoreConfig["provider"], 
   "1password": "1Password",
 };
 
-/** Connect form for a secret store — a pointer at the customer's own vault, never a secret value. */
-export function SecretStoreConnectDialog() {
+/** Connect form for one secret store backend — a pointer at the customer's own vault,
+ * never a secret value. `provider` is fixed by which card renders this (Azure Key Vault
+ * vs 1Password are separate cards, not a dropdown) — `idp`/`secret_store` integrations
+ * are single-slot per org, so connecting here replaces whichever one is already
+ * connected; `replacesLabel` names it so the dialog can say so before submit. */
+export function SecretStoreConnectDialog({
+  provider,
+  replacesLabel,
+}: {
+  provider: SecretStoreConfig["provider"];
+  replacesLabel?: string | undefined;
+}) {
   const [open, setOpen] = useState(false);
-  const [provider, setProvider] = useState<SecretStoreConfig["provider"]>("azure_key_vault");
   const [vaultUrl, setVaultUrl] = useState("");
   const connect = useConnectIntegration();
-  const providerId = useId();
   const vaultUrlId = useId();
 
   function handleSubmit(event: FormEvent) {
@@ -172,29 +165,21 @@ export function SecretStoreConnectDialog() {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Connect secret store</DialogTitle>
+          <DialogTitle>Connect {SECRET_STORE_PROVIDER_LABEL[provider]}</DialogTitle>
           <DialogDescription>
             Cloudable is the injector, never the vault. Point at your own store by URL — this form
             never asks for a secret value, and Cloudable fetches at runtime without ever writing it
             to disk.
+            {replacesLabel && (
+              <>
+                {" "}
+                Replaces the currently connected {replacesLabel} — Cloudable only keeps one secret
+                store connected at a time.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor={providerId}>Store</Label>
-            <Select
-              value={provider}
-              onValueChange={(value) => setProvider(value as SecretStoreConfig["provider"])}
-            >
-              <SelectTrigger id={providerId}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="azure_key_vault">Azure Key Vault</SelectItem>
-                <SelectItem value="1password">1Password</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor={vaultUrlId}>Vault URL</Label>
             <Input

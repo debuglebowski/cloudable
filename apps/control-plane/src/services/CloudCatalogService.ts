@@ -10,7 +10,8 @@ import { SubscriptionClient } from "@azure/arm-subscriptions";
 import { DefaultAzureCredential } from "@azure/identity";
 import { providerCatalogEntries } from "@cloudable/schema";
 import { and, eq } from "drizzle-orm";
-import { Data, Effect } from "effect";
+import { Data, Effect, Schema } from "effect";
+import { ulid } from "ulid";
 import { config } from "../config";
 import { Db } from "../db/layer";
 import { UBUNTU_IMAGES } from "./ProvisioningService.azure";
@@ -19,6 +20,35 @@ export class CloudCatalogError extends Data.TaggedError("CloudCatalogError")<{
   reason: string;
   cause?: unknown;
 }> {}
+
+/**
+ * This deployment has no `AZURE_SUBSCRIPTION_ID` configured — a foreseeable,
+ * actionable state (self-hosting without Azure at all, or not yet set up),
+ * not our own infra breaking. `Schema.TaggedError` with fields nested under
+ * `error` (not `CloudCatalogError`'s plain `reason`/`cause`) so it crosses
+ * the HTTP boundary via `.addError()` as a real status code instead of the
+ * handler `Effect.die`-ing it into an opaque 500 — same convention as
+ * `domain/machine/errors.ts`.
+ */
+export class AzureNotConfiguredError extends Schema.TaggedError<AzureNotConfiguredError>(
+  "AzureNotConfiguredError",
+)("AzureNotConfiguredError", {
+  error: Schema.Struct({
+    code: Schema.Literal("azure_not_configured"),
+    message: Schema.String,
+    requestId: Schema.String,
+  }),
+}) {}
+
+const notConfiguredError = () =>
+  new AzureNotConfiguredError({
+    error: {
+      code: "azure_not_configured",
+      message:
+        "This deployment has no AZURE_SUBSCRIPTION_ID configured — there's no Azure subscription to sync a catalog from.",
+      requestId: ulid(),
+    },
+  });
 
 export type CatalogKind = "region" | "image" | "sku";
 
@@ -63,17 +93,13 @@ let cachedSubscriptionClient: { client: SubscriptionClient; subscriptionId: stri
 
 const getSubscriptionClient = (): Effect.Effect<
   { client: SubscriptionClient; subscriptionId: string },
-  CloudCatalogError
+  AzureNotConfiguredError
 > =>
   Effect.gen(function* () {
     if (cachedSubscriptionClient) return cachedSubscriptionClient;
     const subscriptionId = config.azureSubscriptionId;
     if (!subscriptionId) {
-      return yield* Effect.fail(
-        new CloudCatalogError({
-          reason: "AZURE_SUBSCRIPTION_ID not configured — nothing to sync a region catalog from",
-        }),
-      );
+      return yield* Effect.fail(notConfiguredError());
     }
     cachedSubscriptionClient = {
       client: new SubscriptionClient(new DefaultAzureCredential()),
@@ -89,7 +115,7 @@ const getSubscriptionClient = (): Effect.Effect<
  * choice — pure additive sync, no destructive reconciliation here). */
 export const syncAzureRegions = (): Effect.Effect<
   ReadonlyArray<CatalogEntry>,
-  CloudCatalogError,
+  CloudCatalogError | AzureNotConfiguredError,
   Db
 > =>
   Effect.gen(function* () {
@@ -125,17 +151,13 @@ let cachedComputeClient: { client: ComputeManagementClient; subscriptionId: stri
 
 const getComputeClient = (): Effect.Effect<
   { client: ComputeManagementClient; subscriptionId: string },
-  CloudCatalogError
+  AzureNotConfiguredError
 > =>
   Effect.gen(function* () {
     if (cachedComputeClient) return cachedComputeClient;
     const subscriptionId = config.azureSubscriptionId;
     if (!subscriptionId) {
-      return yield* Effect.fail(
-        new CloudCatalogError({
-          reason: "AZURE_SUBSCRIPTION_ID not configured — nothing to sync a size catalog from",
-        }),
-      );
+      return yield* Effect.fail(notConfiguredError());
     }
     cachedComputeClient = {
       client: new ComputeManagementClient(new DefaultAzureCredential(), subscriptionId),
@@ -157,7 +179,7 @@ const getComputeClient = (): Effect.Effect<
  * previously-synced size Azure stops listing. */
 export const syncAzureSizes = (): Effect.Effect<
   ReadonlyArray<CatalogEntry>,
-  CloudCatalogError,
+  CloudCatalogError | AzureNotConfiguredError,
   Db
 > =>
   Effect.gen(function* () {

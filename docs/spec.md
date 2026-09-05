@@ -50,7 +50,7 @@ Same artefact in all three. Self-hosted is the simplest deployment: one trust bo
 
 ## 3. Identity
 
-SCIM 2.0 + OIDC against any IdP (Entra, Okta, Google Workspace). IdP and cloud provider are independent axes.
+SCIM 2.0 + OIDC against Microsoft Entra ID. IdP and cloud provider are independent axes.
 
 SCIM is **not required**. With no IdP connected, Cloudable's People section is the system of record and fully editable. When SCIM is connected, synced fields become read-only with an indicator of origin.
 
