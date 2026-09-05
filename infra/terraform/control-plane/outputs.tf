@@ -5,7 +5,7 @@ output "control_plane_url" {
 
 output "resource_group_name" {
   description = "Resource group holding every resource this module created."
-  value       = azurerm_resource_group.this.name
+  value       = local.resource_group_name
 }
 
 output "postgres_server_fqdn" {
@@ -25,7 +25,7 @@ output "container_app_identity_principal_id" {
 
 output "machines_resource_group_name" {
   description = "Resource group real Azure machines are provisioned into. Null when enable_self_managed_machines is false."
-  value       = var.enable_self_managed_machines ? azurerm_resource_group.machines[0].name : null
+  value       = local.machines_resource_group_name
 }
 
 output "machines_subnet_id" {

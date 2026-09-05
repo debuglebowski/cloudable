@@ -153,3 +153,15 @@ variable "machines_resource_group_name" {
   default     = "rg-cloudable-managed"
 }
 
+variable "create_resource_group" {
+  description = "Whether this module creates resource_group_name itself (default), or adopts an existing, empty one you created yourself. Adopting matters when a deploying identity's own permissions are scoped to specific, already-existing resource groups: Azure has no way to scope 'permission to create a not-yet-existing resource group' any narrower than the whole subscription, so creating the resource group ahead of time is the only way to keep that identity's grant confined to just this one resource group."
+  type        = bool
+  default     = true
+}
+
+variable "create_machines_resource_group" {
+  description = "Same as create_resource_group, for machines_resource_group_name. Only relevant when enable_self_managed_machines is true."
+  type        = bool
+  default     = true
+}
+
