@@ -83,6 +83,26 @@ run from (it printed a full 8-resource plan in the environment that produced thi
 module, purely because that shell already had `az login` state — that is not a
 signal this module is safe to `apply` anywhere).
 
+## Custom domain (optional)
+
+By default the control plane is reachable at the auto-generated Azure Container Apps
+FQDN (`<app-name>.<random>.<region>.azurecontainerapps.io`). Set `custom_domain` to
+bind a real hostname instead — this also becomes `CONTROL_PLANE_BASE_URL`/
+`BETTER_AUTH_URL`, so it must be the exact hostname you'll reach the control plane at.
+
+Azure requires proof of domain ownership before binding a custom hostname: a `TXT`
+record at `asuid.<domain>` containing the Container App's `custom_domain_verification_id`,
+plus a `CNAME` routing the domain to the app's FQDN. If your DNS is on Cloudflare, set
+`cloudflare_zone_id` (and `cloudflare_api_token`, an API token with DNS-edit permission
+on that zone) and this module creates both records for you. Otherwise, leave those
+empty and create the two records yourself — `terraform plan`'s output for
+`azurerm_container_app.this.custom_domain_verification_id` and this module's own
+`control_plane_url`/FQDN tell you the exact values.
+
+Requires azurerm provider `~> 4.69` (see `versions.tf`) — `azurerm_container_app_environment_managed_certificate`,
+which issues the free TLS certificate Azure auto-renews for the custom domain, doesn't
+exist before that version.
+
 ## Notes
 
 - `control_plane_image_tag` defaults to `main`, the tag `rebuild-base-image.yml` moves

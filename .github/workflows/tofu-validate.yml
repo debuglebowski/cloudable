@@ -3,18 +3,18 @@ name: OpenTofu validate
 # docs/spec.md §25: "Terraform only — no Bicep... Use OpenTofu in Cloudable's
 # own CI to stay licence-clean; publish HCL that works with either." This runs
 # the OpenTofu CLI (never plain Terraform, per that licensing rationale)
-# against every HCL module under infra/terraform/.
+# against `infra/terraform/control-plane` — the only Terraform module in this
+# repo (the customer-federated BYOC module, `infra/terraform/federated-
+# credential/`, was deleted entirely when that feature was removed — see
+# docs/cloud-auth.md).
 #
-# `infra/terraform/control-plane` gets both `validate` and an offline `plan`
-# against its committed `dummy.tfvars` (see that module's README — never
-# `apply`, no real Azure account exists for this posture). `plan` isn't run
-# for `infra/terraform/federated-credential`: it has no dummy tfvars, and
-# `validate` is the meaningful, environment-independent check for a module a
-# BYOC customer runs once in their own tenant, under their own credentials.
+# It gets both `validate` and an offline `plan` against its committed
+# `dummy.tfvars` (see that module's README — never `apply`, no real Azure
+# account exists for this posture).
 #
-# `tofu validate` is a hard gate for both modules — it never contacts Azure
-# (invariant #1: no cloud credential is ever stored here, so none is
-# available to it anyway). `tofu plan`, even against all-new resources with
+# `tofu validate` is a hard gate — it never contacts Azure (invariant #1: no
+# cloud credential is ever stored here, so none is available to it anyway).
+# `tofu plan`, even against all-new resources with
 # no data source lookups, still has the azurerm provider authenticate to
 # Azure AD as part of `Configure()` — confirmed locally: it fails identically
 # whether no credential is present or a syntactically-valid-but-fake one is
@@ -70,11 +70,3 @@ jobs:
         working-directory: infra/terraform/control-plane
         continue-on-error: true
         run: tofu plan -input=false -var-file=dummy.tfvars
-
-      - name: federated-credential — init
-        working-directory: infra/terraform/federated-credential
-        run: tofu init -backend=false -input=false
-
-      - name: federated-credential — validate
-        working-directory: infra/terraform/federated-credential
-        run: tofu validate
