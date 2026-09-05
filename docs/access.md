@@ -225,21 +225,27 @@ terminal) can be trusted to gate on this token at all.
   flip a database row — the first real (if minimal) slice of the CP → agent half of the transport
   described as fully stubbed below.
 
-### What's stubbed, and why that's acceptable for this batch
+### The reverse-tunnel transport — real now, not this unit's original scope
 
-**The actual reverse-tunnel byte-relay transport is still not implemented.** There is no code here
-that opens an outbound connection from a machine, multiplexes bytes for an interactive session, or
-relays a browser's terminal keystrokes anywhere — `tunnel/server.ts` is described in its own file
-banner as "the control-plane side of session brokering," full stop. This matches the cross-unit
-brief precisely: *"the actual reverse-tunnel network transport can be a documented
-stub/simplification if time is tight [...] since there's no real fleet of machines to tunnel to
-[...] the SIGNATURE VALIDATION logic is what must be real and tested, the transport mechanics are
-secondary."* Token minting, verification, the policy gate, and the session lifecycle (`sessions`
-rows + events) are all real and tested against a real local Postgres. One piece of the CP →
-agent direction *is* real now, though (see above): the tunnel-signal channel that tells a
-connected agent a session exists at all. What's still missing is everything downstream of that —
-an actual reverse-tunnel process on the machine (`apps/agent/src/tunnel/client.ts`) and a
-byte-relay protocol — future work for whichever unit builds the agent's tunnel half.
+**An earlier version of this section described the reverse-tunnel byte-relay transport as still
+not implemented**, matching the cross-unit brief this unit was built against: *"the actual
+reverse-tunnel network transport can be a documented stub/simplification if time is tight [...]
+the SIGNATURE VALIDATION logic is what must be real and tested, the transport mechanics are
+secondary."* That's since been built for real, as its own separate binary:
+`apps/tunnel-daemon` (its own persistent outbound connection, `connection.ts`, and a real
+per-session PTY multiplexer, `session-manager.ts`) — not `apps/agent`, and not the manual,
+dev-only trigger `apps/agent/src/tunnel/client.ts` used to provide (removed; it was never wired
+into the real signal-driven attach path, only reachable via an explicit env-var escape hatch).
+
+`session-manager.ts`'s `attach` verifies the session token — the same real signature check this
+doc's earlier sections describe — before ever spawning a PTY, on every attach including a
+reconnect, not just the first one. `pty.ts` drops privilege to the session's `targetOsUser` via
+`su`, with its own username-shape validation to close an argv-injection vector into `su`. Its own
+header comment flags one still-open, honestly-unresolved question: nothing today enforces
+`targetOsUser` at the OS level the way the SSH path's certificate `validPrincipals` does (only the
+username's *shape* is validated, not whether it's an *allowed* value) — a real design question,
+not an assumed-safe gap, and not necessarily a bug given a machine's owner is expected to have
+full shell access to their own machine.
 
 ### TLS terminates at the control plane, by construction
 

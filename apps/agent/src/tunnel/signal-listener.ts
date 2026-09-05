@@ -17,11 +17,11 @@
 // iterations on the happy path; the long poll itself *is* the wait.
 //
 // This module only ever notifies via callbacks — it does not itself open a
-// reverse tunnel or touch a PTY. `apps/agent/src/tunnel/client.ts` (a
-// sibling unit) is what actually verifies the session token and opens the
-// tunnel; wiring a real client in means passing its `connect`/`disconnect`
-// methods as `onSessionWaiting`/`onSessionTerminate` here instead of
-// `index.ts`'s current log-only defaults.
+// reverse tunnel or touch a PTY. The separate `apps/tunnel-daemon` binary
+// (its own persistent outbound connection + session-manager.ts) is what
+// actually verifies the session token and opens the tunnel; this agent
+// process's log-only callbacks (index.ts) just prove the signal itself
+// reaches here.
 // ---------------------------------------------------------------------------
 import { AttestationRejectedError, clearCachedSession, attest as realAttest } from "../attestation";
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "../backoff";

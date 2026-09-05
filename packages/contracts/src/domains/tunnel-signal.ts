@@ -15,10 +15,10 @@
  *
  * Kept as minimal as `wake`'s own payload-free design allows: just which
  * of two things happened, and a session id — never a session token or any
- * other session detail. The agent's tunnel client (a sibling unit,
- * apps/agent/src/tunnel/client.ts) is the one that verifies the session
- * token and actually opens the reverse tunnel; this channel only ever
- * means "session <id> is waiting, connect now" or "session <id>, stop".
+ * other session detail. The separate `apps/tunnel-daemon` binary (its own
+ * persistent outbound connection) is what verifies the session token and
+ * actually opens the reverse tunnel; this channel only ever means
+ * "session <id> is waiting, connect now" or "session <id>, stop".
  *
  * Plain TS types, not Effect Schema, matching `agent-protocol.ts`'s own
  * convention — this package stays framework-free so the agent's
