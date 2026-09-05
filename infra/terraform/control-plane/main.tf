@@ -50,15 +50,26 @@ locals {
   # at all (see `GET /api/v1/provisioning/capabilities`).
   machine_provisioning_env = var.enable_self_managed_machines ? [
     { name = "AZURE_SUBSCRIPTION_ID", value = data.azurerm_client_config.current.subscription_id },
-    { name = "AZURE_MACHINES_RESOURCE_GROUP", value = azurerm_resource_group.machines[0].name },
+    { name = "AZURE_MACHINES_RESOURCE_GROUP", value = local.machines_resource_group_name },
     { name = "AZURE_MACHINES_SUBNET_ID", value = azurerm_subnet.machines[0].id },
   ] : []
 }
 
 resource "azurerm_resource_group" "this" {
+  count    = var.create_resource_group ? 1 : 0
   name     = var.resource_group_name
   location = var.location
   tags     = var.tags
+}
+
+data "azurerm_resource_group" "this" {
+  count = var.create_resource_group ? 0 : 1
+  name  = var.resource_group_name
+}
+
+locals {
+  resource_group_name     = var.create_resource_group ? azurerm_resource_group.this[0].name : data.azurerm_resource_group.this[0].name
+  resource_group_location = var.create_resource_group ? azurerm_resource_group.this[0].location : data.azurerm_resource_group.this[0].location
 }
 
 # ---------------------------------------------------------------------------
@@ -67,8 +78,8 @@ resource "azurerm_resource_group" "this" {
 
 resource "azurerm_postgresql_flexible_server" "this" {
   name                = local.postgres_server_name
-  resource_group_name = azurerm_resource_group.this.name
-  location            = azurerm_resource_group.this.location
+  resource_group_name = local.resource_group_name
+  location            = local.resource_group_location
 
   version    = var.postgres_version
   storage_mb = var.postgres_storage_mb
@@ -135,17 +146,37 @@ data "azurerm_client_config" "current" {}
 data "azurerm_subscription" "current" {}
 
 resource "azurerm_resource_group" "machines" {
-  count    = var.enable_self_managed_machines ? 1 : 0
+  count    = var.enable_self_managed_machines && var.create_machines_resource_group ? 1 : 0
   name     = var.machines_resource_group_name
   location = var.location
   tags     = var.tags
 }
 
+data "azurerm_resource_group" "machines" {
+  count = var.enable_self_managed_machines && !var.create_machines_resource_group ? 1 : 0
+  name  = var.machines_resource_group_name
+}
+
+locals {
+  machines_resource_group_name = (
+    !var.enable_self_managed_machines ? null :
+    var.create_machines_resource_group ? azurerm_resource_group.machines[0].name : data.azurerm_resource_group.machines[0].name
+  )
+  machines_resource_group_location = (
+    !var.enable_self_managed_machines ? null :
+    var.create_machines_resource_group ? azurerm_resource_group.machines[0].location : data.azurerm_resource_group.machines[0].location
+  )
+  machines_resource_group_id = (
+    !var.enable_self_managed_machines ? null :
+    var.create_machines_resource_group ? azurerm_resource_group.machines[0].id : data.azurerm_resource_group.machines[0].id
+  )
+}
+
 resource "azurerm_virtual_network" "machines" {
   count               = var.enable_self_managed_machines ? 1 : 0
   name                = "${var.name_prefix}-machines-vnet"
-  resource_group_name = azurerm_resource_group.machines[0].name
-  location            = azurerm_resource_group.machines[0].location
+  resource_group_name = local.machines_resource_group_name
+  location            = local.machines_resource_group_location
   address_space       = ["10.90.0.0/16"]
   tags                = var.tags
 }
@@ -153,7 +184,7 @@ resource "azurerm_virtual_network" "machines" {
 resource "azurerm_subnet" "machines" {
   count                = var.enable_self_managed_machines ? 1 : 0
   name                 = "machines"
-  resource_group_name  = azurerm_resource_group.machines[0].name
+  resource_group_name  = local.machines_resource_group_name
   virtual_network_name = azurerm_virtual_network.machines[0].name
   address_prefixes     = ["10.90.1.0/24"]
 }
@@ -164,8 +195,8 @@ resource "azurerm_subnet" "machines" {
 resource "azurerm_network_security_group" "machines" {
   count               = var.enable_self_managed_machines ? 1 : 0
   name                = "${var.name_prefix}-machines-nsg"
-  resource_group_name = azurerm_resource_group.machines[0].name
-  location            = azurerm_resource_group.machines[0].location
+  resource_group_name = local.machines_resource_group_name
+  location            = local.machines_resource_group_location
   tags                = var.tags
 
   security_rule {
@@ -190,7 +221,7 @@ resource "azurerm_subnet_network_security_group_association" "machines" {
 resource "azurerm_role_definition" "machine_operator" {
   count       = var.enable_self_managed_machines ? 1 : 0
   name        = "Cloudable Machine Operator (${var.name_prefix})"
-  scope       = azurerm_resource_group.machines[0].id
+  scope       = local.machines_resource_group_id
   description = "Least-privilege role for the control plane's own provisioning code, scoped to a single dedicated resource group. Never Contributor, never subscription scope (docs/spec.md §10)."
 
   permissions {
@@ -223,12 +254,12 @@ resource "azurerm_role_definition" "machine_operator" {
     not_actions = []
   }
 
-  assignable_scopes = [azurerm_resource_group.machines[0].id]
+  assignable_scopes = [local.machines_resource_group_id]
 }
 
 resource "azurerm_role_assignment" "machine_operator" {
   count              = var.enable_self_managed_machines ? 1 : 0
-  scope              = azurerm_resource_group.machines[0].id
+  scope              = local.machines_resource_group_id
   role_definition_id = azurerm_role_definition.machine_operator[0].role_definition_resource_id
   principal_id       = azurerm_container_app.this.identity[0].principal_id
 }
@@ -270,8 +301,8 @@ resource "azurerm_role_assignment" "catalog_reader" {
 
 resource "azurerm_log_analytics_workspace" "this" {
   name                = "${var.name_prefix}-cp-logs"
-  resource_group_name = azurerm_resource_group.this.name
-  location            = azurerm_resource_group.this.location
+  resource_group_name = local.resource_group_name
+  location            = local.resource_group_location
   sku                 = "PerGB2018"
   retention_in_days   = 30
   tags                = var.tags
@@ -279,15 +310,15 @@ resource "azurerm_log_analytics_workspace" "this" {
 
 resource "azurerm_container_app_environment" "this" {
   name                       = "${var.name_prefix}-cp-env"
-  resource_group_name        = azurerm_resource_group.this.name
-  location                   = azurerm_resource_group.this.location
+  resource_group_name        = local.resource_group_name
+  location                   = local.resource_group_location
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
   tags                       = var.tags
 }
 
 resource "azurerm_container_app" "this" {
   name                         = local.app_name
-  resource_group_name          = azurerm_resource_group.this.name
+  resource_group_name          = local.resource_group_name
   container_app_environment_id = azurerm_container_app_environment.this.id
   revision_mode                = "Single"
   tags                         = var.tags
