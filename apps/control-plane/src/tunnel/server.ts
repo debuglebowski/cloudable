@@ -4,24 +4,21 @@ import { machines, sessions } from "@cloudable/schema";
 // SSH-certificate path's session accounting). Mints signed session tokens,
 // persists `sessions` rows, and emits the `access.session_*` events.
 //
-// STUB, deliberately: the actual reverse-tunnel network transport (the
-// tunnel daemon relaying bytes between a browser/ssh client and a machine's
-// outbound connection) is NOT implemented here — there is no fleet of real
-// machines to tunnel to in this build, and the cross-unit brief explicitly
-// allows a documented stub for the transport while requiring token
-// minting/verification to be fully real (see docs/access.md). What's real:
+// This file is this side of session brokering only: the actual
+// reverse-tunnel network transport (relaying bytes between a browser/ssh
+// client and a machine's outbound connection) lives in the separate
+// `apps/tunnel-daemon` binary, not here — see docs/access.md's "reverse-tunnel
+// transport" section for the current, real implementation. What's real here:
 // the policy check, the signed token (session-token.ts, fully tested
 // including the tamper failure path), the `sessions` row lifecycle, and
 // every emitted event.
 //
-// One piece of the transport IS real now, though: `signal.ts`'s
-// tunnel-signal channel, pushed to on `mintSession` success and on every
-// session `endSession`/`terminateSessionsForMachine` end. It never carries
-// bytes, only "session <id> is waiting, connect now" / "session <id>, stop"
-// — the minimal thing a machine's agent needs to know to start (or stop)
-// using the still-stubbed byte-relay transport, once a sibling unit builds
-// it (`apps/agent/src/tunnel/client.ts`). See `signal.ts`'s own header
-// comment for why this is a new channel rather than a repurposed `wake`.
+// `signal.ts`'s tunnel-signal channel, pushed to on `mintSession` success and
+// on every session `endSession`/`terminateSessionsForMachine` end, is the
+// piece that tells a connected agent a session exists at all — it never
+// carries bytes, only "session <id> is waiting, connect now" / "session <id>,
+// stop". See `signal.ts`'s own header comment for why this is a new channel
+// rather than a repurposed `wake`.
 // ---------------------------------------------------------------------------
 import { and, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";

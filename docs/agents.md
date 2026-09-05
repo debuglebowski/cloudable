@@ -248,12 +248,12 @@ proven end to end over a real Docker network in
 `test/agent-connectivity/` (mint a session, confirm the agent's log shows
 it received the signal).
 
-**What's still a stub:** actually *acting* on the signal — opening the
-reverse tunnel and attaching a real PTY session — is
-`apps/agent/src/tunnel/client.ts`, a sibling unit's responsibility. This
-channel only ever hands that client a bare session id; it never carries a
-session token or any other detail, matching `wake`'s own no-payload spirit
-even though it's a different channel.
+Actually *acting* on the signal — opening the reverse tunnel and attaching a
+real PTY session — is the separate `apps/tunnel-daemon` binary's job (its own
+persistent outbound connection + `session-manager.ts`, not this agent
+process). This channel only ever hands the agent a bare session id; it never
+carries a session token or any other detail, matching `wake`'s own
+no-payload spirit even though it's a different channel.
 
 ### Poll/report loop, backoff, and jitter
 
