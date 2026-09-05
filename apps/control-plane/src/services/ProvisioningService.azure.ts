@@ -78,7 +78,7 @@ export function namesFor(machineId: string) {
  * join-token adapters (docker/fake), the agent gets its own attestation
  * credential locally, from Azure IMDS, once it's running — nothing for the
  * control plane to hand it here. */
-function cloudInitFor(desc: MachineDescriptor, dataDiskLun: number): string {
+export function cloudInitFor(desc: MachineDescriptor, dataDiskLun: number): string {
   const packages = (desc.packages ?? []).join(" ");
   const script = `#!/bin/bash
 set -euo pipefail
@@ -116,8 +116,25 @@ Environment=CLOUDABLE_PACKAGES=${packages}
 WantedBy=multi-user.target
 UNIT
 
+cat > /etc/systemd/system/cloudable-tunnel-daemon.service <<UNIT
+[Unit]
+Description=Cloudable tunnel daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/opt/cloudable/tunnel-daemon
+Restart=always
+Environment=CONTROL_PLANE_URL=${config.controlPlaneBaseUrl}
+Environment=ATTESTATION_METHOD=managed_identity
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 systemctl daemon-reload
 systemctl enable --now cloudable-agent
+systemctl enable --now cloudable-tunnel-daemon
 `;
   return Buffer.from(script, "utf-8").toString("base64");
 }
