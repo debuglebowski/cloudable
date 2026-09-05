@@ -1,4 +1,3 @@
-import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { Integration, IntegrationKind } from "@/api/integrations";
@@ -29,13 +28,21 @@ export interface IntegrationCardProps<K extends IntegrationKind> {
   /** Small leading icon naming this card's kind — same "icon square before a
    * title" convention as reports.png's own dashboard-card grid (each card
    * there leads with a colored icon square too), just at the card's smaller
-   * scale. */
-  icon: LucideIcon;
+   * scale. A plain SVG component so both lucide icons and brand marks (e.g.
+   * `@icons-pack/react-simple-icons`) fit — both render a real `<svg>` and
+   * accept `className`. Plain call-signature type (not `ComponentType`) so it
+   * doesn't get compared against a `forwardRef` component's `defaultProps` —
+   * that comparison fails under `exactOptionalPropertyTypes` for both icon
+   * sets. */
+  icon: (props: { className?: string }) => ReactNode;
   description: string;
   integration: Extract<Integration, { kind: K }> | undefined;
   connectForm: ReactNode;
   onDisconnect: (integration: Extract<Integration, { kind: K }>) => void;
   children: (integration: Extract<Integration, { kind: K }>) => ReactNode;
+  /** Extra footer action shown alongside Disconnect once connected — e.g. Azure's
+   * "Configure" catalog dialog. Omitted for every card that doesn't need one. */
+  secondaryAction?: ReactNode;
 }
 
 /** One connection card: connected state + disconnect, or the kind-specific connect form. */
@@ -47,6 +54,7 @@ export function IntegrationCard<K extends IntegrationKind>({
   connectForm,
   onDisconnect,
   children,
+  secondaryAction,
 }: IntegrationCardProps<K>) {
   return (
     <Card className="flex flex-col">
@@ -60,7 +68,7 @@ export function IntegrationCard<K extends IntegrationKind>({
               quieter failure mode than a mid-title line break. */}
           <div className="flex min-w-0 items-center gap-2">
             <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-              <Icon className="size-3.5" strokeWidth={2} />
+              <Icon className="size-3.5" />
             </span>
             <CardTitle className="truncate">{title}</CardTitle>
           </div>
@@ -82,29 +90,32 @@ export function IntegrationCard<K extends IntegrationKind>({
           <p className="text-muted-foreground">Not connected.</p>
         )}
       </CardContent>
-      <CardFooter>
+      <CardFooter className="gap-2">
         {integration ? (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                Disconnect
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Disconnect {title.toLowerCase()}?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Cloudable stops using it immediately — nothing is deleted on the other side.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => onDisconnect(integration)}>
+          <>
+            {secondaryAction}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm">
                   Disconnect
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Disconnect {title.toLowerCase()}?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Cloudable stops using it immediately — nothing is deleted on the other side.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => onDisconnect(integration)}>
+                    Disconnect
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </>
         ) : (
           connectForm
         )}

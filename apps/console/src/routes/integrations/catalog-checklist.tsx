@@ -7,6 +7,14 @@ import {
 } from "@/api/provider-catalog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 /**
  * Checklist over a fixed, discovered catalog — checkbox per entry, not
@@ -77,5 +85,33 @@ export function CatalogChecklist({
         </ul>
       )}
     </div>
+  );
+}
+
+/** The Azure card's "Configure" action — regions/images/sizes used to render inline
+ * on the card itself; every other integration card is a one- or two-line summary, so
+ * this pulls the one heavy exception behind a modal instead. */
+export function AzureCatalogDialog() {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          Configure
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Azure catalog</DialogTitle>
+          <DialogDescription>
+            Regions, images, and sizes this org allows machines to be created with.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-2">
+          <CatalogChecklist title="Regions" kind="region" showSync />
+          <CatalogChecklist title="Images" kind="image" />
+          <CatalogChecklist title="Sizes" kind="sku" showSync />
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

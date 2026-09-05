@@ -68,6 +68,14 @@ start/stop/restart on a VM plus its disk, NIC, and public IP, nothing else. (The
 `infra/terraform/federated-credential/` module defined the same role for the BYOC path above —
 gone along with the rest of it, see above.)
 
+**A second, separate role for catalog sync.** `CloudCatalogService.ts`'s region/size sync
+(`SubscriptionClient.subscriptions.listLocations()`, `ComputeManagementClient.resourceSkus.list()`)
+reads subscription-level resources, which a resource-group-scoped role can never grant regardless
+of which actions it lists. Rather than moving "Cloudable Machine Operator" itself to subscription
+scope, the same managed identity also gets "Cloudable Catalog Reader" — two read-only actions
+(`Microsoft.Resources/subscriptions/locations/read`, `Microsoft.Compute/skus/read`), assigned at
+subscription scope, nothing else. Keeps the VM-management role exactly as narrow as before.
+
 **Certificate credentials** only where federation is impossible. **Client secrets: never.**
 
 ## Revocation

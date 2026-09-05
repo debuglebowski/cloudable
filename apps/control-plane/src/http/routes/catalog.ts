@@ -1,6 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import { OrgCatalogError } from "../../domain/organisation/catalog";
+import { AzureNotConfiguredError } from "../../services/CloudCatalogService";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
 // Org-curated region/image/size catalog for machine creation — see
@@ -45,15 +46,13 @@ export const CatalogGroup = HttpApiGroup.make("catalog")
       .addError(OrgCatalogError, { status: 422 }),
   )
   .add(
-    HttpApiEndpoint.post(
-      "syncRegions",
-      "/api/v1/organisation/catalog/azure/regions/sync",
-    ).addSuccess(SyncRegionsResponse),
+    HttpApiEndpoint.post("syncRegions", "/api/v1/organisation/catalog/azure/regions/sync")
+      .addSuccess(SyncRegionsResponse)
+      .addError(AzureNotConfiguredError, { status: 409 }),
   )
   .add(
-    HttpApiEndpoint.post(
-      "syncSizes",
-      "/api/v1/organisation/catalog/azure/sizes/sync",
-    ).addSuccess(SyncSizesResponse),
+    HttpApiEndpoint.post("syncSizes", "/api/v1/organisation/catalog/azure/sizes/sync")
+      .addSuccess(SyncSizesResponse)
+      .addError(AzureNotConfiguredError, { status: 409 }),
   )
   .middleware(CurrentUserAuthentication);

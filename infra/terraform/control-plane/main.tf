@@ -125,10 +125,14 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_service
 # provisioning-layer code path"). The "Cloudable Machine Operator" role below
 # grants no NSG actions: the NSG is a Terraform-level, pre-created fact,
 # never something ProvisioningService.azure.ts's runtime identity can touch —
-# it can only ever join the subnet it's already attached to.
+# it can only ever join the subnet it's already attached to. A second role,
+# "Cloudable Catalog Reader", grants the two subscription-scoped read actions
+# CloudCatalogService.ts needs for the region/size catalog sync — see its own
+# comment further down for why that can't just be folded into the first role.
 # ---------------------------------------------------------------------------
 
 data "azurerm_client_config" "current" {}
+data "azurerm_subscription" "current" {}
 
 resource "azurerm_resource_group" "machines" {
   count    = var.enable_self_managed_machines ? 1 : 0
@@ -226,6 +230,37 @@ resource "azurerm_role_assignment" "machine_operator" {
   count              = var.enable_self_managed_machines ? 1 : 0
   scope              = azurerm_resource_group.machines[0].id
   role_definition_id = azurerm_role_definition.machine_operator[0].role_definition_resource_id
+  principal_id       = azurerm_container_app.this.identity[0].principal_id
+}
+
+# `CloudCatalogService.ts`'s region/size sync (SubscriptionClient.subscriptions.
+# listLocations / ComputeManagementClient.resourceSkus.list) reads subscription-
+# level resources, not resource-group-level ones — "Cloudable Machine Operator"
+# above can't be extended to cover them without moving its own scope (and every
+# VM/disk/NIC action it grants) up to the whole subscription, which is exactly
+# what docs/spec.md §10 rules out. So this is a second, separate, read-only
+# role, assigned at subscription scope, and nothing else changes.
+resource "azurerm_role_definition" "catalog_reader" {
+  count       = var.enable_self_managed_machines ? 1 : 0
+  name        = "Cloudable Catalog Reader (${var.name_prefix})"
+  scope       = data.azurerm_subscription.current.id
+  description = "Read-only, subscription-scoped: lets the control plane list regions/VM sizes to sync the org-curated machine catalog. No write actions."
+
+  permissions {
+    actions = [
+      "Microsoft.Resources/subscriptions/locations/read",
+      "Microsoft.Compute/skus/read",
+    ]
+    not_actions = []
+  }
+
+  assignable_scopes = [data.azurerm_subscription.current.id]
+}
+
+resource "azurerm_role_assignment" "catalog_reader" {
+  count              = var.enable_self_managed_machines ? 1 : 0
+  scope              = data.azurerm_subscription.current.id
+  role_definition_id = azurerm_role_definition.catalog_reader[0].role_definition_resource_id
   principal_id       = azurerm_container_app.this.identity[0].principal_id
 }
 
