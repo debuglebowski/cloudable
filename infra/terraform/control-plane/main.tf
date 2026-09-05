@@ -32,7 +32,10 @@ locals {
   # Container App itself is created, so this avoids a self-referential
   # dependency on the app's own (not-yet-created) ingress FQDN.
   control_plane_fqdn = "${local.app_name}.${azurerm_container_app_environment.this.default_domain}"
-  public_url         = "https://${local.control_plane_fqdn}"
+  # var.custom_domain overrides only what BETTER_AUTH_URL/CONTROL_PLANE_BASE_URL/the
+  # control_plane_url output say — it does not bind anything itself (see that
+  # variable's own doc comment and README.md's custom-domain recipe).
+  public_url = var.custom_domain != null ? "https://${var.custom_domain}" : "https://${local.control_plane_fqdn}"
 
   # If control_plane_image already carries a digest ("<repo>@sha256:<digest>",
   # the production-pinning form described on control_plane_image_tag), don't

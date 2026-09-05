@@ -165,3 +165,8 @@ variable "create_machines_resource_group" {
   default     = true
 }
 
+variable "custom_domain" {
+  description = "Real public hostname this deployment is reached at (e.g. \"cloudable.example.com\"), if you've bound one yourself. Leave null (default) to use the auto-generated Azure Container Apps FQDN. This module does NOT bind the domain itself or touch any DNS — see README.md's custom-domain recipe for that, since it varies by DNS provider and needs azurerm v4 (this module targets v3+ generically). Setting this only changes what BETTER_AUTH_URL/CONTROL_PLANE_BASE_URL and the control_plane_url output say the deployment's real address is — get the binding live *before* setting this, not after, or auth/CORS will point at a hostname nothing serves yet."
+  type        = string
+  default     = null
+}

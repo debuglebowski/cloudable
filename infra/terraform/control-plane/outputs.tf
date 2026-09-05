@@ -32,3 +32,25 @@ output "machines_subnet_id" {
   description = "Full ARM resource id of the subnet ProvisioningService.azure.ts joins new machines' NICs to. Null when enable_self_managed_machines is false."
   value       = var.enable_self_managed_machines ? azurerm_subnet.machines[0].id : null
 }
+
+# The three outputs below exist for a root config that wants to bind a real
+# custom domain itself (see README.md's recipe) — this module deliberately
+# doesn't do that binding, since it varies by DNS provider and needs azurerm
+# v4 (this module targets v3+ generically). They're generically useful for
+# any downstream customization, not specific to custom domains.
+
+output "container_app_id" {
+  description = "Full ARM resource id of the Container App running the control plane."
+  value       = azurerm_container_app.this.id
+}
+
+output "container_app_environment_id" {
+  description = "Full ARM resource id of the Container Apps Environment the control plane runs in."
+  value       = azurerm_container_app_environment.this.id
+}
+
+output "custom_domain_verification_id" {
+  description = "The Container App's domain-ownership verification token — Azure requires a TXT record at \"asuid.<your domain>\" containing this value before it will bind a custom hostname."
+  value       = azurerm_container_app.this.custom_domain_verification_id
+  sensitive   = true
+}

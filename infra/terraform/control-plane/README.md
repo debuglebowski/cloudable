@@ -83,23 +83,38 @@ run from (it printed a full 8-resource plan in the environment that produced thi
 module, purely because that shell already had `az login` state — that is not a
 signal this module is safe to `apply` anywhere).
 
-## Custom domain (do it yourself)
+## Custom domain (do it yourself, in your own deploy config)
 
-This module deliberately does **not** take a `custom_domain` variable — a real
-self-hoster's DNS could be Cloudflare, Route53, Azure DNS, GoDaddy, or none at all, and
-this repo is meant to stay a minimal, forkable starting point, not grow a variable and a
-provider dependency for every DNS vendor that exists. If you want a real hostname
-instead of the auto-generated Container Apps FQDN, add this to **your own copy** of
-`main.tf` (validated for real against a live Azure tenant):
+This module deliberately does **not** bind a custom domain or touch DNS itself — a real
+self-hoster's DNS could be Cloudflare, Route53, Azure DNS, GoDaddy, or none at all, and this
+module is meant to stay a minimal, generic building block, not grow a provider dependency
+for every DNS vendor that exists. What it *does* provide: an optional `custom_domain`
+variable (only changes what `BETTER_AUTH_URL`/`CONTROL_PLANE_BASE_URL`/the
+`control_plane_url` output say — binds nothing), and three outputs
+(`container_app_id`, `container_app_environment_id`, `custom_domain_verification_id`) a
+calling root config needs to bind one for real.
+
+The intended pattern: your own **real deploy repo** (see `docs/spec.md` §26's
+`cloudable-deploy`, "Terraform values, not code") calls this module and adds the binding
+itself, since it already has to pin real values regardless:
 
 ```hcl
-# Requires bumping the azurerm provider to "~> 4.69" in versions.tf —
-# azurerm_container_app_environment_managed_certificate (the free,
-# auto-renewed TLS cert for a custom domain) doesn't exist before that.
+# In your own deploy repo's main.tf, alongside `module "control_plane" { ... }` (this
+# repo's own cloudable-deploy validated exactly this, for real, against a live tenant).
+# Requires azurerm "~> 4.69" or newer in that repo's own versions.tf —
+# azurerm_container_app_environment_managed_certificate (the free, auto-renewed TLS
+# cert for a custom domain) doesn't exist before that. This module's own azurerm
+# constraint (versions.tf) is deliberately wide enough to coexist with it.
+
+module "control_plane" {
+  source = "git::https://github.com/debuglebowski/cloudable.git//infra/terraform/control-plane?ref=<commit-sha>"
+  custom_domain = "cloudable.example.com" # same hostname as below
+  # ... your other real values
+}
 
 resource "azurerm_container_app_custom_domain" "this" {
-  name             = "cloudable.example.com" # your real hostname
-  container_app_id = azurerm_container_app.this.id
+  name             = "cloudable.example.com" # same hostname as above
+  container_app_id = module.control_plane.container_app_id
 
   # certificate_binding_type is set asynchronously by Azure once the managed
   # certificate below finishes issuing — without ignoring it, every
@@ -110,8 +125,8 @@ resource "azurerm_container_app_custom_domain" "this" {
 }
 
 resource "azurerm_container_app_environment_managed_certificate" "this" {
-  name                          = "${var.name_prefix}-cp-cert"
-  container_app_environment_id = azurerm_container_app_environment.this.id
+  name                          = "cloudable-cp-cert"
+  container_app_environment_id = module.control_plane.container_app_environment_id
   subject_name                  = "cloudable.example.com" # same hostname as above
   domain_control_validation     = "CNAME"
 
@@ -119,15 +134,16 @@ resource "azurerm_container_app_environment_managed_certificate" "this" {
 }
 ```
 
-Also point `local.public_url` (used for `BETTER_AUTH_URL`/`CONTROL_PLANE_BASE_URL`) at
-your hostname instead of `local.control_plane_fqdn`.
-
 Azure requires proof of domain ownership before it'll bind the hostname: a `TXT` record
-at `asuid.<your domain>` containing `azurerm_container_app.this.custom_domain_verification_id`
-(visible in `terraform plan`'s output once you add the resource above), plus a `CNAME`
-pointing your domain at `local.control_plane_fqdn`. Create both however you manage DNS —
-by hand, or with your DNS provider's own Terraform resource (e.g. Cloudflare's
-`cloudflare_dns_record`) in your own fork.
+at `asuid.<your domain>` containing `module.control_plane.custom_domain_verification_id`,
+plus a `CNAME` pointing your domain at the auto-generated FQDN (`control_plane_url`
+output, before you set `custom_domain`). Create both however you manage DNS — by hand, or
+with your DNS provider's own Terraform resource (e.g. Cloudflare's `cloudflare_dns_record`)
+in that same deploy repo.
+
+**Set `custom_domain` only after the binding above is actually live** — setting it first
+points `BETTER_AUTH_URL`/`CONTROL_PLANE_BASE_URL` at a hostname nothing serves yet, breaking
+auth/CORS until the binding catches up.
 
 ## Notes
 
