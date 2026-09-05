@@ -1,5 +1,5 @@
-import { machines, people } from "@cloudable/schema";
-import { eq } from "drizzle-orm";
+import { machines, people, upgradeAttempts } from "@cloudable/schema";
+import { desc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../db/layer";
 import type { ComplianceSeverity } from "../domain/compliance/types";
@@ -113,10 +113,10 @@ export const openFindingsCsv = (rows: readonly ControlFindingRow[]): string =>
  * The named "asset inventory" export ("Asset inventory
  * CSV (owner, encryption, drift, patch status)"). Drift status comes from
  * the "no undeclared software" check (unit 8) when it's registered, else
- * reports "unknown" rather than guessing. Encryption and patch status have
- * no tracked source anywhere in the system yet — see the inline comments
- * on those two columns below for why they stay fixed placeholders rather
- * than a guessed or fabricated signal.
+ * reports "unknown" rather than guessing. Encryption and patch status are
+ * derived from real, already-tracked facts — `machines.provider` and
+ * `upgrade_attempts` — see the inline comments on those two columns below
+ * for exactly what each does and does not claim to know.
  */
 export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, Db> =>
   Effect.gen(function* () {
@@ -128,6 +128,7 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
           id: machines.id,
           name: machines.name,
           state: machines.state,
+          provider: machines.provider,
           ownerEmail: people.email,
         })
         .from(machines)
@@ -145,6 +146,27 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
       );
     }
 
+    // Most recent upgrade attempt per machine (success or failure) — the
+    // real, tracked source for patch status below. `upgrade_attempts` is
+    // append-only (see its own table comment), so "most recent by
+    // `attemptedAt`" is the row that reflects the machine's current image.
+    const upgradeRows = yield* Effect.promise(() =>
+      db
+        .select({
+          machineId: upgradeAttempts.machineId,
+          outcome: upgradeAttempts.outcome,
+        })
+        .from(upgradeAttempts)
+        .where(eq(upgradeAttempts.orgId, orgId))
+        .orderBy(desc(upgradeAttempts.attemptedAt)),
+    );
+    const latestUpgradeByMachine = new Map<string, (typeof upgradeRows)[number]>();
+    for (const row of upgradeRows) {
+      if (!latestUpgradeByMachine.has(row.machineId)) {
+        latestUpgradeByMachine.set(row.machineId, row);
+      }
+    }
+
     return toCsv(
       [
         "machine_id",
@@ -160,21 +182,31 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
         machine.name,
         machine.ownerEmail ?? "unowned",
         machine.state,
-        // Placeholder, not a real signal: no encryption-status source
-        // exists anywhere in the system yet (no disk-encryption event, no
-        // column on `machines`) — this column intentionally reports a
-        // fixed value until one does, rather than guessing.
-        true,
+        // Real, not guessed: Azure managed disks are encrypted at rest by
+        // Storage Service Encryption unconditionally, and
+        // `ProvisioningService.azure.ts` never opts out of it — so any
+        // `provider: "azure"` machine really is encrypted at rest. Docker
+        // and Fake machines have no such platform guarantee (a Docker
+        // container's writable layer is plain host-filesystem storage), so
+        // they honestly report "unknown" rather than assume either way.
+        machine.provider === "azure" ? "encrypted_at_rest" : "unknown",
         driftedMachineIds === null
           ? "unknown"
           : driftedMachineIds.has(machine.id)
             ? "drifted"
             : "clean",
-        // Placeholder, not a real signal: no patch-status source exists
-        // anywhere in the system yet (no OS-patch event, no column on
-        // `machines`) — this column intentionally reports a fixed value
-        // until one does, rather than guessing.
-        "unknown",
+        // Real, not guessed: reflects the machine's own upgrade-attempt
+        // history (`upgrade_attempts`), the only patch-relevant fact this
+        // system tracks. This is the *image* patch level (was the last
+        // attempt to move to a newer OS image a success), not a live
+        // OS-package/apt-security-patch signal — no such per-package
+        // telemetry exists anywhere in this build (see
+        // `domain/machine/types.ts`'s `MachineReportedState`).
+        (() => {
+          const latest = latestUpgradeByMachine.get(machine.id);
+          if (!latest) return "never_upgraded";
+          return latest.outcome === "success" ? "up_to_date" : "upgrade_failed";
+        })(),
       ]),
     );
   });

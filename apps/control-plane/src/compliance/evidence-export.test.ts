@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type * as schema from "@cloudable/schema";
-import { complianceFindingState, machines, orgs, people } from "@cloudable/schema";
+import { complianceFindingState, machines, orgs, people, upgradeAttempts } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
@@ -93,10 +93,11 @@ describe("evidence-export (live DB)", () => {
     while (testOrgIds.length > 0) {
       const orgId = testOrgIds.pop();
       if (!orgId) continue;
-      // Dependency order: complianceFindingState/machines/people reference
-      // (or are scoped to) the org, so they're cleared before the org row
-      // itself. Never touches `events` — nothing here writes to it.
+      // Dependency order: complianceFindingState/upgradeAttempts/machines/people
+      // reference (or are scoped to) the org, so they're cleared before the org
+      // row itself. Never touches `events` — nothing here writes to it.
       await db.delete(complianceFindingState).where(eq(complianceFindingState.orgId, orgId));
+      await db.delete(upgradeAttempts).where(eq(upgradeAttempts.orgId, orgId));
       await db.delete(machines).where(eq(machines.orgId, orgId));
       await db.delete(people).where(eq(people.orgId, orgId));
       await db.delete(orgs).where(eq(orgs.id, orgId));
@@ -161,19 +162,83 @@ describe("evidence-export (live DB)", () => {
     expect(activeOwnerRow?.severity).not.toBe(reportingRow?.severity);
   });
 
-  test("assetInventoryCsv keeps a stable column shape, with encryption/patch status as explicit fixed placeholders", async () => {
+  test("assetInventoryCsv derives encryption_status from provider and patch_status from upgrade history", async () => {
     const orgId = await freshOrg();
 
-    await db.insert(machines).values({
+    // Fake machine, never upgraded: no platform encryption guarantee, and no
+    // upgrade_attempts row at all.
+    const neverUpgraded = mustFirst(
+      await db
+        .insert(machines)
+        .values({
+          orgId,
+          ownerPersonId: null,
+          name: "asset-fake",
+          provider: "fake",
+          region: "eastus",
+          sizeSku: "Standard_B2s",
+          image: "ubuntu-24.04",
+          state: "running",
+          lastVerifiedAt: new Date(),
+        })
+        .returning(),
+    );
+
+    // Azure machine, most recent upgrade attempt succeeded.
+    const upToDate = mustFirst(
+      await db
+        .insert(machines)
+        .values({
+          orgId,
+          ownerPersonId: null,
+          name: "asset-azure",
+          provider: "azure",
+          region: "eastus",
+          sizeSku: "Standard_B2s",
+          image: "ubuntu-24.04",
+          state: "running",
+          lastVerifiedAt: new Date(),
+        })
+        .returning(),
+    );
+    await db.insert(upgradeAttempts).values({
       orgId,
-      ownerPersonId: null,
-      name: "asset-1",
-      provider: "fake",
-      region: "eastus",
-      sizeSku: "Standard_B2s",
-      image: "ubuntu-24.04",
-      state: "running",
-      lastVerifiedAt: new Date(),
+      machineId: upToDate.id,
+      previousImage: "ubuntu-22.04",
+      targetImage: "ubuntu-24.04",
+      outcome: "success",
+      backoffMs: 1000,
+      attemptedAt: new Date(Date.now() - 1000),
+      nextEligibleAt: new Date(Date.now() + 1000),
+    });
+
+    // Fake machine whose most recent upgrade attempt failed and rolled back —
+    // still on its previous image.
+    const upgradeFailed = mustFirst(
+      await db
+        .insert(machines)
+        .values({
+          orgId,
+          ownerPersonId: null,
+          name: "asset-failed",
+          provider: "fake",
+          region: "eastus",
+          sizeSku: "Standard_B2s",
+          image: "ubuntu-22.04",
+          state: "running",
+          lastVerifiedAt: new Date(),
+        })
+        .returning(),
+    );
+    await db.insert(upgradeAttempts).values({
+      orgId,
+      machineId: upgradeFailed.id,
+      previousImage: "ubuntu-22.04",
+      targetImage: "ubuntu-24.04",
+      outcome: "rolled_back",
+      backoffMs: 1000,
+      attemptedAt: new Date(Date.now() - 1000),
+      nextEligibleAt: new Date(Date.now() + 1000),
     });
 
     const csv = await Effect.runPromise(
@@ -184,10 +249,14 @@ describe("evidence-export (live DB)", () => {
     expect(header).toBe(
       "machine_id,machine_name,owner,state,encryption_status,drift_status,patch_status",
     );
-    expect(lines).toHaveLength(1);
-    // encryption_status/patch_status are documented, fixed placeholders —
-    // not a fabricated signal — until a real source exists.
-    expect(lines[0]).toContain(",true,");
-    expect(lines[0]?.endsWith(",unknown")).toBe(true);
+    expect(lines).toHaveLength(3);
+
+    const line = (machineId: string) => lines.find((l) => l?.startsWith(`${machineId},`));
+    expect(line(neverUpgraded.id)).toContain(",unknown,");
+    expect(line(neverUpgraded.id)?.endsWith(",never_upgraded")).toBe(true);
+    expect(line(upToDate.id)).toContain(",encrypted_at_rest,");
+    expect(line(upToDate.id)?.endsWith(",up_to_date")).toBe(true);
+    expect(line(upgradeFailed.id)).toContain(",unknown,");
+    expect(line(upgradeFailed.id)?.endsWith(",upgrade_failed")).toBe(true);
   });
 });
