@@ -68,9 +68,11 @@ export async function bootstrapDefaultAdmin(
     await auth.api.signUpEmail({ body: { email: normalizedEmail, password, name: "Admin" } });
     console.log(`[bootstrap] created default admin ${normalizedEmail}`);
   } catch (err) {
-    console.error(
-      `[bootstrap] default admin bootstrap failed: ${err instanceof Error ? err.message : err}`,
-    );
+    const detail =
+      err && typeof err === "object"
+        ? JSON.stringify(err, Object.getOwnPropertyNames(err))
+        : String(err);
+    console.error(`[bootstrap] default admin bootstrap failed: ${detail}`);
   } finally {
     await sql`select pg_advisory_unlock(${BOOTSTRAP_ADVISORY_LOCK_KEY})`.catch(() => {});
     await sql.end();
