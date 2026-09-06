@@ -116,9 +116,13 @@ resource "azurerm_container_app_custom_domain" "this" {
   name             = "cloudable.example.com" # same hostname as above
   container_app_id = module.control_plane.container_app_id
 
-  # certificate_binding_type is set asynchronously by Azure once the managed
-  # certificate below finishes issuing — without ignoring it, every
-  # subsequent plan sees drift.
+  # certificate_binding_type doesn't get set to "SniEnabled" automatically —
+  # verified for real against a live tenant: `az containerapp hostname list`
+  # showed "Disabled" immediately after `apply` completed, and it stayed
+  # that way. It's in ignore_changes because Terraform can't set it without
+  # a circular dependency (the cert below already depends on this resource;
+  # having this resource reference the cert's id back would cycle) — one
+  # manual step finishes the binding, see below.
   lifecycle {
     ignore_changes = [certificate_binding_type]
   }
@@ -140,6 +144,22 @@ plus a `CNAME` pointing your domain at the auto-generated FQDN (`control_plane_u
 output, before you set `custom_domain`). Create both however you manage DNS — by hand, or
 with your DNS provider's own Terraform resource (e.g. Cloudflare's `cloudflare_dns_record`)
 in that same deploy repo.
+
+Once both resources apply and DNS has propagated, bind them together — this last step doesn't
+happen on its own:
+
+```bash
+az containerapp hostname bind \
+  --hostname cloudable.example.com \
+  --name <container_app_name output> \
+  --resource-group <resource_group_name output> \
+  --certificate "$(az containerapp env certificate list \
+      --name <container app environment name> --resource-group <resource_group_name output> \
+      --query "[0].id" -o tsv)"
+```
+
+Confirm with `curl https://cloudable.example.com/api/v1/health` — a valid certificate and
+`{"status":"ok"}`, not a TLS handshake failure.
 
 **Set `custom_domain` only after the binding above is actually live** — setting it first
 points `BETTER_AUTH_URL`/`CONTROL_PLANE_BASE_URL` at a hostname nothing serves yet, breaking
