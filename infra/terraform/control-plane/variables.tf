@@ -165,6 +165,12 @@ variable "create_machines_resource_group" {
   default     = true
 }
 
+variable "deploying_identity_principal_id" {
+  description = "Object ID (not the application/client ID) of the identity running terraform plan/apply against this module, if it's a scoped-down deploying identity (e.g. a CI/CD OIDC service principal) rather than a subscription Owner/Contributor. Only relevant when enable_self_managed_machines is true, which creates azurerm_role_assignment.catalog_reader below at subscription scope: refreshing that resource on every plan/apply requires Microsoft.Authorization/roleAssignments/read at that same scope, which a narrowly-scoped deploying identity doesn't have by default — without it, terraform plan computes the right diff but then 403s trying to read the resource back. Leave null (default) when the deploying identity already has broader access (e.g. subscription Owner/Contributor) or enable_self_managed_machines is false. Setting this creates one more narrow, read-only role assignment granting exactly that permission, nothing else — like catalog_reader itself, the very first apply that creates it needs an identity that already has Microsoft.Authorization/roleAssignments/write at subscription scope (e.g. a human's own elevated login), since the deploying identity being granted access can't yet grant itself that access."
+  type        = string
+  default     = null
+}
+
 variable "custom_domain" {
   description = "Real public hostname this deployment is reached at (e.g. \"cloudable.example.com\"), if you've bound one yourself. Leave null (default) to use the auto-generated Azure Container Apps FQDN. This module does NOT bind the domain itself or touch any DNS — see README.md's custom-domain recipe for that, since it varies by DNS provider and needs azurerm v4 (this module targets v3+ generically). Setting this only changes what BETTER_AUTH_URL/CONTROL_PLANE_BASE_URL and the control_plane_url output say the deployment's real address is — get the binding live *before* setting this, not after, or auth/CORS will point at a hostname nothing serves yet."
   type        = string

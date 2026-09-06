@@ -298,6 +298,39 @@ resource "azurerm_role_assignment" "catalog_reader" {
   principal_id       = azurerm_container_app.this.identity[0].principal_id
 }
 
+# A third, separate role — not for the control plane's own managed identity,
+# but for whatever *deploying* identity runs terraform against this module.
+# catalog_reader above is itself a subscription-scoped resource, and Terraform
+# needs Microsoft.Authorization/roleAssignments/read at that scope just to
+# read it back on every plan/apply. A scoped-down deploying identity (see
+# create_resource_group's own description above for why one would be scoped
+# down at all) doesn't have that by default, so `tofu plan` computes the
+# correct diff and then 403s trying to confirm the resource is unchanged.
+# Opt-in only (deploying_identity_principal_id defaults to null) since a
+# deploying identity with broader access already doesn't need this.
+resource "azurerm_role_definition" "deploying_identity_role_assignment_reader" {
+  count       = var.enable_self_managed_machines && var.deploying_identity_principal_id != null ? 1 : 0
+  name        = "Cloudable Deploying-Identity Role Assignment Reader (${var.name_prefix})"
+  scope       = data.azurerm_subscription.current.id
+  description = "Read-only, subscription-scoped: lets a scoped-down deploying identity (e.g. CI/CD) read this module's own role assignments during terraform plan/apply. No write actions."
+
+  permissions {
+    actions = [
+      "Microsoft.Authorization/roleAssignments/read",
+    ]
+    not_actions = []
+  }
+
+  assignable_scopes = [data.azurerm_subscription.current.id]
+}
+
+resource "azurerm_role_assignment" "deploying_identity_role_assignment_reader" {
+  count              = var.enable_self_managed_machines && var.deploying_identity_principal_id != null ? 1 : 0
+  scope              = data.azurerm_subscription.current.id
+  role_definition_id = azurerm_role_definition.deploying_identity_role_assignment_reader[0].role_definition_resource_id
+  principal_id       = var.deploying_identity_principal_id
+}
+
 # ---------------------------------------------------------------------------
 # Container Apps — the control plane, one stateless container
 # ---------------------------------------------------------------------------
