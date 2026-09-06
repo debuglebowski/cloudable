@@ -10,7 +10,9 @@ provisions:
 
 - One Azure Container App running the control-plane image (a single stateless
   container — see `docs/spec.md` §25: no Helm chart in v1, this or a Compose
-  equivalent is the whole of it)
+  equivalent is the whole of it). The same container serves the console web UI
+  too, at every path outside `/api/*`/`/_internal/*` (`http/routes/console.ts`)
+  — one image, one Container App, no separate frontend service to deploy.
 - An Azure Database for PostgreSQL Flexible Server + database for it to use
 - A system-assigned managed identity on the container app (no credential is ever
   stored — invariant 1)

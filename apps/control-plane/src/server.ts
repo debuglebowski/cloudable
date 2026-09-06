@@ -1,4 +1,4 @@
-import { HttpApiBuilder, HttpMiddleware, HttpServerRequest } from "@effect/platform";
+import { HttpApiBuilder, HttpMiddleware } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { config } from "./config";
@@ -28,6 +28,7 @@ import { UpgradeLive } from "./http/handlers/upgrade";
 import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
 import { AuthRouteLive } from "./http/routes/auth";
 import { BinariesRouteLive } from "./http/routes/binaries";
+import { ConsoleStaticRouteLive } from "./http/routes/console";
 import { buildAppLive } from "./layers";
 import { seedAzureImages } from "./services/CloudCatalogService";
 import { SwitchableProvisioningServiceLive } from "./services/ProvisioningService.switchable";
@@ -100,43 +101,19 @@ const TunnelRoutesLive = Layer.mergeAll(TunnelConnectRouteLive, AccessAttachRout
   Layer.provide(TunnelRegistry.Default),
 );
 
-// TEMP DEBUG (remove before commit) — investigating the Integrations page's
-// ~1s load: logs every request's method/url/status/duration plus every
-// request header, to correlate a possible client-side retry (React Query's
-// default retryDelay is ~1000ms after one failed attempt).
-const DEBUG_LOG_PATH =
-  "/private/tmp/claude-501/-Users-Kalle-dev-projects-cloudable2/1ee9ccde-c5bd-4ce9-887b-28c303c141c2/scratchpad/cloudable-request-debug.log";
-const debugLogger = HttpMiddleware.make((httpApp) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const t0 = Date.now();
-    const headers = JSON.stringify(request.headers);
-    const exit = yield* Effect.exit(httpApp);
-    const ms = Date.now() - t0;
-    const status = exit._tag === "Success" ? exit.value.status : "FAIL";
-    const causeStr = exit._tag === "Failure" ? ` cause=${JSON.stringify(exit.cause)}` : "";
-    const line = `${new Date().toISOString()} ${request.method} ${request.url} -> ${status} (${ms}ms) headers=${headers}${causeStr}\n`;
-    yield* Effect.sync(() => {
-      require("node:fs").appendFileSync(DEBUG_LOG_PATH, line);
-    });
-    return yield* exit;
-  }),
-);
-
 // Every console page fetches cross-origin (console and control-plane run on
 // different ports in local dev, and there's no reverse proxy in front of
 // either yet) — without this, the browser silently withholds every response
 // body from JS, which surfaces as every query on every page failing at once.
 const ServerLive = HttpApiBuilder.serve((httpApp) =>
-  HttpMiddleware.cors({ allowedOrigins: [config.consoleOrigin], credentials: true })(
-    debugLogger(httpApp),
-  ),
+  HttpMiddleware.cors({ allowedOrigins: [config.consoleOrigin], credentials: true })(httpApp),
 ).pipe(
   Layer.provide(ApiLive),
   Layer.provide(AgentWakeLive),
   Layer.provide(TunnelRoutesLive),
   Layer.provide(AuthRouteLive),
   Layer.provide(BinariesRouteLive),
+  Layer.provide(ConsoleStaticRouteLive),
   Layer.provide(AppLive),
   Layer.provide(BunHttpServer.layer({ port: config.port })),
 );

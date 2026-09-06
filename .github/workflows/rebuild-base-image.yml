@@ -18,6 +18,7 @@ on:
     paths:
       - "apps/control-plane/Dockerfile"
       - "apps/control-plane/**"
+      - "apps/console/**"
       - "packages/schema/**"
       - "packages/events/**"
       - "packages/contracts/**"

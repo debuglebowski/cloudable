@@ -28,7 +28,11 @@ WORKDIR /app
 # Install with every workspace's package.json present (Bun's workspace
 # resolution needs the full set to match bun.lock) but no source yet, so
 # `bun install` is cached independently of application code changes.
-COPY package.json bun.lock bunfig.toml ./
+# tsconfig.base.json: every app's tsconfig.json extends it, but only
+# console's build (`vite build`, via esbuild) actually resolves that chain —
+# control-plane/agent/tunnel-daemon's own `build` scripts don't invoke `tsc`
+# at all here, so this was never needed until console's build was added.
+COPY package.json bun.lock bunfig.toml tsconfig.base.json ./
 COPY apps/control-plane/package.json apps/control-plane/package.json
 COPY apps/agent/package.json apps/agent/package.json
 COPY apps/tunnel-daemon/package.json apps/tunnel-daemon/package.json
@@ -53,9 +57,11 @@ RUN bun install --frozen-lockfile --ignore-scripts
 # into standalone binaries this image serves over HTTP (services/
 # ProvisioningService.azure.ts's cloud-init curls them at VM boot: a fresh
 # Ubuntu VM has no Bun/Node to run TS source with, only whatever binary it
-# downloads). apps/cli, apps/console source is never copied in — their
-# package.json above exists only so `bun install` can resolve the whole
-# workspace graph.
+# downloads) — and apps/console, built below into the static SPA this same
+# image serves at every path `http/routes/console.ts`'s catch-all handles
+# (everything outside `/api/*` and `/_internal/*`). apps/cli source is never
+# copied in — its package.json above exists only so `bun install` can
+# resolve the whole workspace graph.
 COPY packages/contracts packages/contracts
 COPY packages/events packages/events
 COPY packages/schema packages/schema
@@ -63,6 +69,15 @@ COPY packages/session-token packages/session-token
 COPY apps/control-plane apps/control-plane
 COPY apps/agent apps/agent
 COPY apps/tunnel-daemon apps/tunnel-daemon
+COPY apps/console apps/console
+
+# VITE_API_URL="" bakes an empty base URL into console's build, so its
+# `fetch` calls resolve as same-origin relative paths (`/api/v1/...`) —
+# correct here because this image serves both the API and the console from
+# the same origin (see console.ts). Not the right default for `apps/console`
+# run standalone (its own `vite dev` still defaults to
+# `http://localhost:4780`, a real cross-origin API in local dev).
+ENV VITE_API_URL=""
 
 RUN bun run --cwd packages/contracts build \
  && bun run --cwd packages/events build \
@@ -72,7 +87,8 @@ RUN bun run --cwd packages/contracts build \
  && bun run --cwd apps/agent build \
  && bun run --cwd apps/agent build:arm64 \
  && bun run --cwd apps/tunnel-daemon build \
- && bun run --cwd apps/tunnel-daemon build:arm64
+ && bun run --cwd apps/tunnel-daemon build:arm64 \
+ && bun run --cwd apps/console build
 
 # Re-resolve node_modules for production only, so devDependencies
 # (typescript, drizzle-kit, @testcontainers/postgresql, ...) never end up
@@ -106,6 +122,11 @@ COPY --from=builder --chown=bun:bun /app/apps/agent/dist/cloudable-agent-linux-x
 COPY --from=builder --chown=bun:bun /app/apps/agent/dist/cloudable-agent-linux-arm64 /app/binaries/cloudable-agent-linux-arm64
 COPY --from=builder --chown=bun:bun /app/apps/tunnel-daemon/dist/cloudable-tunnel-daemon-linux-x64 /app/binaries/cloudable-tunnel-daemon-linux-x64
 COPY --from=builder --chown=bun:bun /app/apps/tunnel-daemon/dist/cloudable-tunnel-daemon-linux-arm64 /app/binaries/cloudable-tunnel-daemon-linux-arm64
+
+# The console's static build — `http/routes/console.ts` serves it directly
+# from here (CONSOLE_DIST_DIR), no separate web server/container.
+COPY --from=builder --chown=bun:bun /app/apps/console/dist /app/console-dist
+ENV CONSOLE_DIST_DIR=/app/console-dist
 
 USER bun
 EXPOSE 3000
