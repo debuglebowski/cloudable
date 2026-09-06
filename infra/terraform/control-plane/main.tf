@@ -444,6 +444,21 @@ resource "azurerm_container_app" "this" {
       }
 
       dynamic "env" {
+        for_each = local.machine_provisioning_env
+        content {
+          name  = env.value.name
+          value = env.value.value
+        }
+      }
+
+      # Appended last, deliberately: each `dynamic "env"` block above is a
+      # fixed-size list (0 or 1 elements), so an env var conditionally added
+      # earlier in this list shifts every later block's position — and
+      # `azurerm_container_app`'s `env` blocks have no stable per-entry key,
+      # so Terraform reads a position shift as every later entry's `name`/
+      # `value` having changed in place. Adding new optional vars here,
+      # after every existing one, keeps unrelated plans clean.
+      dynamic "env" {
         for_each = var.default_admin_email != null ? [1] : []
         content {
           name  = "DEFAULT_ADMIN_EMAIL"
@@ -456,14 +471,6 @@ resource "azurerm_container_app" "this" {
         content {
           name        = "DEFAULT_ADMIN_PASSWORD"
           secret_name = "default-admin-password"
-        }
-      }
-
-      dynamic "env" {
-        for_each = local.machine_provisioning_env
-        content {
-          name  = env.value.name
-          value = env.value.value
         }
       }
     }
