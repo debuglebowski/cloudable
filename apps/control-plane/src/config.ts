@@ -86,6 +86,14 @@ export interface AppConfig {
    * don't need this route at all).
    */
   readonly agentBinariesDir: string;
+  /**
+   * Directory the console's built static assets (`vite build`'s output)
+   * live in — `http/routes/console.ts`'s catch-all route serves them from
+   * here. Matches where `Dockerfile` copies `apps/console/dist` to in the
+   * published image; irrelevant in local dev, where console runs via its
+   * own `vite` dev server (port 5180) instead of through this server.
+   */
+  readonly consoleDistDir: string;
 }
 
 const readConfig = (): AppConfig => {
@@ -109,6 +117,7 @@ const readConfig = (): AppConfig => {
     azureMachinesResourceGroup: process.env.AZURE_MACHINES_RESOURCE_GROUP ?? "rg-cloudable-managed",
     azureMachinesSubnetId: process.env.AZURE_MACHINES_SUBNET_ID ?? null,
     agentBinariesDir: process.env.AGENT_BINARIES_DIR ?? "/app/binaries",
+    consoleDistDir: process.env.CONSOLE_DIST_DIR ?? "/app/console-dist",
   };
 };
 
