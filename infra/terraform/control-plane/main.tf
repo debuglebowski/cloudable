@@ -388,6 +388,14 @@ resource "azurerm_container_app" "this" {
     }
   }
 
+  dynamic "secret" {
+    for_each = var.default_admin_password != null ? [1] : []
+    content {
+      name  = "default-admin-password"
+      value = var.default_admin_password
+    }
+  }
+
   dynamic "registry" {
     for_each = var.control_plane_image_registry_password != "" ? [1] : []
     content {
@@ -433,6 +441,22 @@ resource "azurerm_container_app" "this" {
       env {
         name  = "PORT"
         value = tostring(var.port)
+      }
+
+      dynamic "env" {
+        for_each = var.default_admin_email != null ? [1] : []
+        content {
+          name  = "DEFAULT_ADMIN_EMAIL"
+          value = var.default_admin_email
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.default_admin_password != null ? [1] : []
+        content {
+          name        = "DEFAULT_ADMIN_PASSWORD"
+          secret_name = "default-admin-password"
+        }
       }
 
       dynamic "env" {

@@ -1,6 +1,7 @@
 import { HttpApiBuilder, HttpMiddleware } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
+import { bootstrapDefaultAdmin } from "./bootstrap-default-admin";
 import { config } from "./config";
 import { DbLive } from "./db/layer";
 import { EvidenceLive } from "./evidence/handler";
@@ -134,6 +135,8 @@ const seedCatalogDefaults = seedAzureImages().pipe(
   Effect.catchAll((cause) => Effect.logWarning(`Azure image catalog seed skipped: ${cause}`)),
 );
 
-Effect.runPromise(seedCatalogDefaults).then(() => {
-  Layer.launch(ServerLive).pipe(BunRuntime.runMain);
-});
+bootstrapDefaultAdmin()
+  .then(() => Effect.runPromise(seedCatalogDefaults))
+  .then(() => {
+    Layer.launch(ServerLive).pipe(BunRuntime.runMain);
+  });
