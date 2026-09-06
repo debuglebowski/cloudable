@@ -31,6 +31,7 @@ import { AuthRouteLive } from "./http/routes/auth";
 import { BinariesRouteLive } from "./http/routes/binaries";
 import { ConsoleStaticRouteLive } from "./http/routes/console";
 import { buildAppLive } from "./layers";
+import { migrateOnBoot } from "./migrate-on-boot";
 import { seedAzureImages } from "./services/CloudCatalogService";
 import { SwitchableProvisioningServiceLive } from "./services/ProvisioningService.switchable";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
@@ -135,8 +136,19 @@ const seedCatalogDefaults = seedAzureImages().pipe(
   Effect.catchAll((cause) => Effect.logWarning(`Azure image catalog seed skipped: ${cause}`)),
 );
 
-bootstrapDefaultAdmin()
+// migrateOnBoot runs first, deliberately: a self-hosted deploy has no other
+// step that ever applies the schema to a fresh database (see that
+// function's own doc comment), and everything below it (bootstrapDefaultAdmin,
+// seedCatalogDefaults, the HTTP server itself) assumes the schema already
+// exists. A migration failure is fatal — exit rather than serve traffic
+// against an unknown schema.
+migrateOnBoot()
+  .then(() => bootstrapDefaultAdmin())
   .then(() => Effect.runPromise(seedCatalogDefaults))
   .then(() => {
     Layer.launch(ServerLive).pipe(BunRuntime.runMain);
+  })
+  .catch((err) => {
+    console.error(`[boot] fatal: ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
   });
