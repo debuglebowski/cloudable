@@ -183,6 +183,11 @@ auth/CORS until the binding catches up.
   rather it scale to zero when idle (cold starts will apply).
 - This module creates its own resource group (`resource_group_name`) rather than
   adopting an existing one.
+- No self-service signup exists on `/login` — set `default_admin_email`/
+  `default_admin_password` to auto-create a first admin account at startup (only takes
+  effect once, the first time no account exists for that email). Without these, bootstrapping
+  a first login takes manual SQL against the database plus a direct call to BetterAuth's
+  `/api/auth/sign-up/email` endpoint.
 - Deploying via CI/CD with a narrowly-scoped identity (rather than a subscription
   Owner/Contributor running `terraform apply` by hand)? Set
   `deploying_identity_principal_id` to that identity's object ID — otherwise, once

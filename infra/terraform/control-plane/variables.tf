@@ -176,3 +176,16 @@ variable "custom_domain" {
   type        = string
   default     = null
 }
+
+variable "default_admin_email" {
+  description = "Email for a self-hosted deployment's first admin account, auto-created at control-plane startup if no account exists for it yet (apps/control-plane/src/bootstrap-default-admin.ts). There is otherwise no self-service signup: BetterAuth rejects sign-up for any email without a matching `people` row, and adding one requires already being logged in — so without this, bootstrapping a first login takes manual SQL plus a direct BetterAuth API call. Leave null (default) to skip. Pair with default_admin_password; once you've logged in and changed your password, both can be unset — the bootstrap only ever acts once, the first time no account exists for this email."
+  type        = string
+  default     = null
+}
+
+variable "default_admin_password" {
+  description = "Password for default_admin_email's auto-created account. Sensitive; supply via *.tfvars, -var, or TF_VAR_default_admin_password — never commit a real value. Only takes effect once, the first time no BetterAuth account exists for default_admin_email; a value left here after that point sits unused."
+  type        = string
+  sensitive   = true
+  default     = null
+}

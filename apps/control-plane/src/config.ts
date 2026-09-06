@@ -94,6 +94,18 @@ export interface AppConfig {
    * own `vite` dev server (port 5180) instead of through this server.
    */
   readonly consoleDistDir: string;
+  /**
+   * Opt-in first-admin bootstrap (see `bootstrap-default-admin.ts`): if set,
+   * and no BetterAuth account exists yet for this email, the control plane
+   * creates an org + person + account for it at startup. There is otherwise
+   * no self-service signup — BetterAuth rejects sign-up for any email
+   * without a matching `people` row (`auth.ts`'s `databaseHooks`), and
+   * adding one requires already being logged in. `null` (default) disables
+   * this entirely. Pair with `defaultAdminPassword`.
+   */
+  readonly defaultAdminEmail: string | null;
+  /** Password for `defaultAdminEmail`'s auto-created account. `null` disables the bootstrap. */
+  readonly defaultAdminPassword: string | null;
 }
 
 const readConfig = (): AppConfig => {
@@ -118,6 +130,8 @@ const readConfig = (): AppConfig => {
     azureMachinesSubnetId: process.env.AZURE_MACHINES_SUBNET_ID ?? null,
     agentBinariesDir: process.env.AGENT_BINARIES_DIR ?? "/app/binaries",
     consoleDistDir: process.env.CONSOLE_DIST_DIR ?? "/app/console-dist",
+    defaultAdminEmail: process.env.DEFAULT_ADMIN_EMAIL ?? null,
+    defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD ?? null,
   };
 };
 
