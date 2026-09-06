@@ -76,6 +76,15 @@ scope, the same managed identity also gets "Cloudable Catalog Reader" — two re
 (`Microsoft.Resources/subscriptions/locations/read`, `Microsoft.Compute/skus/read`), assigned at
 subscription scope, nothing else. Keeps the VM-management role exactly as narrow as before.
 
+**A third, opt-in role for a scoped-down deploying identity.** `catalog_reader` above is
+itself a subscription-scoped resource, so a CI/CD identity applying this module with
+deliberately narrow permissions (rather than subscription Owner/Contributor) can compute
+a correct `terraform plan` but then 403s trying to read that resource back, since it
+lacks `Microsoft.Authorization/roleAssignments/read` at that scope. Setting
+`deploying_identity_principal_id` grants that one identity a third role with exactly
+that single read action, nothing else — opt-in (default `null`) since a deploying
+identity with broader access doesn't need it.
+
 **Certificate credentials** only where federation is impossible. **Client secrets: never.**
 
 ## Revocation

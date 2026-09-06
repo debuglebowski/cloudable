@@ -183,3 +183,12 @@ auth/CORS until the binding catches up.
   rather it scale to zero when idle (cold starts will apply).
 - This module creates its own resource group (`resource_group_name`) rather than
   adopting an existing one.
+- Deploying via CI/CD with a narrowly-scoped identity (rather than a subscription
+  Owner/Contributor running `terraform apply` by hand)? Set
+  `deploying_identity_principal_id` to that identity's object ID — otherwise, once
+  `enable_self_managed_machines` creates the subscription-scoped `catalog_reader` role
+  assignment, that identity can compute a plan but then 403s trying to read the
+  resource back on every run. Like `catalog_reader` itself, the first `apply` that
+  creates this needs an identity that already has
+  `Microsoft.Authorization/roleAssignments/write` at subscription scope — the
+  narrowly-scoped identity can't grant itself the read access it's missing.
