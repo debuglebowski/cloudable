@@ -136,18 +136,32 @@ const seedCatalogDefaults = seedAzureImages().pipe(
   Effect.catchAll((cause) => Effect.logWarning(`Azure image catalog seed skipped: ${cause}`)),
 );
 
+// The HTTP listener starts immediately, deliberately not gated on anything
+// below — Azure Container Apps' default startup probe is a bare TCP check
+// against this port with limited patience, and migrateOnBoot (a real schema
+// migration on a fresh database) plus bootstrapDefaultAdmin (password
+// hashing, an extra BetterAuth round-trip) together were, in production,
+// occasionally slow enough to blow past it: the platform saw "connection
+// refused", killed the container as unresponsive, and restarted it — which
+// then had to wait on the previous attempt's Postgres advisory lock before
+// it could even begin, compounding the delay into a real crash-loop (seen
+// live: repeated `ReplicaUnhealthy`/`ContainerBackOff` events, no
+// application-level error at all, since the process was killed, not
+// thrown). Binding the port first means the probe passes in the time it
+// takes Bun to open a socket, independent of how long the boot sequence
+// below takes.
+Layer.launch(ServerLive).pipe(BunRuntime.runMain);
+
 // migrateOnBoot runs first, deliberately: a self-hosted deploy has no other
 // step that ever applies the schema to a fresh database (see that
-// function's own doc comment), and everything below it (bootstrapDefaultAdmin,
-// seedCatalogDefaults, the HTTP server itself) assumes the schema already
-// exists. A migration failure is fatal — exit rather than serve traffic
-// against an unknown schema.
+// function's own doc comment), and bootstrapDefaultAdmin/seedCatalogDefaults
+// below it assume the schema already exists. A migration failure is fatal —
+// exit rather than keep serving traffic against an unknown schema (the
+// server above is already listening, so this exits a container that had
+// briefly looked ready, not one still failing its startup probe).
 migrateOnBoot()
   .then(() => bootstrapDefaultAdmin())
   .then(() => Effect.runPromise(seedCatalogDefaults))
-  .then(() => {
-    Layer.launch(ServerLive).pipe(BunRuntime.runMain);
-  })
   .catch((err) => {
     console.error(`[boot] fatal: ${err instanceof Error ? err.message : err}`);
     process.exit(1);
