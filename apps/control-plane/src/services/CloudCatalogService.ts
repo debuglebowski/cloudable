@@ -187,6 +187,24 @@ const getComputeClient = (): Effect.Effect<
     return cachedComputeClient;
   });
 
+/** `sku.name` alone ("Standard_A1_v2") means nothing to a person choosing a
+ * size — `vCPUs`/`MemoryGB` are two of the ~25 flat name/value pairs Azure
+ * returns per SKU in `capabilities` (confirmed against a real subscription;
+ * no typed fields for these, just this free-form list), enough to make the
+ * choice legible without going as far as parsing the rest (family, disk
+ * IOPS, etc.) that a self-hoster picking a size doesn't need. Falls back to
+ * the bare name if a SKU is ever missing one of the two — seen in practice
+ * for some retired/specialty SKUs. */
+const skuDisplayName = (sku: {
+  name?: string;
+  capabilities?: { name?: string; value?: string }[];
+}): string => {
+  const vcpus = sku.capabilities?.find((c) => c.name === "vCPUs")?.value;
+  const memoryGb = sku.capabilities?.find((c) => c.name === "MemoryGB")?.value;
+  if (!vcpus || !memoryGb) return sku.name ?? "";
+  return `${sku.name} (${vcpus} vCPU, ${memoryGb} GB RAM)`;
+};
+
 /** Real Azure SDK call — `ComputeManagementClient.resourceSkus.list()`
  * enumerates every SKU (VM sizes, disks, etc.) available to the configured
  * subscription; filtered to `resourceType === "virtualMachines"` for just
@@ -229,7 +247,7 @@ export const syncAzureSizes = (): Effect.Effect<
     for (const sku of skus) {
       if (sku.resourceType !== "virtualMachines" || !sku.name || seen.has(sku.name)) continue;
       seen.add(sku.name);
-      entries.push({ code: sku.name, displayName: sku.name });
+      entries.push({ code: sku.name, displayName: skuDisplayName(sku) });
     }
 
     yield* upsertEntries("azure", "sku", entries);
