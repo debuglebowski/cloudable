@@ -80,7 +80,7 @@ export function CollapsibleSection({
         {headerAction}
       </div>
       {open && (
-        <div className="flex flex-col gap-2 py-1 pl-5">
+        <div className="flex flex-col gap-2 pb-4 pt-1 pl-5">
           {description && <p className="text-sm text-muted-foreground">{description}</p>}
           {children}
         </div>
