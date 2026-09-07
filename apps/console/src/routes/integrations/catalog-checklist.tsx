@@ -81,7 +81,7 @@ export function CatalogChecklist({
         </p>
       )}
       {catalogQuery.data && catalogQuery.data.length > 0 && (
-        <ul className="grid max-h-[45vh] grid-cols-2 gap-x-4 gap-y-1 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
+        <ul className="grid max-h-[45vh] grid-cols-2 gap-x-6 gap-y-3 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
           {catalogQuery.data.map((entry: CatalogItem) => (
             <li key={entry.code} className="flex items-center gap-2">
               <Checkbox
