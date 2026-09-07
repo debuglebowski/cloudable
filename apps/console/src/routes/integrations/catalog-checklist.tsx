@@ -58,11 +58,8 @@ export function CatalogChecklist({
           )}
         </span>
       }
-      defaultOpen={defaultOpen}
-      className="rounded-md border border-border px-2.5"
-    >
-      {showSync && (
-        <div className="flex justify-end">
+      headerAction={
+        showSync && (
           <Button
             variant="ghost"
             size="sm"
@@ -72,8 +69,11 @@ export function CatalogChecklist({
           >
             {sync.isPending ? "Syncing…" : "Sync from Azure"}
           </Button>
-        </div>
-      )}
+        )
+      }
+      defaultOpen={defaultOpen}
+      className="rounded-md border border-border px-2.5"
+    >
       {catalogQuery.isPending && <p className="text-xs text-muted-foreground">Loading…</p>}
       {catalogQuery.data?.length === 0 && (
         <p className="text-xs text-muted-foreground">
@@ -81,7 +81,7 @@ export function CatalogChecklist({
         </p>
       )}
       {catalogQuery.data && catalogQuery.data.length > 0 && (
-        <ul className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+        <ul className="grid max-h-[45vh] grid-cols-2 gap-x-4 gap-y-1 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
           {catalogQuery.data.map((entry: CatalogItem) => (
             <li key={entry.code} className="flex items-center gap-2">
               <Checkbox
@@ -92,7 +92,8 @@ export function CatalogChecklist({
               />
               <label
                 htmlFor={`catalog-${kind}-${entry.code}`}
-                className="cursor-pointer text-xs font-normal"
+                className="cursor-pointer truncate text-xs font-normal"
+                title={entry.displayName}
               >
                 {entry.displayName}
               </label>
@@ -115,14 +116,14 @@ export function AzureCatalogDialog() {
           Configure
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>Azure catalog</DialogTitle>
           <DialogDescription>
             Regions, images, and sizes this org allows machines to be created with.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-2">
+        <div className="flex max-h-[80vh] flex-col gap-2 overflow-y-auto">
           <CatalogChecklist title="Regions" kind="region" showSync defaultOpen />
           <CatalogChecklist title="Images" kind="image" defaultOpen={false} />
           <CatalogChecklist title="Sizes" kind="sku" showSync defaultOpen={false} />
