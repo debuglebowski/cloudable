@@ -9,7 +9,7 @@ import { ComputeManagementClient } from "@azure/arm-compute";
 import { SubscriptionClient } from "@azure/arm-subscriptions";
 import { DefaultAzureCredential } from "@azure/identity";
 import { providerCatalogEntries } from "@cloudable/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Data, Effect, Schema } from "effect";
 import { ulid } from "ulid";
 import { config } from "../config";
@@ -57,6 +57,18 @@ export interface CatalogEntry {
   displayName: string;
 }
 
+/** One multi-row statement per chunk rather than one round-trip per row —
+ * `syncAzureSizes` alone can pass several hundred entries (this
+ * subscription's raw `resourceSkus.list()` enumerates tens of thousands of
+ * per-region SKU records before dedup), and a sequential
+ * `for (...) await tx.insert(...)` loop over that many rows, all inside one
+ * held-open transaction, was slow enough to blow past Azure Container
+ * Apps' request/probe patience — confirmed live: the container was
+ * silently SIGKILLed mid-sync (no app-level error logged at all) and
+ * restarted, which is what a caller actually saw as a 503. Chunked well
+ * under Postgres's ~65535 bound-parameter limit (4 params/row here). */
+const UPSERT_CHUNK_SIZE = 1000;
+
 const upsertEntries = (
   provider: "azure",
   kind: CatalogKind,
@@ -67,17 +79,26 @@ const upsertEntries = (
     yield* Effect.tryPromise({
       try: () =>
         db.transaction(async (tx) => {
-          for (const entry of entries) {
+          for (let i = 0; i < entries.length; i += UPSERT_CHUNK_SIZE) {
+            const chunk = entries.slice(i, i + UPSERT_CHUNK_SIZE);
+            if (chunk.length === 0) continue;
             await tx
               .insert(providerCatalogEntries)
-              .values({ provider, kind, code: entry.code, displayName: entry.displayName })
+              .values(
+                chunk.map((entry) => ({
+                  provider,
+                  kind,
+                  code: entry.code,
+                  displayName: entry.displayName,
+                })),
+              )
               .onConflictDoUpdate({
                 target: [
                   providerCatalogEntries.provider,
                   providerCatalogEntries.kind,
                   providerCatalogEntries.code,
                 ],
-                set: { displayName: entry.displayName, syncedAt: new Date() },
+                set: { displayName: sql`excluded.display_name`, syncedAt: new Date() },
               });
           }
         }),
