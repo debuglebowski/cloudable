@@ -13,7 +13,7 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
         return yield* machineService
           .create({
             orgId: currentUser.orgId,
-            name: payload.name,
+            ...(payload.name !== undefined ? { name: payload.name } : {}),
             provider: payload.provider,
             region: payload.region ?? null,
             sizeSku: payload.sizeSku,

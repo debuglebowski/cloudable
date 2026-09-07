@@ -59,7 +59,7 @@ export const restartMachine = (machineId: string, orgId: string, actorPersonId: 
       return yield* Effect.fail(notRunning(machineId, machine.state));
     }
 
-    yield* provisioning.restart(machineId, machine.provider);
+    yield* provisioning.restart(machineId, machine.provider, machine.name);
 
     const now = new Date();
     yield* Effect.tryPromise({

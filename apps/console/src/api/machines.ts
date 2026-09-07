@@ -159,7 +159,8 @@ export async function listMachines(): Promise<Machine[]> {
 }
 
 export interface CreateMachineInput {
-  name: string;
+  /** Optional — a friendly, org-unique default is generated when omitted. */
+  name?: string;
   provider: MachineProvider;
   /** Required iff `provider === "azure"` — omitted for docker/fake, which have no region. */
   region?: string;

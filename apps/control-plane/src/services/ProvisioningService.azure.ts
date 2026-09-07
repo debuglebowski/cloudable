@@ -57,19 +57,48 @@ export function imageReferenceFor(image: string | undefined) {
   };
 }
 
-/** Deterministic, Azure-name-safe resource names derived from machineId
- * alone — archive/reconcile/reimage never need to persist anything extra
- * to find a machine's resources back, same convention as
- * ProvisioningService.docker.ts's `containerName(machineId)`. */
-export function namesFor(machineId: string) {
-  const slug = `cldm${machineId.replace(/-/g, "")}`;
+/** Azure VM names allow alphanumerics/underscores/periods/hyphens, but the
+ * charset shared by every resource type `namesFor` produces (VM/NIC/PIP all
+ * allow it, disks additionally forbid periods) is alphanumerics + hyphens —
+ * so that's all this ever emits, regardless of the machine's real name. */
+const MAX_SLUG_LENGTH = 32;
+
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, MAX_SLUG_LENGTH)
+    .replace(/-+$/g, "");
+}
+
+/** Azure-name-safe resource names derived from machineId (and, when given, a
+ * human-readable prefix from the machine's own name) — archive/reconcile/
+ * reimage never need to persist anything extra to find a machine's
+ * resources back, same convention as ProvisioningService.docker.ts's
+ * `containerName(machineId)`.
+ *
+ * `name` is optional and, when present, sanitized and capped at
+ * `MAX_SLUG_LENGTH` — only 12 of the machineId's 32 hex characters are used
+ * alongside it (still ~2.8×10¹⁴ combinations against this deployment's one
+ * shared resource group, astronomically collision-safe at any real scale)
+ * to leave headroom under the tightest real Azure limit, the VM resource
+ * name's 64 characters (`cldm-` + 32-char slug + `-` + 12 hex = 50, a real
+ * margin — verified against Microsoft's naming-rules table, not guessed).
+ * Falls back to the exact previous id-only scheme when `name` is absent or
+ * sanitizes to nothing (e.g. a name that's only non-ASCII/punctuation) —
+ * still just as collision-safe, since that path keeps the full id. */
+export function namesFor(machineId: string, name?: string) {
+  const compactId = machineId.replace(/-/g, "");
+  const slug = name ? slugify(name) : "";
+  const base = slug ? `cldm-${slug}-${compactId.slice(0, 12)}` : `cldm${compactId}`;
   return {
-    vm: slug,
-    nic: `${slug}-nic`,
-    pip: `${slug}-pip`,
-    osDisk: `${slug}-os`,
-    dataDisk: `${slug}-data`,
-    computerName: slug.slice(0, 15),
+    vm: base,
+    nic: `${base}-nic`,
+    pip: `${base}-pip`,
+    osDisk: `${base}-os`,
+    dataDisk: `${base}-data`,
+    computerName: base.slice(0, 15),
   };
 }
 
@@ -283,7 +312,7 @@ const service: ProvisioningService = {
       }
       const region = desc.region;
       const clients = yield* getClients();
-      const names = namesFor(desc.machineId);
+      const names = namesFor(desc.machineId, desc.name);
       const tags = { "cloudable-machine-id": desc.machineId, "cloudable-org-id": desc.orgId };
 
       const nic = yield* createNetworking(
@@ -342,10 +371,10 @@ const service: ProvisioningService = {
       } satisfies MachineStatus;
     }),
 
-  archive: (machineId: string, _provider) =>
+  archive: (machineId: string, _provider, name) =>
     Effect.gen(function* () {
       const clients = yield* getClients();
-      const names = namesFor(machineId);
+      const names = namesFor(machineId, name);
       const rg = config.azureMachinesResourceGroup;
 
       yield* runArm(() => clients.compute.virtualMachines.get(rg, names.vm));
@@ -383,10 +412,10 @@ const service: ProvisioningService = {
       return { machineId, state: "archived", externalId: null } satisfies MachineStatus;
     }),
 
-  reconcile: (machineId: string, _provider) =>
+  reconcile: (machineId: string, _provider, name) =>
     Effect.gen(function* () {
       const clients = yield* getClients();
-      const names = namesFor(machineId);
+      const names = namesFor(machineId, name);
       const rg = config.azureMachinesResourceGroup;
 
       const view = yield* runArm(() => clients.compute.virtualMachines.instanceView(rg, names.vm));
@@ -417,7 +446,7 @@ const service: ProvisioningService = {
       }
       const region = desc.region;
       const clients = yield* getClients();
-      const names = namesFor(desc.machineId);
+      const names = namesFor(desc.machineId, desc.name);
       const rg = config.azureMachinesResourceGroup;
 
       yield* runArm(() => clients.compute.virtualMachines.get(rg, names.vm));

@@ -12,6 +12,7 @@ export interface OffboardingPerson {
 
 export interface OwnedMachine {
   id: string;
+  name: string;
   provider: "azure" | "docker" | "fake";
 }
 

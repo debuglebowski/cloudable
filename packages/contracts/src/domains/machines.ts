@@ -34,7 +34,8 @@ export interface MachineSummary {
 }
 
 export interface CreateMachineRequest {
-  name: string;
+  /** Optional — a friendly, org-unique default is generated when omitted or blank. */
+  name?: string;
   provider: MachineProvider;
   /** Required iff `provider === "azure"` (and must name one of the org's
    * enabled Azure regions) — omitted/ignored for every other provider. */

@@ -8,6 +8,7 @@ import { EventBus } from "../../services/EventBus";
 import { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { isProviderEnabled } from "../integrations/integrations";
 import { isCatalogEntryEnabled } from "../organisation/catalog";
+import { generateDefaultMachineName } from "./default-name";
 import {
   InvalidCursorError,
   InvalidMachineRequestError,
@@ -43,7 +44,9 @@ type MachinePackageTableRow = typeof machinePackages.$inferSelect;
 
 export interface CreateMachineInput {
   orgId: string;
-  name: string;
+  /** Optional — a friendly, org-unique default (e.g. "swift-falcon-4f2a") is
+   * generated when omitted or blank. See `generateUniqueDefaultName` below. */
+  name?: string;
   provider: "azure" | "docker" | "fake";
   // Required iff `provider === "azure"` (and must name one of the org's
   // enabled Azure regions — see `isCatalogEntryEnabled`); forbidden for
@@ -190,6 +193,34 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         return machine;
       });
 
+    const MAX_NAME_GENERATION_ATTEMPTS = 5;
+
+    // Check-then-insert, same TOCTOU shape `domain/people/people.ts`'s
+    // `createPerson` already accepts for its own email uniqueness check —
+    // reasonable here too: creating a machine isn't high-frequency enough to
+    // need real locking, and `generateDefaultMachineName`'s ~37.7M-combination
+    // space makes even an unlucky concurrent collision on the SAME candidate
+    // vanishingly unlikely. On the (already vanishingly unlikely) 5th miss,
+    // append a fresh random suffix and return without a final check — not a
+    // hard guarantee, a deliberately-not-over-engineered fallback.
+    const generateUniqueDefaultName = (orgId: string) =>
+      Effect.gen(function* () {
+        for (let attempt = 0; attempt < MAX_NAME_GENERATION_ATTEMPTS; attempt++) {
+          const candidate = generateDefaultMachineName();
+          const existing = yield* Effect.tryPromise({
+            try: () =>
+              db
+                .select({ id: machines.id })
+                .from(machines)
+                .where(and(eq(machines.orgId, orgId), eq(machines.name, candidate)))
+                .limit(1),
+            catch: (cause) => new MachineServiceError({ reason: "name_check_failed", cause }),
+          });
+          if (existing.length === 0) return candidate;
+        }
+        return `${generateDefaultMachineName()}-${ulid().toLowerCase().slice(-6)}`;
+      });
+
     const publishOrFail = (batch: Parameters<typeof eventBus.publish>[0]) =>
       eventBus
         .publish(batch)
@@ -276,6 +307,10 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           region = null;
         }
 
+        const trimmedName = input.name?.trim() ?? "";
+        const name =
+          trimmedName.length > 0 ? trimmedName : yield* generateUniqueDefaultName(input.orgId);
+
         const rows = yield* Effect.tryPromise({
           try: () =>
             db
@@ -284,7 +319,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                 orgId: input.orgId,
                 templateId: input.templateId ?? null,
                 ownerPersonId: input.ownerPersonId,
-                name: input.name,
+                name,
                 provider: input.provider,
                 region,
                 sizeSku: input.sizeSku,
@@ -356,6 +391,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             region: machine.region,
             sizeSku: machine.sizeSku,
             image: machine.image,
+            name: machine.name,
             packages,
           })
           .pipe(

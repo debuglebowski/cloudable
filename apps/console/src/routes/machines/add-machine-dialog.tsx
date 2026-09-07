@@ -104,7 +104,7 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
     mutationFn: () => {
       if (!provider) throw new Error("Provider is required");
       return createMachine({
-        name: name.trim(),
+        ...(name.trim() ? { name: name.trim() } : {}),
         provider,
         ...(supportsRegion(provider) ? { region } : {}),
         sizeSku: sizeSku.trim(),
@@ -130,7 +130,6 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
   }
 
   const canSubmit =
-    name.trim().length > 0 &&
     provider !== "" &&
     (!supportsRegion(provider) || region !== "") &&
     image.trim().length > 0 &&
@@ -165,10 +164,9 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
             <Label htmlFor="add-machine-name">Name</Label>
             <Input
               id="add-machine-name"
-              required
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="db-prod-04"
+              placeholder="Leave blank to auto-generate"
             />
           </div>
           <div className="flex flex-col gap-1">

@@ -50,6 +50,39 @@ describe("namesFor", () => {
     const machineId = "11111111-2222-3333-4444-555555555555";
     expect(namesFor(machineId)).toEqual(namesFor(machineId));
   });
+
+  test("prefixes a sanitized, human-readable slug when a name is given", () => {
+    const machineId = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+    const names = namesFor(machineId, "Web Server 01!");
+    // Only the first 12 of the id's 32 hex chars are used once a slug is
+    // present — see namesFor's own doc comment for why that's still
+    // collision-safe at any real scale.
+    expect(names.vm).toBe("cldm-web-server-01-3fa85f645717");
+    expect(names.nic).toBe(`${names.vm}-nic`);
+    expect(names.pip).toBe(`${names.vm}-pip`);
+    expect(names.osDisk).toBe(`${names.vm}-os`);
+    expect(names.dataDisk).toBe(`${names.vm}-data`);
+    expect(names.computerName).toBe(names.vm.slice(0, 15));
+  });
+
+  test("caps an overly long name so the VM name stays well under Azure's 64-char limit", () => {
+    const machineId = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+    const longName = "a".repeat(80);
+    const names = namesFor(machineId, longName);
+    expect(names.vm.length).toBeLessThanOrEqual(50);
+    expect(names.vm).toBe(`cldm-${"a".repeat(32)}-3fa85f645717`);
+  });
+
+  test("falls back to the id-only scheme when a name sanitizes to nothing", () => {
+    const machineId = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+    expect(namesFor(machineId, "日本語")).toEqual(namesFor(machineId));
+    expect(namesFor(machineId, "!!!")).toEqual(namesFor(machineId));
+  });
+
+  test("falls back to the id-only scheme when no name is given at all", () => {
+    const machineId = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+    expect(namesFor(machineId, undefined)).toEqual(namesFor(machineId));
+  });
 });
 
 describe("cloudInitFor", () => {
