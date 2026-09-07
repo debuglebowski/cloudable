@@ -80,7 +80,9 @@ const pageInfoSchema = Schema.Struct({
 });
 
 const createMachinePayloadSchema = Schema.Struct({
-  name: Schema.String.pipe(Schema.minLength(1)),
+  // Optional — MachineService.create generates a friendly, org-unique
+  // default when omitted or blank.
+  name: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   provider: machineProviderSchema,
   // Required iff provider === "azure" (and must name an org-enabled
   // region); forbidden otherwise — enforced in `MachineService.create`,

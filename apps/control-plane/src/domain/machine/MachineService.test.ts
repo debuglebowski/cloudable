@@ -166,6 +166,72 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     expect(machine.region).toBeNull();
   });
 
+  test("name omitted: generates a friendly, adjective-noun-hex4 default", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "fake");
+
+    const machine = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* svc.create({
+          orgId: org.id,
+          provider: "fake",
+          sizeSku: "Standard_D2s_v5",
+          image: "ubuntu-24.04",
+          ownerPersonId: owner.id,
+        });
+      }),
+    );
+
+    expect(machine.name).toMatch(/^[a-z]+-[a-z]+-[0-9a-f]{4}$/);
+  });
+
+  test("name blank: same as omitted — generates a default rather than storing an empty string", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "fake");
+
+    const machine = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* svc.create({
+          orgId: org.id,
+          name: "   ",
+          provider: "fake",
+          sizeSku: "Standard_D2s_v5",
+          image: "ubuntu-24.04",
+          ownerPersonId: owner.id,
+        });
+      }),
+    );
+
+    expect(machine.name).toMatch(/^[a-z]+-[a-z]+-[0-9a-f]{4}$/);
+  });
+
+  test("name omitted twice in the same org: two different generated names", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "fake");
+
+    const createOne = () =>
+      run(
+        Effect.gen(function* () {
+          const svc = yield* MachineService;
+          return yield* svc.create({
+            orgId: org.id,
+            provider: "fake",
+            sizeSku: "Standard_D2s_v5",
+            image: "ubuntu-24.04",
+            ownerPersonId: owner.id,
+          });
+        }),
+      );
+
+    const [first, second] = await Promise.all([createOne(), createOne()]);
+    expect(first.name).not.toBe(second.name);
+  });
+
   test("provider fake/docker: a supplied region is rejected — the provider has none", async () => {
     const org = await seedOrg();
     const owner = await seedPerson(org.id);

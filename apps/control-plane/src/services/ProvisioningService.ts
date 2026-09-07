@@ -16,6 +16,15 @@ export interface MachineDescriptor {
   region: string | null;
   sizeSku: string;
   /**
+   * Human-readable label — feeds a readable prefix onto the real Azure
+   * resource names (`ProvisioningService.azure.ts`'s `namesFor`) when
+   * present. Optional for the same reason `image` below is: the reconcile
+   * loop's `DesiredMachineState` (`reconcile/types.ts`) has no name field
+   * yet — the real, wired caller (`MachineService.create`) always supplies
+   * it.
+   */
+  name?: string;
+  /**
    * The machine's declared OS image (e.g. "ubuntu-22.04"). Optional: the
    * reconcile loop's `DesiredMachineState` (`reconcile/types.ts`) has no
    * image field yet (unwired, provisional — see that file), so this can't
@@ -46,6 +55,11 @@ export interface ReimageDescriptor {
   region: string | null;
   sizeSku: string;
   targetImage: string;
+  /** Same optional readable-name field as `MachineDescriptor.name` — reimage
+   * recreates the VM under the same resource names `create` used, so this
+   * needs to be the machine's current name for the azure adapter's `namesFor`
+   * call to land on the same names again. */
+  name?: string;
 }
 
 export interface MachineStatus {
@@ -89,14 +103,34 @@ export interface MachineStatus {
  * row loaded (it needs it for other reasons anyway), so this keeps
  * `ProvisioningService.switchable.ts`'s dispatcher a pure closure with no DB
  * dependency of its own. `create`/`reimage` don't need a separate parameter
- * since their descriptor already carries `provider`.
+ * since their descriptor already carries `provider`. `name` (optional,
+ * added alongside the readable-Azure-naming change) follows the same
+ * reasoning: the azure adapter needs the machine's current name to
+ * reconstruct the same resource names `create` used, and every real call
+ * site already has it in hand too. `reconcile-machine.ts`'s still-provisional
+ * reconcile-loop path (whose `DesiredMachineState` has no name field, same
+ * as it has no `image` field) is the one caller that omits it — same
+ * fallback-to-id-only-naming behavior that already existed before this
+ * field was added.
  */
 export interface ProvisioningService {
   create(desc: MachineDescriptor): Effect.Effect<MachineStatus, ProvisioningError>;
-  archive(machineId: string, provider: Provider): Effect.Effect<MachineStatus, ProvisioningError>;
-  reconcile(machineId: string, provider: Provider): Effect.Effect<MachineStatus, ProvisioningError>;
+  archive(
+    machineId: string,
+    provider: Provider,
+    name?: string,
+  ): Effect.Effect<MachineStatus, ProvisioningError>;
+  reconcile(
+    machineId: string,
+    provider: Provider,
+    name?: string,
+  ): Effect.Effect<MachineStatus, ProvisioningError>;
   reimage(desc: ReimageDescriptor): Effect.Effect<MachineStatus, ProvisioningError>;
-  restart(machineId: string, provider: Provider): Effect.Effect<MachineStatus, ProvisioningError>;
+  restart(
+    machineId: string,
+    provider: Provider,
+    name?: string,
+  ): Effect.Effect<MachineStatus, ProvisioningError>;
 }
 
 export class ProvisioningServiceTag extends Context.Tag("ProvisioningService")<
