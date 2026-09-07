@@ -79,6 +79,18 @@ export interface AppConfig {
    */
   readonly azureMachinesSubnetId: string | null;
   /**
+   * Region `azureMachinesSubnetId` actually lives in — self-hosted mode has
+   * exactly one usable region (that fixed subnet), so
+   * `CloudCatalogService.ts`'s size sync filters `Microsoft.Compute/skus`
+   * server-side to just this location: unfiltered, that ARM call took over
+   * two minutes for a real subscription (tens of thousands of raw per-region
+   * SKU records) and was slow enough to get the container killed mid-sync;
+   * filtered to one region, a few seconds. `null` (e.g. self-hosted without
+   * this var set yet, or Azure not configured at all) falls back to the
+   * slow, unfiltered subscription-wide call.
+   */
+  readonly azureMachinesLocation: string | null;
+  /**
    * Directory the compiled agent + tunnel-daemon binaries live in —
    * `GET /_internal/binaries/:target` (`http/routes/binaries.ts`) serves
    * them from here. Matches where `Dockerfile` copies them to in the
@@ -128,6 +140,7 @@ const readConfig = (): AppConfig => {
     azureSubscriptionId: process.env.AZURE_SUBSCRIPTION_ID ?? null,
     azureMachinesResourceGroup: process.env.AZURE_MACHINES_RESOURCE_GROUP ?? "rg-cloudable-managed",
     azureMachinesSubnetId: process.env.AZURE_MACHINES_SUBNET_ID ?? null,
+    azureMachinesLocation: process.env.AZURE_MACHINES_LOCATION ?? null,
     agentBinariesDir: process.env.AGENT_BINARIES_DIR ?? "/app/binaries",
     consoleDistDir: process.env.CONSOLE_DIST_DIR ?? "/app/console-dist",
     defaultAdminEmail: process.env.DEFAULT_ADMIN_EMAIL ?? null,

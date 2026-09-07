@@ -190,14 +190,20 @@ const getComputeClient = (): Effect.Effect<
 /** Real Azure SDK call — `ComputeManagementClient.resourceSkus.list()`
  * enumerates every SKU (VM sizes, disks, etc.) available to the configured
  * subscription; filtered to `resourceType === "virtualMachines"` for just
- * the VM sizes a machine's `sizeSku` actually names. Subscription-wide, not
- * per-region (same shape as `syncAzureRegions` — a real size's availability
- * does vary by region in Azure, but this catalog doesn't model that nuance
- * any more than `syncAzureRegions` models per-size availability; an org
- * enabling a size that turns out to be absent in its chosen region still
- * fails at actual provisioning time, just not at this earlier catalog-check
- * step). Same additive-only upsert as regions — never removes a
- * previously-synced size Azure stops listing. */
+ * the VM sizes a machine's `sizeSku` actually names.
+ *
+ * Filtered server-side to `config.azureMachinesLocation` when set (the one
+ * region `AZURE_MACHINES_SUBNET_ID` actually lives in — self-hosted mode
+ * has no other usable region, since machines always join that one fixed
+ * subnet). This is a real, load-bearing fix, not an optimization: called
+ * unfiltered against a real subscription, this API took over two minutes
+ * (tens of thousands of raw per-region SKU records) — long enough that the
+ * request got killed mid-flight and the container along with it. Filtered
+ * to one region, a few seconds. Falls back to the slow, unfiltered,
+ * subscription-wide call only when the location isn't known (e.g. an older
+ * deploy that hasn't picked up `AZURE_MACHINES_LOCATION` yet). Same
+ * additive-only upsert as regions — never removes a previously-synced size
+ * Azure stops listing. */
 export const syncAzureSizes = (): Effect.Effect<
   ReadonlyArray<CatalogEntry>,
   CloudCatalogError | AzureNotConfiguredError,
@@ -205,10 +211,12 @@ export const syncAzureSizes = (): Effect.Effect<
 > =>
   Effect.gen(function* () {
     const { client } = yield* getComputeClient();
+    const location = config.azureMachinesLocation;
     const skus = yield* Effect.tryPromise({
       try: async () => {
         const results = [];
-        for await (const sku of client.resourceSkus.list()) {
+        const options = location ? { filter: `location eq '${location}'` } : undefined;
+        for await (const sku of client.resourceSkus.list(options)) {
           results.push(sku);
         }
         return results;

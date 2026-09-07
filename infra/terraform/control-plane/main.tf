@@ -55,6 +55,15 @@ locals {
     { name = "AZURE_SUBSCRIPTION_ID", value = data.azurerm_client_config.current.subscription_id },
     { name = "AZURE_MACHINES_RESOURCE_GROUP", value = local.machines_resource_group_name },
     { name = "AZURE_MACHINES_SUBNET_ID", value = azurerm_subnet.machines[0].id },
+    # CloudCatalogService.ts's size sync filters Microsoft.Compute/skus by
+    # this location server-side — confirmed live: unfiltered, that API call
+    # took over two minutes for this subscription (~47k raw per-region SKU
+    # records); filtered to one region, ~8 seconds. Self-hosted mode has
+    # exactly one usable region anyway (machines_subnet_id below is fixed to
+    # this one), so scoping the size catalog to it is also more correct, not
+    # just faster — a size only available elsewhere could never actually be
+    # provisioned here.
+    { name = "AZURE_MACHINES_LOCATION", value = local.machines_resource_group_location },
   ] : []
 }
 
