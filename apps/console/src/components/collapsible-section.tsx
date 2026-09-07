@@ -14,6 +14,9 @@ export interface CollapsibleSectionProps {
   /** Renders a trailing "+" button when set — e.g. "add a deal to this record". */
   onAdd?: () => void;
   addLabel?: string;
+  /** Arbitrary trailing header content (e.g. a text action button) — a sibling of
+   * the toggle, not nested inside it, and always visible regardless of `open`. */
+  headerAction?: React.ReactNode;
   defaultOpen?: boolean;
   children: React.ReactNode;
   className?: string;
@@ -32,6 +35,7 @@ export function CollapsibleSection({
   description,
   onAdd,
   addLabel,
+  headerAction,
   defaultOpen = true,
   children,
   className,
@@ -73,6 +77,7 @@ export function CollapsibleSection({
             <Plus className="size-3.5" />
           </button>
         )}
+        {headerAction}
       </div>
       {open && (
         <div className="flex flex-col gap-2 py-1 pl-5">
