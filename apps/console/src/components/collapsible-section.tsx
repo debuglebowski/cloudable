@@ -4,7 +4,9 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 export interface CollapsibleSectionProps {
-  label: string;
+  /** Plain text, or a node when a caller needs to compose in an inline indicator
+   * (e.g. a status checkmark) beside the text. */
+  label: React.ReactNode;
   /** Optional item count shown next to the label (e.g. "Contacts 2"). */
   count?: number;
   /** Optional muted description rendered above the content when open. */
@@ -18,11 +20,11 @@ export interface CollapsibleSectionProps {
 }
 
 /**
- * Detail-page section: a chevron-toggle header over borderless content, no card
- * box/shadow — distinct from `Card` (components/ui/card.tsx), which is for a
- * self-contained panel, not a collapsible sub-section of one record's page.
- * Single consumer today (machine-detail-page.tsx); if a second detail page needs
- * this, it's already shared rather than copy-pasted.
+ * A chevron-toggle header over content, no card box/shadow of its own — distinct
+ * from `Card` (components/ui/card.tsx), which is a self-contained panel rather
+ * than a collapsible sub-section. Used by the Azure catalog dialog's three
+ * sections (see `catalog-checklist.tsx`); wrap in a bordered `className` when a
+ * caller wants the boxed look that dialog uses instead of a borderless nesting.
  */
 export function CollapsibleSection({
   label,

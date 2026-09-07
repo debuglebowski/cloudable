@@ -1,3 +1,5 @@
+import { CheckCircle2 } from "lucide-react";
+
 import {
   type CatalogItem,
   useProviderCatalog,
@@ -5,6 +7,7 @@ import {
   useSyncAzureSizes,
   useToggleCatalogEntry,
 } from "@/api/provider-catalog";
+import { CollapsibleSection } from "@/components/collapsible-section";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -28,10 +31,12 @@ export function CatalogChecklist({
   title,
   kind,
   showSync,
+  defaultOpen = true,
 }: {
   title: string;
   kind: "region" | "image" | "sku";
   showSync?: boolean;
+  defaultOpen?: boolean;
 }) {
   const catalogQuery = useProviderCatalog("azure", kind);
   const toggle = useToggleCatalogEntry("azure", kind);
@@ -41,12 +46,23 @@ export function CatalogChecklist({
   const regionSync = useSyncAzureRegions();
   const sizeSync = useSyncAzureSizes();
   const sync = kind === "region" ? regionSync : sizeSync;
+  const hasEnabled = catalogQuery.data?.some((entry) => entry.enabled) ?? false;
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-border p-2.5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">{title}</span>
-        {showSync && (
+    <CollapsibleSection
+      label={
+        <span className="flex items-center gap-1.5">
+          {title}
+          {hasEnabled && (
+            <CheckCircle2 className="size-3.5 text-ok" aria-label={`${title} configured`} />
+          )}
+        </span>
+      }
+      defaultOpen={defaultOpen}
+      className="rounded-md border border-border px-2.5"
+    >
+      {showSync && (
+        <div className="flex justify-end">
           <Button
             variant="ghost"
             size="sm"
@@ -56,8 +72,8 @@ export function CatalogChecklist({
           >
             {sync.isPending ? "Syncing…" : "Sync from Azure"}
           </Button>
-        )}
-      </div>
+        </div>
+      )}
       {catalogQuery.isPending && <p className="text-xs text-muted-foreground">Loading…</p>}
       {catalogQuery.data?.length === 0 && (
         <p className="text-xs text-muted-foreground">
@@ -84,7 +100,7 @@ export function CatalogChecklist({
           ))}
         </ul>
       )}
-    </div>
+    </CollapsibleSection>
   );
 }
 
@@ -99,7 +115,7 @@ export function AzureCatalogDialog() {
           Configure
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Azure catalog</DialogTitle>
           <DialogDescription>
@@ -107,9 +123,9 @@ export function AzureCatalogDialog() {
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2">
-          <CatalogChecklist title="Regions" kind="region" showSync />
-          <CatalogChecklist title="Images" kind="image" />
-          <CatalogChecklist title="Sizes" kind="sku" showSync />
+          <CatalogChecklist title="Regions" kind="region" showSync defaultOpen />
+          <CatalogChecklist title="Images" kind="image" defaultOpen={false} />
+          <CatalogChecklist title="Sizes" kind="sku" showSync defaultOpen={false} />
         </div>
       </DialogContent>
     </Dialog>
