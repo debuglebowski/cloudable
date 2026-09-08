@@ -1,0 +1,1 @@
+ALTER TABLE "provider_catalog_entries" ALTER COLUMN "memory_gb" SET DATA TYPE real;

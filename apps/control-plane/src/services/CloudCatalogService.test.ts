@@ -1,5 +1,11 @@
-import { describe, expect, test } from "bun:test";
-import { isGen2Capable, isScheduledForRetirement } from "./CloudCatalogService";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import net from "node:net";
+import { providerCatalogEntries } from "@cloudable/schema";
+import { eq } from "drizzle-orm";
+import { Effect } from "effect";
+import { Db } from "../db/layer";
+import { connectAndMigrate } from "../test-support/db";
+import { isGen2Capable, isScheduledForRetirement, upsertEntries } from "./CloudCatalogService";
 
 describe("isGen2Capable", () => {
   test("accepts a size whose HyperVGenerations includes V2", () => {
@@ -36,5 +42,69 @@ describe("isScheduledForRetirement", () => {
     expect(isScheduledForRetirement({ capabilities: [{ name: "vCPUs", value: "4" }] })).toBe(false);
     expect(isScheduledForRetirement({ capabilities: [] })).toBe(false);
     expect(isScheduledForRetirement({})).toBe(false);
+  });
+});
+
+// Real Postgres, not a fake — same convention/skip-guard as
+// `../config/config.test.ts` and `../domain/machine/MachineService.test.ts`.
+// This specific regression is a schema/column-type bug (memoryGb declared
+// `integer` when real Azure data — e.g. Standard_B1ls's "0.5" GB — is
+// sometimes fractional), which only a real insert against the real column
+// type can catch; a pure-function test of the parsing logic alone would
+// have passed either way and did not catch this the first time.
+const databaseUrl =
+  process.env.DATABASE_URL ?? "postgres://cloudable:cloudable@localhost:5442/cloudable";
+
+function isReachable(hostname: string, port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: hostname, port });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve(false);
+    }, timeoutMs);
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      socket.end();
+      resolve(true);
+    });
+    socket.once("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+  });
+}
+
+const { hostname, port } = new URL(databaseUrl);
+const postgresReachable = await isReachable(hostname, Number(port) || 5432, 2000);
+
+describe.skipIf(!postgresReachable)("upsertEntries (requires Postgres at DATABASE_URL)", () => {
+  let close: () => Promise<void>;
+  let db: Awaited<ReturnType<typeof connectAndMigrate>>["db"];
+  const testCode = "__test_fractional_memory_sku__";
+
+  beforeAll(async () => {
+    const conn = await connectAndMigrate(databaseUrl);
+    db = conn.db;
+    close = conn.close;
+  });
+
+  afterAll(async () => {
+    if (!close) return;
+    await db.delete(providerCatalogEntries).where(eq(providerCatalogEntries.code, testCode));
+    await close();
+  });
+
+  test("a fractional memoryGb (real Azure data, e.g. Standard_B1ls's 0.5 GB) round-trips without throwing", async () => {
+    await Effect.runPromise(
+      upsertEntries("azure", "sku", [
+        { code: testCode, displayName: "test (0.5 GB RAM)", vcpus: 1, memoryGb: 0.5 },
+      ]).pipe(Effect.provideService(Db, db)),
+    );
+
+    const [row] = await db
+      .select({ memoryGb: providerCatalogEntries.memoryGb })
+      .from(providerCatalogEntries)
+      .where(eq(providerCatalogEntries.code, testCode));
+    expect(row?.memoryGb).toBe(0.5);
   });
 });

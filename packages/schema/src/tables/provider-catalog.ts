@@ -1,4 +1,4 @@
-import { integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Global reference data: what does a provider actually offer — "what does
@@ -23,8 +23,14 @@ export const providerCatalogEntries = pgTable(
     // no such concept. Structured (not just baked into displayName) so the
     // console can filter the size list by objective facts instead of forcing
     // an admin to scroll or guess exact SKU names across ~1,200 entries.
+    // vCPUs is always a whole number in real Azure data (confirmed against a
+    // real subscription); memoryGb is not -- Standard_B1ls reports "0.5",
+    // several M-series report values like "218.75" -- so it's `real`, not
+    // `integer` (an earlier version of this column used integer and broke
+    // the sync outright the first time it hit one of these SKUs, rolling
+    // back the whole upsert transaction with no visible error).
     vcpus: integer("vcpus"),
-    memoryGb: integer("memory_gb"),
+    memoryGb: real("memory_gb"),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
