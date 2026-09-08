@@ -33,9 +33,7 @@ describe("isScheduledForRetirement", () => {
   });
 
   test("a size with no RetirementDateUtc capability is not flagged", () => {
-    expect(isScheduledForRetirement({ capabilities: [{ name: "vCPUs", value: "4" }] })).toBe(
-      false,
-    );
+    expect(isScheduledForRetirement({ capabilities: [{ name: "vCPUs", value: "4" }] })).toBe(false);
     expect(isScheduledForRetirement({ capabilities: [] })).toBe(false);
     expect(isScheduledForRetirement({})).toBe(false);
   });
