@@ -257,6 +257,7 @@ resource "azurerm_role_definition" "machine_operator" {
       "Microsoft.Network/networkInterfaces/delete",
       "Microsoft.Network/networkInterfaces/join/action",
       "Microsoft.Network/virtualNetworks/read",
+      "Microsoft.Network/virtualNetworks/subnets/read",
       "Microsoft.Network/virtualNetworks/subnets/join/action",
       "Microsoft.Network/publicIPAddresses/read",
       "Microsoft.Network/publicIPAddresses/write",
