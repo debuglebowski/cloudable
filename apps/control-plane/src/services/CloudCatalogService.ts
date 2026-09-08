@@ -59,6 +59,10 @@ export interface CatalogEntry {
    * concept and leave these `undefined`, stored as `null`. */
   vcpus?: number;
   memoryGb?: number;
+  /** Set by `syncAzureSizes` (what the size runs on) and `seedAzureImages`
+   * (what the image requires) — regions leave this `undefined`. See
+   * `provider-catalog.ts`'s own doc comment on this dual meaning. */
+  architecture?: string;
 }
 
 /** One multi-row statement per chunk rather than one round-trip per row —
@@ -96,6 +100,7 @@ export const upsertEntries = (
                   displayName: entry.displayName,
                   vcpus: entry.vcpus ?? null,
                   memoryGb: entry.memoryGb ?? null,
+                  architecture: entry.architecture ?? null,
                 })),
               )
               .onConflictDoUpdate({
@@ -108,6 +113,7 @@ export const upsertEntries = (
                   displayName: sql`excluded.display_name`,
                   vcpus: sql`excluded.vcpus`,
                   memoryGb: sql`excluded.memory_gb`,
+                  architecture: sql`excluded.architecture`,
                   syncedAt: new Date(),
                 },
               });
@@ -239,7 +245,13 @@ const skuDisplayName = (sku: {
  * unfiltered catalog failed VM creation with exactly this mismatch. Missing
  * the capability entirely (seen on some retired/specialty SKUs) is treated
  * as "no", not "maybe" — same conservative default as `skuDisplayName`
- * falling back to the bare name above. */
+ * falling back to the bare name above.
+ *
+ * This stays a hard, unconditional generation check (not folded into the
+ * per-image compatibility comparison below) because every image this
+ * deployment could ever offer requires Gen2 — there's no real "depends which
+ * image you pick" case for hypervisor generation today, unlike architecture
+ * (see `syncAzureSizes`'s own doc comment on that distinction). */
 export const isGen2Capable = (sku: {
   capabilities?: { name?: string; value?: string }[];
 }): boolean => {
@@ -270,6 +282,32 @@ const numericCapability = (
   const value = sku.capabilities?.find((c) => c.name === name)?.value;
   return value ? Number(value) : undefined;
 };
+
+/** Same lookup as `numericCapability`, string-valued — used for
+ * `"CpuArchitectureType"` (e.g. `"x64"`, `"Arm64"`), the size's own
+ * architecture capability. */
+const stringCapability = (
+  sku: { capabilities?: { name?: string; value?: string }[] },
+  name: string,
+): string | undefined => sku.capabilities?.find((c) => c.name === name)?.value;
+
+/** The set of architectures at least one image this deployment offers
+ * actually requires (from `UBUNTU_IMAGES`) — a size whose own architecture
+ * isn't in this set can never pair with anything this adapter would ever
+ * try to boot, so it's excluded from the sync entirely (the same
+ * "objective, will-never-work fact" reasoning as `isGen2Capable` and
+ * `isScheduledForRetirement`, not a curation judgment). Sizes that *do*
+ * match are still filtered per-image at compatibility-check time
+ * (`MachineService.create`, the Add Machine form) — this only rules out
+ * "matches no image at all." */
+const offeredImageArchitectures = new Set(
+  Object.values(UBUNTU_IMAGES).map((image) => image.architecture),
+);
+
+/** `undefined` architecture (a SKU with no `CpuArchitectureType` capability
+ * at all) is treated as "no", same conservative default as `isGen2Capable`. */
+export const isOfferedArchitecture = (architecture: string | undefined): boolean =>
+  architecture !== undefined && offeredImageArchitectures.has(architecture);
 
 /** Real Azure SDK call — `ComputeManagementClient.resourceSkus.list()`
  * enumerates every SKU (VM sizes, disks, etc.) available to the configured
@@ -313,6 +351,8 @@ export const syncAzureSizes = (): Effect.Effect<
     for (const sku of skus) {
       if (sku.resourceType !== "virtualMachines" || !sku.name || seen.has(sku.name)) continue;
       if (!isGen2Capable(sku) || isScheduledForRetirement(sku)) continue;
+      const architecture = stringCapability(sku, "CpuArchitectureType");
+      if (!architecture || !isOfferedArchitecture(architecture)) continue;
       seen.add(sku.name);
       const vcpus = numericCapability(sku, "vCPUs");
       const memoryGb = numericCapability(sku, "MemoryGB");
@@ -321,6 +361,7 @@ export const syncAzureSizes = (): Effect.Effect<
         displayName: skuDisplayName(sku),
         ...(vcpus !== undefined ? { vcpus } : {}),
         ...(memoryGb !== undefined ? { memoryGb } : {}),
+        architecture,
       });
     }
 
@@ -334,17 +375,23 @@ export const syncAzureSizes = (): Effect.Effect<
  * adapter would actually accept. Safe to call repeatedly (idempotent
  * upsert); called once at boot rather than on a schedule, since the map only
  * changes when someone edits and redeploys the code. */
+const azureImageEntries: CatalogEntry[] = Object.entries(UBUNTU_IMAGES).map(([code, image]) => ({
+  code,
+  displayName: code,
+  architecture: image.architecture,
+}));
+
 export const seedAzureImages = (): Effect.Effect<
   ReadonlyArray<CatalogEntry>,
   CloudCatalogError,
   Db
-> =>
-  upsertEntries(
-    "azure",
-    "image",
-    Object.keys(UBUNTU_IMAGES).map((code) => ({ code, displayName: code })),
-  ).pipe(Effect.as(Object.keys(UBUNTU_IMAGES).map((code) => ({ code, displayName: code }))));
+> => upsertEntries("azure", "image", azureImageEntries).pipe(Effect.as(azureImageEntries));
 
+/** The full synced catalog for one provider/kind — no org filtering (there
+ * is none anymore, see `provider-catalog.ts`'s doc comment). Backs the
+ * catalog list endpoint the Add Machine form reads directly, with real
+ * vcpus/memoryGb/architecture data so it can compute compatibility itself
+ * instead of trusting a maintained allow-list. */
 export const listProviderCatalog = (
   provider: "azure",
   kind: CatalogKind,
@@ -357,6 +404,9 @@ export const listProviderCatalog = (
           .select({
             code: providerCatalogEntries.code,
             displayName: providerCatalogEntries.displayName,
+            vcpus: providerCatalogEntries.vcpus,
+            memoryGb: providerCatalogEntries.memoryGb,
+            architecture: providerCatalogEntries.architecture,
           })
           .from(providerCatalogEntries)
           .where(
@@ -367,5 +417,55 @@ export const listProviderCatalog = (
           ),
       catch: (cause) => new CloudCatalogError({ reason: "list_failed", cause }),
     });
-    return rows;
+    return rows.map((row) => ({
+      code: row.code,
+      displayName: row.displayName,
+      ...(row.vcpus !== null ? { vcpus: row.vcpus } : {}),
+      ...(row.memoryGb !== null ? { memoryGb: row.memoryGb } : {}),
+      ...(row.architecture !== null ? { architecture: row.architecture } : {}),
+    }));
+  });
+
+/** Single-row lookup by code — used by `MachineService.create` to confirm a
+ * chosen size actually exists in the synced catalog and read its
+ * architecture for the compatibility check against the chosen image.
+ * Returns `null` rather than failing when nothing matches — "unknown size"
+ * is the caller's validation error to raise, not this function's. */
+export const getCatalogEntry = (
+  provider: "azure",
+  kind: CatalogKind,
+  code: string,
+): Effect.Effect<CatalogEntry | null, CloudCatalogError, Db> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rows = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select({
+            code: providerCatalogEntries.code,
+            displayName: providerCatalogEntries.displayName,
+            vcpus: providerCatalogEntries.vcpus,
+            memoryGb: providerCatalogEntries.memoryGb,
+            architecture: providerCatalogEntries.architecture,
+          })
+          .from(providerCatalogEntries)
+          .where(
+            and(
+              eq(providerCatalogEntries.provider, provider),
+              eq(providerCatalogEntries.kind, kind),
+              eq(providerCatalogEntries.code, code),
+            ),
+          )
+          .limit(1),
+      catch: (cause) => new CloudCatalogError({ reason: "get_entry_failed", cause }),
+    });
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      code: row.code,
+      displayName: row.displayName,
+      ...(row.vcpus !== null ? { vcpus: row.vcpus } : {}),
+      ...(row.memoryGb !== null ? { memoryGb: row.memoryGb } : {}),
+      ...(row.architecture !== null ? { architecture: row.architecture } : {}),
+    };
   });

@@ -1,14 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { apiGet, apiPatch, apiPost } from "@/lib/api-client";
+import { apiGet, apiPost } from "@/lib/api-client";
 
 /**
- * Org-curated region/image/size catalog for machine creation — see
- * `apps/control-plane/src/domain/organisation/catalog.ts`. Azure only today
- * (docker/fake are regionless and freeform-image/size, per
- * `PROVIDER_CAPABILITIES` in `add-machine-dialog.tsx`), but the path is
- * provider-generic.
+ * The real, fully-synced region/image/size catalog for machine creation —
+ * see `apps/control-plane/src/services/CloudCatalogService.ts` and
+ * `packages/schema/src/tables/provider-catalog.ts`'s doc comment. No
+ * per-org curation (retired — an admin-maintained allow-list could drift
+ * out of sync with what actually works, which is exactly what kept
+ * happening): the Add Machine form reads this directly and computes
+ * compatibility itself from `vcpus`/`memoryGb`/`architecture`. Azure only
+ * today (docker/fake are regionless and freeform-image/size, per
+ * `add-machine-dialog.tsx`'s own `supportsRegion`/`hasImageCatalog`/
+ * `hasSizeCatalog`), but the path is provider-generic.
  */
 
 export type CatalogKind = "region" | "image" | "sku";
@@ -16,10 +21,12 @@ export type CatalogKind = "region" | "image" | "sku";
 export interface CatalogItem {
   code: string;
   displayName: string;
-  enabled: boolean;
   /** Only meaningful for kind "sku" — null for regions/images. */
   vcpus: number | null;
   memoryGb: number | null;
+  /** Meaningful for kind "sku" (what it runs on) and "image" (what it
+   * requires) — null for regions. */
+  architecture: string | null;
 }
 
 export const providerCatalogKeys = {
@@ -35,24 +42,6 @@ export function useProviderCatalog(provider: "azure", kind: CatalogKind) {
       apiGet<{ items: CatalogItem[] }>(`/api/v1/organisation/catalog/${provider}/${kind}`).then(
         (res) => res.items,
       ),
-  });
-}
-
-export function useToggleCatalogEntry(provider: "azure", kind: CatalogKind) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (entry: CatalogItem) =>
-      apiPatch<{ items: CatalogItem[] }>(`/api/v1/organisation/catalog/${provider}/${kind}`, {
-        code: entry.code,
-        displayName: entry.displayName,
-        enabled: !entry.enabled,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: providerCatalogKeys.list(provider, kind) });
-    },
-    onError: (error) => {
-      toast.error(`Couldn't update the ${kind} catalog`, { description: error.message });
-    },
   });
 }
 

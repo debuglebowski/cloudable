@@ -5,9 +5,9 @@ import {
   events,
   integrations,
   machines,
-  orgCatalogSelections,
   orgs,
   people,
+  providerCatalogEntries,
   settingValues,
 } from "@cloudable/schema";
 import { eq, inArray } from "drizzle-orm";
@@ -83,14 +83,14 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     if (!close) return;
     if (createdOrgIds.length > 0) {
       await db.delete(settingValues).where(inArray(settingValues.scopeId, createdOrgIds));
-      await db
-        .delete(orgCatalogSelections)
-        .where(inArray(orgCatalogSelections.orgId, createdOrgIds));
       await db.delete(integrations).where(inArray(integrations.orgId, createdOrgIds));
       await db.delete(machines).where(inArray(machines.orgId, createdOrgIds));
       await db.delete(people).where(inArray(people.orgId, createdOrgIds));
       await db.delete(orgs).where(inArray(orgs.id, createdOrgIds));
     }
+    // `providerCatalogEntries` is global reference data, not org-scoped —
+    // same rows a real "Sync from Azure" would produce, so left in place
+    // rather than cleaned up (no test asserts row counts against it).
     await close();
   });
 
@@ -117,12 +117,22 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     return person;
   }
 
-  async function enableCatalogEntry(orgId: string, kind: "region" | "image" | "sku", code: string) {
-    await db.insert(orgCatalogSelections).values({ orgId, provider: "azure", kind, code });
-  }
-
   async function enableProvider(orgId: string, provider: "azure" | "docker" | "fake") {
     await db.insert(integrations).values({ orgId, kind: "cloud", provider, identifier: provider });
+  }
+
+  /** Seeds the global, non-org-scoped catalog directly — same shape a real
+   * "Sync from Azure" would produce (see provider-catalog.ts's doc comment
+   * on why there's no per-org allow-list anymore). */
+  async function seedCatalogEntry(
+    kind: "region" | "image" | "sku",
+    code: string,
+    fields: { architecture?: string } = {},
+  ) {
+    await db
+      .insert(providerCatalogEntries)
+      .values({ provider: "azure", kind, code, displayName: code, ...fields })
+      .onConflictDoNothing();
   }
 
   test("provider not enabled for the org is rejected", async () => {
@@ -314,10 +324,11 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     expect(outcome._tag).toBe("Left");
   });
 
-  test("provider azure: a region/image not in the org's catalog is rejected", async () => {
+  test("provider azure: an unrecognized region is rejected", async () => {
     const org = await seedOrg();
     const owner = await seedPerson(org.id);
     await enableProvider(org.id, "azure");
+    // Deliberately nothing seeded in providerCatalogEntries for this region.
 
     const outcome = await run(
       Effect.gen(function* () {
@@ -327,7 +338,7 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
             orgId: org.id,
             name: "db-prod-04",
             provider: "azure",
-            region: "westeurope",
+            region: "westeurope-unrecognized-test-region",
             sizeSku: "Standard_D2s_v5",
             image: "ubuntu-24.04",
             ownerPersonId: owner.id,
@@ -339,13 +350,99 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     expect(outcome._tag).toBe("Left");
   });
 
-  test("provider azure: an enabled region/image is accepted", async () => {
+  test("provider azure: an unrecognized image is rejected", async () => {
     const org = await seedOrg();
     const owner = await seedPerson(org.id);
     await enableProvider(org.id, "azure");
-    await enableCatalogEntry(org.id, "region", "westeurope");
-    await enableCatalogEntry(org.id, "image", "ubuntu-24.04");
-    await enableCatalogEntry(org.id, "sku", "Standard_D2s_v5");
+    await seedCatalogEntry("region", "westeurope");
+    await seedCatalogEntry("sku", "Standard_D2s_v5", { architecture: "x64" });
+
+    const outcome = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* Effect.either(
+          svc.create({
+            orgId: org.id,
+            name: "db-prod-06",
+            provider: "azure",
+            region: "westeurope",
+            sizeSku: "Standard_D2s_v5",
+            image: "windows-2022",
+            ownerPersonId: owner.id,
+          }),
+        );
+      }),
+    );
+
+    expect(outcome._tag).toBe("Left");
+  });
+
+  test("provider azure: an unrecognized size is rejected", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "azure");
+    await seedCatalogEntry("region", "westeurope");
+    // Deliberately nothing seeded for this sku code.
+
+    const outcome = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* Effect.either(
+          svc.create({
+            orgId: org.id,
+            name: "db-prod-07",
+            provider: "azure",
+            region: "westeurope",
+            sizeSku: "Standard_Unrecognized_Sku_v9",
+            image: "ubuntu-24.04",
+            ownerPersonId: owner.id,
+          }),
+        );
+      }),
+    );
+
+    expect(outcome._tag).toBe("Left");
+  });
+
+  test("provider azure: a size whose architecture doesn't match the image's requirement is rejected", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "azure");
+    await seedCatalogEntry("region", "westeurope");
+    // ubuntu-24.04 requires x64 (UBUNTU_IMAGES) — seed an Arm64 size.
+    await seedCatalogEntry("sku", "Standard_D2ps_v6_arm_test", { architecture: "Arm64" });
+
+    const outcome = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* Effect.either(
+          svc.create({
+            orgId: org.id,
+            name: "db-prod-08",
+            provider: "azure",
+            region: "westeurope",
+            sizeSku: "Standard_D2ps_v6_arm_test",
+            image: "ubuntu-24.04",
+            ownerPersonId: owner.id,
+          }),
+        );
+      }),
+    );
+
+    expect(outcome._tag).toBe("Left");
+    if (outcome._tag === "Left") {
+      const message =
+        "error" in outcome.left ? outcome.left.error.message : JSON.stringify(outcome.left);
+      expect(message).toContain("not compatible");
+    }
+  });
+
+  test("provider azure: a real, synced region and a compatible size/image are accepted", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "azure");
+    await seedCatalogEntry("region", "westeurope");
+    await seedCatalogEntry("sku", "Standard_D2s_v5", { architecture: "x64" });
 
     const machine = await run(
       Effect.gen(function* () {
@@ -366,17 +463,11 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     expect(machine.region).toBe("westeurope");
   });
 
-  test("provider azure: AZURE_MACHINES_LOCATION forces the region, overriding both client input and the org's (possibly stale) catalog selection", async () => {
+  test("provider azure: AZURE_MACHINES_LOCATION forces the region, overriding client input entirely", async () => {
     const org = await seedOrg();
     const owner = await seedPerson(org.id);
     await enableProvider(org.id, "azure");
-    // Deliberately only enable a *different* region in the catalog — the
-    // real-world scenario this guards against: an org's catalog selection
-    // has drifted (or was never corrected) away from the deployment's
-    // actual usable region.
-    await enableCatalogEntry(org.id, "region", "westeurope");
-    await enableCatalogEntry(org.id, "image", "ubuntu-24.04");
-    await enableCatalogEntry(org.id, "sku", "Standard_D2s_v5");
+    await seedCatalogEntry("sku", "Standard_D2s_v5", { architecture: "x64" });
 
     const original = config.azureMachinesLocation;
     // `config` is a plain mutable object (see config.ts's own doc comment —
@@ -392,7 +483,7 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
             orgId: org.id,
             name: "locked-region",
             provider: "azure",
-            region: "westeurope", // the org's enabled (but wrong) region
+            region: "westeurope", // never even looked up when locked — ignored either way
             sizeSku: "Standard_D2s_v5",
             image: "ubuntu-24.04",
             ownerPersonId: owner.id,
@@ -404,56 +495,5 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     } finally {
       (config as { azureMachinesLocation: string | null }).azureMachinesLocation = original;
     }
-  });
-
-  test("two orgs' catalogs don't leak into each other", async () => {
-    const orgA = await seedOrg();
-    const orgB = await seedOrg();
-    const ownerA = await seedPerson(orgA.id);
-    const ownerB = await seedPerson(orgB.id);
-    await enableProvider(orgA.id, "azure");
-    await enableProvider(orgB.id, "azure");
-    await enableCatalogEntry(orgA.id, "region", "westeurope");
-    await enableCatalogEntry(orgA.id, "image", "ubuntu-24.04");
-    await enableCatalogEntry(orgA.id, "sku", "Standard_D2s_v5");
-    await enableCatalogEntry(orgB.id, "region", "japaneast");
-    await enableCatalogEntry(orgB.id, "image", "ubuntu-24.04");
-    await enableCatalogEntry(orgB.id, "sku", "Standard_D2s_v5");
-
-    const machineA = await run(
-      Effect.gen(function* () {
-        const svc = yield* MachineService;
-        return yield* svc.create({
-          orgId: orgA.id,
-          name: "a-1",
-          provider: "azure",
-          region: "westeurope",
-          sizeSku: "Standard_D2s_v5",
-          image: "ubuntu-24.04",
-          ownerPersonId: ownerA.id,
-        });
-      }),
-    );
-
-    const outcomeB = await run(
-      Effect.gen(function* () {
-        const svc = yield* MachineService;
-        // orgB never enabled "westeurope" — orgA's catalog must not leak in.
-        return yield* Effect.either(
-          svc.create({
-            orgId: orgB.id,
-            name: "b-1",
-            provider: "azure",
-            region: "westeurope",
-            sizeSku: "Standard_D2s_v5",
-            image: "ubuntu-24.04",
-            ownerPersonId: ownerB.id,
-          }),
-        );
-      }),
-    );
-
-    expect(machineA.region).toBe("westeurope");
-    expect(outcomeB._tag).toBe("Left");
   });
 });

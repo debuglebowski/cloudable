@@ -11,7 +11,6 @@ import type { Integration } from "@/api/integrations";
 import { useProvisioningCapabilities } from "@/api/provisioning-capabilities";
 import { PageLoader } from "@/components/page-loader";
 
-import { AzureCatalogDialog } from "./catalog-checklist";
 import {
   CloudEnableButton,
   IdpConnectDialog,
@@ -149,7 +148,6 @@ export function IntegrationsPage() {
                   />
                 }
                 onDisconnect={handleDisconnect}
-                secondaryAction={<AzureCatalogDialog />}
               >
                 {() =>
                   capabilities?.azure.subscriptionId ? (
