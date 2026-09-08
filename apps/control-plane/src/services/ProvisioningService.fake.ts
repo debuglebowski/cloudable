@@ -38,6 +38,16 @@ export interface FakeProvisioningOptions {
 export const FAKE_VERIFICATION_FAILURE_IMAGE = "cloudable/dev-force-verification-failure";
 
 /**
+ * Dev/test-only sentinel `image`: creating a fake machine with this value
+ * makes `create()` fail with a `ProvisioningError` instead of settling on
+ * "running", so `MachineService.create`'s error path (persisting
+ * `machines.lastError` and emitting `machine.provisioning_failed`) can be
+ * exercised end-to-end without a real Azure account. Not a real image name
+ * and `ProvisioningService.azure.ts` has no matching behavior.
+ */
+export const FAKE_CREATE_FAILURE_IMAGE = "cloudable/dev-force-create-failure";
+
+/**
  * In-memory `ProvisioningService` for dev/test — no real Azure account
  * exists in this build (see `ProvisioningService.azure.ts`). `create` moves
  * a machine through "provisioning" then "running" synchronously; `archive`
@@ -79,6 +89,15 @@ export const makeFakeProvisioningServiceLive = (
 
       const create: ProvisioningService["create"] = (desc: MachineDescriptor) =>
         Effect.gen(function* () {
+          if (desc.image === FAKE_CREATE_FAILURE_IMAGE) {
+            return yield* Effect.fail(
+              new ProvisioningError({
+                reason: "provider_error",
+                cause: "simulated create failure (dev sentinel image)",
+              }),
+            );
+          }
+
           const declaredPackages = desc.packages ?? [];
 
           const provisioning: FakeMachineEntry = {

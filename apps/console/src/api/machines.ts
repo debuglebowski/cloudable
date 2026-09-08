@@ -23,6 +23,9 @@ export interface Machine {
   sizeSku: string;
   image: string;
   state: MachineState;
+  /** The most recent provisioning failure message, if any — set whenever `state`
+   * is `"error"`; cleared back to `null` by a later successful attempt. */
+  lastError: string | null;
   lastVerifiedAt: string | null;
   archivedAt: string | null;
 }
@@ -108,6 +111,7 @@ interface MachineSummaryWire {
   sizeSku: string;
   image: string;
   state: MachineState;
+  lastError: string | null;
   lastVerifiedAt: string | null;
   createdAt: string;
 }
@@ -124,6 +128,7 @@ function toMachine(wire: MachineSummaryWire): Machine {
     sizeSku: wire.sizeSku,
     image: wire.image,
     state: wire.state,
+    lastError: wire.lastError,
     lastVerifiedAt: wire.lastVerifiedAt,
     // The real machines table has no archivedAt-on-summary field distinct from
     // `state` — "archived" is the state itself. Kept as a separate field here only

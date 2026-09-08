@@ -304,6 +304,12 @@ export function MachineDetailPage() {
         </div>
       </div>
 
+      {machine.state === "error" && machine.lastError && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {machine.lastError}
+        </div>
+      )}
+
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as DetailTab)}>
         <TabsList>
           <TabsTrigger value="properties">Properties</TabsTrigger>

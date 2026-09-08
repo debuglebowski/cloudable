@@ -5,7 +5,7 @@ import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { type EffectiveLoggingTier, getEffectiveLoggingTier } from "../../logging/settings";
 import { EventBus } from "../../services/EventBus";
-import { ProvisioningServiceTag } from "../../services/ProvisioningService";
+import { type ProvisioningError, ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { isProviderEnabled } from "../integrations/integrations";
 import { isCatalogEntryEnabled } from "../organisation/catalog";
 import { generateDefaultMachineName } from "./default-name";
@@ -18,6 +18,7 @@ import {
 import {
   machineCreatedEvent,
   machineOwnerAssignedEvent,
+  machineProvisioningFailedEvent,
   machineSettingChangedEvent,
 } from "./events";
 import {
@@ -137,6 +138,24 @@ const toManifestRow = (row: MachinePackageTableRow): MachinePackageRow => ({
   pinned: row.pinned,
   source: row.source,
 });
+
+/** Renders a `ProvisioningError`'s `cause` down to one readable line — an
+ * `Error`'s `.message`, a plain string as-is, or a JSON fallback for
+ * anything else — prefixed with the classified `reason` so both the
+ * console and the audit event summary carry enough detail to act on
+ * without a stack trace. */
+const formatProvisioningError = (error: ProvisioningError): string => {
+  const { cause } = error;
+  const causeText =
+    cause instanceof Error
+      ? cause.message
+      : typeof cause === "string"
+        ? cause
+        : cause !== undefined
+          ? JSON.stringify(cause)
+          : undefined;
+  return causeText ? `${error.reason}: ${causeText}` : error.reason;
+};
 
 const notFound = (machineId: string) =>
   new MachineNotFoundError({
@@ -383,31 +402,54 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           machineId: machine.id,
         }).map((entry) => entry.packageName);
 
-        const provisionedState = yield* provisioning
-          .create({
-            machineId: machine.id,
-            orgId: machine.orgId,
-            provider: machine.provider,
-            region: machine.region,
-            sizeSku: machine.sizeSku,
-            image: machine.image,
-            name: machine.name,
-            packages,
-          })
-          .pipe(
-            Effect.map((status) =>
-              status.state === "running" ? ("running" as const) : ("error" as const),
-            ),
-            Effect.catchTag("ProvisioningError", () => Effect.succeed("error" as const)),
-          );
+        const provisioningOutcome: { state: "running" | "error"; error: string | null } =
+          yield* provisioning
+            .create({
+              machineId: machine.id,
+              orgId: machine.orgId,
+              provider: machine.provider,
+              region: machine.region,
+              sizeSku: machine.sizeSku,
+              image: machine.image,
+              name: machine.name,
+              packages,
+            })
+            .pipe(
+              Effect.map((status) =>
+                status.state === "running"
+                  ? { state: "running" as const, error: null }
+                  : {
+                      state: "error" as const,
+                      error: `provider reported unexpected state "${status.state}" after create`,
+                    },
+              ),
+              Effect.catchTag("ProvisioningError", (error) =>
+                Effect.succeed({ state: "error" as const, error: formatProvisioningError(error) }),
+              ),
+            );
+
+        if (provisioningOutcome.error) {
+          yield* publishOrFail([
+            machineProvisioningFailedEvent({
+              machineId: machine.id,
+              orgId: machine.orgId,
+              correlationId,
+              actorType,
+              actorId,
+              stage: "create",
+              error: provisioningOutcome.error,
+            }),
+          ]);
+        }
 
         const settledRows = yield* Effect.tryPromise({
           try: () =>
             db
               .update(machines)
               .set({
-                state: provisionedState,
-                lastVerifiedAt: provisionedState === "running" ? new Date() : null,
+                state: provisioningOutcome.state,
+                lastError: provisioningOutcome.error,
+                lastVerifiedAt: provisioningOutcome.state === "running" ? new Date() : null,
               })
               .where(eq(machines.id, machine.id))
               .returning(),

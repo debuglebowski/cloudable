@@ -43,6 +43,13 @@
       "when": 1788520598491,
       "tag": "0005_lying_wallop",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788849315428,
+      "tag": "0006_round_gauntlet",
+      "breakpoints": true
     }
   ]
 }
