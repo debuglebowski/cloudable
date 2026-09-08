@@ -17,6 +17,9 @@ export interface CatalogItem {
   code: string;
   displayName: string;
   enabled: boolean;
+  /** Only meaningful for kind "sku" — null for regions/images. */
+  vcpus: number | null;
+  memoryGb: number | null;
 }
 
 export const providerCatalogKeys = {

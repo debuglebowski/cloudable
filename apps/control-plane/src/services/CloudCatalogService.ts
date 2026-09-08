@@ -55,6 +55,10 @@ export type CatalogKind = "region" | "image" | "sku";
 export interface CatalogEntry {
   code: string;
   displayName: string;
+  /** Only ever set by `syncAzureSizes` — regions/images have no such
+   * concept and leave these `undefined`, stored as `null`. */
+  vcpus?: number;
+  memoryGb?: number;
 }
 
 /** One multi-row statement per chunk rather than one round-trip per row —
@@ -66,7 +70,7 @@ export interface CatalogEntry {
  * Apps' request/probe patience — confirmed live: the container was
  * silently SIGKILLed mid-sync (no app-level error logged at all) and
  * restarted, which is what a caller actually saw as a 503. Chunked well
- * under Postgres's ~65535 bound-parameter limit (4 params/row here). */
+ * under Postgres's ~65535 bound-parameter limit (6 params/row here). */
 const UPSERT_CHUNK_SIZE = 1000;
 
 const upsertEntries = (
@@ -90,6 +94,8 @@ const upsertEntries = (
                   kind,
                   code: entry.code,
                   displayName: entry.displayName,
+                  vcpus: entry.vcpus ?? null,
+                  memoryGb: entry.memoryGb ?? null,
                 })),
               )
               .onConflictDoUpdate({
@@ -98,7 +104,12 @@ const upsertEntries = (
                   providerCatalogEntries.kind,
                   providerCatalogEntries.code,
                 ],
-                set: { displayName: sql`excluded.display_name`, syncedAt: new Date() },
+                set: {
+                  displayName: sql`excluded.display_name`,
+                  vcpus: sql`excluded.vcpus`,
+                  memoryGb: sql`excluded.memory_gb`,
+                  syncedAt: new Date(),
+                },
               });
           }
         }),
@@ -236,6 +247,30 @@ export const isGen2Capable = (sku: {
   return generations?.split(",").includes("V2") ?? false;
 };
 
+/** Azure flags a SKU it plans to stop offering with a `RetirementDateUtc`
+ * capability — present or not, regardless of the actual date. Excluding it
+ * from the sync is the same kind of objective, non-opinionated fact as
+ * `isGen2Capable` above (not Cloudable curating a "good" size list by
+ * taste — that's the org admin's call, not this deployment's): a governed,
+ * potentially long-lived machine shouldn't be provisioned onto a size Azure
+ * has already announced it will remove. */
+export const isScheduledForRetirement = (sku: {
+  capabilities?: { name?: string; value?: string }[];
+}): boolean => sku.capabilities?.some((c) => c.name === "RetirementDateUtc") ?? false;
+
+/** `sku.capabilities` is Azure's own flat name/value list (see
+ * `skuDisplayName`'s doc comment) — this pulls one out as a number for the
+ * console's vCPU/RAM filter (`catalog-checklist.tsx`), same lookup
+ * `skuDisplayName` does for display, just typed and reused for filtering
+ * instead of formatting. */
+const numericCapability = (
+  sku: { capabilities?: { name?: string; value?: string }[] },
+  name: string,
+): number | undefined => {
+  const value = sku.capabilities?.find((c) => c.name === name)?.value;
+  return value ? Number(value) : undefined;
+};
+
 /** Real Azure SDK call — `ComputeManagementClient.resourceSkus.list()`
  * enumerates every SKU (VM sizes, disks, etc.) available to the configured
  * subscription; filtered to `resourceType === "virtualMachines"` for just
@@ -277,9 +312,16 @@ export const syncAzureSizes = (): Effect.Effect<
     const entries: CatalogEntry[] = [];
     for (const sku of skus) {
       if (sku.resourceType !== "virtualMachines" || !sku.name || seen.has(sku.name)) continue;
-      if (!isGen2Capable(sku)) continue;
+      if (!isGen2Capable(sku) || isScheduledForRetirement(sku)) continue;
       seen.add(sku.name);
-      entries.push({ code: sku.name, displayName: skuDisplayName(sku) });
+      const vcpus = numericCapability(sku, "vCPUs");
+      const memoryGb = numericCapability(sku, "MemoryGB");
+      entries.push({
+        code: sku.name,
+        displayName: skuDisplayName(sku),
+        ...(vcpus !== undefined ? { vcpus } : {}),
+        ...(memoryGb !== undefined ? { memoryGb } : {}),
+      });
     }
 
     yield* upsertEntries("azure", "sku", entries);

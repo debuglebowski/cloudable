@@ -29,6 +29,9 @@ export interface CatalogListItem {
   code: string;
   displayName: string;
   enabled: boolean;
+  /** Only meaningful for `kind === "sku"` — null for regions/images. */
+  vcpus: number | null;
+  memoryGb: number | null;
 }
 
 /** Discovered entries joined against this org's enabled subset — what the
@@ -47,6 +50,8 @@ export const listOrgCatalog = (
             .select({
               code: providerCatalogEntries.code,
               displayName: providerCatalogEntries.displayName,
+              vcpus: providerCatalogEntries.vcpus,
+              memoryGb: providerCatalogEntries.memoryGb,
             })
             .from(providerCatalogEntries)
             .where(

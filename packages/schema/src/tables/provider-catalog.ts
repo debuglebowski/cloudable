@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Global reference data: what does a provider actually offer — "what does
@@ -19,6 +19,12 @@ export const providerCatalogEntries = pgTable(
     kind: text("kind", { enum: ["region", "image", "sku"] }).notNull(),
     code: text("code").notNull(),
     displayName: text("display_name").notNull(),
+    // Only meaningful for kind === "sku" — null for regions/images, which have
+    // no such concept. Structured (not just baked into displayName) so the
+    // console can filter the size list by objective facts instead of forcing
+    // an admin to scroll or guess exact SKU names across ~1,200 entries.
+    vcpus: integer("vcpus"),
+    memoryGb: integer("memory_gb"),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
