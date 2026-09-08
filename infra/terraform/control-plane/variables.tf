@@ -204,6 +204,31 @@ variable "alert_action_group_id" {
   default     = null
 }
 
+variable "enable_flow_logs" {
+  description = <<-EOT
+    Opt-in: enable Azure VNet Flow Logs on the machines VNet and subnet
+    (only meaningful when enable_self_managed_machines is also true).
+    Records IP traffic flows through them — since the machines NSG's only
+    rule is DenyAllInbound, this produces auditable evidence that no inbound
+    traffic actually reaches provisioned machines, not just that the rule
+    exists on paper.
+
+    Requires a regional Network Watcher to already exist (Azure enables one
+    automatically per region unless explicitly disabled — true for the
+    overwhelming majority of subscriptions) and creates its own storage
+    account for the log data, with a 90-day retention (matching this
+    project's own "retention is expiry" principle, not indefinite).
+
+    The flow log resource itself must live in the Network Watcher's own
+    resource group (an Azure requirement, not a Terraform choice — flow logs
+    are technically child resources of the Network Watcher, not of the VNet
+    they monitor), so the deploying identity needs write access there too,
+    which this module does not grant.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "enable_private_networking" {
   description = <<-EOT
     Opt-in: put the Postgres Flexible Server behind VNet integration

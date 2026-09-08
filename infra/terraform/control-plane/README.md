@@ -199,6 +199,13 @@ real maintenance window (tens of minutes, not a rolling update), not a quick fli
   Action Group's resource ID to wire them up. This module doesn't create the action
   group itself; that's org-wide alerting infrastructure out of scope for a
   single-app deploy template.
+- `enable_flow_logs` (opt-in, only meaningful with `enable_self_managed_machines`)
+  turns on VNet Flow Logs for the machines VNet and subnet, with a dedicated storage
+  account and a 90-day retention. Requires a regional Network Watcher to already
+  exist (Azure enables one automatically per region unless explicitly disabled) —
+  the flow log resources are created in *its* resource group, not this module's own,
+  since that's where Azure requires them to live. The deploying identity needs write
+  access there too, which this module does not grant.
 - `control_plane_image_tag` defaults to `main`, the tag `rebuild-base-image.yml` moves
   on every push to main. Pinning by image digest instead (see the comment on that
   variable) is on you once you have a release process; swap `control_plane_image` for
