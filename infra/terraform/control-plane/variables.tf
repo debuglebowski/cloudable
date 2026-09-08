@@ -189,3 +189,40 @@ variable "default_admin_password" {
   sensitive   = true
   default     = null
 }
+
+variable "alert_action_group_id" {
+  description = <<-EOT
+    Azure Monitor Action Group resource ID to notify for the Postgres health
+    alerts below (CPU/memory/disk-IOPS/storage). Leave null (default) to skip
+    creating them entirely — most self-hosters won't have a pre-existing
+    action group, and this module doesn't create one itself (that's org-wide
+    alerting infrastructure, out of scope for a single-app deploy template).
+    Create one yourself (`azurerm_monitor_action_group` or the Azure Portal)
+    and pass its `id` here to wire alerts up to it.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "enable_private_networking" {
+  description = <<-EOT
+    Opt-in: put the Postgres Flexible Server behind VNet integration
+    (delegated subnet + private DNS zone, public_network_access_enabled =
+    false) instead of the default public-access + "allow Azure services"
+    firewall rule, and give the Container Apps Environment an
+    infrastructure_subnet_id in the same VNet so the control plane reaches
+    Postgres over private IPs. Default false preserves today's public-access
+    behavior unchanged for every existing self-hoster.
+
+    WARNING: flipping this on an ALREADY-DEPLOYED instance forces recreation
+    of both the Postgres server (delegated_subnet_id is ForceNew) and the
+    Container Apps Environment (infrastructure_subnet_id is ForceNew, which
+    cascades to recreating the Container App itself, including its managed
+    identity and every role assignment bound to it) — this destroys the live
+    database. See README.md's private-networking section before doing this
+    against a real deployment; it's safe to set from the very first
+    `terraform apply` of a brand-new deployment.
+  EOT
+  type        = bool
+  default     = false
+}
