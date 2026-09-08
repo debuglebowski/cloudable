@@ -24,6 +24,14 @@ locals {
   # urlencode both credential parts: a generated password commonly contains
   # URI-reserved characters (/, +, =, @, ...) that would otherwise break
   # connection-string parsing in the `postgres` client / drizzle-orm.
+  #
+  # sslmode=require (not verify-full) is deliberate, not an oversight, and
+  # stays correct under var.enable_private_networking too: verify-full checks
+  # the cert's hostname against the connection host, but Azure's own docs warn
+  # against it whenever a private DNS resolver uses a different name than the
+  # cert's — exactly the case here, since a VNet-integrated server's fqdn
+  # resolves under our own private zone, not the public *.postgres.database
+  # .azure.com name the cert is issued for.
   database_url = "postgres://${urlencode(var.postgres_admin_username)}:${urlencode(var.postgres_admin_password)}@${local.postgres_fqdn}:5432/${var.postgres_database_name}?sslmode=require"
 
   # Azure Container Apps assigns a predictable FQDN of
@@ -85,6 +93,75 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
+# Private networking (opt-in, var.enable_private_networking) — a dedicated
+# VNet for the control plane's own Postgres + Container Apps Environment,
+# separate from the "machines" VNet below (that one is customer-VM address
+# space, gated by an unrelated toggle). Postgres Flexible Server's private
+# mode isn't the generic azurerm_private_endpoint resource — it's VNet
+# integration via a delegated subnet + private DNS zone, both required
+# together and both ForceNew (see the server resource below).
+# ---------------------------------------------------------------------------
+
+resource "azurerm_virtual_network" "control_plane" {
+  count               = var.enable_private_networking ? 1 : 0
+  name                = "${var.name_prefix}-cp-vnet"
+  resource_group_name = local.resource_group_name
+  location            = local.resource_group_location
+  address_space       = ["10.91.0.0/16"]
+  tags                = var.tags
+}
+
+resource "azurerm_subnet" "postgres" {
+  count                = var.enable_private_networking ? 1 : 0
+  name                 = "postgres"
+  resource_group_name  = local.resource_group_name
+  virtual_network_name = azurerm_virtual_network.control_plane[0].name
+  address_prefixes     = ["10.91.0.0/27"]
+
+  delegation {
+    name = "postgres-flexible-server"
+    service_delegation {
+      name    = "Microsoft.DBforPostgreSQL/flexibleServers"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+}
+
+# Deliberately NOT delegated: without a workload_profile block on the
+# Container Apps Environment below, it stays a "Consumption only" environment
+# — Microsoft's own docs say not to delegate that mode's infrastructure
+# subnet (delegation is only for workload-profile environments, which this
+# module doesn't use). /23 is that mode's documented minimum size; subnets
+# can't be grown in place once resources exist in them, so this is sized with
+# headroom rather than tightly.
+resource "azurerm_subnet" "container_apps" {
+  count                = var.enable_private_networking ? 1 : 0
+  name                 = "container-apps"
+  resource_group_name  = local.resource_group_name
+  virtual_network_name = azurerm_virtual_network.control_plane[0].name
+  address_prefixes     = ["10.91.2.0/23"]
+}
+
+# Name must end in ".postgres.database.azure.com" but must NOT equal the
+# server's own name segment (Azure rejects that combination) — hence deriving
+# it from name_prefix rather than local.postgres_server_name.
+resource "azurerm_private_dns_zone" "postgres" {
+  count               = var.enable_private_networking ? 1 : 0
+  name                = "${var.name_prefix}.private.postgres.database.azure.com"
+  resource_group_name = local.resource_group_name
+  tags                = var.tags
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "postgres" {
+  count                 = var.enable_private_networking ? 1 : 0
+  name                  = "${var.name_prefix}-cp-vnet-link"
+  resource_group_name   = local.resource_group_name
+  private_dns_zone_name = azurerm_private_dns_zone.postgres[0].name
+  virtual_network_id    = azurerm_virtual_network.control_plane[0].id
+  tags                  = var.tags
+}
+
+# ---------------------------------------------------------------------------
 # PostgreSQL — Azure Database for PostgreSQL Flexible Server
 # ---------------------------------------------------------------------------
 
@@ -101,13 +178,17 @@ resource "azurerm_postgresql_flexible_server" "this" {
   administrator_password = var.postgres_admin_password
 
   # Self-host is a single-trust-boundary deployment (docs/spec.md §2) — no
-  # VNet peering or private endpoint plumbing. Reachability to the control
-  # plane's Container App is granted via the "allow Azure services" firewall
-  # rule below, which is broader than just this deployment (see the comment on
-  # that resource). A self-hoster who wants VNet-integrated Postgres instead
-  # can fork this module; that's a deliberately out-of-scope hardening step
-  # here.
-  public_network_access_enabled = true
+  # VNet peering or private endpoint plumbing by default. Reachability to the
+  # control plane's Container App is granted via the "allow Azure services"
+  # firewall rule below, which is broader than just this deployment (see the
+  # comment on that resource). Set var.enable_private_networking = true for
+  # VNet-integrated Postgres instead (see the resources above) — that's an
+  # opt-in hardening step, not the default, since it forces recreation of
+  # both this server and the Container Apps Environment on an
+  # already-deployed instance (see that variable's own description).
+  public_network_access_enabled = !var.enable_private_networking
+  delegated_subnet_id           = var.enable_private_networking ? azurerm_subnet.postgres[0].id : null
+  private_dns_zone_id           = var.enable_private_networking ? azurerm_private_dns_zone.postgres[0].id : null
 
   zone = "1"
 
@@ -116,6 +197,16 @@ resource "azurerm_postgresql_flexible_server" "this" {
   lifecycle {
     ignore_changes = [zone]
   }
+
+  # Not strictly enforced by Azure at server-creation time any more, but
+  # without this Terraform has no graph edge between the server and the VNet
+  # link (the server only references the DNS *zone*, not the *link*) — this
+  # closes a brief window where the server could finish provisioning before
+  # the zone is actually linked to the VNet, and the FQDN fails to resolve
+  # from inside it. depends_on must be a static list (no ternary), so this
+  # references the resource bare rather than by index — a no-op when its
+  # count is 0, same pattern as allow_azure_services's own references below.
+  depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
 }
 
 resource "azurerm_postgresql_flexible_server_database" "this" {
@@ -131,13 +222,85 @@ resource "azurerm_postgresql_flexible_server_database" "this" {
 # connections from IP addresses allocated to ANY Azure service, including other
 # customers' subscriptions, not only this module's Container App. That's a
 # deliberate simplification for a one-shot self-host template (see the
-# public_network_access_enabled comment above); harden with VNet integration /
-# private endpoints yourself if your compliance posture requires it.
+# public_network_access_enabled comment above). Meaningless (and rejected by
+# the API) once private networking is on, so it doesn't exist in that mode.
 resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_services" {
+  count            = var.enable_private_networking ? 0 : 1
   name             = "AllowAzureServices"
   server_id        = azurerm_postgresql_flexible_server.this.id
   start_ip_address = "0.0.0.0"
   end_ip_address   = "0.0.0.0"
+}
+
+# Ships server logs + metrics to the same Log Analytics workspace already
+# provisioned below for the Container App — no second logging destination.
+# Postgres's own log_statement default (not "all") keeps ingestion volume,
+# and so cost, low; this only breaks down if someone later turns on
+# statement-level query logging on the server itself.
+resource "azurerm_monitor_diagnostic_setting" "postgres" {
+  name                       = "${local.postgres_server_name}-diagnostics"
+  target_resource_id         = azurerm_postgresql_flexible_server.this.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+
+  enabled_log {
+    category_group = "allLogs"
+  }
+
+  enabled_metric {
+    category = "AllMetrics"
+  }
+}
+
+# Opt-in (var.alert_action_group_id) health alerts for the Postgres server.
+# Deliberately permissive — Average over a full hour, not a short spike
+# window, at a high threshold — to page on sustained resource pressure, not
+# transient load. Metric names verified against a live server's actual
+# metric definitions (`az monitor metrics list-definitions`), not assumed:
+# there is no "io_consumption_percent" on Flexible Server (that's a Single
+# Server metric) — the equivalent here is disk_iops_consumed_percentage.
+locals {
+  postgres_health_alerts = {
+    cpu = {
+      metric_name = "cpu_percent"
+      description = "Average CPU on the control-plane Postgres server exceeded 90% over the last hour"
+    }
+    memory = {
+      metric_name = "memory_percent"
+      description = "Average memory utilization on the control-plane Postgres server exceeded 90% over the last hour"
+    }
+    disk_iops = {
+      metric_name = "disk_iops_consumed_percentage"
+      description = "Average disk IOPS consumption on the control-plane Postgres server exceeded 90% over the last hour"
+    }
+    storage = {
+      metric_name = "storage_percent"
+      description = "Average storage utilization on the control-plane Postgres server exceeded 90% over the last hour"
+    }
+  }
+}
+
+resource "azurerm_monitor_metric_alert" "postgres_health" {
+  for_each = var.alert_action_group_id != null ? local.postgres_health_alerts : {}
+
+  name                = "${local.postgres_server_name}-${each.key}-alert"
+  resource_group_name = local.resource_group_name
+  scopes              = [azurerm_postgresql_flexible_server.this.id]
+  description         = each.value.description
+  severity            = 2
+  frequency           = "PT15M"
+  window_size         = "PT1H"
+
+  criteria {
+    metric_namespace = "Microsoft.DBforPostgreSQL/flexibleServers"
+    metric_name      = each.value.metric_name
+    aggregation      = "Average"
+    operator         = "GreaterThan"
+    threshold        = 90
+  }
+
+  action {
+    action_group_id = var.alert_action_group_id
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -360,6 +523,15 @@ resource "azurerm_container_app_environment" "this" {
   location                   = local.resource_group_location
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
   tags                       = var.tags
+
+  # Gives this environment DNS visibility into the VNet the Postgres private
+  # zone above is linked to, so it can resolve/reach the server once
+  # public_network_access_enabled is off. No workload_profile block: adding
+  # one isn't required for this, and would in fact break the intent here —
+  # "Consumption only" mode (no workload_profile) is what wants an
+  # undelegated infra subnet; workload-profile environments want it delegated
+  # instead.
+  infrastructure_subnet_id = var.enable_private_networking ? azurerm_subnet.container_apps[0].id : null
 }
 
 resource "azurerm_container_app" "this" {

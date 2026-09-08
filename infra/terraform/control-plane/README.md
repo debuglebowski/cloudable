@@ -167,18 +167,49 @@ Confirm with `curl https://cloudable.example.com/api/v1/health` — a valid cert
 points `BETTER_AUTH_URL`/`CONTROL_PLANE_BASE_URL` at a hostname nothing serves yet, breaking
 auth/CORS until the binding catches up.
 
+## Private networking (opt-in)
+
+Set `enable_private_networking = true` to put Postgres behind VNet integration
+(delegated subnet + private DNS zone, `public_network_access_enabled = false`) and
+give the Container Apps Environment its own subnet in the same VNet, so the control
+plane reaches Postgres over private IPs instead of Azure's shared "allow Azure
+services" range. Public ingress to the control plane itself is unaffected — this only
+changes how the app reaches its database, not how the internet reaches the app.
+
+**On a brand-new deployment**: safe to set from the first `terraform apply`.
+
+**On an already-deployed instance**: `delegated_subnet_id`
+(`azurerm_postgresql_flexible_server`) and `infrastructure_subnet_id`
+(`azurerm_container_app_environment`) are both `ForceNew` — flipping this flag on a
+live deployment destroys and recreates the Postgres server (including its data) and
+the Container App itself (including its managed identity — anything you granted that
+identity's `principal_id` access to outside this module, e.g. a Key Vault, needs
+re-granting to the new one afterward). There is no in-place path. Take an independent
+`pg_dump` first, apply with the flag on, then `pg_restore` into the new (empty,
+private-only) server from something inside the new VNet — the server has no public
+endpoint any more, so the restore itself can't run from your laptop or CI. Budget a
+real maintenance window (tens of minutes, not a rolling update), not a quick flip.
+
 ## Notes
 
+- Postgres always ships diagnostic logs + metrics to the module's Log Analytics
+  workspace (no toggle — cheap, and reuses a workspace this module creates anyway).
+  Health alerts (CPU/memory/disk-IOPS/storage, all permissive: >90% averaged over a
+  full hour) are opt-in — set `alert_action_group_id` to an existing Azure Monitor
+  Action Group's resource ID to wire them up. This module doesn't create the action
+  group itself; that's org-wide alerting infrastructure out of scope for a
+  single-app deploy template.
 - `control_plane_image_tag` defaults to `main`, the tag `rebuild-base-image.yml` moves
   on every push to main. Pinning by image digest instead (see the comment on that
   variable) is on you once you have a release process; swap `control_plane_image` for
   `<repo>@sha256:<digest>` when you do.
 - Postgres is reachable from the container app via Azure's "allow Azure services"
-  firewall rule (`0.0.0.0`–`0.0.0.0`), not a VNet/private-endpoint setup. Per
-  Microsoft's own docs that rule admits traffic from **any** Azure customer's
+  firewall rule (`0.0.0.0`–`0.0.0.0`), not a VNet/private-endpoint setup, by default.
+  Per Microsoft's own docs that rule admits traffic from **any** Azure customer's
   resources, not just this deployment's container app — a deliberate simplification
-  for a one-shot self-host template; harden it yourself (VNet integration / private
-  endpoints) if your compliance posture requires network isolation.
+  for a one-shot self-host template. Set `enable_private_networking = true` for
+  VNet-integrated Postgres instead (see below); `public_network_access_enabled`/the
+  firewall rule turn off automatically when you do.
 - `min_replicas = 1` keeps the control plane always warm. Set it to `0` if you'd
   rather it scale to zero when idle (cold starts will apply).
 - This module creates its own resource group (`resource_group_name`) rather than
