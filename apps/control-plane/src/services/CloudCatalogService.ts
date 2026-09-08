@@ -73,7 +73,7 @@ export interface CatalogEntry {
  * under Postgres's ~65535 bound-parameter limit (6 params/row here). */
 const UPSERT_CHUNK_SIZE = 1000;
 
-const upsertEntries = (
+export const upsertEntries = (
   provider: "azure",
   kind: CatalogKind,
   entries: ReadonlyArray<CatalogEntry>,
