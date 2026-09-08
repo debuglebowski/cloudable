@@ -52,6 +52,7 @@ const machineSummaryFields = {
   sizeSku: Schema.String,
   image: Schema.String,
   state: machineStateSchema,
+  lastError: Schema.NullOr(Schema.String),
   lastVerifiedAt: Schema.NullOr(Schema.DateFromString),
   createdAt: Schema.DateFromString,
 };

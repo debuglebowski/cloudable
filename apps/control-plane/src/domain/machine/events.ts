@@ -249,6 +249,40 @@ export function machineOwnerAssignedEvent(input: MachineOwnerAssignedInput): Mac
   };
 }
 
+export interface MachineProvisioningFailedInput extends ActorContext {
+  machineId: string;
+  orgId: string;
+  correlationId: string;
+  stage: string;
+  error: string;
+  occurredAt?: Date;
+}
+
+/**
+ * Emitted whenever a provisioning attempt (create, or a future
+ * reconcile/upgrade path) leaves a machine in the `"error"` state — the
+ * detail behind that state that `machines.lastError` also carries on the
+ * row itself, so it survives in the append-only event log even after a
+ * later successful attempt clears the row's own `lastError`.
+ */
+export function machineProvisioningFailedEvent(
+  input: MachineProvisioningFailedInput,
+): MachineEvent {
+  return {
+    id: PLACEHOLDER_ID,
+    type: "machine.provisioning_failed",
+    occurredAt: input.occurredAt ?? new Date(),
+    recordedAt: PLACEHOLDER_RECORDED_AT,
+    orgId: input.orgId,
+    actorType: input.actorType,
+    actorId: input.actorId,
+    machineId: input.machineId,
+    correlationId: input.correlationId,
+    schemaVersion: 1,
+    payload: { stage: input.stage, error: input.error },
+  };
+}
+
 export interface MachineSettingChangedInput extends ActorContext {
   machineId: string;
   orgId: string;

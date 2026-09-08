@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import net from "node:net";
 import type * as schema from "@cloudable/schema";
 import {
+  events,
   integrations,
   machines,
   orgCatalogSelections,
@@ -9,12 +10,15 @@ import {
   people,
   settingValues,
 } from "@cloudable/schema";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
-import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
+import {
+  FAKE_CREATE_FAILURE_IMAGE,
+  FakeProvisioningServiceLive,
+} from "../../services/ProvisioningService.fake";
 import { connectAndMigrate } from "../../test-support/db";
 import { MachineService } from "./MachineService";
 
@@ -230,6 +234,34 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
 
     const [first, second] = await Promise.all([createOne(), createOne()]);
     expect(first.name).not.toBe(second.name);
+  });
+
+  test("provisioning failure: machine lands in error state with the failure message on lastError, and a machine.provisioning_failed event is recorded", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "fake");
+
+    const machine = await run(
+      Effect.gen(function* () {
+        const svc = yield* MachineService;
+        return yield* svc.create({
+          orgId: org.id,
+          name: "db-prod-broken",
+          provider: "fake",
+          sizeSku: "Standard_D2s_v5",
+          image: FAKE_CREATE_FAILURE_IMAGE,
+          ownerPersonId: owner.id,
+        });
+      }),
+    );
+
+    expect(machine.state).toBe("error");
+    expect(machine.lastError).toContain("simulated create failure");
+
+    const machineEvents = await db.select().from(events).where(eq(events.machineId, machine.id));
+    const failureEvent = machineEvents.find((e) => e.type === "machine.provisioning_failed");
+    expect(failureEvent).toBeDefined();
+    expect(failureEvent?.payload).toEqual({ stage: "create", error: machine.lastError });
   });
 
   test("provider fake/docker: a supplied region is rejected — the provider has none", async () => {

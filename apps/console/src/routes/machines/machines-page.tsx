@@ -178,6 +178,11 @@ export function MachinesPage() {
                       <Badge
                         variant={MACHINE_STATE_BADGE_VARIANT[machine.state]}
                         dot={machine.state === "stopped"}
+                        title={
+                          machine.state === "error" && machine.lastError
+                            ? machine.lastError
+                            : undefined
+                        }
                       >
                         {MACHINE_STATE_LABEL[machine.state]}
                       </Badge>

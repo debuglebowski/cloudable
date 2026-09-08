@@ -38,6 +38,11 @@ export const machines = pgTable("machines", {
   })
     .notNull()
     .default("provisioning"),
+  // The most recent provisioning/reconcile failure message, if any — the
+  // detail behind a "error" `state` that the console surfaces directly
+  // rather than making a user dig through the event log for it. Cleared
+  // (set back to null) whenever a provisioning attempt succeeds.
+  lastError: text("last_error"),
   // The cloud provider's resource id for this machine, once provisioned.
   externalResourceId: text("external_resource_id"),
   // Last time the control agent successfully checked in — feeds the
