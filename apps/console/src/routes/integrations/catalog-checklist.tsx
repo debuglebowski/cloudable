@@ -8,6 +8,7 @@ import {
   useSyncAzureSizes,
   useToggleCatalogEntry,
 } from "@/api/provider-catalog";
+import { useProvisioningCapabilities } from "@/api/provisioning-capabilities";
 import { CollapsibleSection } from "@/components/collapsible-section";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -34,11 +35,17 @@ export function CatalogChecklist({
   kind,
   showSync,
   defaultOpen = true,
+  lockedRegion,
 }: {
   title: string;
   kind: "region" | "image" | "sku";
   showSync?: boolean;
   defaultOpen?: boolean;
+  /** Only meaningful for `kind === "region"` — mirrors `AZURE_MACHINES_LOCATION`.
+   * When set, this deployment has exactly one usable region, so the
+   * interactive checklist (which an org's own selections could still drift
+   * out of sync with — seen live) is replaced by a static notice instead. */
+  lockedRegion?: string | null;
 }) {
   const catalogQuery = useProviderCatalog("azure", kind);
   const toggle = useToggleCatalogEntry("azure", kind);
@@ -54,18 +61,21 @@ export function CatalogChecklist({
     entry.displayName.toLowerCase().includes(search.toLowerCase()),
   );
 
+  const regionIsLocked = kind === "region" && Boolean(lockedRegion);
+
   return (
     <CollapsibleSection
       label={
         <span className="flex items-center gap-1.5">
           {title}
-          {hasEnabled && (
+          {(hasEnabled || regionIsLocked) && (
             <CheckCircle2 className="size-3.5 text-ok" aria-label={`${title} configured`} />
           )}
         </span>
       }
       headerAction={
-        showSync && (
+        showSync &&
+        !regionIsLocked && (
           <Button
             variant="ghost"
             size="sm"
@@ -80,13 +90,22 @@ export function CatalogChecklist({
       defaultOpen={defaultOpen}
       className="rounded-md border border-border px-2.5"
     >
-      {catalogQuery.isPending && <p className="text-xs text-muted-foreground">Loading…</p>}
-      {catalogQuery.data?.length === 0 && (
+      {regionIsLocked && (
+        <p className="text-xs text-muted-foreground">
+          This deployment only provisions in <span className="font-medium">{lockedRegion}</span> —
+          region is fixed by <code className="text-[11px]">AZURE_MACHINES_LOCATION</code> and isn't
+          configurable per org.
+        </p>
+      )}
+      {!regionIsLocked && catalogQuery.isPending && (
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      )}
+      {!regionIsLocked && catalogQuery.data?.length === 0 && (
         <p className="text-xs text-muted-foreground">
           Nothing discovered yet{showSync ? " — sync from Azure first." : "."}
         </p>
       )}
-      {catalogQuery.data && catalogQuery.data.length > 0 && (
+      {!regionIsLocked && catalogQuery.data && catalogQuery.data.length > 0 && (
         <>
           <Input
             value={search}
@@ -126,6 +145,9 @@ export function CatalogChecklist({
  * on the card itself; every other integration card is a one- or two-line summary, so
  * this pulls the one heavy exception behind a modal instead. */
 export function AzureCatalogDialog() {
+  const capabilitiesQuery = useProvisioningCapabilities();
+  const lockedRegion = capabilitiesQuery.data?.azure.lockedRegion ?? null;
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -141,7 +163,13 @@ export function AzureCatalogDialog() {
           </DialogDescription>
         </DialogHeader>
         <div className="flex max-h-[80vh] flex-col gap-2 overflow-y-auto">
-          <CatalogChecklist title="Regions" kind="region" showSync defaultOpen />
+          <CatalogChecklist
+            title="Regions"
+            kind="region"
+            showSync
+            defaultOpen
+            lockedRegion={lockedRegion}
+          />
           <CatalogChecklist title="Images" kind="image" defaultOpen={false} />
           <CatalogChecklist title="Sizes" kind="sku" showSync defaultOpen={false} />
         </div>

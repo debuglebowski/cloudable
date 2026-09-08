@@ -13,6 +13,7 @@ import {
 import { eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
+import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import {
@@ -363,6 +364,46 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
 
     expect(machine.provider).toBe("azure");
     expect(machine.region).toBe("westeurope");
+  });
+
+  test("provider azure: AZURE_MACHINES_LOCATION forces the region, overriding both client input and the org's (possibly stale) catalog selection", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "azure");
+    // Deliberately only enable a *different* region in the catalog — the
+    // real-world scenario this guards against: an org's catalog selection
+    // has drifted (or was never corrected) away from the deployment's
+    // actual usable region.
+    await enableCatalogEntry(org.id, "region", "westeurope");
+    await enableCatalogEntry(org.id, "image", "ubuntu-24.04");
+    await enableCatalogEntry(org.id, "sku", "Standard_D2s_v5");
+
+    const original = config.azureMachinesLocation;
+    // `config` is a plain mutable object (see config.ts's own doc comment —
+    // `readonly` is compile-time only), read directly inside
+    // `MachineService.create` rather than injected, so this is the only way
+    // to exercise the locked branch without a real deployment env var.
+    (config as { azureMachinesLocation: string | null }).azureMachinesLocation = "northeurope";
+    try {
+      const machine = await run(
+        Effect.gen(function* () {
+          const svc = yield* MachineService;
+          return yield* svc.create({
+            orgId: org.id,
+            name: "locked-region",
+            provider: "azure",
+            region: "westeurope", // the org's enabled (but wrong) region
+            sizeSku: "Standard_D2s_v5",
+            image: "ubuntu-24.04",
+            ownerPersonId: owner.id,
+          });
+        }),
+      );
+
+      expect(machine.region).toBe("northeurope");
+    } finally {
+      (config as { azureMachinesLocation: string | null }).azureMachinesLocation = original;
+    }
   });
 
   test("two orgs' catalogs don't leak into each other", async () => {

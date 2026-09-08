@@ -16,6 +16,15 @@ const AzureCapability = Schema.Struct({
   available: Schema.Boolean,
   subscriptionId: Schema.NullOr(Schema.String),
   resourceGroup: Schema.NullOr(Schema.String),
+  /** Mirrors `AZURE_MACHINES_LOCATION` (`config.ts`) — `null` means this
+   * deployment has no fixed region (the org's catalog choice governs, same
+   * as before this field existed). When set, this is the *only* region a
+   * machine can ever land in on this deployment (the machines vnet/subnet
+   * live nowhere else) — the console uses it to stop offering a region
+   * choice that doesn't actually exist, and `MachineService.create` enforces
+   * it server-side regardless of what the client sends or what an org's
+   * catalog selections say. */
+  lockedRegion: Schema.NullOr(Schema.String),
 });
 
 const ProvisioningCapabilitiesResponse = Schema.Struct({
