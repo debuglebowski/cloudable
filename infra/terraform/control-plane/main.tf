@@ -127,19 +127,29 @@ resource "azurerm_subnet" "postgres" {
   }
 }
 
-# Deliberately NOT delegated: without a workload_profile block on the
-# Container Apps Environment below, it stays a "Consumption only" environment
-# — Microsoft's own docs say not to delegate that mode's infrastructure
-# subnet (delegation is only for workload-profile environments, which this
-# module doesn't use). /23 is that mode's documented minimum size; subnets
-# can't be grown in place once resources exist in them, so this is sized with
-# headroom rather than tightly.
+# Corrected against a real, live apply, not just docs: earlier research
+# concluded a "Consumption only" (no workload_profile block) environment
+# should NOT have its infrastructure subnet delegated. That's wrong in
+# practice — a real `terraform apply` against this exact module failed with
+# "ManagedEnvironmentSubnetDelegationError: The subnet of the environment
+# must be delegated to the service 'Microsoft.App/environments'" on an
+# environment with no workload_profile block at all. Delegating it (and
+# sizing it /21, matching the size Microsoft's docs require alongside
+# delegation) is what actually works.
 resource "azurerm_subnet" "container_apps" {
   count                = var.enable_private_networking ? 1 : 0
   name                 = "container-apps"
   resource_group_name  = local.resource_group_name
   virtual_network_name = azurerm_virtual_network.control_plane[0].name
-  address_prefixes     = ["10.91.2.0/23"]
+  address_prefixes     = ["10.91.8.0/21"]
+
+  delegation {
+    name = "container-apps-environment"
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
 }
 
 # Name must end in ".postgres.database.azure.com" but must NOT equal the
