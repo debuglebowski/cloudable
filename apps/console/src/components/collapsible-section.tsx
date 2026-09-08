@@ -45,22 +45,15 @@ export function CollapsibleSection({
   return (
     <div className={cn("flex flex-col", className)}>
       <div className="flex items-center gap-1">
-        {/* group + hover:bg-accent, matching the "+" button beside it — this toggle
-            was the one clickable row in the app with literally no hover feedback:
-            `hover:text-foreground` alone was a no-op (the label is already
-            `text-foreground` at rest, inherited, nothing else set it), so hovering
-            changed nothing at all. Same fix as SettingRow's own hover addition, for
-            the same reason: every other click-to-toggle row in the app gives some
-            visible cue, this one didn't. */}
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
-          className="group flex flex-1 items-center gap-1.5 rounded-md py-2 text-left text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="flex flex-1 items-center gap-1.5 rounded-md py-2 text-left text-sm font-medium"
         >
           <ChevronRight
             className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:text-accent-foreground",
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
               open && "rotate-90",
             )}
           />

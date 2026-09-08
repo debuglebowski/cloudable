@@ -1,4 +1,5 @@
 import { CheckCircle2 } from "lucide-react";
+import { useState } from "react";
 
 import {
   type CatalogItem,
@@ -18,6 +19,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 /**
  * Checklist over a fixed, discovered catalog — checkbox per entry, not
@@ -47,6 +49,10 @@ export function CatalogChecklist({
   const sizeSync = useSyncAzureSizes();
   const sync = kind === "region" ? regionSync : sizeSync;
   const hasEnabled = catalogQuery.data?.some((entry) => entry.enabled) ?? false;
+  const [search, setSearch] = useState("");
+  const filtered = catalogQuery.data?.filter((entry) =>
+    entry.displayName.toLowerCase().includes(search.toLowerCase()),
+  );
 
   return (
     <CollapsibleSection
@@ -81,25 +87,36 @@ export function CatalogChecklist({
         </p>
       )}
       {catalogQuery.data && catalogQuery.data.length > 0 && (
-        <ul className="grid max-h-[45vh] grid-cols-2 gap-x-6 gap-y-3 overflow-y-auto sm:grid-cols-3 lg:grid-cols-4">
-          {catalogQuery.data.map((entry: CatalogItem) => (
-            <li key={entry.code} className="flex items-center gap-2">
-              <Checkbox
-                id={`catalog-${kind}-${entry.code}`}
-                checked={entry.enabled}
-                disabled={toggle.isPending}
-                onCheckedChange={() => toggle.mutate(entry)}
-              />
-              <label
-                htmlFor={`catalog-${kind}-${entry.code}`}
-                className="cursor-pointer truncate text-xs font-normal"
-                title={entry.displayName}
-              >
-                {entry.displayName}
-              </label>
-            </li>
-          ))}
-        </ul>
+        <>
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={`Search ${title.toLowerCase()}…`}
+            className="h-7 text-xs"
+          />
+          {filtered?.length === 0 && (
+            <p className="text-xs text-muted-foreground">No matches for “{search}”.</p>
+          )}
+          <ul className="flex max-h-[45vh] flex-col gap-2 overflow-y-auto">
+            {filtered?.map((entry: CatalogItem) => (
+              <li key={entry.code} className="flex items-center gap-2">
+                <Checkbox
+                  id={`catalog-${kind}-${entry.code}`}
+                  checked={entry.enabled}
+                  disabled={toggle.isPending}
+                  onCheckedChange={() => toggle.mutate(entry)}
+                />
+                <label
+                  htmlFor={`catalog-${kind}-${entry.code}`}
+                  className="cursor-pointer truncate text-xs font-normal"
+                  title={entry.displayName}
+                >
+                  {entry.displayName}
+                </label>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </CollapsibleSection>
   );
@@ -116,7 +133,7 @@ export function AzureCatalogDialog() {
           Configure
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Azure catalog</DialogTitle>
           <DialogDescription>
