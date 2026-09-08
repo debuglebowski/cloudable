@@ -393,6 +393,81 @@ resource "azurerm_subnet_network_security_group_association" "machines" {
   network_security_group_id = azurerm_network_security_group.machines[0].id
 }
 
+# ---------------------------------------------------------------------------
+# Flow logs (opt-in, var.enable_flow_logs) — VNet Flow Logs, not the legacy
+# NSG Flow Logs (which retire 2027-09-30 and no longer accept new setups).
+# References the region's auto-created Network Watcher by Azure's own
+# standard naming convention ("NetworkWatcher_<region>" in "NetworkWatcherRG")
+# rather than creating one — Network Watcher is a subscription/region
+# singleton, not something a single app module should own.
+# ---------------------------------------------------------------------------
+
+locals {
+  flow_logs_enabled       = var.enable_flow_logs && var.enable_self_managed_machines
+  network_watcher_name    = "NetworkWatcher_${lower(replace(local.machines_resource_group_location, " ", ""))}"
+  network_watcher_rg_name = "NetworkWatcherRG"
+}
+
+data "azurerm_network_watcher" "this" {
+  count               = local.flow_logs_enabled ? 1 : 0
+  name                = local.network_watcher_name
+  resource_group_name = local.network_watcher_rg_name
+}
+
+resource "azurerm_storage_account" "flow_logs" {
+  count                    = local.flow_logs_enabled ? 1 : 0
+  name                     = "${var.name_prefix}flowlogs${random_string.postgres_suffix.result}"
+  resource_group_name      = local.machines_resource_group_name
+  location                 = local.machines_resource_group_location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  tags                     = var.tags
+}
+
+# Both a VNet-level and a subnet-level flow log are created deliberately,
+# even though this VNet has exactly one subnet and so this necessarily
+# double-logs the same traffic: Vanta's "Virtual networks have flow logs" and
+# "Subnets have flow logs" checks each look for a flow log resource scoped to
+# that specific resource type, not for traffic being covered transitively.
+# The 5 GB/month free tier is shared across both, per subscription, not
+# doubled — combined volume for a low-traffic deployment should still fit
+# comfortably within it.
+resource "azurerm_network_watcher_flow_log" "machines_vnet" {
+  count                = local.flow_logs_enabled ? 1 : 0
+  name                 = "${var.name_prefix}-machines-vnet-flow-log"
+  network_watcher_name = data.azurerm_network_watcher.this[0].name
+  resource_group_name  = data.azurerm_network_watcher.this[0].resource_group_name
+  location             = local.machines_resource_group_location
+
+  target_resource_id = azurerm_virtual_network.machines[0].id
+  storage_account_id = azurerm_storage_account.flow_logs[0].id
+  enabled            = true
+  version            = 2
+
+  retention_policy {
+    enabled = true
+    days    = 90
+  }
+}
+
+resource "azurerm_network_watcher_flow_log" "machines_subnet" {
+  count                = local.flow_logs_enabled ? 1 : 0
+  name                 = "${var.name_prefix}-machines-subnet-flow-log"
+  network_watcher_name = data.azurerm_network_watcher.this[0].name
+  resource_group_name  = data.azurerm_network_watcher.this[0].resource_group_name
+  location             = local.machines_resource_group_location
+
+  target_resource_id = azurerm_subnet.machines[0].id
+  storage_account_id = azurerm_storage_account.flow_logs[0].id
+  enabled            = true
+  version            = 2
+
+  retention_policy {
+    enabled = true
+    days    = 90
+  }
+}
+
 resource "azurerm_role_definition" "machine_operator" {
   count       = var.enable_self_managed_machines ? 1 : 0
   name        = "Cloudable Machine Operator (${var.name_prefix})"
