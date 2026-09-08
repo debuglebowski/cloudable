@@ -218,6 +218,24 @@ const skuDisplayName = (sku: {
   return `${sku.name} (${vcpus} vCPU, ${memoryGb} GB RAM)`;
 };
 
+/** Every image this adapter offers (`UBUNTU_IMAGES` in
+ * `ProvisioningService.azure.ts`) is Hypervisor Generation 2 only — Canonical
+ * doesn't even publish a Generation 1 offer for 24.04 anymore, and 22.04's
+ * offer here is explicitly the "-gen2" SKU. A size whose own
+ * `HyperVGenerations` capability doesn't include `"V2"` (comma-separated,
+ * e.g. `"V1,V2"` or bare `"V1"`) can never boot either image — confirmed
+ * live: `Standard_A4m_v2` (`HyperVGenerations: "V1"`) picked from the
+ * unfiltered catalog failed VM creation with exactly this mismatch. Missing
+ * the capability entirely (seen on some retired/specialty SKUs) is treated
+ * as "no", not "maybe" — same conservative default as `skuDisplayName`
+ * falling back to the bare name above. */
+export const isGen2Capable = (sku: {
+  capabilities?: { name?: string; value?: string }[];
+}): boolean => {
+  const generations = sku.capabilities?.find((c) => c.name === "HyperVGenerations")?.value;
+  return generations?.split(",").includes("V2") ?? false;
+};
+
 /** Real Azure SDK call — `ComputeManagementClient.resourceSkus.list()`
  * enumerates every SKU (VM sizes, disks, etc.) available to the configured
  * subscription; filtered to `resourceType === "virtualMachines"` for just
@@ -259,6 +277,7 @@ export const syncAzureSizes = (): Effect.Effect<
     const entries: CatalogEntry[] = [];
     for (const sku of skus) {
       if (sku.resourceType !== "virtualMachines" || !sku.name || seen.has(sku.name)) continue;
+      if (!isGen2Capable(sku)) continue;
       seen.add(sku.name);
       entries.push({ code: sku.name, displayName: skuDisplayName(sku) });
     }
