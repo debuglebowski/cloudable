@@ -7,7 +7,7 @@ import { useIntegrations } from "@/api/integrations";
 import { createMachine, machinesKeys } from "@/api/machines";
 import { listPeople } from "@/api/people-directory";
 import type { CatalogItem } from "@/api/provider-catalog";
-import { useProviderCatalog } from "@/api/provider-catalog";
+import { useProviderCatalog, useSyncAzureRegions, useSyncAzureSizes } from "@/api/provider-catalog";
 import { useProvisioningCapabilities } from "@/api/provisioning-capabilities";
 import { Button } from "@/components/ui/button";
 import {
@@ -125,6 +125,8 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
   const images = imageCatalogQuery.data ?? [];
   const sizeCatalogQuery = useProviderCatalog("azure", "sku");
   const sizes = sizeCatalogQuery.data ?? [];
+  const regionSync = useSyncAzureRegions();
+  const sizeSync = useSyncAzureSizes();
 
   const selectedImage = images.find((entry) => entry.code === image);
   const selectedSize = sizes.find((entry) => entry.code === sizeSku);
@@ -277,7 +279,19 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
             )}
             {provider && supportsRegion(provider) && !lockedRegion && (
               <div className="flex flex-col gap-1">
-                <Label htmlFor="add-machine-region">Region</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="add-machine-region">Region</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1.5 text-xs"
+                    disabled={regionSync.isPending}
+                    onClick={() => regionSync.mutate()}
+                  >
+                    {regionSync.isPending ? "Syncing…" : "Sync from Azure"}
+                  </Button>
+                </div>
                 <Select value={region} onValueChange={setRegion}>
                   <SelectTrigger id="add-machine-region">
                     <SelectValue
@@ -302,7 +316,19 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
             )}
             {provider && hasSizeCatalog(provider) && (
               <div className="flex flex-col gap-1">
-                <Label htmlFor="add-machine-size">Size SKU</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="add-machine-size">Size SKU</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-1.5 text-xs"
+                    disabled={sizeSync.isPending}
+                    onClick={() => sizeSync.mutate()}
+                  >
+                    {sizeSync.isPending ? "Syncing…" : "Sync from Azure"}
+                  </Button>
+                </div>
                 <Popover open={sizeComboOpen} onOpenChange={setSizeComboOpen}>
                   <PopoverTrigger asChild>
                     <Button
