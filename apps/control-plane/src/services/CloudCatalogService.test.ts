@@ -5,7 +5,12 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../db/layer";
 import { connectAndMigrate } from "../test-support/db";
-import { isGen2Capable, isScheduledForRetirement, upsertEntries } from "./CloudCatalogService";
+import {
+  isGen2Capable,
+  isOfferedArchitecture,
+  isScheduledForRetirement,
+  upsertEntries,
+} from "./CloudCatalogService";
 
 describe("isGen2Capable", () => {
   test("accepts a size whose HyperVGenerations includes V2", () => {
@@ -42,6 +47,20 @@ describe("isScheduledForRetirement", () => {
     expect(isScheduledForRetirement({ capabilities: [{ name: "vCPUs", value: "4" }] })).toBe(false);
     expect(isScheduledForRetirement({ capabilities: [] })).toBe(false);
     expect(isScheduledForRetirement({})).toBe(false);
+  });
+});
+
+describe("isOfferedArchitecture", () => {
+  test("x64 is offered -- both UBUNTU_IMAGES entries require it", () => {
+    expect(isOfferedArchitecture("x64")).toBe(true);
+  });
+
+  test("an architecture no current image requires (e.g. Arm64) is not offered", () => {
+    expect(isOfferedArchitecture("Arm64")).toBe(false);
+  });
+
+  test("a missing CpuArchitectureType capability is not offered, not unknown", () => {
+    expect(isOfferedArchitecture(undefined)).toBe(false);
   });
 });
 

@@ -10,6 +10,16 @@ import { integer, pgTable, real, text, timestamp, uniqueIndex, uuid } from "driz
  * images are seeded from `ProvisioningService.azure.ts`'s own `UBUNTU_IMAGES`
  * map, since Azure has no API enumerating "images compatible with our
  * cloud-init setup" the way it does for regions/sizes.
+ *
+ * There used to be a second table here (`orgCatalogSelections`) letting an
+ * org admin curate an allow-list over this data — retired: three
+ * independently-curated allow-lists (region/image/size) with nothing
+ * checking whether a chosen *combination* actually works produced a string
+ * of real production failures (region without a matching vnet, a size that
+ * can't boot the chosen image's hypervisor generation, ...). The Add
+ * Machine form now reads this table directly and computes compatibility
+ * live from the fields below, instead of trusting an admin-maintained list
+ * that could silently drift out of sync with reality.
  */
 export const providerCatalogEntries = pgTable(
   "provider_catalog_entries",
@@ -31,38 +41,17 @@ export const providerCatalogEntries = pgTable(
     // back the whole upsert transaction with no visible error).
     vcpus: integer("vcpus"),
     memoryGb: real("memory_gb"),
+    // Dual meaning, like vcpus/memoryGb above but for kind === "sku" *or*
+    // "image": for a sku, what it runs on (Azure's CpuArchitectureType
+    // capability, e.g. "x64"/"Arm64"); for an image, what it requires (from
+    // UBUNTU_IMAGES in ProvisioningService.azure.ts). The Add Machine form
+    // compares the two live to decide which image/size combinations are
+    // actually valid. Null for kind === "region".
+    architecture: text("architecture"),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("provider_catalog_entries_provider_kind_code_idx").on(
-      table.provider,
-      table.kind,
-      table.code,
-    ),
-  ],
-);
-
-/**
- * An org's curated allow-list over `providerCatalogEntries` — presence of a
- * row means "enabled," same "set of independently addable/removable named
- * entries" shape as `machinePackages` (see that table's own header comment
- * for why this isn't folded into the generic `settingValues` bag). Only
- * meaningful for providers whose `PROVIDER_CAPABILITIES` claims a catalog
- * (`packages/contracts/src/domains/providers.ts`) — today, Azure only.
- */
-export const orgCatalogSelections = pgTable(
-  "org_catalog_selections",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    orgId: uuid("org_id").notNull(),
-    provider: text("provider", { enum: ["azure", "docker", "fake"] }).notNull(),
-    kind: text("kind", { enum: ["region", "image", "sku"] }).notNull(),
-    code: text("code").notNull(),
-    enabledAt: timestamp("enabled_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex("org_catalog_selections_org_provider_kind_code_idx").on(
-      table.orgId,
       table.provider,
       table.kind,
       table.code,

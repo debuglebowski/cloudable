@@ -40,9 +40,19 @@ const DATA_DISK_LUN = 0;
  * org-facing image catalog from — Azure has no API enumerating "images
  * compatible with our cloud-init setup" the way it does for regions, so this
  * hand-maintained map doubles as that catalog rather than drifting from it. */
-export const UBUNTU_IMAGES: Record<string, { offer: string; sku: string }> = {
-  "ubuntu-22.04": { offer: "0001-com-ubuntu-server-jammy", sku: "22_04-lts-gen2" },
-  "ubuntu-24.04": { offer: "ubuntu-24_04-lts", sku: "server" },
+// `architecture` is the image's real requirement, not decoration -- it's
+// what `CloudCatalogService.ts`'s size sync filters against, and what
+// `MachineService.create`/the Add Machine form compare a chosen size's own
+// architecture capability to. Both entries confirmed Gen2 x64 this session:
+// 22.04's own sku is literally "22_04-lts-gen2"; 24.04's `ubuntu-24_04-lts`
+// offer has no Gen1 counterpart at all (Canonical stopped publishing one).
+export const UBUNTU_IMAGES: Record<string, { offer: string; sku: string; architecture: string }> = {
+  "ubuntu-22.04": {
+    offer: "0001-com-ubuntu-server-jammy",
+    sku: "22_04-lts-gen2",
+    architecture: "x64",
+  },
+  "ubuntu-24.04": { offer: "ubuntu-24_04-lts", sku: "server", architecture: "x64" },
 };
 
 export function imageReferenceFor(image: string | undefined) {

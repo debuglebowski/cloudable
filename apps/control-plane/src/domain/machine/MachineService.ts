@@ -5,10 +5,11 @@ import { ulid } from "ulid";
 import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { type EffectiveLoggingTier, getEffectiveLoggingTier } from "../../logging/settings";
+import { getCatalogEntry } from "../../services/CloudCatalogService";
 import { EventBus } from "../../services/EventBus";
 import { type ProvisioningError, ProvisioningServiceTag } from "../../services/ProvisioningService";
+import { UBUNTU_IMAGES } from "../../services/ProvisioningService.azure";
 import { isProviderEnabled } from "../integrations/integrations";
-import { isCatalogEntryEnabled } from "../organisation/catalog";
 import { generateDefaultMachineName } from "./default-name";
 import {
   InvalidCursorError,
@@ -291,49 +292,51 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             if (trimmedRegion.length === 0) {
               return yield* invalid('"region" is required for provider "azure"');
             }
-            const regionEnabled = yield* isCatalogEntryEnabled(
-              input.orgId,
-              "azure",
-              "region",
-              trimmedRegion,
-            ).pipe(
+            // No org-level curation anymore (see provider-catalog.ts's doc
+            // comment) -- just confirm this is a real, synced region rather
+            // than trusting arbitrary client input.
+            const regionEntry = yield* getCatalogEntry("azure", "region", trimmedRegion).pipe(
               Effect.provideService(Db, db),
               Effect.mapError(
                 (cause) => new MachineServiceError({ reason: "catalog_read_failed", cause }),
               ),
             );
-            if (!regionEnabled) {
-              return yield* invalid(`region "${trimmedRegion}" is not enabled for this org`);
+            if (!regionEntry) {
+              return yield* invalid(`region "${trimmedRegion}" is not recognized`);
             }
             region = trimmedRegion;
           }
-          const imageEnabled = yield* isCatalogEntryEnabled(
-            input.orgId,
-            "azure",
-            "image",
-            input.image,
-          ).pipe(
-            Effect.provideService(Db, db),
-            Effect.mapError(
-              (cause) => new MachineServiceError({ reason: "catalog_read_failed", cause }),
-            ),
-          );
-          if (!imageEnabled) {
-            return yield* invalid(`image "${input.image}" is not enabled for this org`);
+
+          // Image: must be one this adapter actually knows how to boot
+          // (`UBUNTU_IMAGES`) -- the same check `ProvisioningService.azure.ts`
+          // would otherwise only discover deep inside provisioning, landing
+          // the machine in a permanent `error` state for what's really just
+          // a bad request.
+          const requiredImage = UBUNTU_IMAGES[input.image];
+          if (!requiredImage) {
+            return yield* invalid(`image "${input.image}" is not recognized`);
           }
-          const sizeSkuEnabled = yield* isCatalogEntryEnabled(
-            input.orgId,
-            "azure",
-            "sku",
-            input.sizeSku,
-          ).pipe(
+
+          // Size: must exist in the synced catalog, and its architecture
+          // must match what the chosen image requires -- the real
+          // compatibility check that replaces per-org curation. Both
+          // Ubuntu images require the same architecture today, so this is
+          // presently a no-op beyond "does the size exist at all"; it
+          // becomes load-bearing the moment a differently-profiled image
+          // exists.
+          const sizeEntry = yield* getCatalogEntry("azure", "sku", input.sizeSku).pipe(
             Effect.provideService(Db, db),
             Effect.mapError(
               (cause) => new MachineServiceError({ reason: "catalog_read_failed", cause }),
             ),
           );
-          if (!sizeSkuEnabled) {
-            return yield* invalid(`size "${input.sizeSku}" is not enabled for this org`);
+          if (!sizeEntry) {
+            return yield* invalid(`size "${input.sizeSku}" is not recognized`);
+          }
+          if (sizeEntry.architecture && sizeEntry.architecture !== requiredImage.architecture) {
+            return yield* invalid(
+              `size "${input.sizeSku}" (${sizeEntry.architecture}) is not compatible with image "${input.image}" (requires ${requiredImage.architecture})`,
+            );
           }
         } else {
           if (trimmedRegion.length > 0) {
