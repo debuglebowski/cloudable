@@ -13,6 +13,7 @@ export const ProvisioningCapabilitiesLive = HttpApiBuilder.group(
           available: config.azureSubscriptionId !== null,
           subscriptionId: config.azureSubscriptionId,
           resourceGroup: config.azureSubscriptionId ? config.azureMachinesResourceGroup : null,
+          lockedRegion: config.azureMachinesLocation,
         },
         docker: { available: true },
         fake: { available: true },

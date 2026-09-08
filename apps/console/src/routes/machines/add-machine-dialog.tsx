@@ -6,6 +6,7 @@ import { useIntegrations } from "@/api/integrations";
 import { createMachine, machinesKeys } from "@/api/machines";
 import { listPeople } from "@/api/people-directory";
 import { useProviderCatalog } from "@/api/provider-catalog";
+import { useProvisioningCapabilities } from "@/api/provisioning-capabilities";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -86,6 +87,8 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
     .map((integration) => integration.provider)
     .filter((p): p is CloudProvider => p !== null);
 
+  const capabilitiesQuery = useProvisioningCapabilities();
+  const lockedRegion = capabilitiesQuery.data?.azure.lockedRegion ?? null;
   const regionCatalogQuery = useProviderCatalog("azure", "region");
   const enabledRegions = (regionCatalogQuery.data ?? []).filter((entry) => entry.enabled);
   const imageCatalogQuery = useProviderCatalog("azure", "image");
@@ -106,7 +109,10 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
       return createMachine({
         ...(name.trim() ? { name: name.trim() } : {}),
         provider,
-        ...(supportsRegion(provider) ? { region } : {}),
+        // When the deployment locks the region, don't send one at all —
+        // the server forces it regardless, and sending our (possibly
+        // stale/empty) local `region` state would just be misleading.
+        ...(supportsRegion(provider) && !lockedRegion ? { region } : {}),
         sizeSku: sizeSku.trim(),
         image: image.trim(),
         ownerPersonId,
@@ -131,7 +137,7 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
 
   const canSubmit =
     provider !== "" &&
-    (!supportsRegion(provider) || region !== "") &&
+    (!supportsRegion(provider) || lockedRegion !== null || region !== "") &&
     image.trim().length > 0 &&
     (!hasSizeCatalog(provider) || sizeSku !== "") &&
     ownerPersonId.length > 0 &&
@@ -196,7 +202,15 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
             </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            {provider && supportsRegion(provider) && (
+            {provider && supportsRegion(provider) && lockedRegion && (
+              <div className="flex flex-col gap-1">
+                <Label>Region</Label>
+                <p className="flex h-9 items-center text-sm text-muted-foreground">
+                  {lockedRegion} <span className="ml-1">(fixed for this deployment)</span>
+                </p>
+              </div>
+            )}
+            {provider && supportsRegion(provider) && !lockedRegion && (
               <div className="flex flex-col gap-1">
                 <Label htmlFor="add-machine-region">Region</Label>
                 <Select value={region} onValueChange={setRegion}>

@@ -2,6 +2,7 @@ import { machinePackages, machines } from "@cloudable/schema";
 import { and, asc, eq, gt, or } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { ulid } from "ulid";
+import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { type EffectiveLoggingTier, getEffectiveLoggingTier } from "../../logging/settings";
 import { EventBus } from "../../services/EventBus";
@@ -273,22 +274,38 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
 
         let region: string | null;
         if (input.provider === "azure") {
-          if (trimmedRegion.length === 0) {
-            return yield* invalid('"region" is required for provider "azure"');
-          }
-          const regionEnabled = yield* isCatalogEntryEnabled(
-            input.orgId,
-            "azure",
-            "region",
-            trimmedRegion,
-          ).pipe(
-            Effect.provideService(Db, db),
-            Effect.mapError(
-              (cause) => new MachineServiceError({ reason: "catalog_read_failed", cause }),
-            ),
-          );
-          if (!regionEnabled) {
-            return yield* invalid(`region "${trimmedRegion}" is not enabled for this org`);
+          const lockedRegion = config.azureMachinesLocation;
+          if (lockedRegion) {
+            // Deployment config is authoritative — ignore whatever the
+            // client sent (or didn't), independent of the org's catalog
+            // state. This is the actual fix, not the catalog check below:
+            // a self-hosted deployment has exactly one region its machines
+            // vnet/subnet live in, but the catalog's "enabled regions" list
+            // is admin-editable and can drift out of sync with that (seen
+            // live — an org had a since-abandoned region checked while the
+            // real one wasn't, producing a machine `InvalidResourceReference`
+            // could never succeed against: a NIC can't join a subnet outside
+            // its own region).
+            region = lockedRegion;
+          } else {
+            if (trimmedRegion.length === 0) {
+              return yield* invalid('"region" is required for provider "azure"');
+            }
+            const regionEnabled = yield* isCatalogEntryEnabled(
+              input.orgId,
+              "azure",
+              "region",
+              trimmedRegion,
+            ).pipe(
+              Effect.provideService(Db, db),
+              Effect.mapError(
+                (cause) => new MachineServiceError({ reason: "catalog_read_failed", cause }),
+              ),
+            );
+            if (!regionEnabled) {
+              return yield* invalid(`region "${trimmedRegion}" is not enabled for this org`);
+            }
+            region = trimmedRegion;
           }
           const imageEnabled = yield* isCatalogEntryEnabled(
             input.orgId,
@@ -318,7 +335,6 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           if (!sizeSkuEnabled) {
             return yield* invalid(`size "${input.sizeSku}" is not enabled for this org`);
           }
-          region = trimmedRegion;
         } else {
           if (trimmedRegion.length > 0) {
             return yield* invalid(`provider "${input.provider}" has no region — omit it`);

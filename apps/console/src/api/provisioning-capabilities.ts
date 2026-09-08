@@ -11,7 +11,16 @@ import { apiGet } from "@/lib/api-client";
  * even offered.
  */
 export interface ProvisioningCapabilities {
-  azure: { available: boolean; subscriptionId: string | null; resourceGroup: string | null };
+  azure: {
+    available: boolean;
+    subscriptionId: string | null;
+    resourceGroup: string | null;
+    /** Mirrors `AZURE_MACHINES_LOCATION` on the control plane — when set, this
+     * is the only region this deployment can ever provision into. Drives
+     * hiding the region picker (Add Machine dialog) and the region checklist
+     * (Integrations page) in favor of a fixed, non-configurable value. */
+    lockedRegion: string | null;
+  };
   docker: { available: boolean };
   fake: { available: boolean };
 }
