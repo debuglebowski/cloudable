@@ -17,6 +17,9 @@ const CatalogItem = Schema.Struct({
   code: Schema.String,
   displayName: Schema.String,
   enabled: Schema.Boolean,
+  /** Only meaningful for kind "sku" — null for regions/images. */
+  vcpus: Schema.NullOr(Schema.Number),
+  memoryGb: Schema.NullOr(Schema.Number),
 });
 
 const CatalogPath = Schema.Struct({ provider: CatalogProvider, kind: CatalogKind });

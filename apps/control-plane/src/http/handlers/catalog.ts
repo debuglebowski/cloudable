@@ -44,13 +44,27 @@ export const CatalogLive = HttpApiBuilder.group(Api, "catalog", (handlers) =>
     .handle("syncRegions", () =>
       Effect.gen(function* () {
         const entries = yield* syncAzureRegions();
-        return { items: entries.map((entry) => ({ ...entry, enabled: false })) };
+        return {
+          items: entries.map((entry) => ({
+            ...entry,
+            enabled: false,
+            vcpus: entry.vcpus ?? null,
+            memoryGb: entry.memoryGb ?? null,
+          })),
+        };
       }).pipe(Effect.catchTag("CloudCatalogError", (e) => Effect.die(e))),
     )
     .handle("syncSizes", () =>
       Effect.gen(function* () {
         const entries = yield* syncAzureSizes();
-        return { items: entries.map((entry) => ({ ...entry, enabled: false })) };
+        return {
+          items: entries.map((entry) => ({
+            ...entry,
+            enabled: false,
+            vcpus: entry.vcpus ?? null,
+            memoryGb: entry.memoryGb ?? null,
+          })),
+        };
       }).pipe(Effect.catchTag("CloudCatalogError", (e) => Effect.die(e))),
     ),
 );

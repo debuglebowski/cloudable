@@ -57,8 +57,20 @@ export function CatalogChecklist({
   const sync = kind === "region" ? regionSync : sizeSync;
   const hasEnabled = catalogQuery.data?.some((entry) => entry.enabled) ?? false;
   const [search, setSearch] = useState("");
-  const filtered = catalogQuery.data?.filter((entry) =>
-    entry.displayName.toLowerCase().includes(search.toLowerCase()),
+  // Only meaningful for kind "sku" — the size catalog is ~1,200 entries in a
+  // real region and a text search alone doesn't scale to "find me something
+  // with at least 4 vCPUs." Deliberately just a floor filter, not a curated
+  // shortlist: which sizes are relevant is the org admin's call, not
+  // something this deployment decides for them.
+  const [minVcpus, setMinVcpus] = useState("");
+  const [minMemoryGb, setMinMemoryGb] = useState("");
+  const minVcpusNum = minVcpus ? Number(minVcpus) : null;
+  const minMemoryGbNum = minMemoryGb ? Number(minMemoryGb) : null;
+  const filtered = catalogQuery.data?.filter(
+    (entry) =>
+      entry.displayName.toLowerCase().includes(search.toLowerCase()) &&
+      (minVcpusNum === null || (entry.vcpus ?? 0) >= minVcpusNum) &&
+      (minMemoryGbNum === null || (entry.memoryGb ?? 0) >= minMemoryGbNum),
   );
 
   const regionIsLocked = kind === "region" && Boolean(lockedRegion);
@@ -113,6 +125,26 @@ export function CatalogChecklist({
             placeholder={`Search ${title.toLowerCase()}…`}
             className="h-7 text-xs"
           />
+          {kind === "sku" && (
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                min={0}
+                value={minVcpus}
+                onChange={(event) => setMinVcpus(event.target.value)}
+                placeholder="Min vCPUs"
+                className="h-7 text-xs"
+              />
+              <Input
+                type="number"
+                min={0}
+                value={minMemoryGb}
+                onChange={(event) => setMinMemoryGb(event.target.value)}
+                placeholder="Min RAM (GB)"
+                className="h-7 text-xs"
+              />
+            </div>
+          )}
           {filtered?.length === 0 && (
             <p className="text-xs text-muted-foreground">No matches for “{search}”.</p>
           )}
