@@ -131,9 +131,20 @@ const getSubscriptionClient = (): Effect.Effect<
 
 /** Real Azure SDK call — `SubscriptionClient.subscriptions.listLocations()`
  * enumerates every region the configured subscription can provision into.
- * Upserts into `providerCatalogEntries`; never removes a previously-synced
- * region that Azure stops listing (an org that already enabled it keeps its
- * choice — pure additive sync, no destructive reconciliation here). */
+ * Filtered to `config.azureMachinesLocation` when set, same reasoning as
+ * `syncAzureSizes` below: self-hosted mode has exactly one usable region —
+ * wherever the machines vnet/subnet actually live — so offering the rest of
+ * Azure's ~60 regions here isn't a convenience, it's a trap. Enabling any
+ * other region in an org's catalog produces machines that are guaranteed to
+ * fail provisioning (a NIC can't join a subnet outside its own region — seen
+ * live: `InvalidResourceReference` on a machine created against a region the
+ * vnet doesn't exist in). Falls back to the unfiltered, every-region list
+ * only when the location isn't known (e.g. an older deploy that hasn't
+ * picked up `AZURE_MACHINES_LOCATION` yet), matching `syncAzureSizes`'s own
+ * fallback. Upserts into `providerCatalogEntries`; never removes a
+ * previously-synced region that Azure stops listing (an org that already
+ * enabled it keeps its choice — pure additive sync, no destructive
+ * reconciliation here). */
 export const syncAzureRegions = (): Effect.Effect<
   ReadonlyArray<CatalogEntry>,
   CloudCatalogError | AzureNotConfiguredError,
@@ -141,11 +152,12 @@ export const syncAzureRegions = (): Effect.Effect<
 > =>
   Effect.gen(function* () {
     const { client, subscriptionId } = yield* getSubscriptionClient();
+    const location = config.azureMachinesLocation;
     const locations = yield* Effect.tryPromise({
       try: async () => {
         const results = [];
-        for await (const location of client.subscriptions.listLocations(subscriptionId)) {
-          results.push(location);
+        for await (const loc of client.subscriptions.listLocations(subscriptionId)) {
+          results.push(loc);
         }
         return results;
       },
@@ -153,10 +165,11 @@ export const syncAzureRegions = (): Effect.Effect<
     });
 
     const entries: CatalogEntry[] = locations
-      .filter((location): location is typeof location & { name: string } => Boolean(location.name))
-      .map((location) => ({
-        code: location.name,
-        displayName: location.displayName ?? location.name,
+      .filter((loc): loc is typeof loc & { name: string } => Boolean(loc.name))
+      .filter((loc) => !location || loc.name === location)
+      .map((loc) => ({
+        code: loc.name,
+        displayName: loc.displayName ?? loc.name,
       }));
 
     yield* upsertEntries("azure", "region", entries);
