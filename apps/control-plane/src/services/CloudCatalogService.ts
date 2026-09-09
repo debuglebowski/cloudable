@@ -9,7 +9,7 @@ import { ComputeManagementClient } from "@azure/arm-compute";
 import { SubscriptionClient } from "@azure/arm-subscriptions";
 import { DefaultAzureCredential } from "@azure/identity";
 import { providerCatalogEntries } from "@cloudable/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import { Data, Effect, Schema } from "effect";
 import { ulid } from "ulid";
 import { config } from "../config";
@@ -46,6 +46,21 @@ const notConfiguredError = () =>
       code: "azure_not_configured",
       message:
         "This deployment has no AZURE_SUBSCRIPTION_ID configured — there's no Azure subscription to sync a catalog from.",
+      requestId: ulid(),
+    },
+  });
+
+/** Same tagged error, different actionable message — reused rather than a new error
+ * type so the HTTP layer's existing `.addError(AzureNotConfiguredError, {status: 409})`
+ * on the sync endpoints (`http/routes/catalog.ts`) needs no new wiring. See
+ * `syncAzureSizes`'s own doc comment for why this is a hard failure now, not a slow
+ * fallback. */
+const locationNotConfiguredError = () =>
+  new AzureNotConfiguredError({
+    error: {
+      code: "azure_not_configured",
+      message:
+        "This deployment has no AZURE_MACHINES_LOCATION configured — refusing to sync sizes without one rather than falling back to an unfiltered, subscription-wide call (confirmed to take 80s+ against a real subscription). Every Terraform-provisioned deployment sets this automatically from its resource group's location; a manually-maintained local .env needs it added by hand.",
       requestId: ulid(),
     },
   });
@@ -118,6 +133,32 @@ export const upsertEntries = (
                 },
               });
           }
+
+          // Prune anything for this exact (provider, kind) that this sync no longer
+          // returned — a real two-way sync, not additive-only. Without this, a SKU
+          // that stops matching today's filters (retired, region changed, no longer
+          // Gen2/offered-architecture — see syncAzureSizes) keeps its old row
+          // forever: null vcpus/memoryGb/architecture from before those columns
+          // existed, or just genuinely stale, but still fully selectable in the Add
+          // Machine wizard (computeCompatibility treats a null architecture as
+          // "always compatible", so a stale row is indistinguishable from a real one
+          // except for its blank spec columns). Guarded on entries.length > 0: an
+          // empty result more likely means a transient Azure/auth hiccup than "zero
+          // sizes actually exist" — better to leave stale data in place than wipe an
+          // entire kind because one sync call came back empty. Scoped to this exact
+          // (provider, kind) — a sku sync never touches region/image rows.
+          if (entries.length > 0) {
+            await tx.delete(providerCatalogEntries).where(
+              and(
+                eq(providerCatalogEntries.provider, provider),
+                eq(providerCatalogEntries.kind, kind),
+                notInArray(
+                  providerCatalogEntries.code,
+                  entries.map((entry) => entry.code),
+                ),
+              ),
+            );
+          }
         }),
       catch: (cause) => new CloudCatalogError({ reason: "upsert_failed", cause }),
     });
@@ -148,20 +189,22 @@ const getSubscriptionClient = (): Effect.Effect<
 
 /** Real Azure SDK call — `SubscriptionClient.subscriptions.listLocations()`
  * enumerates every region the configured subscription can provision into.
- * Filtered to `config.azureMachinesLocation` when set, same reasoning as
- * `syncAzureSizes` below: self-hosted mode has exactly one usable region —
- * wherever the machines vnet/subnet actually live — so offering the rest of
- * Azure's ~60 regions here isn't a convenience, it's a trap. Enabling any
- * other region in an org's catalog produces machines that are guaranteed to
- * fail provisioning (a NIC can't join a subnet outside its own region — seen
- * live: `InvalidResourceReference` on a machine created against a region the
- * vnet doesn't exist in). Falls back to the unfiltered, every-region list
- * only when the location isn't known (e.g. an older deploy that hasn't
- * picked up `AZURE_MACHINES_LOCATION` yet), matching `syncAzureSizes`'s own
- * fallback. Upserts into `providerCatalogEntries`; never removes a
- * previously-synced region that Azure stops listing (an org that already
- * enabled it keeps its choice — pure additive sync, no destructive
- * reconciliation here). */
+ * Filtered client-side to `config.azureMachinesLocation` when set (unlike
+ * `syncAzureSizes`'s server-side OData filter, `listLocations()` has no such
+ * parameter — the call itself is always the same cheap ~60-region list, so
+ * this filter is about correctness, not the latency `syncAzureSizes` had to
+ * fix): self-hosted mode has exactly one usable region — wherever the
+ * machines vnet/subnet actually live — so offering the rest of Azure's ~60
+ * regions here isn't a convenience, it's a trap. Enabling any other region in
+ * an org's catalog produces machines that are guaranteed to fail provisioning
+ * (a NIC can't join a subnet outside its own region — seen live:
+ * `InvalidResourceReference` on a machine created against a region the vnet
+ * doesn't exist in). Falls back to the unfiltered, every-region list only
+ * when the location isn't known (e.g. an older deploy that hasn't picked up
+ * `AZURE_MACHINES_LOCATION` yet) — kept here since, unlike sizes, there's no
+ * slow path to fail fast against. `upsertEntries` prunes any previously-
+ * synced region this call doesn't return, same as sizes/images — no
+ * region-specific exception. */
 export const syncAzureRegions = (): Effect.Effect<
   ReadonlyArray<CatalogEntry>,
   CloudCatalogError | AzureNotConfiguredError,
@@ -314,18 +357,28 @@ export const isOfferedArchitecture = (architecture: string | undefined): boolean
  * subscription; filtered to `resourceType === "virtualMachines"` for just
  * the VM sizes a machine's `sizeSku` actually names.
  *
- * Filtered server-side to `config.azureMachinesLocation` when set (the one
- * region `AZURE_MACHINES_SUBNET_ID` actually lives in — self-hosted mode
- * has no other usable region, since machines always join that one fixed
- * subnet). This is a real, load-bearing fix, not an optimization: called
- * unfiltered against a real subscription, this API took over two minutes
- * (tens of thousands of raw per-region SKU records) — long enough that the
- * request got killed mid-flight and the container along with it. Filtered
- * to one region, a few seconds. Falls back to the slow, unfiltered,
- * subscription-wide call only when the location isn't known (e.g. an older
- * deploy that hasn't picked up `AZURE_MACHINES_LOCATION` yet). Same
- * additive-only upsert as regions — never removes a previously-synced size
- * Azure stops listing. */
+ * Always filtered server-side to `config.azureMachinesLocation` (the one
+ * region `AZURE_MACHINES_SUBNET_ID` actually lives in — self-hosted mode has
+ * no other usable region, since machines always join that one fixed subnet;
+ * `lockedRegion` in `provisioning-capabilities.ts` is this exact same value,
+ * so the wizard's own "region chosen first" ordering and this sync are
+ * already talking about the one region a deployment has). This used to fall
+ * back to an unfiltered, subscription-wide call when the location wasn't
+ * set — real, load-bearing difference, not an optimization: unfiltered
+ * against a real subscription this API took 80-90s+ (confirmed live; tens of
+ * thousands of raw per-region SKU records across every Azure region, versus
+ * a few seconds for one). That fallback is gone: every Terraform-provisioned
+ * deployment sets `AZURE_MACHINES_LOCATION` automatically (from the resource
+ * group's own location, `infra/terraform/control-plane/main.tf`), so a
+ * missing location only ever means local dev's hand-maintained `.env` is
+ * incomplete — worth failing fast and telling the operator that, not quietly
+ * eating a minute-plus ARM call as if it were expected. `upsertEntries` prunes
+ * any previously-synced size this call doesn't return (a real sync, not an
+ * additive-only one) — see its own doc comment for why that matters here
+ * specifically: a size whose architecture/generation/retirement status
+ * changes, or one synced before `vcpus`/`memoryGb`/`architecture` existed as
+ * columns, used to linger forever with blank spec data instead of either
+ * having real data or not being offered at all. */
 export const syncAzureSizes = (): Effect.Effect<
   ReadonlyArray<CatalogEntry>,
   CloudCatalogError | AzureNotConfiguredError,
@@ -334,10 +387,13 @@ export const syncAzureSizes = (): Effect.Effect<
   Effect.gen(function* () {
     const { client } = yield* getComputeClient();
     const location = config.azureMachinesLocation;
+    if (!location) {
+      return yield* Effect.fail(locationNotConfiguredError());
+    }
     const skus = yield* Effect.tryPromise({
       try: async () => {
         const results = [];
-        const options = location ? { filter: `location eq '${location}'` } : undefined;
+        const options = { filter: `location eq '${location}'` };
         for await (const sku of client.resourceSkus.list(options)) {
           results.push(sku);
         }

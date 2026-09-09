@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import net from "node:net";
 import { providerCatalogEntries } from "@cloudable/schema";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../db/layer";
 import { connectAndMigrate } from "../test-support/db";
+import type { CatalogKind } from "./CloudCatalogService";
 import {
   isGen2Capable,
   isOfferedArchitecture,
@@ -99,7 +100,19 @@ const postgresReachable = await isReachable(hostname, Number(port) || 5432, 2000
 describe.skipIf(!postgresReachable)("upsertEntries (requires Postgres at DATABASE_URL)", () => {
   let close: () => Promise<void>;
   let db: Awaited<ReturnType<typeof connectAndMigrate>>["db"];
-  const testCode = "__test_fractional_memory_sku__";
+
+  // `upsertEntries` now prunes anything for the (provider, kind) it's called with that
+  // isn't in the entries it was just given (see its own doc comment) — correct for its
+  // three real callers, which always pass the complete current set for that kind, but a
+  // real hazard for a test calling it directly with a small fixture list: this dev box's
+  // shared Postgres (this file's own "Real Postgres, not a fake" comment above) can hold
+  // 1000+ real synced `sku` rows at the same DATABASE_URL these tests run against, and a
+  // fixture list that doesn't include them all would prune every one of them. Each test
+  // below gets its OWN fake `kind` (never one of the real "region"/"image"/"sku", and
+  // never shared between tests) so a prune can only ever affect that one test's own
+  // rows — regardless of execution order, and safe even if these ever ran concurrently.
+  // `as CatalogKind` is a test-only escape hatch past the production type, which
+  // deliberately only allows the real three.
 
   beforeAll(async () => {
     const conn = await connectAndMigrate(databaseUrl);
@@ -109,21 +122,80 @@ describe.skipIf(!postgresReachable)("upsertEntries (requires Postgres at DATABAS
 
   afterAll(async () => {
     if (!close) return;
-    await db.delete(providerCatalogEntries).where(eq(providerCatalogEntries.code, testCode));
+    await db
+      .delete(providerCatalogEntries)
+      .where(
+        inArray(providerCatalogEntries.kind, [
+          "__test_kind_fractional__",
+          "__test_kind_prune__",
+          "__test_kind_prune_empty__",
+        ] as unknown as CatalogKind[]),
+      );
     await close();
   });
 
   test("a fractional memoryGb (real Azure data, e.g. Standard_B1ls's 0.5 GB) round-trips without throwing", async () => {
+    const kind = "__test_kind_fractional__" as CatalogKind;
+    const code = "__test_fractional_memory_sku__";
     await Effect.runPromise(
-      upsertEntries("azure", "sku", [
-        { code: testCode, displayName: "test (0.5 GB RAM)", vcpus: 1, memoryGb: 0.5 },
+      upsertEntries("azure", kind, [
+        { code, displayName: "test (0.5 GB RAM)", vcpus: 1, memoryGb: 0.5 },
       ]).pipe(Effect.provideService(Db, db)),
     );
 
     const [row] = await db
       .select({ memoryGb: providerCatalogEntries.memoryGb })
       .from(providerCatalogEntries)
-      .where(eq(providerCatalogEntries.code, testCode));
+      .where(eq(providerCatalogEntries.code, code));
     expect(row?.memoryGb).toBe(0.5);
+  });
+
+  // The regression this guards: a size that stops matching a sync's filters (retired,
+  // architecture no longer offered, or just synced under an older, less-strict version
+  // of this filter) used to keep its row forever — null vcpus/memoryGb/architecture,
+  // but still fully selectable in the Add Machine wizard. Confirmed live against a real
+  // subscription: 1434 stored sku rows, only 1056 actually returned by a real sync.
+  test("a subsequent sync prunes a code the new sync no longer returns", async () => {
+    const kind = "__test_kind_prune__" as CatalogKind;
+    const kept = "__test_prune_kept__";
+    const stale = "__test_prune_stale__";
+    await Effect.runPromise(
+      upsertEntries("azure", kind, [
+        { code: kept, displayName: "kept", vcpus: 2, memoryGb: 4, architecture: "x64" },
+        { code: stale, displayName: "stale", vcpus: 2, memoryGb: 4, architecture: "x64" },
+      ]).pipe(Effect.provideService(Db, db)),
+    );
+
+    await Effect.runPromise(
+      upsertEntries("azure", kind, [
+        { code: kept, displayName: "kept", vcpus: 2, memoryGb: 4, architecture: "x64" },
+      ]).pipe(Effect.provideService(Db, db)),
+    );
+
+    const rows = await db
+      .select({ code: providerCatalogEntries.code })
+      .from(providerCatalogEntries)
+      .where(eq(providerCatalogEntries.kind, kind));
+    expect(rows.map((row) => row.code)).toEqual([kept]);
+  });
+
+  // Guards the empty-result safeguard: a transient Azure/auth hiccup returning zero
+  // rows should never be read as "this kind is genuinely empty now" and wipe it.
+  test("an empty sync result leaves existing rows untouched rather than wiping the kind", async () => {
+    const kind = "__test_kind_prune_empty__" as CatalogKind;
+    const code = "__test_prune_untouched__";
+    await Effect.runPromise(
+      upsertEntries("azure", kind, [
+        { code, displayName: "untouched", vcpus: 1, memoryGb: 1 },
+      ]).pipe(Effect.provideService(Db, db)),
+    );
+
+    await Effect.runPromise(upsertEntries("azure", kind, []).pipe(Effect.provideService(Db, db)));
+
+    const [row] = await db
+      .select({ code: providerCatalogEntries.code })
+      .from(providerCatalogEntries)
+      .where(eq(providerCatalogEntries.code, code));
+    expect(row?.code).toBe(code);
   });
 });
