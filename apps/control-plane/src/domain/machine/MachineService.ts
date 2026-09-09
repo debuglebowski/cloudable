@@ -421,31 +421,54 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           machineId: machine.id,
         }).map((entry) => entry.packageName);
 
-        const provisioningOutcome: { state: "running" | "error"; error: string | null } =
-          yield* provisioning
-            .create({
-              machineId: machine.id,
-              orgId: machine.orgId,
-              provider: machine.provider,
-              region: machine.region,
-              sizeSku: machine.sizeSku,
-              image: machine.image,
-              name: machine.name,
-              packages,
-            })
-            .pipe(
-              Effect.map((status) =>
-                status.state === "running"
-                  ? { state: "running" as const, error: null }
-                  : {
-                      state: "error" as const,
-                      error: `provider reported unexpected state "${status.state}" after create`,
-                    },
-              ),
-              Effect.catchTag("ProvisioningError", (error) =>
-                Effect.succeed({ state: "error" as const, error: formatProvisioningError(error) }),
-              ),
-            );
+        // `"provisioning"` is a real, expected outcome here, not an error — the Azure
+        // adapter's create() deliberately returns it (see ProvisioningService.azure.ts):
+        // `beginCreateOrUpdateAndWait` only waits for the ARM deployment to exist, not
+        // for the OS to boot, cloud-init to run, and the agent to attest, so reporting
+        // "running" immediately would be a lie. `machines.state`'s own schema default is
+        // "provisioning" for exactly this reason. Confirmed live: every real Azure
+        // machine creation was landing in "error" with "provider reported unexpected
+        // state 'provisioning' after create" — a false failure on an actually-succeeding
+        // create. docker/fake settle to "running" synchronously in their own create()
+        // (a container starts near-instantly; nothing to wait for), so this branch is
+        // inert for them — this only ever matters for azure.
+        //
+        // Known gap, not fixed here: nothing in this codebase currently promotes a
+        // machine from "provisioning" to "running" afterward — reconcile/loop.ts's
+        // runReconcileLoop exists and is tested but is never invoked from server.ts, and
+        // the agent's own first check-in (agent-protocol.ts's markVerified) only touches
+        // lastVerifiedAt, not state. A real Azure machine will sit at "provisioning"
+        // forever in the console even once it's genuinely running. Out of scope for this
+        // fix (wiring a scheduled reconcile pass, or promoting on first agent check-in,
+        // is a real design decision, not a one-line change) — flagged here so it isn't
+        // mistaken for resolved.
+        const provisioningOutcome: {
+          state: "running" | "provisioning" | "error";
+          error: string | null;
+        } = yield* provisioning
+          .create({
+            machineId: machine.id,
+            orgId: machine.orgId,
+            provider: machine.provider,
+            region: machine.region,
+            sizeSku: machine.sizeSku,
+            image: machine.image,
+            name: machine.name,
+            packages,
+          })
+          .pipe(
+            Effect.map((status) =>
+              status.state === "running" || status.state === "provisioning"
+                ? { state: status.state, error: null }
+                : {
+                    state: "error" as const,
+                    error: `provider reported unexpected state "${status.state}" after create`,
+                  },
+            ),
+            Effect.catchTag("ProvisioningError", (error) =>
+              Effect.succeed({ state: "error" as const, error: formatProvisioningError(error) }),
+            ),
+          );
 
         if (provisioningOutcome.error) {
           yield* publishOrFail([
