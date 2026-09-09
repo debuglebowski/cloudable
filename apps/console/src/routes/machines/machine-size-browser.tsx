@@ -1,4 +1,13 @@
-import { Check, Cpu, Loader2, Search, SlidersHorizontal } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Check,
+  Cpu,
+  Loader2,
+  Search,
+  SlidersHorizontal,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { CatalogItem } from "@/api/provider-catalog";
@@ -41,6 +50,8 @@ const FAMILY_ORDER = [
   "Other",
 ];
 
+type SortColumn = "vcpus" | "memoryGb" | "architecture";
+
 export interface MachineSizeBrowserProps {
   sizes: CatalogItem[];
   isLoading: boolean;
@@ -70,9 +81,16 @@ export function MachineSizeBrowser({
 }: MachineSizeBrowserProps) {
   const [search, setSearch] = useState("");
   const [minVcpus, setMinVcpus] = useState("");
+  const [maxVcpus, setMaxVcpus] = useState("");
   const [minMemoryGb, setMinMemoryGb] = useState("");
+  const [maxMemoryGb, setMaxMemoryGb] = useState("");
   const [family, setFamily] = useState("All");
   const [hideIncompatible, setHideIncompatible] = useState(false);
+  // Display order, not a filter — deliberately left out of clearFilters/
+  // activeFilterCount below (clearing filters shouldn't also reset how you're
+  // looking at what's left) and out of RENDER_CAP's "N sizes match" framing.
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   const families = useMemo(() => {
     const present = new Set(sizes.map((entry) => deriveFamily(entry.code)));
@@ -80,27 +98,113 @@ export function MachineSizeBrowser({
   }, [sizes]);
 
   const minVcpusNum = minVcpus ? Number(minVcpus) : null;
+  const maxVcpusNum = maxVcpus ? Number(maxVcpus) : null;
   const minMemoryGbNum = minMemoryGb ? Number(minMemoryGb) : null;
+  const maxMemoryGbNum = maxMemoryGb ? Number(maxMemoryGb) : null;
 
   const filtered = useMemo(
     () =>
       sizes.filter((entry) => {
         if (!matchesSizeSearch(entry, search)) return false;
         if (minVcpusNum !== null && (entry.vcpus ?? 0) < minVcpusNum) return false;
+        if (maxVcpusNum !== null && (entry.vcpus ?? Number.POSITIVE_INFINITY) > maxVcpusNum) {
+          return false;
+        }
         if (minMemoryGbNum !== null && (entry.memoryGb ?? 0) < minMemoryGbNum) return false;
+        if (
+          maxMemoryGbNum !== null &&
+          (entry.memoryGb ?? Number.POSITIVE_INFINITY) > maxMemoryGbNum
+        ) {
+          return false;
+        }
         if (family !== "All" && deriveFamily(entry.code) !== family) return false;
         if (hideIncompatible && !computeCompatibility(entry, selectedImage).compatible) {
           return false;
         }
         return true;
       }),
-    [sizes, search, minVcpusNum, minMemoryGbNum, family, hideIncompatible, selectedImage],
+    [
+      sizes,
+      search,
+      minVcpusNum,
+      maxVcpusNum,
+      minMemoryGbNum,
+      maxMemoryGbNum,
+      family,
+      hideIncompatible,
+      selectedImage,
+    ],
   );
+
+  // Sorted after filtering, before the RENDER_CAP slice below — sorting a 1000+-row
+  // catalog by vCPU/RAM/architecture is exactly how you'd want to find "the biggest"
+  // or "the smallest" option, and doing it before the cap means the cap follows the
+  // sort (e.g. sorted by vCPU descending, "showing 200" means the 200 largest, not an
+  // arbitrary 200 that then happen to get sorted). Missing data (null vcpus/memoryGb/
+  // architecture) always sorts last regardless of direction — there's nothing to rank
+  // it against, "unknown" isn't meaningfully smallest or largest.
+  const sorted = useMemo(() => {
+    if (!sortColumn) return filtered;
+    const dir = sortDirection === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      if (sortColumn === "architecture") {
+        if (a.architecture == null && b.architecture == null) return 0;
+        if (a.architecture == null) return 1;
+        if (b.architecture == null) return -1;
+        return dir * a.architecture.localeCompare(b.architecture);
+      }
+      const av = a[sortColumn];
+      const bv = b[sortColumn];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return dir * (av - bv);
+    });
+  }, [filtered, sortColumn, sortDirection]);
+
+  function toggleSort(column: SortColumn) {
+    if (sortColumn === column) {
+      setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+    } else {
+      setSortColumn(column);
+      setSortDirection("asc");
+    }
+  }
+
+  // A plain function returning JSX, not a `<SortHeader />` component — avoids React
+  // treating each call as a fresh component type across renders (which would remount
+  // rather than update), for what's otherwise just three near-identical header cells.
+  function renderSortHeader(column: SortColumn, label: string) {
+    const active = sortColumn === column;
+    return (
+      <button
+        type="button"
+        onClick={() => toggleSort(column)}
+        className={cn(
+          "flex items-center gap-0.5 text-left hover:text-foreground",
+          active && "font-medium text-foreground",
+        )}
+      >
+        {label}
+        {active ? (
+          sortDirection === "asc" ? (
+            <ArrowUp className="size-3" />
+          ) : (
+            <ArrowDown className="size-3" />
+          )
+        ) : (
+          <ArrowUpDown className="size-3 opacity-30" />
+        )}
+      </button>
+    );
+  }
 
   function clearFilters() {
     setSearch("");
     setMinVcpus("");
+    setMaxVcpus("");
     setMinMemoryGb("");
+    setMaxMemoryGb("");
     setFamily("All");
     setHideIncompatible(false);
   }
@@ -130,11 +234,13 @@ export function MachineSizeBrowser({
     );
   }
 
-  const visible = filtered.slice(0, RENDER_CAP);
+  const visible = sorted.slice(0, RENDER_CAP);
   const activeFilterCount =
     (family !== "All" ? 1 : 0) +
     (minVcpusNum !== null ? 1 : 0) +
+    (maxVcpusNum !== null ? 1 : 0) +
     (minMemoryGbNum !== null ? 1 : 0) +
+    (maxMemoryGbNum !== null ? 1 : 0) +
     (hideIncompatible ? 1 : 0);
   // Same "Showing N of M" info the render cap already needs to disclose (see
   // RENDER_CAP's own comment) — surfaced once, next to the section label, instead
@@ -212,27 +318,53 @@ export function MachineSizeBrowser({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="min-vcpus">Min vCPUs</Label>
-                <Input
-                  id="min-vcpus"
-                  type="number"
-                  min={0}
-                  value={minVcpus}
-                  onChange={(event) => setMinVcpus(event.target.value)}
-                  placeholder="Any"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="min-vcpus">Min vCPUs</Label>
+                  <Input
+                    id="min-vcpus"
+                    type="number"
+                    min={0}
+                    value={minVcpus}
+                    onChange={(event) => setMinVcpus(event.target.value)}
+                    placeholder="Any"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="max-vcpus">Max vCPUs</Label>
+                  <Input
+                    id="max-vcpus"
+                    type="number"
+                    min={0}
+                    value={maxVcpus}
+                    onChange={(event) => setMaxVcpus(event.target.value)}
+                    placeholder="Any"
+                  />
+                </div>
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="min-ram">Min RAM (GB)</Label>
-                <Input
-                  id="min-ram"
-                  type="number"
-                  min={0}
-                  value={minMemoryGb}
-                  onChange={(event) => setMinMemoryGb(event.target.value)}
-                  placeholder="Any"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="min-ram">Min RAM (GB)</Label>
+                  <Input
+                    id="min-ram"
+                    type="number"
+                    min={0}
+                    value={minMemoryGb}
+                    onChange={(event) => setMinMemoryGb(event.target.value)}
+                    placeholder="Any"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="max-ram">Max RAM (GB)</Label>
+                  <Input
+                    id="max-ram"
+                    type="number"
+                    min={0}
+                    value={maxMemoryGb}
+                    onChange={(event) => setMaxMemoryGb(event.target.value)}
+                    placeholder="Any"
+                  />
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -275,15 +407,18 @@ export function MachineSizeBrowser({
           instead of double-rounding. */}
       <div className="overflow-hidden rounded-md border">
         <div
-          className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-xs uppercase tracking-wide text-muted-foreground"
-          aria-hidden="true"
+          className={cn(
+            "flex items-center gap-2 border-b bg-muted/40 px-3 py-2 text-xs uppercase tracking-wide text-muted-foreground",
+            isSyncing && "pointer-events-none opacity-60",
+          )}
+          aria-disabled={isSyncing || undefined}
         >
-          <span className="size-4 shrink-0" />
+          <span className="size-4 shrink-0" aria-hidden="true" />
           <div className="grid flex-1 grid-cols-[1fr_5rem_5rem_7rem] gap-2">
             <span>Size</span>
-            <span>vCPU</span>
-            <span>RAM</span>
-            <span>Architecture</span>
+            {renderSortHeader("vcpus", "vCPU")}
+            {renderSortHeader("memoryGb", "RAM")}
+            {renderSortHeader("architecture", "Architecture")}
           </div>
         </div>
 
