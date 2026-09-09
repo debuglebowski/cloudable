@@ -113,7 +113,7 @@ export function IntegrationsPage() {
               <IntegrationCard
                 title="Microsoft Entra ID"
                 icon={MicrosoftLogo}
-                description="SCIM 2.0 + OIDC against your Entra tenant. Optional — without one, People stays Cloudable's fully editable system of record."
+                description="SCIM 2.0 + SAML against your Entra tenant. Optional — without one, People stays Cloudable's fully editable system of record."
                 integration={idp}
                 connectForm={<IdpConnectDialog />}
                 onDisconnect={handleDisconnect}

@@ -11,7 +11,8 @@ export class ApiError extends Error {
 }
 
 // No auth header by default — used by flows that aren't session-scoped
-// (`cloudable login`'s dev-mode SSH-certificate issuance).
+// (`cloudable login`'s SSH-certificate issuance, which authenticates via a
+// one-shot signed `code` in the request body instead — see `login.ts`).
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${config.apiUrl}${path}`, {
     ...init,

@@ -133,15 +133,30 @@ describe.skipIf(!postgresReachable)(
       expect(account).toBeTruthy();
     });
 
-    test("does nothing when email or password is unset", async () => {
+    test("does nothing when the email is unset, whatever the password", async () => {
       const email = `bootstrap-unset-${crypto.randomUUID()}@example.com`;
 
       await bootstrapDefaultAdmin(undefined, PASSWORD);
-      await bootstrapDefaultAdmin(email, undefined);
       await bootstrapDefaultAdmin(undefined, undefined);
 
       const personRows = await db.select().from(people).where(eq(people.email, email));
       expect(personRows).toHaveLength(0);
+    });
+
+    // The email-set/password-unset case is NOT a no-op any more: a
+    // deployment that only supplies an email gets a generated one-time
+    // password, printed once by `bootstrapDefaultAdmin` itself, so no
+    // standing admin credential has to live in its config.
+    test("generates a password when only the email is set", async () => {
+      const email = `bootstrap-generated-${crypto.randomUUID()}@example.com`;
+      createdEmails.push(email);
+
+      await bootstrapDefaultAdmin(email, undefined);
+
+      const personRows = await db.select().from(people).where(eq(people.email, email));
+      expect(personRows).toHaveLength(1);
+      const [account] = await db.select().from(authUser).where(eq(authUser.email, email)).limit(1);
+      expect(account).toBeTruthy();
     });
   },
 );

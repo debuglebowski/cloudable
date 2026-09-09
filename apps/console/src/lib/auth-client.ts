@@ -82,3 +82,24 @@ export async function getSession(): Promise<AuthSession | null> {
   }
   return (await res.json()) as AuthSession | null;
 }
+
+/**
+ * Starts a SAML sign-in — unlike `signInEmail`, this doesn't complete the
+ * login itself. It only asks BetterAuth's `@better-auth/sso` plugin (`apps/
+ * control-plane/src/auth.ts`) for the IdP redirect URL; the caller (`login-
+ * page.tsx`) does `window.location.href = url` to actually leave the page —
+ * a real SP-initiated SAML flow needs a full navigation, not a fetch.
+ */
+export async function signInSso(providerId: string, callbackURL: string): Promise<string> {
+  const res = await fetch(`${BASE_URL}/api/auth/sign-in/sso`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId, callbackURL }),
+  });
+  if (!res.ok) {
+    throw new AuthError(res.status, await extractErrorMessage(res));
+  }
+  const body = (await res.json()) as { url: string };
+  return body.url;
+}

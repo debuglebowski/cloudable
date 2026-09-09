@@ -15,7 +15,9 @@ import { AccessLive } from "../src/http/handlers/access";
 import { AgentProtocolLive } from "../src/http/handlers/agent-protocol";
 import { ApprovalsLive } from "../src/http/handlers/approvals";
 import { ArchiveLive } from "../src/http/handlers/archive";
+import { AuthSsoStatusLive } from "../src/http/handlers/auth-sso-status";
 import { CatalogLive } from "../src/http/handlers/catalog";
+import { CliAuthLive } from "../src/http/handlers/cli-auth";
 import { ComplianceLive } from "../src/http/handlers/compliance";
 import { ConfigLive } from "../src/http/handlers/config";
 import { ElevationsLive } from "../src/http/handlers/elevations";
@@ -121,6 +123,8 @@ describe("agent-protocol handlers (integration)", () => {
           RestartLive,
           CatalogLive,
           ProvisioningCapabilitiesLive,
+          AuthSsoStatusLive,
+          CliAuthLive,
         ),
       ),
     );

@@ -32,12 +32,22 @@ const ConnectIntegrationPayload = Schema.Struct({
 
 const IntegrationIdPath = Schema.Struct({ id: Schema.String });
 
+// `kind: "idp"` connects only, when the supplied SAML federation metadata
+// URL turns out unreachable or not actually SAML metadata — see
+// `services/IdpSsoService.ts`. Not reused from `access.ts`: no shared error
+// schema module exists in this codebase (each route file declares its own).
+export const BadRequestError = Schema.Struct({
+  code: Schema.Literal("bad_request"),
+  message: Schema.String,
+});
+
 export const IntegrationsGroup = HttpApiGroup.make("integrations")
   .add(HttpApiEndpoint.get("list", "/api/v1/integrations").addSuccess(ListIntegrationsResponse))
   .add(
     HttpApiEndpoint.post("connect", "/api/v1/integrations")
       .setPayload(ConnectIntegrationPayload)
-      .addSuccess(Integration, { status: 201 }),
+      .addSuccess(Integration, { status: 201 })
+      .addError(BadRequestError, { status: 400 }),
   )
   .add(
     HttpApiEndpoint.post("disconnect", "/api/v1/integrations/:id/disconnect")

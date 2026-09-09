@@ -8,15 +8,21 @@
 // (`revoke`/`end` take `{ certificateId | sessionId, ... }`) rather than
 // `/:id` segments — a deliberate simplification for this build.
 //
-// `issueCertificate`/`listCertificates`/`revokeCertificate`/`endSession`/
-// `listSessions` still take `orgId`/`personId` explicitly rather than via
-// `CurrentUserAuthentication`: `issueCertificate` is `cloudable login`'s CLI
-// flow (`apps/cli/src/login.ts`), which has no browser session to carry at
-// all — no real IdP exists yet, so it takes `--dev-person-id`/`--org-id`
-// flags by design (see that file's own header comment); the other four
-// aren't part of this — they just haven't needed migrating (`endSession`/
-// `listSessions` don't gate on `personId` at all, and both scripts in this
-// build share one fixed `orgId`, so that value is never actually wrong).
+// `issueCertificate` no longer takes `orgId`/`personId` on the wire — real
+// identity now exists (SAML SSO, see `../../auth.ts`/`services/
+// IdpSsoService.ts`), but `cloudable login`'s CLI process still has no
+// browser session to carry (see `apps/cli/src/login.ts`'s header comment).
+// It instead takes `code`: a short-lived signed token
+// (`services/CliAuthCode.ts`) minted by the console's session-gated
+// `POST /api/v1/cli-auth/code` and handed to the CLI over a local redirect,
+// carrying `{ personId, orgId }` the handler verifies instead of trusting.
+//
+// `listCertificates`/`revokeCertificate`/`endSession`/`listSessions` still
+// take `orgId`/`personId` explicitly rather than via
+// `CurrentUserAuthentication` — they just haven't needed migrating yet
+// (`endSession`/`listSessions` don't gate on `personId` at all, and both
+// scripts in this build share one fixed `orgId`, so that value is never
+// actually wrong).
 //
 // `mintSession` IS `CurrentUserAuthentication`-gated (below): unlike the
 // above, an attacker-supplied `personId` there is a real access-control
@@ -54,8 +60,7 @@ export const InternalError = Schema.Struct({
 });
 
 const IssueCertificateRequest = Schema.Struct({
-  orgId: Schema.String,
-  personId: Schema.String,
+  code: Schema.String,
   osUser: Schema.String,
   machineScope: MachineScope,
   publicKeyBase64: Schema.String,

@@ -16,7 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-/** Connect form for Microsoft Entra ID — SCIM 2.0 + OIDC discovery, never a client secret.
+/** Connect form for Microsoft Entra ID — SCIM 2.0 + SAML federation, never a client secret.
  * Fieldless on provider (there's only one) — just the tenant's own federation metadata URL. */
 export function IdpConnectDialog() {
   const [open, setOpen] = useState(false);
@@ -50,7 +50,7 @@ export function IdpConnectDialog() {
         <DialogHeader>
           <DialogTitle>Connect Microsoft Entra ID</DialogTitle>
           <DialogDescription>
-            SCIM 2.0 + OIDC against your Entra tenant. Optional — Cloudable never asks for a client
+            SCIM 2.0 + SAML against your Entra tenant. Optional — Cloudable never asks for a client
             secret here; federate it on Entra's own side.
           </DialogDescription>
         </DialogHeader>

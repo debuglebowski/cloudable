@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { type AuthUser, getSession, signInEmail, signOut } from "@/lib/auth-client";
+import { apiGet } from "@/lib/api-client";
+import { type AuthUser, getSession, signInEmail, signInSso, signOut } from "@/lib/auth-client";
 
 /**
  * Session state for the whole console — `root.tsx`'s route guard and the
@@ -42,6 +43,23 @@ export function useSignInMutation() {
       // immediately.
       queryClient.invalidateQueries({ queryKey: authKeys.session });
     },
+  });
+}
+
+/** Unauthenticated — read before any session exists, to decide whether `/login` shows a "Sign in with SSO" button at all. */
+export function useSsoProviderQuery() {
+  return useQuery({
+    queryKey: ["auth", "sso-provider"] as const,
+    queryFn: () =>
+      apiGet<{ available: boolean; providerId: string | null }>("/api/v1/auth/sso-provider"),
+  });
+}
+
+/** No `onSuccess` session handling — a successful call means "here's where to redirect," not "you're signed in." The real session only exists after the browser completes the SAML round trip started by that redirect. */
+export function useSignInSsoMutation() {
+  return useMutation({
+    mutationFn: ({ providerId, callbackURL }: { providerId: string; callbackURL: string }) =>
+      signInSso(providerId, callbackURL),
   });
 }
 

@@ -3,11 +3,17 @@ import { AlertCircle, Cloud, History, Loader2, ShieldCheck, UserCheck } from "lu
 import type * as React from "react";
 import { useState } from "react";
 
-import { useSignInMutation } from "@/api/auth";
+import { useSignInMutation, useSignInSsoMutation, useSsoProviderQuery } from "@/api/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthError } from "@/lib/auth-client";
+
+/** Where a successful sign-in lands — `root.tsx`'s guard sets this when it bounced an unauthenticated visit through here; falls back to `/` (the pre-existing behavior) when there wasn't one. */
+function redirectTarget(): string {
+  const redirect = new URLSearchParams(window.location.search).get("redirect");
+  return redirect || "/";
+}
 
 const TRUST_POINTS = [
   {
@@ -86,24 +92,48 @@ function BrandPanel() {
 }
 
 /**
- * Plain email/password sign-in against BetterAuth's real
- * `emailAndPassword` provider (`apps/control-plane/src/auth.ts`) — no
- * OAuth/SSO button, no "forgot password" flow, matching this build's
- * actual auth surface exactly rather than implying one that doesn't exist.
- * `root.tsx`'s route guard sends every unauthenticated request here (and
- * bounces an already-authenticated visit to this route straight back to
- * `/`), then back to `/` again on successful sign-in.
+ * Email/password sign-in against BetterAuth's real `emailAndPassword`
+ * provider (`apps/control-plane/src/auth.ts`), plus — when an org has
+ * connected an identity provider (`GET /api/v1/auth/sso-provider`) — a
+ * "Sign in with SSO" button that starts the real SAML flow, matching this
+ * build's actual auth surface exactly rather than implying more than what's
+ * wired. `root.tsx`'s route guard sends every unauthenticated request here
+ * (preserving where it was headed via `?redirect=`) and bounces an
+ * already-authenticated visit to this route straight back there, then back
+ * there again on successful sign-in.
  */
 export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const mutation = useSignInMutation();
+  const ssoProvider = useSsoProviderQuery();
+  const ssoMutation = useSignInSsoMutation();
   const navigate = useNavigate();
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!email || !password || mutation.isPending) return;
-    mutation.mutate({ email, password }, { onSuccess: () => navigate({ to: "/" }) });
+    const [to, query] = redirectTarget().split("?");
+    mutation.mutate(
+      { email, password },
+      {
+        onSuccess: () =>
+          query
+            ? navigate({ to: to || "/", search: Object.fromEntries(new URLSearchParams(query)) })
+            : navigate({ to: to || "/" }),
+      },
+    );
+  }
+
+  function handleSsoClick() {
+    if (!ssoProvider.data?.providerId || ssoMutation.isPending) return;
+    ssoMutation.mutate(
+      {
+        providerId: ssoProvider.data.providerId,
+        callbackURL: `${window.location.origin}${redirectTarget()}`,
+      },
+      { onSuccess: (url) => window.location.assign(url) },
+    );
   }
 
   return (
@@ -172,6 +202,37 @@ export function LoginPage() {
               {mutation.isPending ? "Signing in…" : "Sign in"}
             </Button>
           </form>
+
+          {ssoProvider.data?.available && (
+            <div className="mt-5 flex flex-col gap-3">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="h-px flex-1 bg-border" />
+                or
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              {ssoMutation.isError && (
+                <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span>
+                    {ssoMutation.error instanceof AuthError
+                      ? ssoMutation.error.message
+                      : "Something went wrong."}
+                  </span>
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="w-full"
+                disabled={ssoMutation.isPending}
+                onClick={handleSsoClick}
+              >
+                {ssoMutation.isPending && <Loader2 className="size-4 animate-spin" />}
+                {ssoMutation.isPending ? "Redirecting…" : "Sign in with SSO"}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { accessRoute, accessSessionTerminalRoute } from "./access/route";
 import { approvalsRoute } from "./approvals/route";
 import { archiveRoute } from "./archive/route";
 import { auditRoute } from "./audit/route";
+import { cliAuthRoute } from "./cli-auth/route";
 import { IndexPage } from "./index";
 import { integrationsRoute } from "./integrations/route";
 import { loginRoute } from "./login/route";
@@ -54,4 +55,5 @@ export const routeTree = rootRoute.addChildren([
   integrationsRoute,
   organisationRoute,
   loginRoute,
+  cliAuthRoute,
 ]);

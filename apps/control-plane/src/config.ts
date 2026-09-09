@@ -13,6 +13,14 @@ import { Context, Layer } from "effect";
  */
 export interface AppConfig {
   readonly databaseUrl: string;
+  /**
+   * `entra` swaps `databaseUrl`'s password for a managed-identity access
+   * token per connection (see `db/connect.ts`) — what a real deployment
+   * runs, so no database password exists anywhere. `password` (the default)
+   * uses the credential in `databaseUrl` itself: local dev, docker-compose,
+   * tests, and the rollback path if Entra auth misbehaves.
+   */
+  readonly databaseAuthMode: "password" | "entra";
   readonly port: number;
   readonly betterAuthSecret: string;
   readonly betterAuthUrl: string;
@@ -125,6 +133,10 @@ const readConfig = (): AppConfig => {
   return {
     databaseUrl:
       process.env.DATABASE_URL ?? "postgres://cloudable:cloudable@localhost:5442/cloudable",
+    // Anything other than the literal "entra" means password auth — an
+    // unset or misspelled value falls back to the mode that works with a
+    // plain connection string, rather than to one that needs Azure.
+    databaseAuthMode: process.env.DATABASE_AUTH_MODE === "entra" ? "entra" : "password",
     port,
     betterAuthSecret: process.env.BETTER_AUTH_SECRET ?? "dev-only-change-me",
     betterAuthUrl: process.env.BETTER_AUTH_URL ?? "http://localhost:4780",

@@ -4,18 +4,20 @@
  *
  * Every request below is real-session-scoped (`CurrentUserTag`, see
  * `apps/control-plane/src/http/middleware/auth.ts`) EXCEPT
- * `IssueCertificateRequest`: `issueCertificate` is still `cloudable
- * login`'s dev-mode identity stand-in, not a browser session, so it keeps
- * `orgId`/`personId` on the wire — see that endpoint's own doc comment in
- * `apps/control-plane/src/http/routes/access.ts`.
+ * `IssueCertificateRequest`: `issueCertificate` is `cloudable login`'s CLI
+ * flow, which has no browser session to carry — it instead sends `code`, a
+ * short-lived signed token minted by the console's session-gated
+ * `POST /api/v1/cli-auth/code` and handed over via a local redirect (see
+ * that endpoint's own doc comment in `apps/control-plane/src/http/routes/
+ * access.ts`).
  */
 
 /** Which machines a certificate or session grant is scoped to. */
 export type MachineScope = "all" | ReadonlyArray<string>;
 
 export interface IssueCertificateRequest {
-  orgId: string;
-  personId: string;
+  /** From `POST /api/v1/cli-auth/code` — carries `{ personId, orgId }`, verified server-side, never trusted from the client directly. */
+  code: string;
   /** OS username the certificate is valid for — the certificate's sole principal. */
   osUser: string;
   machineScope: MachineScope;

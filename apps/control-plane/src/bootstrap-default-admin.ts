@@ -1,10 +1,11 @@
+import * as crypto from "node:crypto";
 import * as schema from "@cloudable/schema";
 import { authUser, orgs, people } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
 import { auth } from "./auth";
 import { config } from "./config";
+import { openPostgres } from "./db/connect";
 
 /** Fixed, arbitrary — only needs to differ from `test-support/db.ts`'s
  * `MIGRATION_ADVISORY_LOCK_KEY` (847_291_003) to avoid colliding with it. */
@@ -26,15 +27,32 @@ const BOOTSTRAP_ADVISORY_LOCK_KEY = 394_812_207;
  * scoped advisory lock actually covers every query below, including
  * `auth.api.signUpEmail` — a separate connection/module (`auth.ts`'s own
  * `authDb`) that can't be wrapped in one DB transaction with the rest.
+ *
+ * `defaultAdminPassword` is optional: with only an email set, a random
+ * password is generated and printed once, at the moment the account is
+ * actually created. That's deliberate — a deployment shouldn't have to keep
+ * a standing admin password in its config forever for something used once,
+ * on the very first boot, to get far enough to connect an identity provider
+ * (after which people sign in through it instead). Note there's no password
+ * *reset* flow in the console yet, so the printed value stays that account's
+ * credential until SSO is connected — capture it from the container logs.
  */
 export async function bootstrapDefaultAdmin(
   email = config.defaultAdminEmail,
   password = config.defaultAdminPassword,
 ): Promise<void> {
   const normalizedEmail = email?.trim().toLowerCase();
-  if (!normalizedEmail || !password) return;
+  if (!normalizedEmail) return;
 
-  const sql = postgres(config.databaseUrl, { max: 1 });
+  // Generated up front but only ever printed below, after the account is
+  // really created — the common case is a restart where one already exists,
+  // and printing a password nobody can use would just train people to
+  // ignore the line that matters.
+  const generatedPassword = password ? undefined : crypto.randomBytes(24).toString("base64url");
+  const effectivePassword = password ?? generatedPassword;
+  if (!effectivePassword) return;
+
+  const sql = openPostgres({ max: 1 });
   const db = drizzle(sql, { schema });
   try {
     await sql`select pg_advisory_lock(${BOOTSTRAP_ADVISORY_LOCK_KEY})`;
@@ -65,8 +83,18 @@ export async function bootstrapDefaultAdmin(
         .returning();
     }
 
-    await auth.api.signUpEmail({ body: { email: normalizedEmail, password, name: "Admin" } });
+    await auth.api.signUpEmail({
+      body: { email: normalizedEmail, password: effectivePassword, name: "Admin" },
+    });
     console.log(`[bootstrap] created default admin ${normalizedEmail}`);
+    if (generatedPassword) {
+      console.log(
+        `[bootstrap] generated a one-time password for ${normalizedEmail}: ${generatedPassword}`,
+      );
+      console.log(
+        "[bootstrap] this is printed once and never again — save it, sign in, and connect an identity provider",
+      );
+    }
   } catch (err) {
     const detail =
       err && typeof err === "object"

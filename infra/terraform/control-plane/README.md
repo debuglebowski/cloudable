@@ -14,8 +14,10 @@ provisions:
   too, at every path outside `/api/*`/`/_internal/*` (`http/routes/console.ts`)
   — one image, one Container App, no separate frontend service to deploy.
 - An Azure Database for PostgreSQL Flexible Server + database for it to use
-- A system-assigned managed identity on the container app (no credential is ever
-  stored — invariant 1)
+- A managed identity on the container app (no credential is ever stored — invariant 1).
+  System-assigned by default; a user-assigned one when `key_vault_id` is set, so it
+  exists before the app and survives the app being recreated — see the Key Vault
+  section below.
 
 Terraform only — no Bicep, no one-click alternative. This is open source and self-hosted
 only; there's no paying-customer onboarding-friction problem to justify keeping a second IaC
@@ -189,6 +191,65 @@ re-granting to the new one afterward). There is no in-place path. Take an indepe
 private-only) server from something inside the new VNet — the server has no public
 endpoint any more, so the restore itself can't run from your laptop or CI. Budget a
 real maintenance window (tens of minutes, not a rolling update), not a quick flip.
+
+## Key Vault-backed secrets (opt-in)
+
+Set `key_vault_id` + `key_vault_uri` (both, together) and the Container App stops
+carrying secret *values* entirely: it references Key Vault secrets by URI and resolves
+them at container start using a user-assigned managed identity this module creates and
+grants `Key Vault Secrets User` on that vault. Nothing sensitive lands in Terraform
+state, and the application is unchanged — it still just reads environment variables.
+
+The vault itself is deliberately not created here (soft-delete/purge protection,
+network rules and naming are org-wide decisions, and a vault should outlive this
+module). Neither are the secrets: writing them with `azurerm_key_vault_secret` would
+put the values straight back into state, defeating the point.
+
+Create the four the module expects, out-of-band, once:
+
+```bash
+for name in better-auth-secret join-token-secret agent-session-secret cli-auth-code-secret; do
+  az keyvault secret set --vault-name <your-vault> --name "$name" \
+    --value "$(openssl rand -base64 32)" --output none
+done
+```
+
+`join-token-secret`, `agent-session-secret` and `cli-auth-code-secret` have **no
+plain-value fallback** on purpose. Without Key Vault the app falls back to the literal
+`dev-only-change-me` compiled into it — a published default in a public repo — so
+agent join tokens, agent session tokens and CLI sign-in codes would be signed with a
+key anyone can read. There is intentionally no way to set them to a real value without
+a vault, so a deployment can't quietly keep running on the default.
+
+Rotating any of them is `az keyvault secret set` plus a revision restart — the
+references are versionless, so no Terraform change. Note that rotating
+`join-token-secret` or `agent-session-secret` invalidates every outstanding token for
+every org at once; agents have to re-attest.
+
+## Postgres Entra authentication (opt-in)
+
+`enable_postgres_entra_auth = true` (requires the Key Vault variables above, since it
+reuses the same identity) turns on Entra auth for the database and points the control
+plane at it: `DATABASE_URL` loses its password entirely and the app fetches a
+short-lived managed-identity token per connection instead.
+
+Password auth stays **enabled** alongside it, deliberately — it is the rollback path,
+reachable by setting the app's `DATABASE_AUTH_MODE` back to `password` with no
+infrastructure change. The cost is that `postgres_admin_password` remains in state;
+turning `password_auth_enabled` off is a deliberate follow-up once token auth has
+proven itself, not something to do in the same change that introduces it.
+
+One step Terraform cannot do for you, because it is SQL against the server rather than
+an ARM operation: an Entra admin (set one with `postgres_entra_admin_object_id`) must
+create the database role for the app's identity and grant it what it needs.
+
+```sql
+SELECT * FROM pgaadauth_create_principal('<app_identity_name output>', false, false);
+GRANT CONNECT ON DATABASE <db> TO "<app_identity_name output>";
+-- then the minimum the app needs on the schema it owns — not superuser
+```
+
+Until that role exists the app authenticates but has no privileges.
 
 ## Notes
 

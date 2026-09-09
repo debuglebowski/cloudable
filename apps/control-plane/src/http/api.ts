@@ -5,7 +5,9 @@ import { AccessGroup } from "./routes/access";
 import { AgentProtocolGroup } from "./routes/agent-protocol";
 import { ApprovalsGroup } from "./routes/approvals";
 import { ArchiveGroup } from "./routes/archive";
+import { AuthSsoStatusGroup } from "./routes/auth-sso-status";
 import { CatalogGroup } from "./routes/catalog";
+import { CliAuthGroup } from "./routes/cli-auth";
 import { ComplianceGroup } from "./routes/compliance";
 import { ConfigGroup } from "./routes/config";
 import { ElevationsGroup } from "./routes/elevations";
@@ -48,6 +50,8 @@ export class Api extends HttpApi.make("cloudable")
   .add(NotificationsGroup)
   .add(RestartGroup)
   .add(CatalogGroup)
-  .add(ProvisioningCapabilitiesGroup) {}
+  .add(ProvisioningCapabilitiesGroup)
+  .add(AuthSsoStatusGroup)
+  .add(CliAuthGroup) {}
 // Feature units: import your HttpApiGroup and append `.add(YourGroup)` to the chain above.
 // Never reorder existing `.add()` calls.

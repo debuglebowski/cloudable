@@ -131,7 +131,18 @@ describe("GET /api/v1/agent/wake", () => {
 
   const openClientSocket = (port: number, token: string): Promise<WebSocket> =>
     new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://localhost:${port}/api/v1/agent/wake`, {
+      // Constructor cast to `Bun.WebSocketOptions`'s own overload, not left
+      // to inference: adding `@better-auth/sso` elsewhere in this program
+      // (see `../../auth.ts`) makes some transitive dependency's ambient
+      // `WebSocket` declaration (only `(url, protocols?: string | string[])`)
+      // shadow bun-types' own extended one for this whole program — Bun's
+      // actual runtime behavior (and this call) is unaffected, only the
+      // un-annotated *type* is.
+      const WebSocketWithOptions = WebSocket as unknown as new (
+        url: string,
+        options: Bun.WebSocketOptions,
+      ) => WebSocket;
+      const ws = new WebSocketWithOptions(`ws://localhost:${port}/api/v1/agent/wake`, {
         headers: { authorization: `Bearer ${token}` },
       });
       ws.addEventListener("open", () => resolve(ws), { once: true });

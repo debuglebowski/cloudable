@@ -140,11 +140,34 @@ export function RootLayout() {
   }
 
   if (pathname === "/login") {
-    return sessionQuery.data ? <Navigate to="/" /> : <Outlet />;
+    if (!sessionQuery.data) return <Outlet />;
+    // Same `redirect` param `login-page.tsx` reads on successful sign-in —
+    // covers the case where the tab was already signed in when `/login`
+    // was reached with one still in the URL (e.g. a second `cloudable
+    // login` cli-auth tab opened while the browser's other tab is
+    // already signed in). Split path from query ourselves rather than
+    // handing the whole string to `Navigate`'s `to` — this app has no
+    // `validateSearch` anywhere, so nothing parses a `to` string containing
+    // `?` for us.
+    const redirect = new URLSearchParams(window.location.search).get("redirect");
+    const [redirectPath, redirectQuery] = (redirect || "/").split("?");
+    return redirectQuery ? (
+      <Navigate
+        to={redirectPath || "/"}
+        search={Object.fromEntries(new URLSearchParams(redirectQuery))}
+      />
+    ) : (
+      <Navigate to={redirectPath || "/"} />
+    );
   }
 
   if (!sessionQuery.data) {
-    return <Navigate to="/login" />;
+    // `cloudable login`'s `/cli-auth` handoff (see that route) needs to
+    // land back where it started after the browser detours through
+    // `/login` — every other route just falls back to `/` (`login-
+    // page.tsx`'s own default), same as before this param existed.
+    const redirect = encodeURIComponent(window.location.pathname + window.location.search);
+    return <Navigate to="/login" search={{ redirect }} />;
   }
 
   return (

@@ -1,8 +1,7 @@
 import * as schema from "@cloudable/schema";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import postgres from "postgres";
-import { config } from "./config";
+import { openPostgres } from "./db/connect";
 
 /** Fixed, arbitrary — distinct from bootstrap-default-admin.ts's
  * BOOTSTRAP_ADVISORY_LOCK_KEY (394_812_207) and test-support/db.ts's
@@ -36,7 +35,7 @@ const BOOT_MIGRATION_ADVISORY_LOCK_KEY = 615_930_744;
  * request with "relation does not exist".
  */
 export async function migrateOnBoot(): Promise<void> {
-  const sql = postgres(config.databaseUrl, { max: 1 });
+  const sql = openPostgres({ max: 1 });
   const db = drizzle(sql, { schema });
   try {
     await sql`select pg_advisory_lock(${BOOT_MIGRATION_ADVISORY_LOCK_KEY})`;
