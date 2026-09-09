@@ -25,9 +25,10 @@ export interface CollapsibleSectionProps {
 /**
  * A chevron-toggle header over content, no card box/shadow of its own — distinct
  * from `Card` (components/ui/card.tsx), which is a self-contained panel rather
- * than a collapsible sub-section. Used by the Azure catalog dialog's three
- * sections (see `catalog-checklist.tsx`); wrap in a bordered `className` when a
- * caller wants the boxed look that dialog uses instead of a borderless nesting.
+ * than a collapsible sub-section. Used by the Add Machine wizard's Review step
+ * (`machines/add-machine-dialog.tsx`) for its three summary sections; wrap in a
+ * bordered `className` when a caller wants a boxed look instead of a borderless
+ * nesting.
  */
 export function CollapsibleSection({
   label,
