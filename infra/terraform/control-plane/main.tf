@@ -646,6 +646,13 @@ resource "azurerm_container_app" "this" {
   revision_mode                = "Single"
   tags                         = var.tags
 
+  # Same drift as the environment's own workload_profile block above and
+  # for the same reason: once the environment has a Consumption workload
+  # profile (declared or, as discovered, auto-attached by Azure regardless),
+  # the app itself reports back workload_profile_name = "Consumption" too —
+  # not computed, so leaving it unset here drifts on every plan.
+  workload_profile_name = var.enable_private_networking ? "Consumption" : null
+
   # System-assigned managed identity. Self-hosted mode has no federation
   # (docs/spec.md §2/§10) — no BYOC mode exists to need it (docs/cloud-auth.md).
   # This identity exists so the control plane can authenticate to other Azure resources in the same
