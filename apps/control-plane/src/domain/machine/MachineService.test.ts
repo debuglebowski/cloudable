@@ -16,6 +16,8 @@ import { Effect, Layer } from "effect";
 import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
+import type { ProvisioningService } from "../../services/ProvisioningService";
+import { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import {
   FAKE_CREATE_FAILURE_IMAGE,
   FakeProvisioningServiceLive,
@@ -461,6 +463,67 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
 
     expect(machine.provider).toBe("azure");
     expect(machine.region).toBe("westeurope");
+  });
+
+  // Regression: the real Azure adapter's create() legitimately returns
+  // state: "provisioning" (beginCreateOrUpdateAndWait only waits for the ARM
+  // deployment to exist, not for the OS to boot) -- this used to be treated as
+  // an unrecognized/error outcome, landing every real Azure machine in "error"
+  // with `provider reported unexpected state "provisioning" after create`, a
+  // false failure on an actually-succeeding create. FakeProvisioningServiceLive
+  // (used by every other test here) settles straight to "running", so this
+  // needs its own one-off provisioning stub to exercise the "provisioning"
+  // branch at all.
+  test("provider azure: create() reporting 'provisioning' is accepted, not treated as an error", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    await enableProvider(org.id, "azure");
+    await seedCatalogEntry("region", "westeurope");
+    await seedCatalogEntry("sku", "Standard_D2s_v5", { architecture: "x64" });
+
+    const provisioningStillInProgress: ProvisioningService = {
+      create: (desc) =>
+        Effect.succeed({
+          machineId: desc.machineId,
+          state: "provisioning",
+          externalId: "azure-vm-in-progress",
+        }),
+      archive: () => Effect.die("not used in this test"),
+      reconcile: () => Effect.die("not used in this test"),
+      reimage: () => Effect.die("not used in this test"),
+      restart: () => Effect.die("not used in this test"),
+    };
+    const dbLayer = Layer.succeed(Db, db);
+    const layerWithSlowProvisioning = MachineService.Default.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          dbLayer,
+          Layer.provide(EventBus.Default, dbLayer),
+          Layer.succeed(ProvisioningServiceTag, provisioningStillInProgress),
+        ),
+      ),
+    );
+
+    const machine = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const svc = yield* MachineService;
+          return yield* svc.create({
+            orgId: org.id,
+            name: "still-booting",
+            provider: "azure",
+            region: "westeurope",
+            sizeSku: "Standard_D2s_v5",
+            image: "ubuntu-24.04",
+            ownerPersonId: owner.id,
+          });
+        }),
+        layerWithSlowProvisioning,
+      ),
+    );
+
+    expect(machine.state).toBe("provisioning");
+    expect(machine.lastError).toBeNull();
   });
 
   test("provider azure: AZURE_MACHINES_LOCATION forces the region, overriding client input entirely", async () => {
