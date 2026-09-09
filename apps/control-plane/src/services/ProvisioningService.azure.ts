@@ -239,9 +239,24 @@ const runArm = <A>(op: () => Promise<A>): Effect.Effect<A, ProvisioningError> =>
  * (infra/terraform/control-plane/main.tf) denies ALL inbound traffic
  * regardless — including port 22 — so nothing can ever attempt to use it.
  * Real access to a machine is exclusively via the tunnel daemon + SSH CA
- * (docs/access.md), never this. */
-function throwawayAdminPassword(): string {
-  return `Cldm-${crypto.randomUUID()}-${crypto.randomUUID()}`;
+ * (docs/access.md), never this.
+ *
+ * A single `crypto.randomUUID()`, not two: `"Cldm-" + uuid + "-" + uuid` is
+ * 5 + 36 + 1 + 36 = 78 characters, over Azure's own 72-character maximum for
+ * a Linux VM admin password — confirmed live, this failed VM creation on
+ * every real Azure machine that got far enough in Azure's validation
+ * pipeline to reach the password field (masked until now by this session's
+ * other fixes, which were rejecting most requests earlier — on SKU/region
+ * compatibility — before ever reaching this check) with `provider_error: The
+ * supplied password must be between 6-72 characters long...`. One UUID
+ * keeps this at 5 + 36 = 41 characters, comfortably under the limit, and
+ * still deterministically satisfies at least 3 of Azure's 5 complexity
+ * categories without relying on randomness: "Cldm-" alone guarantees
+ * uppercase ("C"), lowercase ("ldm"), and a special character (the hyphen);
+ * a v4 UUID's fixed version nibble additionally guarantees a literal "4"
+ * digit at a known position. */
+export function throwawayAdminPassword(): string {
+  return `Cldm-${crypto.randomUUID()}`;
 }
 
 const createNetworking = (
