@@ -1,8 +1,7 @@
 import * as schema from "@cloudable/schema";
 import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
 import { Context, Effect, Layer } from "effect";
-import postgres from "postgres";
-import { config } from "../config";
+import { openPostgres } from "./connect";
 
 /** The Drizzle database handle, scoped to the process's Postgres connection. */
 export class Db extends Context.Tag("Db")<Db, PostgresJsDatabase<typeof schema>>() {}
@@ -15,7 +14,7 @@ export class Db extends Context.Tag("Db")<Db, PostgresJsDatabase<typeof schema>>
 export const DbLive = Layer.scoped(
   Db,
   Effect.gen(function* () {
-    const sql = postgres(config.databaseUrl);
+    const sql = openPostgres();
     yield* Effect.addFinalizer(() => Effect.promise(() => sql.end()));
     return drizzle(sql, { schema });
   }),

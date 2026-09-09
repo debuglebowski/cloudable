@@ -2,34 +2,47 @@
 // `cloudable login`: browser → IdP → ~8h certificate into the user's
 // ssh-agent.
 //
-// No real IdP exists in this sandbox (see CLAUDE.md's build-order note and
-// `docs/access.md`), so the browser→IdP round trip is simulated behind a
-// `--dev-person-id`/`--org-id` flag pair — DEV-ONLY, clearly gated (see
-// `assertDevFlow` below), and documented as the seam a future feature unit
-// replaces with a real OIDC redirect once an IdP integration exists.
+// The browser round trip is real now: this opens the system browser to the
+// console's `/cli-auth` page, which (behind `root.tsx`'s usual session
+// guard) may first detour through `/login` — email/password or, once an org
+// has connected one, "Sign in with SSO" (SAML, see `apps/control-plane/src/
+// services/IdpSsoService.ts`) — then back. `/cli-auth`, now signed in,
+// mints a short-lived signed code (`POST /api/v1/cli-auth/code`) and
+// redirects the browser to a `node:http` server this process is running on
+// localhost, which is the only thing actually listening for the result.
 //
-// What IS real: the ephemeral keypair is generated locally (never sent to
-// the control plane — only its public half is), the control plane's SSH CA
-// signs it into a genuine OpenSSH certificate (see
+// No more `--dev-person-id`/`--org-id` flags: those traded on the control
+// plane accepting a client-supplied identity for `issueCertificate`
+// directly, which is exactly the trust `code` replaces — bringing them back
+// as a fallback would mean reopening that hole for anyone who passes them,
+// not just local dev. Nothing in this repo's own tests/scripts invoked them
+// programmatically, so nothing else depends on removing them. Local/sandbox
+// testing without a real IdP still works end-to-end via email/password
+// sign-in at `/login` — this flow doesn't care which method produced the
+// session.
+//
+// What IS real regardless: the ephemeral keypair is generated locally
+// (never sent to the control plane — only its public half is), the control
+// plane's SSH CA signs it into a genuine OpenSSH certificate (see
 // `apps/control-plane/src/services/ssh-ca/openssh-cert.ts`, verified against
 // `ssh-keygen -L`), and the certificate + private key are loaded into the
 // user's running ssh-agent over the real wire protocol (`ssh-agent-client.ts`,
 // verified against a real `ssh-agent` process) — no `ssh-add` shell-out.
 // ---------------------------------------------------------------------------
+import * as childProcess from "node:child_process";
+import * as http from "node:http";
 import * as os from "node:os";
 import type {
   IssueCertificateRequest,
   IssueCertificateResponse,
   MachineScope,
 } from "@cloudable/contracts";
+import { config } from "./config";
 import { generateRawEd25519KeyPair } from "./ed25519-keys";
 import { apiRequest } from "./http-client";
 import { addCertifiedIdentity } from "./ssh-agent-client";
 
 export interface LoginOptions {
-  /** DEV-ONLY: stands in for the identity a real OIDC flow would resolve from the browser session. */
-  devPersonId: string;
-  orgId: string;
   osUser: string;
   machineScope: MachineScope;
 }
@@ -65,42 +78,80 @@ export function parseLoginArgs(argv: ReadonlyArray<string>): LoginOptions {
     }
   }
 
-  const devPersonId = flags.get("dev-person-id");
-  const orgId = flags.get("org-id");
-  if (!devPersonId || !orgId) {
-    throw new Error(
-      "cloudable login (dev mode) requires --dev-person-id <id> and --org-id <id> — " +
-        "there is no real IdP in this build; see docs/access.md",
-    );
-  }
-
   return {
-    devPersonId,
-    orgId,
     osUser: flags.get("os-user") ?? os.userInfo().username,
     machineScope: parseMachineScope(flags.get("machine-scope")),
   };
 }
 
-/** Extracts the raw certificate bytes out of the `<type> <base64> [comment]` OpenSSH line. */
-function certificateBlobFromLine(line: string): Uint8Array {
-  const parts = line.trim().split(" ");
-  const base64 = parts[1];
-  if (parts[0] !== "ssh-ed25519-cert-v01@openssh.com" || !base64) {
-    throw new Error(`unexpected certificate line shape: ${line}`);
+/** Best-effort — if this fails (no GUI, unknown platform), the printed URL is the fallback; the local server still waits for the redirect either way. */
+function openBrowser(url: string): void {
+  const command =
+    process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  try {
+    childProcess.spawn(command, [url], { detached: true, stdio: "ignore" }).unref();
+  } catch {
+    // Nothing to do — the caller already printed the URL.
   }
-  return new Uint8Array(Buffer.from(base64, "base64"));
+}
+
+const CALLBACK_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Opens the browser to the console's `/cli-auth` page and waits for it to
+ * redirect back to a `node:http` server on an OS-assigned localhost port —
+ * the real replacement for the old `--dev-person-id`/`--org-id` flags (see
+ * this file's header comment).
+ */
+async function obtainCliAuthCode(): Promise<string> {
+  const state = crypto.randomUUID();
+
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const code = url.searchParams.get("code");
+      const receivedState = url.searchParams.get("state");
+      const ok = code !== null && receivedState === state;
+
+      res.writeHead(ok ? 200 : 400, { "content-type": "text/html; charset=utf-8" });
+      res.end(
+        ok
+          ? "<title>cloudable login</title><body>Signed in — you can close this tab.</body>"
+          : "<title>cloudable login</title><body>Something went wrong — go back to your terminal.</body>",
+      );
+
+      clearTimeout(timeout);
+      server.close();
+      if (ok && code) resolve(code);
+      else reject(new Error("cli-auth callback missing code or state mismatch"));
+    });
+
+    const timeout = setTimeout(() => {
+      server.close();
+      reject(new Error("Timed out waiting for sign-in in the browser."));
+    }, CALLBACK_TIMEOUT_MS);
+
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : undefined;
+      if (!port) {
+        clearTimeout(timeout);
+        reject(new Error("failed to start local callback server"));
+        return;
+      }
+      const url = `${config.apiUrl}/cli-auth?callbackPort=${port}&state=${state}`;
+      console.log(`Opening your browser to sign in:\n  ${url}`);
+      openBrowser(url);
+    });
+  });
 }
 
 export async function login(options: LoginOptions): Promise<LoginResult> {
-  // DEV-ONLY seam — see the file banner. A real flow would open a browser to the org's IdP
-  // and exchange the resulting session for `{ personId, orgId }` here instead of taking them
-  // as flags.
   const keypair = generateRawEd25519KeyPair();
+  const code = await obtainCliAuthCode();
 
   const request: IssueCertificateRequest = {
-    orgId: options.orgId,
-    personId: options.devPersonId,
+    code,
     osUser: options.osUser,
     machineScope: options.machineScope,
     publicKeyBase64: Buffer.from(keypair.publicKeyRaw).toString("base64"),
@@ -122,7 +173,7 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
       certificateBlob,
       publicKeyRaw: keypair.publicKeyRaw,
       privateKeySeed: keypair.privateKeySeed,
-      comment: `${options.devPersonId}@cloudable`,
+      comment: `${options.osUser}@cloudable`,
       lifetimeSeconds,
     });
     loadedIntoAgent = true;
@@ -134,6 +185,16 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
     expiresAt,
     loadedIntoAgent,
   };
+}
+
+/** Extracts the raw certificate bytes out of the `<type> <base64> [comment]` OpenSSH line. */
+function certificateBlobFromLine(line: string): Uint8Array {
+  const parts = line.trim().split(" ");
+  const base64 = parts[1];
+  if (parts[0] !== "ssh-ed25519-cert-v01@openssh.com" || !base64) {
+    throw new Error(`unexpected certificate line shape: ${line}`);
+  }
+  return new Uint8Array(Buffer.from(base64, "base64"));
 }
 
 export async function runLoginCommand(argv: ReadonlyArray<string>): Promise<void> {

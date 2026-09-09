@@ -21,6 +21,40 @@ locals {
   app_name             = "${var.name_prefix}-cp"
   postgres_server_name = "${var.name_prefix}-pg-${random_string.postgres_suffix.result}"
   postgres_fqdn        = azurerm_postgresql_flexible_server.this.fqdn
+
+  # Both Key Vault inputs are required together — see var.key_vault_id.
+  use_key_vault = var.key_vault_id != null && var.key_vault_uri != null
+
+  # Entra DB auth rides on the same user-assigned identity the Key Vault path
+  # creates, so it can't be enabled on its own.
+  use_entra_db_auth = var.enable_postgres_entra_auth && local.use_key_vault
+
+  # The identity the Container App runs as, and that every role assignment
+  # below binds to. User-assigned when Key Vault is in play: its principal_id
+  # exists BEFORE the app does, which is what breaks the otherwise-circular
+  # app -> secret reference -> role assignment -> app dependency. It also
+  # survives the app being recreated, unlike the system-assigned identity
+  # (see README.md's private-networking warning about re-granting).
+  app_principal_id = local.use_key_vault ? azurerm_user_assigned_identity.app[0].principal_id : azurerm_container_app.this.identity[0].principal_id
+
+  # Name the app authenticates to Postgres as. Under Entra auth that's the
+  # identity itself — Azure resolves the token's principal by name, so the
+  # database role created by `pgaadauth_create_principal` has to match this
+  # exactly.
+  postgres_login = local.use_entra_db_auth ? azurerm_user_assigned_identity.app[0].name : var.postgres_admin_username
+
+  key_vault_secret_uri = local.use_key_vault ? "${var.key_vault_uri}secrets" : null
+
+  # Secret names expected in the vault, doubling as the Container App secret
+  # names (the app-side env var each backs is wired below). Versionless URIs
+  # on purpose: rotating a secret in the vault is then picked up by a
+  # revision restart, with no Terraform change.
+  key_vault_backed_secrets = [
+    "better-auth-secret",
+    "join-token-secret",
+    "agent-session-secret",
+    "cli-auth-code-secret",
+  ]
   # urlencode both credential parts: a generated password commonly contains
   # URI-reserved characters (/, +, =, @, ...) that would otherwise break
   # connection-string parsing in the `postgres` client / drizzle-orm.
@@ -32,7 +66,12 @@ locals {
   # cert's — exactly the case here, since a VNet-integrated server's fqdn
   # resolves under our own private zone, not the public *.postgres.database
   # .azure.com name the cert is issued for.
-  database_url = "postgres://${urlencode(var.postgres_admin_username)}:${urlencode(var.postgres_admin_password)}@${local.postgres_fqdn}:5432/${var.postgres_database_name}?sslmode=require"
+  #
+  # Under Entra auth there is no password component at all: the app supplies
+  # a managed-identity token per connection instead (DATABASE_AUTH_MODE=entra,
+  # see apps/control-plane/src/db/connect.ts), so this string carries only
+  # host/user/database and stops being sensitive.
+  database_url = local.use_entra_db_auth ? "postgres://${urlencode(local.postgres_login)}@${local.postgres_fqdn}:5432/${var.postgres_database_name}?sslmode=require" : "postgres://${urlencode(var.postgres_admin_username)}:${urlencode(var.postgres_admin_password)}@${local.postgres_fqdn}:5432/${var.postgres_database_name}?sslmode=require"
 
   # Azure Container Apps assigns a predictable FQDN of
   # "<app-name>.<environment-default-domain>". The environment's default
@@ -187,6 +226,21 @@ resource "azurerm_postgresql_flexible_server" "this" {
   administrator_login    = var.postgres_admin_username
   administrator_password = var.postgres_admin_password
 
+  # Password auth stays enabled alongside Entra, deliberately: it is the
+  # rollback path, reachable by flipping the app's DATABASE_AUTH_MODE back to
+  # "password" with no infrastructure change. The cost is that
+  # postgres_admin_password stays in state — turning password_auth_enabled
+  # off is the follow-up that finally removes it, once token auth has proven
+  # itself in production (see var.enable_postgres_entra_auth).
+  dynamic "authentication" {
+    for_each = local.use_entra_db_auth ? [1] : []
+    content {
+      active_directory_auth_enabled = true
+      password_auth_enabled         = true
+      tenant_id                     = data.azurerm_client_config.current.tenant_id
+    }
+  }
+
   # Self-host is a single-trust-boundary deployment (docs/spec.md §2) — no
   # VNet peering or private endpoint plumbing by default. Reachability to the
   # control plane's Container App is granted via the "allow Azure services"
@@ -217,6 +271,20 @@ resource "azurerm_postgresql_flexible_server" "this" {
   # references the resource bare rather than by index — a no-op when its
   # count is 0, same pattern as allow_azure_services's own references below.
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
+}
+
+# The human (or deploying identity) who can log in as an Entra admin and run
+# the one-time `pgaadauth_create_principal` + GRANT for the app's identity.
+# Terraform can't do that step itself — it's SQL against the server, not an
+# ARM operation — so without this there is no way in to perform it.
+resource "azurerm_postgresql_flexible_server_active_directory_administrator" "this" {
+  count               = local.use_entra_db_auth && var.postgres_entra_admin_object_id != null ? 1 : 0
+  server_name         = azurerm_postgresql_flexible_server.this.name
+  resource_group_name = local.resource_group_name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  object_id           = var.postgres_entra_admin_object_id
+  principal_name      = var.postgres_entra_admin_principal_name
+  principal_type      = var.postgres_entra_admin_principal_type
 }
 
 resource "azurerm_postgresql_flexible_server_database" "this" {
@@ -574,6 +642,38 @@ resource "azurerm_network_watcher_flow_log" "control_plane_container_apps_subnet
   }
 }
 
+# ---------------------------------------------------------------------------
+# App identity + Key Vault access (opt-in, var.key_vault_id)
+#
+# A user-assigned identity, created ahead of the Container App, is what makes
+# Key Vault secret references possible at all: the app can't start until it
+# can resolve those references, resolving them needs a role assignment, and a
+# role assignment needs a principal — which, with a system-assigned identity,
+# only exists once the app is already running. Creating the identity as its
+# own resource cuts that cycle.
+#
+# Deliberately NOT creating the vault or its secrets here — see
+# var.key_vault_id. Secrets are written out-of-band precisely so their values
+# never enter Terraform state.
+# ---------------------------------------------------------------------------
+
+resource "azurerm_user_assigned_identity" "app" {
+  count               = local.use_key_vault ? 1 : 0
+  name                = "id-${local.app_name}"
+  location            = local.resource_group_location
+  resource_group_name = local.resource_group_name
+  tags                = var.tags
+}
+
+resource "azurerm_role_assignment" "app_key_vault_secrets" {
+  count = local.use_key_vault ? 1 : 0
+  scope = var.key_vault_id
+  # Read-only on secret VALUES. Not "Key Vault Secrets Officer" — the app
+  # never writes or rotates a secret, it only resolves the four it's given.
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.app[0].principal_id
+}
+
 resource "azurerm_role_definition" "machine_operator" {
   count       = var.enable_self_managed_machines ? 1 : 0
   name        = "Cloudable Machine Operator (${var.name_prefix})"
@@ -618,7 +718,7 @@ resource "azurerm_role_assignment" "machine_operator" {
   count              = var.enable_self_managed_machines ? 1 : 0
   scope              = local.machines_resource_group_id
   role_definition_id = azurerm_role_definition.machine_operator[0].role_definition_resource_id
-  principal_id       = azurerm_container_app.this.identity[0].principal_id
+  principal_id       = local.app_principal_id
 }
 
 # `CloudCatalogService.ts`'s region/size sync (SubscriptionClient.subscriptions.
@@ -649,7 +749,7 @@ resource "azurerm_role_assignment" "catalog_reader" {
   count              = var.enable_self_managed_machines ? 1 : 0
   scope              = data.azurerm_subscription.current.id
   role_definition_id = azurerm_role_definition.catalog_reader[0].role_definition_resource_id
-  principal_id       = azurerm_container_app.this.identity[0].principal_id
+  principal_id       = local.app_principal_id
 }
 
 # A third, separate role — not for the control plane's own managed identity,
@@ -756,18 +856,41 @@ resource "azurerm_container_app" "this" {
   # the "Cloudable Machine Operator" role below (when
   # enable_self_managed_machines is true) so ProvisioningService.azure.ts
   # can manage real VMs; otherwise nothing is granted to it.
+  # User-assigned once Key Vault is in play (see azurerm_user_assigned_identity
+  # .app above for why); system-assigned otherwise, unchanged for every
+  # existing deployment that doesn't set key_vault_id.
   identity {
-    type = "SystemAssigned"
+    type         = local.use_key_vault ? "UserAssigned" : "SystemAssigned"
+    identity_ids = local.use_key_vault ? [azurerm_user_assigned_identity.app[0].id] : null
   }
 
+  # Not a Key Vault reference: under Entra auth this carries no password at
+  # all (see local.database_url), and under password auth it's the same
+  # inline value it has always been.
   secret {
     name  = "database-url"
     value = local.database_url
   }
 
-  secret {
-    name  = "better-auth-secret"
-    value = var.better_auth_secret
+  # The four signing secrets. With key_vault_id set these carry only a URI —
+  # Container Apps resolves the value itself at container start using the
+  # identity above, so nothing sensitive reaches Terraform state and the
+  # application still just reads an environment variable.
+  dynamic "secret" {
+    for_each = local.use_key_vault ? toset(local.key_vault_backed_secrets) : toset([])
+    content {
+      name                = secret.value
+      key_vault_secret_id = "${local.key_vault_secret_uri}/${secret.value}"
+      identity            = azurerm_user_assigned_identity.app[0].id
+    }
+  }
+
+  dynamic "secret" {
+    for_each = local.use_key_vault ? [] : [1]
+    content {
+      name  = "better-auth-secret"
+      value = var.better_auth_secret
+    }
   }
 
   dynamic "secret" {
@@ -863,6 +986,58 @@ resource "azurerm_container_app" "this" {
           secret_name = "default-admin-password"
         }
       }
+
+      # The three signing secrets that were never wired here before. Without
+      # them the app falls back to the literal "dev-only-change-me" baked
+      # into JoinTokenAttestation.ts / AgentSessionToken.ts / CliAuthCode.ts
+      # — a published default in an MIT-licensed repo, which means agent join
+      # tokens, agent session tokens and CLI sign-in codes were signed with a
+      # publicly known key. Only available via Key Vault: there is no plain-
+      # value fallback on purpose, so nothing silently keeps running on the
+      # default.
+      dynamic "env" {
+        for_each = local.use_key_vault ? [1] : []
+        content {
+          name        = "JOIN_TOKEN_SECRET"
+          secret_name = "join-token-secret"
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.use_key_vault ? [1] : []
+        content {
+          name        = "AGENT_SESSION_SECRET"
+          secret_name = "agent-session-secret"
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.use_key_vault ? [1] : []
+        content {
+          name        = "CLI_AUTH_CODE_SECRET"
+          secret_name = "cli-auth-code-secret"
+        }
+      }
+
+      # Tells DefaultAzureCredential which identity to use — with a
+      # user-assigned identity there's no single implicit one to fall back
+      # on, so ProvisioningService.azure.ts and db/connect.ts would otherwise
+      # both fail to get a token.
+      dynamic "env" {
+        for_each = local.use_key_vault ? [1] : []
+        content {
+          name  = "AZURE_CLIENT_ID"
+          value = azurerm_user_assigned_identity.app[0].client_id
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.use_entra_db_auth ? [1] : []
+        content {
+          name  = "DATABASE_AUTH_MODE"
+          value = "entra"
+        }
+      }
     }
   }
 
@@ -881,4 +1056,25 @@ resource "azurerm_container_app" "this" {
     azurerm_postgresql_flexible_server_database.this,
     azurerm_postgresql_flexible_server_firewall_rule.allow_azure_services,
   ]
+
+  # `better_auth_secret` is optional only because the Key Vault path supplies
+  # it from the vault instead. Without either, the app would come up with an
+  # empty session-signing secret rather than failing — catch it at plan time.
+  # A `validation` block on the variable itself can't express this: those
+  # couldn't reference other variables until Terraform 1.9, and this module
+  # supports 1.5+.
+  lifecycle {
+    precondition {
+      condition     = local.use_key_vault || var.better_auth_secret != null
+      error_message = "better_auth_secret must be set unless key_vault_id/key_vault_uri are (in which case the vault supplies it as `better-auth-secret`)."
+    }
+    precondition {
+      condition     = (var.key_vault_id == null) == (var.key_vault_uri == null)
+      error_message = "key_vault_id and key_vault_uri must be set together — one without the other silently disables the Key Vault path."
+    }
+    precondition {
+      condition     = !var.enable_postgres_entra_auth || local.use_key_vault
+      error_message = "enable_postgres_entra_auth requires key_vault_id/key_vault_uri: it reuses the user-assigned identity that path creates."
+    }
+  }
 }

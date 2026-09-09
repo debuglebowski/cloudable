@@ -82,14 +82,29 @@ serials for KRL purposes.
 
 ## 2. `cloudable login` (`apps/cli/src/login.ts`)
 
-### The dev-mode IdP seam
+### The real IdP seam: SAML, not the old dev flags
 
-There is no real IdP integration in this sandbox (build order step 10, not reached by this
-batch). `cloudable login --dev-person-id <id> --org-id <id> [--os-user <user>]
-[--machine-scope all|m1,m2]` stands in for "browser → IdP → identity" — clearly gated (the command
-refuses to run without both flags) and documented here as **dev-only**. A future feature unit
-wires a real OIDC redirect and replaces the two flags with values read from the resulting session;
-everything downstream of "we now know `{ personId, orgId }`" is unchanged.
+Build order step 10 is partially here: real login SSO (SAML, via `@better-auth/sso` — see
+`apps/control-plane/src/services/IdpSsoService.ts` and `docs/spec.md` §3) is wired; SCIM
+provisioning is not — `people.source` still only ever gets set to `"manual"` today.
+
+`cloudable login [--os-user <user>] [--machine-scope all|m1,m2]` opens the system browser to the
+console's `/cli-auth` page, which sits behind the ordinary session guard: an unauthenticated visit
+detours through `/login` (email/password, or "Sign in with SSO" once an org has connected one) and
+back. Once signed in, `/cli-auth` mints a short-lived signed code
+(`POST /api/v1/cli-auth/code`, session-gated, `services/CliAuthCode.ts`) and redirects the browser
+to a `node:http` server this CLI process is running on an OS-assigned localhost port — the only
+thing that ever sees the code. `cloudable login` then calls `issueCertificate` with `{ code, ... }`
+instead of a client-asserted `orgId`/`personId`; the control plane verifies the code's signature
+and expiry (60s) and derives `{ personId, orgId }` from it, never trusting the request body
+directly.
+
+The old `--dev-person-id <id> --org-id <id>` flags are gone, not kept as a fallback: they worked
+by having `issueCertificate` trust client-supplied identity directly, which is exactly the hole
+`code` closes — reopening it behind a flag would mean reopening it for anyone who passes that flag,
+not just local dev. Nothing else in this repo invoked them programmatically. Local/sandbox testing
+without a real IdP still works end-to-end: sign up via email/password at `/login`, then run
+`cloudable login` — this flow doesn't care which method produced the session.
 
 ### What's real: the ephemeral keypair and the certificate
 

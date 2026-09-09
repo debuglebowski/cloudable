@@ -10,7 +10,9 @@ import { AccessLive } from "./http/handlers/access";
 import { AgentProtocolLive } from "./http/handlers/agent-protocol";
 import { ApprovalsLive } from "./http/handlers/approvals";
 import { ArchiveLive } from "./http/handlers/archive";
+import { AuthSsoStatusLive } from "./http/handlers/auth-sso-status";
 import { CatalogLive } from "./http/handlers/catalog";
+import { CliAuthLive } from "./http/handlers/cli-auth";
 import { ComplianceLive } from "./http/handlers/compliance";
 import { ConfigLive } from "./http/handlers/config";
 import { ElevationsLive } from "./http/handlers/elevations";
@@ -86,6 +88,8 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       RestartLive,
       CatalogLive,
       ProvisioningCapabilitiesLive,
+      AuthSsoStatusLive,
+      CliAuthLive,
     ),
   ),
   Layer.provide(DbLive),

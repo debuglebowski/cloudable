@@ -54,3 +54,13 @@ output "custom_domain_verification_id" {
   value       = azurerm_container_app.this.custom_domain_verification_id
   sensitive   = true
 }
+
+output "app_identity_name" {
+  description = "Name of the user-assigned managed identity the control plane runs as (null unless key_vault_id is set). This is the exact name the Postgres role must be created with under Entra auth: `SELECT * FROM pgaadauth_create_principal('<this>', false, false)`."
+  value       = local.use_key_vault ? azurerm_user_assigned_identity.app[0].name : null
+}
+
+output "app_identity_principal_id" {
+  description = "Principal (object) id of the user-assigned managed identity, for granting it access to resources outside this module. Null unless key_vault_id is set — with a system-assigned identity, use container_app_identity_principal_id instead."
+  value       = local.use_key_vault ? azurerm_user_assigned_identity.app[0].principal_id : null
+}

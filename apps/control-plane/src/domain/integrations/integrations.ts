@@ -1,5 +1,5 @@
 import { integrations } from "@cloudable/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { Db } from "../../db/layer";
 
@@ -148,4 +148,34 @@ export const disconnectIntegration = (
           .where(and(eq(integrations.id, integrationId), eq(integrations.orgId, orgId))),
       "disconnect_integration_failed",
     );
+  });
+
+/**
+ * Not scoped to an org — used only by the unauthenticated login page
+ * (`GET /api/v1/auth/sso-provider`) to decide whether to show a "Sign in
+ * with SSO" button at all, before any session/org is known. A self-hosted
+ * deployment is realistically single-org (`CLAUDE.md`'s distribution
+ * model), so "any org's active idp row" and "this deployment's idp row"
+ * coincide in practice; ordered by most-recently-connected first if that
+ * ever isn't true, so at least a stale row from an org nobody uses anymore
+ * doesn't permanently shadow a real one connected later.
+ */
+export const findAnyActiveIdpIntegration = (): Effect.Effect<
+  IntegrationRow | undefined,
+  IntegrationsDbError,
+  Db
+> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rows = yield* dbTry(
+      () =>
+        db
+          .select()
+          .from(integrations)
+          .where(and(eq(integrations.kind, "idp"), isNull(integrations.removedAt)))
+          .orderBy(desc(integrations.connectedAt))
+          .limit(1),
+      "find_idp_integration_failed",
+    );
+    return rows[0];
   });

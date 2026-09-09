@@ -121,9 +121,10 @@ variable "postgres_database_name" {
 }
 
 variable "better_auth_secret" {
-  description = "Secret used by BetterAuth to sign sessions (BETTER_AUTH_SECRET). Generate a random 32+ byte value, e.g. `openssl rand -base64 32`. Marked sensitive."
+  description = "Secret used by BetterAuth to sign sessions (BETTER_AUTH_SECRET). Generate a random 32+ byte value, e.g. `openssl rand -base64 32`. Marked sensitive. Required UNLESS key_vault_id is set, in which case leave it null and put the value in the vault as `better-auth-secret` instead — passing it here would write it into Terraform state, which is the thing the Key Vault path exists to avoid."
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "port" {
@@ -250,4 +251,99 @@ variable "enable_private_networking" {
   EOT
   type        = bool
   default     = false
+}
+
+# ---------------------------------------------------------------------------
+# Key Vault-backed secrets (opt-in)
+# ---------------------------------------------------------------------------
+
+variable "key_vault_id" {
+  description = <<-EOT
+    Opt-in: resource id of an EXISTING Key Vault holding this deployment's
+    signing secrets. Set it (together with key_vault_uri) and the Container
+    App stops carrying secret VALUES entirely — it references Key Vault
+    secrets by URI and resolves them at container start with a user-assigned
+    managed identity this module creates and grants "Key Vault Secrets User"
+    on this vault. Nothing sensitive then exists in Terraform state.
+
+    The vault itself is deliberately NOT created here: soft-delete/purge
+    protection, network rules and naming are org-wide decisions that vary,
+    and a vault outliving this module is the point. Same posture as
+    alert_action_group_id.
+
+    Leave null (default) to keep today's behavior exactly: system-assigned
+    identity, secrets passed as plain values from var.better_auth_secret and
+    friends.
+
+    The vault must contain these four secrets (create them out-of-band, e.g.
+    `az keyvault secret set` — putting them there via Terraform would defeat
+    the purpose by writing the values back into state):
+      better-auth-secret, join-token-secret, agent-session-secret,
+      cli-auth-code-secret
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "key_vault_uri" {
+  description = <<-EOT
+    Data-plane URI of the same vault as key_vault_id (e.g.
+    "https://my-vault.vault.azure.net/"), used to build the secret
+    references. Both are required together; azurerm exposes them as the
+    vault's `id` and `vault_uri` attributes. Taken as an input rather than
+    looked up so this module needs no read permission on the vault.
+  EOT
+  type        = string
+  default     = null
+}
+
+# ---------------------------------------------------------------------------
+# Postgres Entra (Azure AD) authentication (opt-in)
+# ---------------------------------------------------------------------------
+
+variable "enable_postgres_entra_auth" {
+  description = <<-EOT
+    Opt-in: enable Entra authentication on the Postgres Flexible Server and
+    point the control plane at it, so the app authenticates with a
+    short-lived managed-identity token instead of a stored password
+    (DATABASE_URL loses its password; the app fetches a token per connection
+    — see apps/control-plane/src/db/connect.ts).
+
+    Requires key_vault_id/key_vault_uri, since it depends on the same
+    user-assigned identity those create.
+
+    Password authentication stays ENABLED alongside it, deliberately: it's
+    the rollback path (flip DATABASE_AUTH_MODE back to "password" without
+    touching infrastructure). That does mean postgres_admin_password remains
+    in state — turning password auth off entirely is a deliberate follow-up
+    once token auth is proven, not something to do in the same change that
+    introduces it.
+
+    One manual step this module cannot do for you: an Entra admin on the
+    server must create a database role for the identity and grant it what
+    the app needs — `SELECT * FROM pgaadauth_create_principal('<identity
+    name>', false, false)` plus grants. Until that role exists the app can
+    authenticate but has no privileges. Grant it exactly what it needs, not
+    superuser.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "postgres_entra_admin_object_id" {
+  description = "Object id of the Entra principal to make Postgres AD administrator — needed to run the one-time role bootstrap described on enable_postgres_entra_auth. Typically a human operator or the deploying identity."
+  type        = string
+  default     = null
+}
+
+variable "postgres_entra_admin_principal_name" {
+  description = "Display name / UPN matching postgres_entra_admin_object_id (Azure requires both)."
+  type        = string
+  default     = null
+}
+
+variable "postgres_entra_admin_principal_type" {
+  description = "Principal type for postgres_entra_admin_object_id: User, Group, or ServicePrincipal."
+  type        = string
+  default     = "User"
 }

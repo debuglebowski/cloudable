@@ -25,6 +25,7 @@ export * from "./tables/auth-user";
 export * from "./tables/auth-session";
 export * from "./tables/auth-account";
 export * from "./tables/auth-verification";
+export * from "./tables/auth-sso-provider";
 export * from "./tables/restore-request";
 
 export * from "./shared";

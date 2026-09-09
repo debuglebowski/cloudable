@@ -1,5 +1,6 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
+import { verifyCliAuthCode } from "../../services/CliAuthCode";
 import { SignerTag } from "../../services/Signer";
 import { SshCaService } from "../../services/ssh-ca/SshCaService";
 import { listActiveSessionsByOrg } from "../../tunnel/queries";
@@ -38,11 +39,24 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
   handlers
     .handle("issueCertificate", ({ payload }) =>
       Effect.gen(function* () {
+        // `code` came from `POST /api/v1/cli-auth/code` (session-gated,
+        // called by the console's `/cli-auth` page) via a local redirect to
+        // `cloudable login`'s own callback server — see that route's header
+        // comment. Verified here, never trusted from the request body
+        // directly.
+        const verified = verifyCliAuthCode(payload.code);
+        if (!verified.ok) {
+          return yield* Effect.fail({
+            code: "denied" as const,
+            message: `Sign-in code ${verified.error.reason} — run \`cloudable login\` again.`,
+          });
+        }
+
         const sshCa = yield* SshCaService;
         const subjectPublicKeyRaw = new Uint8Array(Buffer.from(payload.publicKeyBase64, "base64"));
         const issued = yield* sshCa.issueCertificate({
-          orgId: payload.orgId,
-          personId: payload.personId,
+          orgId: verified.orgId,
+          personId: verified.personId,
           osUser: payload.osUser,
           machineScope: payload.machineScope,
           subjectPublicKeyRaw,
