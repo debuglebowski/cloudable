@@ -1,8 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import type * as schema from "@cloudable/schema";
+import { machines, orgs } from "@cloudable/schema";
+import { inArray } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
+import { connectAndMigrate } from "../../test-support/db";
 import { AttestationError, type MachineIdentity } from "./AttestationMethod";
-import { makeManagedIdentityAttestation } from "./managed-identity";
+import { makeManagedIdentityAttestation, resolveMachineByResourceId } from "./managed-identity";
 
 const AUDIENCE = "https://management.azure.com/";
 const RESOURCE_ID =
@@ -226,5 +231,80 @@ describe("managed-identity attestation", () => {
       Effect.flip(method.issueCredential({ orgId: "org-1", machineId: "machine-1" })),
     );
     expect(error.reason).toBe("not_supported");
+  });
+});
+
+// Real Postgres, not a fake — `resolveMachineByResourceId`'s whole job is a real
+// SQL comparison; only a real round trip can confirm it actually matches
+// case-insensitively.
+describe("resolveMachineByResourceId (requires Postgres)", () => {
+  let close: () => Promise<void>;
+  let db: PostgresJsDatabase<typeof schema>;
+  const createdOrgIds: string[] = [];
+
+  beforeAll(async () => {
+    const databaseUrl =
+      process.env.DATABASE_URL ?? "postgres://cloudable:cloudable@localhost:5442/cloudable";
+    const conn = await connectAndMigrate(databaseUrl);
+    db = conn.db;
+    close = conn.close;
+  });
+
+  afterAll(async () => {
+    if (createdOrgIds.length > 0) {
+      await db.delete(machines).where(inArray(machines.orgId, createdOrgIds));
+      await db.delete(orgs).where(inArray(orgs.id, createdOrgIds));
+    }
+    await close();
+  });
+
+  async function seedMachine(externalResourceId: string) {
+    const [org] = await db
+      .insert(orgs)
+      .values({ name: `org-${crypto.randomUUID()}` })
+      .returning();
+    if (!org) throw new Error("seed failed");
+    createdOrgIds.push(org.id);
+
+    const [machine] = await db
+      .insert(machines)
+      .values({
+        orgId: org.id,
+        name: "m1",
+        provider: "azure",
+        sizeSku: "Standard_D2s_v5",
+        image: "ubuntu-24.04",
+        externalResourceId,
+      })
+      .returning();
+    if (!machine) throw new Error("seed failed");
+    return machine;
+  }
+
+  // Regression: this is the exact real-world mismatch that made every fresh
+  // Azure machine's attestation fail with "unknown_machine" — confirmed live
+  // against a real stuck machine (an IMDS token's `xms_mirid` claim reads
+  // "resourcegroups" lowercase; ARM's own get/list responses, which is what
+  // populated `externalResourceId` here, read "resourceGroups").
+  test("matches regardless of casing differences in the resourceGroups segment", async () => {
+    const machine = await seedMachine(
+      "/subscriptions/x/resourceGroups/rg-cloudable-managed/providers/Microsoft.Compute/virtualMachines/vm-1",
+    );
+
+    const identity = await Effect.runPromise(
+      resolveMachineByResourceId(
+        db,
+        "/subscriptions/x/resourcegroups/rg-cloudable-managed/providers/Microsoft.Compute/virtualMachines/vm-1",
+      ),
+    );
+
+    expect(identity).toEqual({ machineId: machine.id, orgId: machine.orgId });
+  });
+
+  test("fails with unknown_machine when genuinely no row matches", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(resolveMachineByResourceId(db, "/subscriptions/x/.../virtualMachines/nope")),
+    );
+    expect(error.reason).toBe("unknown_machine");
   });
 });
