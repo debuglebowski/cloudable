@@ -291,7 +291,7 @@ export const upgradeMachine = (
         region: machine.region,
         sizeSku: machine.sizeSku,
         targetImage,
-        name: machine.name,
+        externalId: machine.externalResourceId,
       }),
     );
 
@@ -301,7 +301,7 @@ export const upgradeMachine = (
       failureReason = `reimage failed: ${reimageOutcome.left.reason}`;
     } else {
       const reconcileOutcome = yield* Effect.either(
-        provisioning.reconcile(machineId, machine.provider, machine.name),
+        provisioning.reconcile(machineId, machine.provider, machine.externalResourceId),
       );
       if (reconcileOutcome._tag === "Left") {
         failureReason = `verification call failed: ${reconcileOutcome.left.reason}`;

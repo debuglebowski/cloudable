@@ -55,11 +55,12 @@ export interface ReimageDescriptor {
   region: string | null;
   sizeSku: string;
   targetImage: string;
-  /** Same optional readable-name field as `MachineDescriptor.name` — reimage
-   * recreates the VM under the same resource names `create` used, so this
-   * needs to be the machine's current name for the azure adapter's `namesFor`
-   * call to land on the same names again. */
-  name?: string;
+  /** The machine's current `externalResourceId` — reimage isn't a new logical
+   * machine, so both finding the old VM to delete AND naming its replacement
+   * reuse the identity this resolves to (see `ProvisioningService.azure.ts`'s
+   * `resolveVmNames`), rather than minting a fresh name. No separate `name`
+   * field: unlike `create`, nothing here needs to invent a brand-new name. */
+  externalId: string | null;
 }
 
 export interface MachineStatus {
@@ -103,33 +104,45 @@ export interface MachineStatus {
  * row loaded (it needs it for other reasons anyway), so this keeps
  * `ProvisioningService.switchable.ts`'s dispatcher a pure closure with no DB
  * dependency of its own. `create`/`reimage` don't need a separate parameter
- * since their descriptor already carries `provider`. `name` (optional,
- * added alongside the readable-Azure-naming change) follows the same
- * reasoning: the azure adapter needs the machine's current name to
- * reconstruct the same resource names `create` used, and every real call
- * site already has it in hand too. `reconcile-machine.ts`'s still-provisional
- * reconcile-loop path (whose `DesiredMachineState` has no name field, same
- * as it has no `image` field) is the one caller that omits it — same
- * fallback-to-id-only-naming behavior that already existed before this
- * field was added.
+ * since their descriptor already carries `provider`.
+ *
+ * `archive`/`reconcile`/`restart` take `externalId` (the machine's current
+ * `externalResourceId`, `null` if not yet known) rather than a `name` — every
+ * real call site already has the machine row loaded, same as `provider`
+ * above. This used to be an optional `name?: string`, which the azure
+ * adapter recomputed a resource name from (`namesFor`) to find the VM again.
+ * That was a real, live footgun: two call sites (`reconcile-machine.ts`,
+ * `domain/archive/archive.ts`) forgot to pass it, silently computing the
+ * *wrong* name and 404ing against Azure — `reconcile-machine.ts`'s left the
+ * whole reconcile loop permanently unable to promote any named Azure machine
+ * out of "provisioning"; `archive.ts`'s was worse, since a 404 there is
+ * treated as "already gone" and silently left the real VM running forever
+ * while marking the machine archived. Recomputing a name from scratch at
+ * every call site duplicates logic and has no compiler or runtime check that
+ * it lands on the same name `create()` actually used. Looking up the stored
+ * `externalResourceId` instead removes the guesswork entirely: it's the
+ * exact resource Azure itself returned at creation, not a re-derived guess.
+ * The azure adapter self-heals any row where it's still `null` (or wrong) by
+ * querying Azure for the VM tagged `cloudable-machine-id` — see
+ * `ProvisioningService.azure.ts`'s `resolveVmNames`.
  */
 export interface ProvisioningService {
   create(desc: MachineDescriptor): Effect.Effect<MachineStatus, ProvisioningError>;
   archive(
     machineId: string,
     provider: Provider,
-    name?: string,
+    externalId: string | null,
   ): Effect.Effect<MachineStatus, ProvisioningError>;
   reconcile(
     machineId: string,
     provider: Provider,
-    name?: string,
+    externalId: string | null,
   ): Effect.Effect<MachineStatus, ProvisioningError>;
   reimage(desc: ReimageDescriptor): Effect.Effect<MachineStatus, ProvisioningError>;
   restart(
     machineId: string,
     provider: Provider,
-    name?: string,
+    externalId: string | null,
   ): Effect.Effect<MachineStatus, ProvisioningError>;
 }
 

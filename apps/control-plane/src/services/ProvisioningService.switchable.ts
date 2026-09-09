@@ -38,11 +38,13 @@ export const SwitchableProvisioningServiceLive: Layer.Layer<ProvisioningServiceT
 
     return {
       create: (desc) => implFor(desc.provider).create(desc),
-      archive: (machineId, provider, name) => implFor(provider).archive(machineId, provider, name),
-      reconcile: (machineId, provider, name) =>
-        implFor(provider).reconcile(machineId, provider, name),
+      archive: (machineId, provider, externalId) =>
+        implFor(provider).archive(machineId, provider, externalId),
+      reconcile: (machineId, provider, externalId) =>
+        implFor(provider).reconcile(machineId, provider, externalId),
       reimage: (desc) => implFor(desc.provider).reimage(desc),
-      restart: (machineId, provider, name) => implFor(provider).restart(machineId, provider, name),
+      restart: (machineId, provider, externalId) =>
+        implFor(provider).restart(machineId, provider, externalId),
     } satisfies ProvisioningService;
   }),
 );

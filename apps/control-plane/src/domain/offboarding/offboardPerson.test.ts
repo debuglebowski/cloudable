@@ -65,6 +65,7 @@ function buildTestLayers(opts: {
           id,
           name: `machine-${id}`,
           provider: "fake" as const,
+          externalResourceId: `fake-${id}`,
         }));
       }),
     findLiveCertificateIds: () =>
