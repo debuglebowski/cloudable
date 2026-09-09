@@ -283,6 +283,47 @@ export function machineProvisioningFailedEvent(
   };
 }
 
+export interface MachineDriftDetectedInput extends ActorContext {
+  machineId: string;
+  orgId: string;
+  correlationId: string;
+  undeclaredPackages: ReadonlyArray<string>;
+  occurredAt?: Date;
+}
+
+/**
+ * Emitted by the reconcile loop (`reconcile/persist-result.ts`) when a live
+ * reconcile pass observes packages running that aren't in the declared
+ * manifest. Deliberately simpler than `deriveEvents`'s own
+ * `machine.drift_detected` emission (`./events.ts`'s `deriveEvents`, used by
+ * the agent `/report` path via `services/reconcile-diff.ts`): that one only
+ * fires on a *change* in the drift set, because it has a real previous
+ * snapshot (`machines.lastReportedState`) to diff against. A live Azure
+ * reconcile pass has no such snapshot — `ProvisioningService`'s `reconcile()`
+ * doesn't report `packagesHash`/`runningAccessMethods`, so this deliberately
+ * doesn't try to reuse `deriveEvents` (forcing that shape would mean
+ * fabricating a fake `runningAccessMethods: []` on every pass, which would
+ * falsely read as "access methods were just removed" against whatever the
+ * agent's own last report actually said). `undeclaredPorts` is always empty
+ * here for the same honest reason `deriveEvents` documents: this signal
+ * never observes ports at all, not that none are open.
+ */
+export function machineDriftDetectedEvent(input: MachineDriftDetectedInput): MachineEvent {
+  return {
+    id: PLACEHOLDER_ID,
+    type: "machine.drift_detected",
+    occurredAt: input.occurredAt ?? new Date(),
+    recordedAt: PLACEHOLDER_RECORDED_AT,
+    orgId: input.orgId,
+    actorType: input.actorType,
+    actorId: input.actorId,
+    machineId: input.machineId,
+    correlationId: input.correlationId,
+    schemaVersion: 1,
+    payload: { undeclaredPackages: [...input.undeclaredPackages], undeclaredPorts: [] },
+  };
+}
+
 export interface MachineSettingChangedInput extends ActorContext {
   machineId: string;
   orgId: string;
