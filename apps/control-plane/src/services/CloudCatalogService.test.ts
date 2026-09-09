@@ -9,6 +9,7 @@ import type { CatalogKind } from "./CloudCatalogService";
 import {
   isGen2Capable,
   isOfferedArchitecture,
+  isRestrictedInLocation,
   isScheduledForRetirement,
   upsertEntries,
 } from "./CloudCatalogService";
@@ -48,6 +49,50 @@ describe("isScheduledForRetirement", () => {
     expect(isScheduledForRetirement({ capabilities: [{ name: "vCPUs", value: "4" }] })).toBe(false);
     expect(isScheduledForRetirement({ capabilities: [] })).toBe(false);
     expect(isScheduledForRetirement({})).toBe(false);
+  });
+});
+
+describe("isRestrictedInLocation", () => {
+  // Real data: `az vm list-skus --location northeurope --size Standard_B4as_v2 --all`
+  // against the production subscription, seen live after a user hit
+  // `quota_exceeded: ... currently not available in location 'northeurope'`
+  // creating a machine with this exact SKU.
+  const b4asRestrictions = [
+    {
+      type: "Location",
+      values: ["northeurope"],
+      reasonCode: "NotAvailableForSubscription",
+    },
+    {
+      type: "Zone",
+      values: ["northeurope"],
+      reasonCode: "NotAvailableForSubscription",
+    },
+  ];
+
+  test("flags a SKU with a Location restriction covering the deployment's region", () => {
+    expect(isRestrictedInLocation({ restrictions: b4asRestrictions }, "northeurope")).toBe(true);
+  });
+
+  test("does not flag a Location restriction for a different region", () => {
+    expect(isRestrictedInLocation({ restrictions: b4asRestrictions }, "westeurope")).toBe(false);
+  });
+
+  // Deliberate: this deployment never pins an availability zone, so a SKU restricted
+  // in only some zones can still be placed in whichever zone isn't restricted — see
+  // isRestrictedInLocation's own doc comment.
+  test("does not flag a Zone-only restriction, even for the deployment's own region", () => {
+    expect(
+      isRestrictedInLocation(
+        { restrictions: [{ type: "Zone", values: ["northeurope"] }] },
+        "northeurope",
+      ),
+    ).toBe(false);
+  });
+
+  test("a SKU with no restrictions at all is not flagged", () => {
+    expect(isRestrictedInLocation({ restrictions: [] }, "northeurope")).toBe(false);
+    expect(isRestrictedInLocation({}, "northeurope")).toBe(false);
   });
 });
 
