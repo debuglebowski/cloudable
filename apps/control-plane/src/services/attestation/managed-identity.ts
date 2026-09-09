@@ -1,5 +1,7 @@
+import type * as schema from "@cloudable/schema";
 import { integrations, machines } from "@cloudable/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
 import { type JWTPayload, createRemoteJWKSet, jwtVerify } from "jose";
 import { config } from "../../config";
@@ -163,6 +165,45 @@ export const makeManagedIdentityAttestation = (
  * by `registry.ts`, which composes this Effect (and the other methods') into
  * the single `AttestationRegistryTag` layer.
  */
+/**
+ * Looks up the machine owning a given Azure resource id — extracted and
+ * exported (rather than an inline closure) so it's directly testable against
+ * a real database without needing a signed JWT to drive it through
+ * `verifyCredential`.
+ *
+ * Case-insensitive on purpose: Azure resource ids are case-insensitive by
+ * definition, but different ARM operations echo them back with different
+ * casing for the same real resource — confirmed live: an IMDS-issued token's
+ * `xms_mirid` claim reads "resourcegroups" (all lowercase), while
+ * `virtualMachines.get`/`.list()` (ARM read paths) return "resourceGroups".
+ * A plain `eq()` here is exact-string, so it silently never matches whichever
+ * machines had their `externalResourceId` recorded via a differently-cased
+ * ARM response than the one IMDS happens to issue at attestation time — this
+ * masqueraded as `unknown_machine` in production.
+ */
+export const resolveMachineByResourceId = (
+  db: PostgresJsDatabase<typeof schema>,
+  resourceId: string,
+): Effect.Effect<MachineIdentity, AttestationError> =>
+  Effect.gen(function* () {
+    const rows = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select()
+          .from(machines)
+          .where(sql`lower(${machines.externalResourceId}) = lower(${resourceId})`)
+          .limit(1),
+      catch: (cause) => new AttestationError({ reason: "lookup_failed", cause }),
+    });
+
+    const machine = rows[0];
+    if (!machine) {
+      return yield* Effect.fail(new AttestationError({ reason: "unknown_machine" }));
+    }
+
+    return { machineId: machine.id, orgId: machine.orgId } satisfies MachineIdentity;
+  });
+
 export const managedIdentityAttestationEffect: Effect.Effect<AttestationMethod, never, Db> =
   Effect.gen(function* () {
     const db = yield* Db;
@@ -174,18 +215,7 @@ export const managedIdentityAttestationEffect: Effect.Effect<AttestationMethod, 
           return yield* Effect.fail(new AttestationError({ reason: "missing_identity_claim" }));
         }
 
-        const rows = yield* Effect.tryPromise({
-          try: () =>
-            db.select().from(machines).where(eq(machines.externalResourceId, resourceId)).limit(1),
-          catch: (cause) => new AttestationError({ reason: "lookup_failed", cause }),
-        });
-
-        const machine = rows[0];
-        if (!machine) {
-          return yield* Effect.fail(new AttestationError({ reason: "unknown_machine" }));
-        }
-
-        return { machineId: machine.id, orgId: machine.orgId } satisfies MachineIdentity;
+        return yield* resolveMachineByResourceId(db, resourceId);
       });
 
     // The org's connected `cloud` integration (console Integrations page,
