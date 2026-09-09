@@ -32,6 +32,7 @@ import { BinariesRouteLive } from "./http/routes/binaries";
 import { ConsoleStaticRouteLive } from "./http/routes/console";
 import { buildAppLive } from "./layers";
 import { migrateOnBoot } from "./migrate-on-boot";
+import { startReconcileDaemon } from "./reconcile/daemon";
 import { seedAzureImages } from "./services/CloudCatalogService";
 import { SwitchableProvisioningServiceLive } from "./services/ProvisioningService.switchable";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
@@ -103,6 +104,17 @@ const TunnelRoutesLive = Layer.mergeAll(TunnelConnectRouteLive, AccessAttachRout
   Layer.provide(TunnelRegistry.Default),
 );
 
+// Forks `reconcile/daemon.ts`'s `startReconcileDaemon` as a background fiber sharing
+// this same layer graph's `Db`/`ProvisioningServiceTag`/`MachineService`/`EventBus`
+// (all supplied by `AppLive` below) — no second connection pool for the reconcile
+// work itself, only the dedicated advisory-lock connection the daemon opens on its
+// own. `forkDaemon`, not `fork`: this must outlive whatever effect happens to be
+// running when the layer is constructed, scoped to the whole runtime's lifetime
+// instead — same as the HTTP server itself. `effectDiscard` because forking returns
+// a `Fiber` this layer has no further use for; the daemon runs supervised in the
+// background from here on.
+const ReconcileDaemonLive = Layer.effectDiscard(Effect.forkDaemon(startReconcileDaemon));
+
 // Every console page fetches cross-origin (console and control-plane run on
 // different ports in local dev, and there's no reverse proxy in front of
 // either yet) — without this, the browser silently withholds every response
@@ -116,6 +128,7 @@ const ServerLive = HttpApiBuilder.serve((httpApp) =>
   Layer.provide(AuthRouteLive),
   Layer.provide(BinariesRouteLive),
   Layer.provide(ConsoleStaticRouteLive),
+  Layer.provide(ReconcileDaemonLive),
   Layer.provide(AppLive),
   // idleTimeout (seconds, Bun's own default is 10) needs real headroom: the Azure
   // sizes sync (`catalog.ts`'s `syncSizes` -> `CloudCatalogService.syncAzureSizes`)

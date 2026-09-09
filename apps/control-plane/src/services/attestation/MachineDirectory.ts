@@ -1,5 +1,5 @@
 import { machines } from "@cloudable/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 
@@ -39,10 +39,32 @@ export class MachineDirectory extends Effect.Service<MachineDirectory>()("Machin
         Effect.orDie,
       );
 
+    // A successful check-in is the strongest liveness signal this control plane has —
+    // direct proof the OS booted, cloud-init ran, and the agent is attesting. It
+    // self-heals `state`, promoting `"provisioning"` (the normal case: nothing has
+    // marked this machine "running" yet, see `reconcile/persist-result.ts`'s own
+    // doc comment on why nothing did before this) and correcting a stale `"error"`
+    // (a reconcile pass can land in the narrow window before Azure's hypervisor
+    // reports the VM as powered on — see that same file's grace-period comment; this
+    // is the backstop for the rare case that window still produced a false "error").
+    // Keyed on the row's *current* `state`, not "is this the first check-in ever" —
+    // so any later successful check-in can still correct an earlier mistake, not
+    // just the first one. Deliberately excludes every archived/stopped state: a
+    // check-in must never revive an archived row's displayed state. One statement,
+    // not a read-then-write — same conditional-`CASE` idiom
+    // `CloudCatalogService.ts`'s `upsertEntries` and `persist-result.ts` already use,
+    // so there's no race between checking the current state and acting on it.
     const markVerified = (machineId: string, at: Date): Effect.Effect<void> =>
       Effect.tryPromise({
         try: () =>
-          db.update(machines).set({ lastVerifiedAt: at }).where(eq(machines.id, machineId)),
+          db
+            .update(machines)
+            .set({
+              lastVerifiedAt: at,
+              state: sql`CASE WHEN ${machines.state} IN ('provisioning', 'error') THEN 'running' ELSE ${machines.state} END`,
+              lastError: sql`CASE WHEN ${machines.state} IN ('provisioning', 'error') THEN NULL ELSE ${machines.lastError} END`,
+            })
+            .where(eq(machines.id, machineId)),
         catch: (cause) => new Error(`machine update failed: ${String(cause)}`),
       }).pipe(Effect.asVoid, Effect.orDie);
 
