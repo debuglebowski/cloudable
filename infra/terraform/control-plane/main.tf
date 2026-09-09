@@ -611,12 +611,32 @@ resource "azurerm_container_app_environment" "this" {
 
   # Gives this environment DNS visibility into the VNet the Postgres private
   # zone above is linked to, so it can resolve/reach the server once
-  # public_network_access_enabled is off. No workload_profile block: adding
-  # one isn't required for this, and would in fact break the intent here —
-  # "Consumption only" mode (no workload_profile) is what wants an
-  # undelegated infra subnet; workload-profile environments want it delegated
-  # instead.
+  # public_network_access_enabled is off.
   infrastructure_subnet_id = var.enable_private_networking ? azurerm_subnet.container_apps[0].id : null
+
+  # Corrected against a real, live apply, not just docs/provider source:
+  # earlier research concluded a VNet-integrated environment with no
+  # workload_profile block stays "Consumption only" and doesn't need one.
+  # Two things about that turned out wrong in practice: the subnet actually
+  # needs delegating to Microsoft.App/environments regardless (see the
+  # container_apps subnet's own comment), and once that delegation is in
+  # place, Azure silently attaches a default Consumption workload profile
+  # to the environment on its own -- declaring it explicitly here isn't
+  # optional, it's what stops every future plan from showing perpetual
+  # drift trying to remove a profile Azure just re-adds anyway.
+  dynamic "workload_profile" {
+    for_each = var.enable_private_networking ? [1] : []
+    content {
+      name                  = "Consumption"
+      workload_profile_type = "Consumption"
+      # Not computed fields — Azure reports these as 0 for a Consumption
+      # profile (it doesn't use fixed min/max the way Dedicated profiles
+      # do), and leaving them unset here would drift against that on every
+      # plan, the same way the whole block did before it was declared.
+      maximum_count = 0
+      minimum_count = 0
+    }
+  }
 }
 
 resource "azurerm_container_app" "this" {
