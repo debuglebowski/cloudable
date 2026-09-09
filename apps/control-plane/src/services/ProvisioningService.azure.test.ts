@@ -5,6 +5,7 @@ import {
   cloudInitFor,
   imageReferenceFor,
   namesFor,
+  throwawayAdminPassword,
 } from "./ProvisioningService.azure";
 
 describe("imageReferenceFor", () => {
@@ -120,6 +121,44 @@ describe("cloudInitFor", () => {
     expect(script).toContain(
       `curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-tunnel-daemon-linux-$ARCH"`,
     );
+  });
+});
+
+describe("throwawayAdminPassword", () => {
+  // Regression: the original `"Cldm-" + uuid + "-" + uuid` was 78 characters —
+  // over Azure's 72-character max for a Linux VM admin password. This failed VM
+  // creation live with `provider_error: The supplied password must be between
+  // 6-72 characters long...` on every request that got far enough in Azure's
+  // validation pipeline to reach this field (most were rejected earlier, on
+  // SKU/region compatibility, until this session's other fixes cleared that
+  // path). Checked across many calls, not just one, since the UUID content is
+  // random — length must hold for every possible UUID, not just the sampled one.
+  test("always falls within Azure's 6-72 character bounds for a Linux VM admin password", () => {
+    for (let i = 0; i < 200; i++) {
+      const password = throwawayAdminPassword();
+      expect(password.length).toBeGreaterThanOrEqual(6);
+      expect(password.length).toBeLessThanOrEqual(72);
+    }
+  });
+
+  // Azure requires at least 3 of: uppercase, lowercase, digit, special character,
+  // no control characters. Checked deterministically via the fixed "Cldm-" prefix
+  // and a v4 UUID's fixed version nibble, not by sampling and hoping.
+  test("always satisfies at least 3 of Azure's password complexity categories", () => {
+    for (let i = 0; i < 200; i++) {
+      const password = throwawayAdminPassword();
+      const categories = [
+        /[A-Z]/.test(password),
+        /[a-z]/.test(password),
+        /[0-9]/.test(password),
+        /[^A-Za-z0-9]/.test(password),
+      ].filter(Boolean).length;
+      expect(categories).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  test("is different on every call — never reused across machines", () => {
+    expect(throwawayAdminPassword()).not.toBe(throwawayAdminPassword());
   });
 });
 
