@@ -117,7 +117,16 @@ const ServerLive = HttpApiBuilder.serve((httpApp) =>
   Layer.provide(BinariesRouteLive),
   Layer.provide(ConsoleStaticRouteLive),
   Layer.provide(AppLive),
-  Layer.provide(BunHttpServer.layer({ port: config.port })),
+  // idleTimeout (seconds, Bun's own default is 10) needs real headroom: the Azure
+  // sizes sync (`catalog.ts`'s `syncSizes` -> `CloudCatalogService.syncAzureSizes`)
+  // is a real, synchronous-from-the-caller's-view ARM sweep across a large SKU
+  // list, confirmed in practice to run well past 10s with a 1000+-row catalog.
+  // At the default, Bun kills the idle connection at 10s, the fiber gets
+  // interrupted along with it, and the sync stops wherever it happened to be —
+  // no error surfaced anywhere, just a catalog with some rows populated and the
+  // rest silently left on old/null data. 180s is generous headroom without being
+  // unbounded (Bun caps this option at 255 regardless).
+  Layer.provide(BunHttpServer.layer({ port: config.port, idleTimeout: 180 })),
 );
 
 // Unlike the Azure region catalog (a real ARM call, only ever triggered by
