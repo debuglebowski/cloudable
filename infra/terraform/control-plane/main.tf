@@ -413,8 +413,16 @@ resource "azurerm_subnet_network_security_group_association" "machines" {
 # ---------------------------------------------------------------------------
 
 locals {
-  flow_logs_enabled       = var.enable_flow_logs && var.enable_self_managed_machines
-  network_watcher_name    = "NetworkWatcher_${lower(replace(local.machines_resource_group_location, " ", ""))}"
+  # Broadened to cover the private-networking VNet too, not just machines —
+  # this module assumes a single practical region throughout (see e.g. the
+  # machine-size-catalog sync comment elsewhere), so falling back to the
+  # control plane's own region/RG when machines are disabled is safe and,
+  # for this deployment specifically (both enabled), computes to exactly the
+  # same values as before — no drift on the already-existing resources below.
+  flow_logs_enabled       = var.enable_flow_logs && (var.enable_self_managed_machines || var.enable_private_networking)
+  flow_logs_region        = var.enable_self_managed_machines ? local.machines_resource_group_location : local.resource_group_location
+  flow_logs_rg_name       = var.enable_self_managed_machines ? local.machines_resource_group_name : local.resource_group_name
+  network_watcher_name    = "NetworkWatcher_${lower(replace(local.flow_logs_region, " ", ""))}"
   network_watcher_rg_name = "NetworkWatcherRG"
 }
 
@@ -427,11 +435,38 @@ data "azurerm_network_watcher" "this" {
 resource "azurerm_storage_account" "flow_logs" {
   count                    = local.flow_logs_enabled ? 1 : 0
   name                     = "${var.name_prefix}flowlogs${random_string.postgres_suffix.result}"
-  resource_group_name      = local.machines_resource_group_name
-  location                 = local.machines_resource_group_location
+  resource_group_name      = local.flow_logs_rg_name
+  location                 = local.flow_logs_region
   account_tier             = "Standard"
   account_replication_type = "LRS"
   tags                     = var.tags
+}
+
+# This storage account is itself a resource a compliance scan will flag for
+# lacking health monitoring (found live: Vanta's "Storage account health
+# monitored" check picked it up the run after it was created) — same
+# permissive shape as the Postgres alerts above, not a separate exception.
+resource "azurerm_monitor_metric_alert" "flow_logs_storage_availability" {
+  count               = local.flow_logs_enabled && var.alert_action_group_id != null ? 1 : 0
+  name                = "${var.name_prefix}-flow-logs-storage-availability-alert"
+  resource_group_name = local.flow_logs_rg_name
+  scopes              = [azurerm_storage_account.flow_logs[0].id]
+  description         = "Average availability on the flow-logs storage account dropped below 95% over the last hour"
+  severity            = 2
+  frequency           = "PT15M"
+  window_size         = "PT1H"
+
+  criteria {
+    metric_namespace = "Microsoft.Storage/storageAccounts"
+    metric_name      = "Availability"
+    aggregation      = "Average"
+    operator         = "LessThan"
+    threshold        = 95
+  }
+
+  action {
+    action_group_id = var.alert_action_group_id
+  }
 }
 
 # Both a VNet-level and a subnet-level flow log are created deliberately,
@@ -443,7 +478,7 @@ resource "azurerm_storage_account" "flow_logs" {
 # doubled — combined volume for a low-traffic deployment should still fit
 # comfortably within it.
 resource "azurerm_network_watcher_flow_log" "machines_vnet" {
-  count                = local.flow_logs_enabled ? 1 : 0
+  count                = local.flow_logs_enabled && var.enable_self_managed_machines ? 1 : 0
   name                 = "${var.name_prefix}-machines-vnet-flow-log"
   network_watcher_name = data.azurerm_network_watcher.this[0].name
   resource_group_name  = data.azurerm_network_watcher.this[0].resource_group_name
@@ -461,13 +496,74 @@ resource "azurerm_network_watcher_flow_log" "machines_vnet" {
 }
 
 resource "azurerm_network_watcher_flow_log" "machines_subnet" {
-  count                = local.flow_logs_enabled ? 1 : 0
+  count                = local.flow_logs_enabled && var.enable_self_managed_machines ? 1 : 0
   name                 = "${var.name_prefix}-machines-subnet-flow-log"
   network_watcher_name = data.azurerm_network_watcher.this[0].name
   resource_group_name  = data.azurerm_network_watcher.this[0].resource_group_name
   location             = local.machines_resource_group_location
 
   target_resource_id = azurerm_subnet.machines[0].id
+  storage_account_id = azurerm_storage_account.flow_logs[0].id
+  enabled            = true
+  version            = 2
+
+  retention_policy {
+    enabled = true
+    days    = 90
+  }
+}
+
+# Same coverage for the private-networking VNet (opt-in, var.enable_flow_logs
+# + var.enable_private_networking) — found live, not anticipated: closing the
+# machines-network flow-log gap surfaced this VNet and its two subnets as
+# their own new "needs remediation" entries once they existed (a compliance
+# scan sees resources as they're created, including ones a previous fix
+# itself introduced). Reuses the same storage account and Network Watcher
+# reference as the machines flow logs above — no new destination needed.
+resource "azurerm_network_watcher_flow_log" "control_plane_vnet" {
+  count                = local.flow_logs_enabled && var.enable_private_networking ? 1 : 0
+  name                 = "${var.name_prefix}-cp-vnet-flow-log"
+  network_watcher_name = data.azurerm_network_watcher.this[0].name
+  resource_group_name  = data.azurerm_network_watcher.this[0].resource_group_name
+  location             = local.flow_logs_region
+
+  target_resource_id = azurerm_virtual_network.control_plane[0].id
+  storage_account_id = azurerm_storage_account.flow_logs[0].id
+  enabled            = true
+  version            = 2
+
+  retention_policy {
+    enabled = true
+    days    = 90
+  }
+}
+
+resource "azurerm_network_watcher_flow_log" "control_plane_postgres_subnet" {
+  count                = local.flow_logs_enabled && var.enable_private_networking ? 1 : 0
+  name                 = "${var.name_prefix}-cp-postgres-subnet-flow-log"
+  network_watcher_name = data.azurerm_network_watcher.this[0].name
+  resource_group_name  = data.azurerm_network_watcher.this[0].resource_group_name
+  location             = local.flow_logs_region
+
+  target_resource_id = azurerm_subnet.postgres[0].id
+  storage_account_id = azurerm_storage_account.flow_logs[0].id
+  enabled            = true
+  version            = 2
+
+  retention_policy {
+    enabled = true
+    days    = 90
+  }
+}
+
+resource "azurerm_network_watcher_flow_log" "control_plane_container_apps_subnet" {
+  count                = local.flow_logs_enabled && var.enable_private_networking ? 1 : 0
+  name                 = "${var.name_prefix}-cp-container-apps-subnet-flow-log"
+  network_watcher_name = data.azurerm_network_watcher.this[0].name
+  resource_group_name  = data.azurerm_network_watcher.this[0].resource_group_name
+  location             = local.flow_logs_region
+
+  target_resource_id = azurerm_subnet.container_apps[0].id
   storage_account_id = azurerm_storage_account.flow_logs[0].id
   enabled            = true
   version            = 2
