@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
-import type { MachineStatus } from "../services/ProvisioningService";
+import { Effect, Layer } from "effect";
+import {
+  type MachineStatus,
+  type ProvisioningService,
+  ProvisioningServiceTag,
+} from "../services/ProvisioningService";
 import { makeFakeProvisioningServiceLive } from "../services/ProvisioningService.fake";
 import { diffUndeclaredPackages, reconcileMachine } from "./reconcile-machine";
 import type { DesiredMachineState } from "./types";
@@ -132,5 +136,59 @@ describe("reconcileMachine", () => {
 
     expect(error._tag).toBe("ReconcileError");
     expect(error.reason).toBe("archived_requires_restore");
+  });
+
+  // Regression: `reconcile()`/`archive()` were called with no third argument
+  // at all, so the azure adapter always fell back to guessing a resource
+  // name instead of looking up the machine's real, stored one — silently
+  // breaking the reconcile loop for every named Azure machine. This spies on
+  // the exact arguments `reconcileMachine` passes, independent of what any
+  // particular adapter does with them.
+  describe("threads `lastKnown.externalId` through to the provisioning port", () => {
+    function spyProvisioning() {
+      const calls: Array<{ method: string; machineId: string; externalId: string | null }> = [];
+      const provisioning: ProvisioningService = {
+        create: () => Effect.die("not used in this test"),
+        archive: (machineId, _provider, externalId) => {
+          calls.push({ method: "archive", machineId, externalId });
+          return Effect.succeed({ machineId, state: "archived", externalId });
+        },
+        reconcile: (machineId, _provider, externalId) => {
+          calls.push({ method: "reconcile", machineId, externalId });
+          return Effect.succeed({ machineId, state: "running", externalId });
+        },
+        reimage: () => Effect.die("not used in this test"),
+        restart: () => Effect.die("not used in this test"),
+      };
+      return { calls, layer: Layer.succeed(ProvisioningServiceTag, provisioning) };
+    }
+
+    test("reconcile", async () => {
+      const { calls, layer } = spyProvisioning();
+      const lastKnown: MachineStatus = {
+        machineId: "m-1",
+        state: "running",
+        externalId: "real-id",
+      };
+
+      await Effect.runPromise(Effect.provide(reconcileMachine(desired(), lastKnown), layer));
+
+      expect(calls).toEqual([{ method: "reconcile", machineId: "m-1", externalId: "real-id" }]);
+    });
+
+    test("archive", async () => {
+      const { calls, layer } = spyProvisioning();
+      const lastKnown: MachineStatus = {
+        machineId: "m-1",
+        state: "running",
+        externalId: "real-id",
+      };
+
+      await Effect.runPromise(
+        Effect.provide(reconcileMachine(desired({ lifecycle: "archived" }), lastKnown), layer),
+      );
+
+      expect(calls).toEqual([{ method: "archive", machineId: "m-1", externalId: "real-id" }]);
+    });
   });
 });

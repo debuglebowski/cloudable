@@ -23,7 +23,12 @@ export const DrizzleOffboardingRepoLive = Layer.effect(
       Effect.tryPromise({
         try: async () => {
           const rows = await db
-            .select({ id: machines.id, name: machines.name, provider: machines.provider })
+            .select({
+              id: machines.id,
+              name: machines.name,
+              provider: machines.provider,
+              externalResourceId: machines.externalResourceId,
+            })
             .from(machines)
             .where(
               and(

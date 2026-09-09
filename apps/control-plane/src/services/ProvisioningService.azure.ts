@@ -102,6 +102,15 @@ export function namesFor(machineId: string, name?: string) {
   const compactId = machineId.replace(/-/g, "");
   const slug = name ? slugify(name) : "";
   const base = slug ? `cldm-${slug}-${compactId.slice(0, 12)}` : `cldm${compactId}`;
+  return namesForBase(base);
+}
+
+/** Every name `namesFor` produces derives from one `base` string — factored
+ * out so a `base` recovered from an *existing* resource (via
+ * `parseVmNameFromResourceId`, or a tag-based lookup) produces the exact same
+ * NIC/PIP/disk names `namesFor` would have, without re-deriving `base` itself
+ * from `(machineId, name)` and risking a mismatch. */
+function namesForBase(base: string) {
   return {
     vm: base,
     nic: `${base}-nic`,
@@ -111,6 +120,95 @@ export function namesFor(machineId: string, name?: string) {
     computerName: base.slice(0, 15),
   };
 }
+
+/** Extracts a VM's resource name from its full ARM resource id
+ * (`.../providers/Microsoft.Compute/virtualMachines/<name>`), or `null` if
+ * `id` isn't shaped like one. Used by `resolveVmNames` to recover the exact
+ * name `create()` minted, instead of ever re-guessing it from `(machineId,
+ * name)` again. */
+export function parseVmNameFromResourceId(id: string): string | null {
+  const match = /\/virtualMachines\/([^/]+)$/i.exec(id);
+  return match ? (match[1] ?? null) : null;
+}
+
+/**
+ * Resolves the resource names for an *existing* VM — used by
+ * `archive`/`reconcile`/`restart`/`reimage`, every method that looks up a
+ * machine that (unlike `create`) already exists, instead of minting one.
+ *
+ * The whole point: never re-derive a name from `(machineId, name)` at a
+ * lookup site again. Two call sites already forgot to pass `name` at all
+ * (`reconcile-machine.ts`, `domain/archive/archive.ts`) — one left the
+ * reconcile loop permanently unable to promote any named Azure machine out
+ * of "provisioning", the other silently abandoned a live VM while marking it
+ * archived. A wrong guess doesn't just risk being wrong; it's indistinguishable
+ * from "the resource is genuinely gone" (both 404), which is actively
+ * dangerous for `archive`. Reusing the ID Azure itself returned at creation
+ * removes the guesswork entirely.
+ *
+ * - If `externalId` parses to a VM name: build every other resource name from
+ *   it directly (`namesForBase`). One direct lookup below, same cost as the
+ *   old happy path — no extra ARM calls for the common case.
+ * - If `externalId` is `null` (a row that predates this change, or one whose
+ *   `create()` call somehow didn't persist it) — or the direct lookup 404s —
+ *   self-heal: every VM is tagged `cloudable-machine-id` at creation (see
+ *   `create`'s own `tags`), so list VMs in the machines resource group once
+ *   and find the one carrying this machine's id. Exact and unambiguous, no
+ *   guessing, and it only runs on this cold/broken path — never in steady
+ *   state, so it adds no per-pass ARM load for already-healthy machines.
+ * - Either way, returns the resolved names *and* the VM's real resource id,
+ *   so a caller can report the corrected `externalId` back — every reconcile
+ *   pass's `persistReconcileResult` already writes `externalResourceId` from
+ *   `MachineStatus.externalId`, so a self-healed row fixes itself permanently
+ *   in the DB on its very first successful pass.
+ * - If neither the direct lookup nor the tag search find anything, this
+ *   fails with a real `not_found` — now a trustworthy signal (genuinely no
+ *   VM exists), not a false positive from a wrong guess.
+ */
+const resolveVmNames = (
+  clients: ArmClients,
+  rg: string,
+  machineId: string,
+  externalId: string | null,
+): Effect.Effect<
+  { names: ReturnType<typeof namesForBase>; resourceId: string },
+  ProvisioningError
+> =>
+  Effect.gen(function* () {
+    const knownName = externalId ? parseVmNameFromResourceId(externalId) : null;
+
+    if (knownName) {
+      const direct = yield* runArm(() => clients.compute.virtualMachines.get(rg, knownName)).pipe(
+        Effect.map((vm) => ({ names: namesForBase(knownName), resourceId: vm.id ?? knownName })),
+        Effect.catchTag("ProvisioningError", (error) =>
+          error.reason === "not_found" ? Effect.succeed(null) : Effect.fail(error),
+        ),
+      );
+      if (direct) return direct;
+    }
+
+    // Self-heal: no usable stored id, or the direct lookup 404'd. Ask Azure
+    // directly, by the one fact that's never guessed — the tag it stamped on
+    // the VM itself at creation. `.list()` returns a lazily-paged async
+    // iterable, not a `Promise` — the iteration itself (each page is a real
+    // HTTP call) is what needs wrapping, not the call that creates it.
+    const found = yield* runArm(async () => {
+      for await (const vm of clients.compute.virtualMachines.list(rg)) {
+        if (vm.tags?.["cloudable-machine-id"] === machineId && vm.name) return vm;
+      }
+      return null;
+    });
+    if (found?.name) {
+      return { names: namesForBase(found.name), resourceId: found.id ?? found.name };
+    }
+
+    return yield* Effect.fail(
+      new ProvisioningError({
+        reason: "not_found",
+        cause: `no VM found for machine ${machineId} (tried externalId=${externalId ?? "null"}, tag search)`,
+      }),
+    );
+  });
 
 /** Every binary this cloud-init installs is public (same posture as the
  * now-public GHCR control-plane image) — no token to inject. Unlike the
@@ -143,10 +241,12 @@ cat > /etc/systemd/system/cloudable-agent.service <<UNIT
 Description=Cloudable control agent
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/opt/cloudable/agent
 Restart=always
+RestartSec=5
 Environment=CONTROL_PLANE_URL=${config.controlPlaneBaseUrl}
 Environment=ATTESTATION_METHOD=managed_identity
 Environment=CLOUDABLE_PACKAGES=${packages}
@@ -160,10 +260,12 @@ cat > /etc/systemd/system/cloudable-tunnel-daemon.service <<UNIT
 Description=Cloudable tunnel daemon
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/opt/cloudable/tunnel-daemon
 Restart=always
+RestartSec=5
 Environment=CONTROL_PLANE_URL=${config.controlPlaneBaseUrl}
 Environment=ATTESTATION_METHOD=managed_identity
 
@@ -396,13 +498,12 @@ const service: ProvisioningService = {
       } satisfies MachineStatus;
     }),
 
-  archive: (machineId: string, _provider, name) =>
+  archive: (machineId: string, _provider, externalId) =>
     Effect.gen(function* () {
       const clients = yield* getClients();
-      const names = namesFor(machineId, name);
       const rg = config.azureMachinesResourceGroup;
+      const { names } = yield* resolveVmNames(clients, rg, machineId, externalId);
 
-      yield* runArm(() => clients.compute.virtualMachines.get(rg, names.vm));
       yield* runArm(() => clients.compute.virtualMachines.beginDeallocateAndWait(rg, names.vm));
 
       // A snapshot's location must match its source disk's — fetch the disk
@@ -437,11 +538,11 @@ const service: ProvisioningService = {
       return { machineId, state: "archived", externalId: null } satisfies MachineStatus;
     }),
 
-  reconcile: (machineId: string, _provider, name) =>
+  reconcile: (machineId: string, _provider, externalId) =>
     Effect.gen(function* () {
       const clients = yield* getClients();
-      const names = namesFor(machineId, name);
       const rg = config.azureMachinesResourceGroup;
+      const { names, resourceId } = yield* resolveVmNames(clients, rg, machineId, externalId);
 
       const view = yield* runArm(() => clients.compute.virtualMachines.instanceView(rg, names.vm));
       const powerState = view.statuses?.find((s) => s.code?.startsWith("PowerState/"))?.code;
@@ -449,7 +550,7 @@ const service: ProvisioningService = {
       return {
         machineId,
         state: powerState === "PowerState/running" ? "running" : "error",
-        externalId: `/subscriptions/${clients.subscriptionId}/resourceGroups/${rg}/providers/Microsoft.Compute/virtualMachines/${names.vm}`,
+        externalId: resourceId,
       } satisfies MachineStatus;
     }),
 
@@ -471,10 +572,12 @@ const service: ProvisioningService = {
       }
       const region = desc.region;
       const clients = yield* getClients();
-      const names = namesFor(desc.machineId, desc.name);
       const rg = config.azureMachinesResourceGroup;
-
-      yield* runArm(() => clients.compute.virtualMachines.get(rg, names.vm));
+      // Reimage keeps the same logical machine's identity — the replacement
+      // VM is created under the exact same names the old one had, resolved
+      // the same way `archive`/`reconcile` do (see `resolveVmNames`), not a
+      // freshly-minted one.
+      const { names } = yield* resolveVmNames(clients, rg, desc.machineId, desc.externalId);
 
       // Delete the VM + its OS disk only — NIC, public IP, and (crucially)
       // the data disk survive. "An OS upgrade is: reimage, remount

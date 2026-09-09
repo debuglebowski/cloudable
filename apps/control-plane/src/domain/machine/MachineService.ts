@@ -433,18 +433,14 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         // (a container starts near-instantly; nothing to wait for), so this branch is
         // inert for them — this only ever matters for azure.
         //
-        // Known gap, not fixed here: nothing in this codebase currently promotes a
-        // machine from "provisioning" to "running" afterward — reconcile/loop.ts's
-        // runReconcileLoop exists and is tested but is never invoked from server.ts, and
-        // the agent's own first check-in (agent-protocol.ts's markVerified) only touches
-        // lastVerifiedAt, not state. A real Azure machine will sit at "provisioning"
-        // forever in the console even once it's genuinely running. Out of scope for this
-        // fix (wiring a scheduled reconcile pass, or promoting on first agent check-in,
-        // is a real design decision, not a one-line change) — flagged here so it isn't
-        // mistaken for resolved.
+        // The reconcile loop (`reconcile/daemon.ts`) and the agent's own first
+        // check-in (`MachineDirectory.markVerified`) both promote "provisioning" to
+        // "running" later — see their own doc comments. This DB write's job is only
+        // to record the state Azure reported *right now*, honestly.
         const provisioningOutcome: {
           state: "running" | "provisioning" | "error";
           error: string | null;
+          externalId: string | null;
         } = yield* provisioning
           .create({
             machineId: machine.id,
@@ -459,14 +455,21 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           .pipe(
             Effect.map((status) =>
               status.state === "running" || status.state === "provisioning"
-                ? { state: status.state, error: null }
+                ? { state: status.state, error: null, externalId: status.externalId }
                 : {
                     state: "error" as const,
                     error: `provider reported unexpected state "${status.state}" after create`,
+                    externalId: status.externalId,
                   },
             ),
             Effect.catchTag("ProvisioningError", (error) =>
-              Effect.succeed({ state: "error" as const, error: formatProvisioningError(error) }),
+              Effect.succeed({
+                state: "error" as const,
+                error: formatProvisioningError(error),
+                // No resource exists to record — `create()` itself failed
+                // before Azure ever returned an id (quota, bad SKU, etc).
+                externalId: null,
+              }),
             ),
           );
 
@@ -492,6 +495,15 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                 state: provisioningOutcome.state,
                 lastError: provisioningOutcome.error,
                 lastVerifiedAt: provisioningOutcome.state === "running" ? new Date() : null,
+                // Recorded immediately, not left for a later reconcile pass to backfill —
+                // this is the exact id Azure just returned, and both the reconcile loop's
+                // lookup and managed-identity attestation's machine lookup
+                // (`services/attestation/managed-identity.ts`) key off this column. Leaving
+                // it null until reconcile ran was itself the root cause of a real incident:
+                // every fresh Azure machine's agent/tunnel-daemon attestation failed with
+                // "unknown_machine" (that lookup found nothing), and the reconcile loop
+                // separately couldn't find the VM either — both read this same column.
+                externalResourceId: provisioningOutcome.externalId,
               })
               .where(eq(machines.id, machine.id))
               .returning(),

@@ -14,6 +14,7 @@ export interface OwnedMachine {
   id: string;
   name: string;
   provider: "azure" | "docker" | "fake";
+  externalResourceId: string | null;
 }
 
 /**

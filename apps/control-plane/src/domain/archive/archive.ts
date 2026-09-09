@@ -80,7 +80,7 @@ export const archiveMachine = (machineId: string, approvalId?: string) =>
     // reason as a no-op; any other `ProvisioningError` (docker/cloud API genuinely
     // unreachable, etc.) still fails through to the HTTP layer's `Effect.die`.
     yield* provisioning
-      .archive(machineId, machine.provider)
+      .archive(machineId, machine.provider, machine.externalResourceId)
       .pipe(
         Effect.catchTag("ProvisioningError", (error) =>
           error.reason === "not_found" ? Effect.void : Effect.fail(error),

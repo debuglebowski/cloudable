@@ -28,10 +28,12 @@ describe.skipIf(!azureConfigured)(
     afterAll(async () => {
       // Best-effort cleanup regardless of test outcome — archive() tears
       // down every resource create() made (VM, both disks, NIC, public IP).
+      // `externalId: null` deliberately — this exercises the real self-heal
+      // path (tag-based lookup) live against Azure, not just the direct one.
       await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          yield* provisioning.archive(machineId, "azure");
+          yield* provisioning.archive(machineId, "azure", null);
         }),
       ).catch(() => {});
     });
@@ -59,28 +61,34 @@ describe.skipIf(!azureConfigured)(
       // before asserting on it.
       await Bun.sleep(15_000);
 
+      // Real created.externalId in hand — exercises resolveVmNames' direct
+      // lookup path (no self-heal/tag search needed).
       const reconciled = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* provisioning.reconcile(machineId, "azure");
+          return yield* provisioning.reconcile(machineId, "azure", created.externalId);
         }),
       );
       expect(["running", "error"]).toContain(reconciled.state);
+      expect(reconciled.externalId).toBe(created.externalId);
 
       const archived = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* provisioning.archive(machineId, "azure");
+          return yield* provisioning.archive(machineId, "azure", reconciled.externalId);
         }),
       );
       expect(archived.state).toBe("archived");
     }, 600_000);
 
     test("reconcile on an unknown machine fails with not_found", async () => {
+      // externalId: null and a machineId nothing was ever tagged with —
+      // both resolveVmNames paths (direct lookup, tag self-heal) come up
+      // empty, so this also covers the "genuinely nothing exists" outcome.
       const result = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* Effect.either(provisioning.reconcile(crypto.randomUUID(), "azure"));
+          return yield* Effect.either(provisioning.reconcile(crypto.randomUUID(), "azure", null));
         }),
       );
       expect(result._tag).toBe("Left");

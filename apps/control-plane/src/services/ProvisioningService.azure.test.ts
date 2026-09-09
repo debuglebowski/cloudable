@@ -5,6 +5,7 @@ import {
   cloudInitFor,
   imageReferenceFor,
   namesFor,
+  parseVmNameFromResourceId,
   throwawayAdminPassword,
 } from "./ProvisioningService.azure";
 
@@ -86,6 +87,37 @@ describe("namesFor", () => {
   });
 });
 
+describe("parseVmNameFromResourceId", () => {
+  test("extracts the VM name from a real ARM resource id", () => {
+    const id =
+      "/subscriptions/abc-123/resourceGroups/rg-cloudable-managed/providers/Microsoft.Compute/virtualMachines/cldm-web-server-01-3fa85f645717";
+    expect(parseVmNameFromResourceId(id)).toBe("cldm-web-server-01-3fa85f645717");
+  });
+
+  test("is case-insensitive on the resource-type segment", () => {
+    // Azure resource ids are case-insensitive by convention; ARM sometimes
+    // echoes them back with different casing than what was requested.
+    const id =
+      "/subscriptions/abc/resourceGroups/rg/providers/microsoft.compute/VIRTUALMACHINES/my-vm";
+    expect(parseVmNameFromResourceId(id)).toBe("my-vm");
+  });
+
+  test("returns null for a trailing slash with no name", () => {
+    const id = "/subscriptions/abc/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/";
+    expect(parseVmNameFromResourceId(id)).toBeNull();
+  });
+
+  test("returns null for an id naming a different resource type", () => {
+    const id = "/subscriptions/abc/resourceGroups/rg/providers/Microsoft.Compute/disks/my-disk";
+    expect(parseVmNameFromResourceId(id)).toBeNull();
+  });
+
+  test("returns null for garbage input", () => {
+    expect(parseVmNameFromResourceId("not-a-resource-id")).toBeNull();
+    expect(parseVmNameFromResourceId("")).toBeNull();
+  });
+});
+
 describe("cloudInitFor", () => {
   const desc = {
     machineId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -111,6 +143,22 @@ describe("cloudInitFor", () => {
     expect(script).toContain("ExecStart=/opt/cloudable/tunnel-daemon");
     expect(script).toContain("systemctl enable --now cloudable-agent");
     expect(script).toContain("systemctl enable --now cloudable-tunnel-daemon");
+  });
+
+  // Regression: both units were `Restart=always` with no override, so
+  // systemd's default burst limit (5 crashes in 10s) permanently stopped
+  // them after any sustained boot-time failure (e.g. the attestation bug
+  // this same session fixed) — no further retries, ever, without manual
+  // intervention. `StartLimitIntervalSec=0` disables that permanent-death
+  // behavior; a daemon whose only job is "keep trying to phone home" should
+  // never stop trying.
+  test("both units disable the restart burst limit so a sustained boot failure can't permanently kill them", () => {
+    const script = decode();
+    const unitBlocks = script.split(/(?=\[Unit\])/).filter((block) => block.includes("[Unit]"));
+    expect(unitBlocks.length).toBeGreaterThanOrEqual(2);
+    for (const block of unitBlocks) {
+      expect(block).toContain("StartLimitIntervalSec=0");
+    }
   });
 
   test("both binaries are downloaded from this control plane's own public base URL", () => {

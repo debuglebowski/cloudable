@@ -68,7 +68,7 @@ describe.skipIf(!dockerReachable)(
       const reconciled = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* provisioning.reconcile(machineId, "docker");
+          return yield* provisioning.reconcile(machineId, "docker", null);
         }),
       );
       expect(reconciled.state).toBe("running");
@@ -77,7 +77,7 @@ describe.skipIf(!dockerReachable)(
       const archived = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
-          return yield* provisioning.archive(machineId, "docker");
+          return yield* provisioning.archive(machineId, "docker", null);
         }),
       );
       expect(archived.state).toBe("archived");
@@ -104,7 +104,7 @@ describe.skipIf(!dockerReachable)(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
           return yield* Effect.either(
-            provisioning.reconcile(`unknown-${crypto.randomUUID()}`, "docker"),
+            provisioning.reconcile(`unknown-${crypto.randomUUID()}`, "docker", null),
           );
         }),
       );

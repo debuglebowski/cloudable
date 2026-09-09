@@ -524,6 +524,11 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
 
     expect(machine.state).toBe("provisioning");
     expect(machine.lastError).toBeNull();
+    // Regression: this used to be left null until a later reconcile pass backfilled
+    // it — a pass that (until this same session's fix) could never succeed for a
+    // named Azure machine, and that managed-identity attestation also keys off
+    // (see `services/attestation/managed-identity.ts`). Recorded immediately now.
+    expect(machine.externalResourceId).toBe("azure-vm-in-progress");
   });
 
   test("provider azure: AZURE_MACHINES_LOCATION forces the region, overriding client input entirely", async () => {
