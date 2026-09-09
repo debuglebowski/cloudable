@@ -313,6 +313,30 @@ export const isScheduledForRetirement = (sku: {
   capabilities?: { name?: string; value?: string }[];
 }): boolean => sku.capabilities?.some((c) => c.name === "RetirementDateUtc") ?? false;
 
+/** Azure attaches a `restrictions` entry to a SKU it can't be used somewhere —
+ * `type: "Location"` restrictions are exactly what our own sync already scopes
+ * to (`config.azureMachinesLocation`), so a SKU whose restrictions cover that
+ * region can never actually provision here, regardless of what its other
+ * capabilities say. Confirmed live: `Standard_B4as_v2` passed every other
+ * filter (Gen2, not retired, x64) but reliably failed VM creation with
+ * `quota_exceeded: ... currently not available in location 'northeurope'` —
+ * exactly what its own restrictions array already said (`reasonCode:
+ * "NotAvailableForSubscription", type: "Location", values: ["northeurope"]`,
+ * confirmed via `az vm list-skus --size Standard_B4as_v2 --all`), the sync
+ * just wasn't checking it. Deliberately NOT excluding `type: "Zone"`
+ * restrictions (a SKU restricted in only some availability zones within an
+ * otherwise-fine region): this deployment's VM creation never pins a zone
+ * (`ProvisioningService.azure.ts`), so Azure can still place it in whichever
+ * zone isn't restricted — excluding on a partial zone restriction would
+ * over-exclude sizes that actually work. Same "objective, will-never-work
+ * fact" category as `isGen2Capable`/`isScheduledForRetirement` above, not
+ * curation by taste. */
+export const isRestrictedInLocation = (
+  sku: { restrictions?: { type?: string; values?: string[] }[] },
+  location: string,
+): boolean =>
+  sku.restrictions?.some((r) => r.type === "Location" && r.values?.includes(location)) ?? false;
+
 /** `sku.capabilities` is Azure's own flat name/value list (see
  * `skuDisplayName`'s doc comment) — this pulls one out as a number for the
  * console's vCPU/RAM filter (`catalog-checklist.tsx`), same lookup
@@ -406,7 +430,13 @@ export const syncAzureSizes = (): Effect.Effect<
     const entries: CatalogEntry[] = [];
     for (const sku of skus) {
       if (sku.resourceType !== "virtualMachines" || !sku.name || seen.has(sku.name)) continue;
-      if (!isGen2Capable(sku) || isScheduledForRetirement(sku)) continue;
+      if (
+        !isGen2Capable(sku) ||
+        isScheduledForRetirement(sku) ||
+        isRestrictedInLocation(sku, location)
+      ) {
+        continue;
+      }
       const architecture = stringCapability(sku, "CpuArchitectureType");
       if (!architecture || !isOfferedArchitecture(architecture)) continue;
       seen.add(sku.name);
