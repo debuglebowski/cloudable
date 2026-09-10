@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { safeRedirectTarget } from "@/lib/redirect-target";
 import { cn } from "@/lib/utils";
 import { NAV_BADGE_HOOKS, NAV_ITEMS, type NavItem } from "@/nav-config";
 
@@ -149,8 +150,7 @@ export function RootLayout() {
     // handing the whole string to `Navigate`'s `to` — this app has no
     // `validateSearch` anywhere, so nothing parses a `to` string containing
     // `?` for us.
-    const redirect = new URLSearchParams(window.location.search).get("redirect");
-    const [redirectPath, redirectQuery] = (redirect || "/").split("?");
+    const [redirectPath, redirectQuery] = safeRedirectTarget(window.location.search).split("?");
     return redirectQuery ? (
       <Navigate
         to={redirectPath || "/"}
@@ -166,7 +166,16 @@ export function RootLayout() {
     // land back where it started after the browser detours through
     // `/login` — every other route just falls back to `/` (`login-
     // page.tsx`'s own default), same as before this param existed.
-    const redirect = encodeURIComponent(window.location.pathname + window.location.search);
+    // NOT encodeURIComponent'd: `Navigate`'s `search` prop serialises and
+    // encodes the value itself, so pre-encoding produced a double-encoded
+    // param. `login-page.tsx` reads it with `URLSearchParams.get()`, which
+    // decodes exactly once, so "/integrations" came back as "%2Fintegrations"
+    // and the SSO callbackURL built from it was
+    // "https://<host>%2Fintegrations" -- not a path on the host, a mangled
+    // hostname. BetterAuth rejected every SSO attempt with "Invalid
+    // callbackURL", and the email/password path silently navigated to a
+    // nonsense route for the same reason.
+    const redirect = window.location.pathname + window.location.search;
     return <Navigate to="/login" search={{ redirect }} />;
   }
 
