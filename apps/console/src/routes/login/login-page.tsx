@@ -8,11 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthError } from "@/lib/auth-client";
+import { safeRedirectTarget } from "@/lib/redirect-target";
 
-/** Where a successful sign-in lands — `root.tsx`'s guard sets this when it bounced an unauthenticated visit through here; falls back to `/` (the pre-existing behavior) when there wasn't one. */
+/** Where a successful sign-in lands — `root.tsx`'s guard sets this when it bounced an unauthenticated visit through here; falls back to `/` when there wasn't one, or when the value isn't a safe same-origin path (see `safeRedirectTarget`). */
 function redirectTarget(): string {
-  const redirect = new URLSearchParams(window.location.search).get("redirect");
-  return redirect || "/";
+  return safeRedirectTarget(window.location.search);
 }
 
 const TRUST_POINTS = [
