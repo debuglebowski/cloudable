@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
