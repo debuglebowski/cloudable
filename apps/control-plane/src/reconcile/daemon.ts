@@ -1,6 +1,5 @@
 import { Duration, Effect } from "effect";
-import postgres from "postgres";
-import { config } from "../config";
+import { openPostgres } from "../db/connect";
 import type { Db } from "../db/layer";
 import type { MachineService } from "../domain/machine/MachineService";
 import type { EventBus } from "../services/EventBus";
@@ -66,7 +65,14 @@ export const startReconcileDaemon: Effect.Effect<
   Db | ProvisioningServiceTag | MachineService | EventBus
 > = Effect.gen(function* () {
   while (true) {
-    const lockSql = postgres(config.databaseUrl, { max: 1 });
+    // openPostgres, not postgres(config.databaseUrl, ...): under
+    // DATABASE_AUTH_MODE=entra the connection string carries no password at
+    // all, so building a client directly here sends an empty one and every
+    // acquisition fails with "Password returned by client is empty" — which
+    // reads like a lock problem and is actually an auth one. That silently
+    // killed reconciliation in a real deployment; the daemon logs a warning
+    // and retries forever, so nothing crashes and nothing reconciles.
+    const lockSql = openPostgres({ max: 1 });
     const acquired = yield* Effect.tryPromise({
       try: () => lockSql`select pg_advisory_lock(${RECONCILE_LEADER_LOCK_KEY})`,
       catch: (cause) => cause,
