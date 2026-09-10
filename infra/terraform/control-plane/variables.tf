@@ -341,11 +341,18 @@ variable "enable_postgres_entra_auth" {
     this to false, supplying a postgres_admin_password, and applying again.
 
     One manual step this module cannot do for you: an Entra admin on the
-    server must create a database role for the identity and grant it what
-    the app needs — `SELECT * FROM pgaadauth_create_principal('<identity
-    name>', false, false)` plus grants. Until that role exists the app can
-    authenticate but has no privileges. Grant it exactly what it needs, not
-    superuser.
+    server must create a database role for the identity. Connect to the
+    `postgres` database (the pgaadauth extension is only installed there,
+    not in your application database) and run
+    `SELECT pgaadauth_create_principal('<identity name>', false, false)`,
+    then grant it membership in postgres_admin_username so it inherits
+    ownership of the existing tables — it runs migrations on boot, so
+    GRANT CONNECT alone is not enough. Not superuser. Until the role
+    exists the app is rejected at connect time and crashes on boot.
+
+    Note that with enable_private_networking this SQL cannot be run from
+    your own machine at all: the server has no public endpoint. See
+    README.md.
   EOT
   type        = bool
   default     = false
