@@ -15,7 +15,7 @@ provisions:
   — one image, one Container App, no separate frontend service to deploy.
 - An Azure Database for PostgreSQL Flexible Server + database for it to use
 - A managed identity on the container app (no credential is ever stored — invariant 1).
-  System-assigned by default; a user-assigned one when `key_vault_id` is set, so it
+  System-assigned by default; a user-assigned one when `enable_key_vault` is set, so it
   exists before the app and survives the app being recreated — see the Key Vault
   section below.
 
@@ -194,7 +194,7 @@ real maintenance window (tens of minutes, not a rolling update), not a quick fli
 
 ## Key Vault-backed secrets (opt-in)
 
-Set `key_vault_id` + `key_vault_uri` (both, together) and the Container App stops
+Set `enable_key_vault = true` (with `key_vault_id` + `key_vault_uri`) and the Container App stops
 carrying secret *values* entirely: it references Key Vault secrets by URI and resolves
 them at container start using a user-assigned managed identity this module creates and
 grants `Key Vault Secrets User` on that vault. Nothing sensitive lands in Terraform
@@ -228,7 +228,7 @@ every org at once; agents have to re-attest.
 
 ## Postgres Entra authentication (opt-in)
 
-`enable_postgres_entra_auth = true` (requires the Key Vault variables above, since it
+`enable_postgres_entra_auth = true` (requires `enable_key_vault`, since it
 reuses the same identity) turns on Entra auth for the database and points the control
 plane at it: `DATABASE_URL` loses its password entirely and the app fetches a
 short-lived managed-identity token per connection instead.
