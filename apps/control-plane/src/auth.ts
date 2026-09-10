@@ -109,7 +109,21 @@ const options = {
   // sign-in click, in practice. Without this, real browser sessions break
   // immediately after login (sign-out, and any later `/sign-in` retry,
   // all 403 "Invalid origin" the moment a cookie is already set).
-  trustedOrigins: [config.consoleOrigin],
+  //
+  // `betterAuthUrl` FIRST and unconditionally: setting this option REPLACES
+  // BetterAuth's default (which is baseURL), it does not extend it. Listing
+  // only `consoleOrigin` therefore stopped the deployment trusting its own
+  // origin — and since consoleOrigin defaults to the dev server on
+  // localhost:5180 and nothing sets CONSOLE_ORIGIN in production, the list
+  // was exactly one origin that never appears in a real request. That is
+  // invisible to email/password sign-in but fatal to SSO, which validates
+  // `callbackURL` against this list: the console posts its own absolute
+  // origin and got "Invalid callbackURL".
+  //
+  // In production both entries are the same origin (one container serves the
+  // API and the console); in local dev they differ, which is the only reason
+  // consoleOrigin is here at all. Deduped so the list stays honest either way.
+  trustedOrigins: [...new Set([config.betterAuthUrl, config.consoleOrigin])],
   emailAndPassword: { enabled: true },
   // Root-cause fix for the class of bug that produced an orphaned
   // `dev@cloudable.local`: `emailAndPassword` sign-up on its own creates a
