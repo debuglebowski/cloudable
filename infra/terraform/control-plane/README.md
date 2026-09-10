@@ -301,15 +301,35 @@ admin. A token is the only way in.
 
 One step Terraform cannot do for you, because it is SQL against the server rather than
 an ARM operation: an Entra admin (set one or more with `postgres_entra_administrators`) must
-create the database role for the app's identity and grant it what it needs.
+create the database role for the app's identity. Until it exists the app authenticates and
+is then rejected — `password authentication failed for user "<identity name>"` — and
+crashes on boot.
 
 ```sql
-SELECT * FROM pgaadauth_create_principal('<app_identity_name output>', false, false);
-GRANT CONNECT ON DATABASE <db> TO "<app_identity_name output>";
--- then the minimum the app needs on the schema it owns — not superuser
+-- connect to the `postgres` database, NOT your application database
+SELECT pgaadauth_create_principal('<app_identity_name output>', false, false);
+GRANT "<postgres_admin_username>" TO "<app_identity_name output>";
 ```
 
-Until that role exists the app authenticates but has no privileges.
+Two things about this bite reliably:
+
+**Connect to `postgres`, not your application database.** The `pgaadauth` extension is only
+installed there; against the app database you get `function pgaadauth_create_principal(unknown,
+boolean, boolean) does not exist` and nothing more helpful. Roles are cluster-wide, so
+creating it from `postgres` is correct anyway.
+
+**Grant membership in the admin role, not just `CONNECT`.** Existing tables are owned by
+`postgres_admin_username`, which can no longer log in at all once this flag disables password
+auth. The app runs migrations on boot and has to alter those tables, so `GRANT CONNECT` alone
+leaves it authenticated with no ability to work. Membership inherits the ownership rights
+without making the app a superuser — verify with `SELECT rolname, rolsuper FROM pg_roles WHERE
+rolname = '<identity name>'`, where `rolsuper` must be false.
+
+**With `enable_private_networking`, none of this can run from your machine.** The server has
+no public endpoint and no firewall rule can add one; you need a shell inside the VNet. If the
+Container Apps environment is VNet-integrated, a one-off Container Apps job running a
+`postgres` image is the lightest way in — delete it afterwards, since it has to carry a
+database access token.
 
 ## Notes
 
