@@ -48,6 +48,10 @@ locals {
 
   key_vault_secret_uri = local.use_key_vault ? "${var.key_vault_uri}secrets" : null
 
+  # See the postgres AD administrator resource for why empty string, not just
+  # null, means "not configured" here.
+  entra_admin_configured = (var.postgres_entra_admin_object_id != null && var.postgres_entra_admin_object_id != "") && (var.postgres_entra_admin_principal_name != null && var.postgres_entra_admin_principal_name != "")
+
   # Secret names expected in the vault, doubling as the Container App secret
   # names (the app-side env var each backs is wired below). Versionless URIs
   # on purpose: rotating a secret in the vault is then picked up by a
@@ -284,7 +288,13 @@ resource "azurerm_postgresql_flexible_server_active_directory_administrator" "th
   # Azure requires object_id AND principal_name together, so both gate the
   # count — supplying only one would fail at apply with "principal_name is
   # required" rather than simply skipping the admin.
-  count               = local.use_entra_db_auth && var.postgres_entra_admin_object_id != null && var.postgres_entra_admin_principal_name != null ? 1 : 0
+  #
+  # Empty string counts as unset, not just null: `${{ vars.FOO }}` in a GitHub
+  # Actions workflow renders as "" for a variable that hasn't been created,
+  # so TF_VAR_x="" is the normal shape of "not configured" in CI. Checking
+  # only for null lets that through and fails with "expected object_id to be
+  # a valid UUID, got ".
+  count               = local.use_entra_db_auth && local.entra_admin_configured ? 1 : 0
   server_name         = azurerm_postgresql_flexible_server.this.name
   resource_group_name = local.resource_group_name
   tenant_id           = data.azurerm_client_config.current.tenant_id
