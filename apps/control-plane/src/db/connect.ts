@@ -12,8 +12,12 @@ import { config } from "../config";
  * identity, so no database password exists anywhere (see
  * `infra/terraform/control-plane`'s Postgres `authentication` block).
  * `password` (the default) keeps the plain `DATABASE_URL` credential — what
- * local dev and `docker-compose.yml` use, and the rollback path if Entra
- * auth misbehaves in a real deployment.
+ * local dev, `docker-compose.yml` and tests use.
+ *
+ * Note that switching a real deployment back to `password` is not a rollback
+ * on its own: the Terraform module turns the server's password auth off when
+ * it turns Entra auth on, so there is no password to fall back to. Recovering
+ * from broken token auth is an infrastructure change, not an env-var flip.
  *
  * Why this works without touching module-load order: postgres.js accepts a
  * *function* for `password` and connects lazily, so the token is fetched per

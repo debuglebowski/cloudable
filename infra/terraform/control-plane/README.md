@@ -28,7 +28,11 @@ format in sync.
 - An Azure subscription, and `az login` already run (or another way to authenticate
   the `azurerm` provider — see the [azurerm provider auth docs][azurerm-auth])
 - Terraform >= 1.5, or [OpenTofu](https://opentofu.org/) (this HCL works with either)
-- A generated `BETTER_AUTH_SECRET` (e.g. `openssl rand -base64 32`)
+- An existing Key Vault, if you want the recommended setup. See
+  "Key Vault-backed secrets" below for what to create in it and why. Without
+  `enable_key_vault` you must instead supply `better_auth_secret` yourself, and the
+  three signing secrets stay on their published `dev-only-change-me` default — read
+  that section before choosing this.
 - Nothing else for the image: `.github/workflows/rebuild-base-image.yml` publishes it
   publicly to `ghcr.io/debuglebowski/cloudable/control-plane` (the default for
   `control_plane_image`/`control_plane_image_tag`) — no registry credential needed.
@@ -58,23 +62,24 @@ whatever you pushed.
 cd infra/terraform/control-plane
 
 terraform init
-
-# Required: postgres_admin_password, better_auth_secret (both sensitive — pass via
-# a *.tfvars file (this directory's .gitignore excludes *.tfvars except the
-# committed dummy.tfvars used for validation), -var, or TF_VAR_* env vars —
-# never commit real values).
-terraform plan \
-  -var="postgres_admin_password=<a strong password>" \
-  -var="better_auth_secret=$(openssl rand -base64 32)"
-
-terraform apply \
-  -var="postgres_admin_password=<a strong password>" \
-  -var="better_auth_secret=$(openssl rand -base64 32)"
+terraform plan
+terraform apply
 ```
+
+With `enable_key_vault` and `enable_postgres_entra_auth` both set (the recommended
+setup), no secret is passed on the command line at all. Every secret value lives in
+Key Vault and the database uses managed-identity tokens, so there is nothing sensitive
+to supply here and nothing sensitive in state. Set the vault's secrets first — see
+"Key Vault-backed secrets" below.
+
+Without those flags you must supply `better_auth_secret` and `postgres_admin_password`
+yourself, via a `*.tfvars` file (this directory's `.gitignore` excludes `*.tfvars`
+except the committed `dummy.tfvars` used for validation), `-var`, or `TF_VAR_*` env
+vars. Both then sit in Terraform state in plain text. Never commit real values.
 
 After `apply`, the deployed URL is the `control_plane_url` output.
 
-To tear everything down: `terraform destroy` with the same variables.
+To tear everything down: `terraform destroy`, with the same variables if you supplied any.
 
 ## Verifying this template without an Azure account
 
@@ -205,14 +210,40 @@ network rules and naming are org-wide decisions, and a vault should outlive this
 module). Neither are the secrets: writing them with `azurerm_key_vault_secret` would
 put the values straight back into state, defeating the point.
 
-Create the four the module expects, out-of-band, once:
+Create the four the module expects, out-of-band, once, with the script in this directory:
 
 ```bash
-for name in better-auth-secret join-token-secret agent-session-secret cli-auth-code-secret; do
-  az keyvault secret set --vault-name <your-vault> --name "$name" \
-    --value "$(openssl rand -base64 32)" --output none
-done
+# From the directory that CALLS this module (e.g. your own deploy config):
+tofu output -json key_vault_secret_spec > /tmp/spec.json
+
+scripts/seed-vault-secrets.sh --vault <your-vault> --spec /tmp/spec.json
 ```
+
+The names and lengths are not written down here twice. They come from
+`local.key_vault_secret_specs` in `main.tf` and reach the script through the
+`key_vault_secret_spec` output, so adding a fifth secret is a one-line change that both
+the Container App wiring and the seeding script pick up. The output describes *how* the
+values are produced and never what they are, so it is not sensitive.
+
+The script is idempotent: an existing secret is left alone, because rotating these is
+not a no-op (see the warning at the end of this section). Pass `--rotate <name>` to
+replace one deliberately, or `--dry-run` to see what it would do. It refuses to run
+against a soft-deleted secret, which otherwise fails opaquely — Key Vault reports such a
+secret as missing but rejects any attempt to set it.
+
+**Why a script and not Terraform.** `azurerm_key_vault_secret` would put every value
+straight into state. `azurerm_resource_deployment_script_azure_cli` looks like the answer
+and is worse: Azure deletes that resource once `retention_interval` expires (26 hours
+maximum), so the next plan sees a 404 and recreates it — the script re-runs on *every*
+apply, with only a shell `if` standing between an image bump and rotating all four
+secrets. It also requires a CI-controlled identity holding `Key Vault Secrets Officer`,
+which is exactly the blast radius the vault was introduced to remove.
+
+If a consumer ever caps a secret's length, set that secret's `bytes` in
+`local.key_vault_secret_specs` — base64url of B bytes is exactly `ceil(B*8/6)`
+characters, so 18 bytes is exactly 24 characters at 144 bits. The script verifies the
+generated length against the spec before writing, so the constraint is enforced rather
+than documented.
 
 `join-token-secret`, `agent-session-secret` and `cli-auth-code-secret` have **no
 plain-value fallback** on purpose. Without Key Vault the app falls back to the literal
@@ -221,10 +252,32 @@ agent join tokens, agent session tokens and CLI sign-in codes would be signed wi
 key anyone can read. There is intentionally no way to set them to a real value without
 a vault, so a deployment can't quietly keep running on the default.
 
-Rotating any of them is `az keyvault secret set` plus a revision restart — the
-references are versionless, so no Terraform change. Note that rotating
+Rotating any of them is `scripts/seed-vault-secrets.sh --rotate <name>` plus a revision
+restart — the references are versionless, so no Terraform change. Note that rotating
 `join-token-secret` or `agent-session-secret` invalidates every outstanding token for
 every org at once; agents have to re-attest.
+
+### The plan-time check
+
+A `check` block reports at plan time if the vault is missing any of the four, so you
+find out before a revision fails to provision rather than after. It uses the
+metadata-only `azurerm_key_vault_secrets` data source — that one exposes secret *names*
+and has no `value` attribute at all, so nothing it reads can reach state.
+
+Two things worth knowing about it:
+
+- It only ever warns, never blocks. That is deliberate: an unreadable vault (RBAC still
+  propagating, throttling, network rules added later) must not stop an unrelated image
+  bump from deploying.
+- With `enable_key_vault` unset you will see one warning per plan about a failed read.
+  Nested data blocks inside a `check` cannot take `count`, and the alternative — a
+  top-level counted data source — turns any read failure into a hard error that could
+  wedge a pipeline. A spurious warning is the better trade.
+
+For the check to say anything useful, the identity running Terraform needs
+`Key Vault Reader` on the vault — metadata only, explicitly **not** able to read secret
+values. The module creates that assignment when `deploying_identity_principal_id` is
+set. Without it the check simply warns and you carry on.
 
 ## Postgres Entra authentication (opt-in)
 
@@ -233,11 +286,18 @@ reuses the same identity) turns on Entra auth for the database and points the co
 plane at it: `DATABASE_URL` loses its password entirely and the app fetches a
 short-lived managed-identity token per connection instead.
 
-Password auth stays **enabled** alongside it, deliberately — it is the rollback path,
-reachable by setting the app's `DATABASE_AUTH_MODE` back to `password` with no
-infrastructure change. The cost is that `postgres_admin_password` remains in state;
-turning `password_auth_enabled` off is a deliberate follow-up once token auth has
-proven itself, not something to do in the same change that introduces it.
+Password auth is turned **off** at the same time. No admin password exists on the
+server, and `postgres_admin_password` is neither needed nor stored in state. That is
+the point: it was the last secret value Terraform still held.
+
+The cost is that there is no instant rollback. Setting the app's `DATABASE_AUTH_MODE`
+back to `password` on its own will not work, because the server has no password to
+authenticate against. Recovering from broken token auth means setting
+`enable_postgres_entra_auth = false`, supplying a `postgres_admin_password`, and
+applying again — a few minutes, not a flag flip.
+
+Before you rely on this, confirm you can actually reach the database as the Entra
+admin. A token is the only way in.
 
 One step Terraform cannot do for you, because it is SQL against the server rather than
 an ARM operation: an Entra admin (set one or more with `postgres_entra_administrators`) must
