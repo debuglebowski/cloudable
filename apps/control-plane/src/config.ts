@@ -21,6 +21,15 @@ export interface AppConfig {
    * tests, and the rollback path if Entra auth misbehaves.
    */
   readonly databaseAuthMode: "password" | "entra";
+  /**
+   * Key Vault data-plane URI (e.g. `https://my-vault.vault.azure.net/`). When
+   * set, the SSH CA and session-token keys live inside that vault and are
+   * used through sign operations only — `null` falls back to
+   * `Signer.local.ts`, which generates keys in-process (fine for local dev,
+   * never for a real deployment: invariant #9, and the keys don't survive a
+   * restart).
+   */
+  readonly keyVaultUri: string | null;
   readonly port: number;
   readonly betterAuthSecret: string;
   readonly betterAuthUrl: string;
@@ -137,6 +146,7 @@ const readConfig = (): AppConfig => {
     // unset or misspelled value falls back to the mode that works with a
     // plain connection string, rather than to one that needs Azure.
     databaseAuthMode: process.env.DATABASE_AUTH_MODE === "entra" ? "entra" : "password",
+    keyVaultUri: process.env.KEY_VAULT_URI ?? null,
     port,
     betterAuthSecret: process.env.BETTER_AUTH_SECRET ?? "dev-only-change-me",
     betterAuthUrl: process.env.BETTER_AUTH_URL ?? "http://localhost:4780",

@@ -7,7 +7,12 @@ export class SignerError extends Data.TaggedError("SignerError")<{
 
 export interface SignRequest {
   keyId: string;
-  algorithm: "ed25519" | "rsa-sha256";
+  /**
+   * `ecdsa-sha2-nistp256` is what the SSH CA uses — Key Vault has no Ed25519
+   * (RSA, EC P-256/256K/384/521, oct only), and invariant #9 requires the key
+   * to live somewhere that signs without exporting.
+   */
+  algorithm: "ecdsa-sha2-nistp256" | "rsa-sha256";
   data: Uint8Array;
 }
 

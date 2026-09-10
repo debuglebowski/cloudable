@@ -92,7 +92,7 @@ export const mintSessionToken = (
     const claimsSegment = toBase64Url(utf8(JSON.stringify(claims)));
     const signature = yield* signer.sign({
       keyId: SESSION_TOKEN_KEY_ID,
-      algorithm: "ed25519",
+      algorithm: "ecdsa-sha2-nistp256",
       data: utf8(claimsSegment),
     });
 

@@ -8,11 +8,12 @@ import {
   CERT_TYPE_USER,
   type CertificateFields,
   assembleCertificate,
+  ecdsaP256PublicKeyBlob,
   ed25519PublicKeyBlob,
   encodeCertificateBody,
   encodeSignatureField,
   formatAsOpenSshLine,
-  rawEd25519FromSpki,
+  rawP256PointFromSpki,
   sha256Fingerprint,
 } from "./openssh-cert";
 
@@ -80,9 +81,9 @@ export class SshCaService extends Effect.Service<SshCaService>()("SshCaService",
     const eventBus = yield* EventBus;
     const signer = yield* SignerTag;
 
-    const caPublicKeyRaw = (): Effect.Effect<Uint8Array, SshCaError> =>
+    const caPublicKeyBlob = (): Effect.Effect<Uint8Array, SshCaError> =>
       signer.publicKey(SSH_CA_KEY_ID).pipe(
-        Effect.map((spki) => rawEd25519FromSpki(spki)),
+        Effect.map((spki) => ecdsaP256PublicKeyBlob(rawP256PointFromSpki(spki))),
         Effect.mapError((cause) => new SshCaError({ reason: "sign_failed", cause })),
       );
 
@@ -99,7 +100,7 @@ export class SshCaService extends Effect.Service<SshCaService>()("SshCaService",
           );
         }
 
-        const caRaw = yield* caPublicKeyRaw();
+        const caBlob = yield* caPublicKeyBlob();
 
         const now = new Date();
         const expiresAt = new Date(now.getTime() + CERTIFICATE_TTL_SECONDS * 1000);
@@ -120,12 +121,12 @@ export class SshCaService extends Effect.Service<SshCaService>()("SshCaService",
           validAfter: BigInt(Math.floor(now.getTime() / 1000) - 60),
           validBefore: BigInt(Math.floor(expiresAt.getTime() / 1000)),
           extensions: [{ name: "permit-pty" }],
-          caPublicKeyRaw: caRaw,
+          caPublicKeyBlob: caBlob,
         };
 
         const body = encodeCertificateBody(fields);
         const signature = yield* signer
-          .sign({ keyId: SSH_CA_KEY_ID, algorithm: "ed25519", data: body })
+          .sign({ keyId: SSH_CA_KEY_ID, algorithm: "ecdsa-sha2-nistp256", data: body })
           .pipe(Effect.mapError((cause) => new SshCaError({ reason: "sign_failed", cause })));
 
         const blob = assembleCertificate(body, encodeSignatureField(signature));
