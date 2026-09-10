@@ -22,8 +22,11 @@ locals {
   postgres_server_name = "${var.name_prefix}-pg-${random_string.postgres_suffix.result}"
   postgres_fqdn        = azurerm_postgresql_flexible_server.this.fqdn
 
-  # Both Key Vault inputs are required together — see var.key_vault_id.
-  use_key_vault = var.key_vault_id != null && var.key_vault_uri != null
+  # A plain variable, not derived from key_vault_id being non-null: this
+  # drives `count`/`for_each` below, which Terraform must resolve at plan
+  # time, and a caller's key_vault_id is typically an unknown-until-apply
+  # resource attribute. See var.enable_key_vault.
+  use_key_vault = var.enable_key_vault
 
   # Entra DB auth rides on the same user-assigned identity the Key Vault path
   # creates, so it can't be enabled on its own.
@@ -278,7 +281,10 @@ resource "azurerm_postgresql_flexible_server" "this" {
 # Terraform can't do that step itself — it's SQL against the server, not an
 # ARM operation — so without this there is no way in to perform it.
 resource "azurerm_postgresql_flexible_server_active_directory_administrator" "this" {
-  count               = local.use_entra_db_auth && var.postgres_entra_admin_object_id != null ? 1 : 0
+  # Azure requires object_id AND principal_name together, so both gate the
+  # count — supplying only one would fail at apply with "principal_name is
+  # required" rather than simply skipping the admin.
+  count               = local.use_entra_db_auth && var.postgres_entra_admin_object_id != null && var.postgres_entra_admin_principal_name != null ? 1 : 0
   server_name         = azurerm_postgresql_flexible_server.this.name
   resource_group_name = local.resource_group_name
   tenant_id           = data.azurerm_client_config.current.tenant_id
@@ -1066,15 +1072,15 @@ resource "azurerm_container_app" "this" {
   lifecycle {
     precondition {
       condition     = local.use_key_vault || var.better_auth_secret != null
-      error_message = "better_auth_secret must be set unless key_vault_id/key_vault_uri are (in which case the vault supplies it as `better-auth-secret`)."
+      error_message = "better_auth_secret must be set unless enable_key_vault is (in which case the vault supplies it as `better-auth-secret`)."
     }
     precondition {
-      condition     = (var.key_vault_id == null) == (var.key_vault_uri == null)
-      error_message = "key_vault_id and key_vault_uri must be set together — one without the other silently disables the Key Vault path."
+      condition     = !var.enable_key_vault || (var.key_vault_id != null && var.key_vault_uri != null)
+      error_message = "enable_key_vault requires both key_vault_id and key_vault_uri."
     }
     precondition {
       condition     = !var.enable_postgres_entra_auth || local.use_key_vault
-      error_message = "enable_postgres_entra_auth requires key_vault_id/key_vault_uri: it reuses the user-assigned identity that path creates."
+      error_message = "enable_postgres_entra_auth requires enable_key_vault: it reuses the user-assigned identity that path creates."
     }
   }
 }

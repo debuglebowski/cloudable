@@ -121,7 +121,7 @@ variable "postgres_database_name" {
 }
 
 variable "better_auth_secret" {
-  description = "Secret used by BetterAuth to sign sessions (BETTER_AUTH_SECRET). Generate a random 32+ byte value, e.g. `openssl rand -base64 32`. Marked sensitive. Required UNLESS key_vault_id is set, in which case leave it null and put the value in the vault as `better-auth-secret` instead — passing it here would write it into Terraform state, which is the thing the Key Vault path exists to avoid."
+  description = "Secret used by BetterAuth to sign sessions (BETTER_AUTH_SECRET). Generate a random 32+ byte value, e.g. `openssl rand -base64 32`. Marked sensitive. Required UNLESS enable_key_vault is set, in which case leave it null and put the value in the vault as `better-auth-secret` instead — passing it here would write it into Terraform state, which is the thing the Key Vault path exists to avoid."
   type        = string
   sensitive   = true
   default     = null
@@ -257,9 +257,26 @@ variable "enable_private_networking" {
 # Key Vault-backed secrets (opt-in)
 # ---------------------------------------------------------------------------
 
+variable "enable_key_vault" {
+  description = <<-EOT
+    Opt-in master switch for the Key Vault path (supply key_vault_id and
+    key_vault_uri alongside it).
+
+    Separate from key_vault_id rather than derived from it because Terraform
+    requires `count`/`for_each` to be resolvable at PLAN time: a caller
+    naturally passes `key_vault_id = azurerm_key_vault.x.id`, whose value is
+    unknown until apply, and deriving the toggle from it makes every
+    conditional resource here unplannable ("The count value depends on
+    resource attributes that cannot be determined until apply"). A plain bool
+    is always known.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "key_vault_id" {
   description = <<-EOT
-    Opt-in: resource id of an EXISTING Key Vault holding this deployment's
+    Resource id of an EXISTING Key Vault holding this deployment's
     signing secrets. Set it (together with key_vault_uri) and the Container
     App stops carrying secret VALUES entirely — it references Key Vault
     secrets by URI and resolves them at container start with a user-assigned
