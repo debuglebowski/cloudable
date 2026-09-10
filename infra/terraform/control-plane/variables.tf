@@ -347,20 +347,28 @@ variable "enable_postgres_entra_auth" {
   default     = false
 }
 
-variable "postgres_entra_admin_object_id" {
-  description = "Object id of the Entra principal to make Postgres AD administrator — needed to run the one-time role bootstrap described on enable_postgres_entra_auth. Typically a human operator or the deploying identity."
-  type        = string
-  default     = null
-}
+variable "postgres_entra_administrators" {
+  description = <<-EOT
+    Entra principals made Postgres AD administrators, keyed by principal name
+    (UPN for a user, display name for a group or service principal). Needed so
+    a real person can log in and run the one-time role bootstrap described on
+    enable_postgres_entra_auth — Terraform can't do that step itself.
 
-variable "postgres_entra_admin_principal_name" {
-  description = "Display name / UPN matching postgres_entra_admin_object_id (Azure requires both)."
-  type        = string
-  default     = null
-}
+    A map rather than a single principal because a deployment usually has more
+    than one operator, and because pointing it at one Entra GROUP lets
+    membership be managed in Entra instead of here:
 
-variable "postgres_entra_admin_principal_type" {
-  description = "Principal type for postgres_entra_admin_object_id: User, Group, or ServicePrincipal."
-  type        = string
-  default     = "User"
+      postgres_entra_administrators = {
+        "alice@example.com" = { object_id = "..." }
+        "platform-team"     = { object_id = "...", principal_type = "Group" }
+      }
+
+    Empty (the default) means no administrator is configured, and the one-time
+    bootstrap can't be performed until one is.
+  EOT
+  type = map(object({
+    object_id      = string
+    principal_type = optional(string, "User")
+  }))
+  default = {}
 }

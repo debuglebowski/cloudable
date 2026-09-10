@@ -240,7 +240,7 @@ turning `password_auth_enabled` off is a deliberate follow-up once token auth ha
 proven itself, not something to do in the same change that introduces it.
 
 One step Terraform cannot do for you, because it is SQL against the server rather than
-an ARM operation: an Entra admin (set one with `postgres_entra_admin_object_id`) must
+an ARM operation: an Entra admin (set one or more with `postgres_entra_administrators`) must
 create the database role for the app's identity and grant it what it needs.
 
 ```sql

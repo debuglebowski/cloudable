@@ -48,9 +48,6 @@ locals {
 
   key_vault_secret_uri = local.use_key_vault ? "${var.key_vault_uri}secrets" : null
 
-  # See the postgres AD administrator resource for why empty string, not just
-  # null, means "not configured" here.
-  entra_admin_configured = (var.postgres_entra_admin_object_id != null && var.postgres_entra_admin_object_id != "") && (var.postgres_entra_admin_principal_name != null && var.postgres_entra_admin_principal_name != "")
 
   # Secret names expected in the vault, doubling as the Container App secret
   # names (the app-side env var each backs is wired below). Versionless URIs
@@ -280,27 +277,19 @@ resource "azurerm_postgresql_flexible_server" "this" {
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
 }
 
-# The human (or deploying identity) who can log in as an Entra admin and run
-# the one-time `pgaadauth_create_principal` + GRANT for the app's identity.
-# Terraform can't do that step itself — it's SQL against the server, not an
-# ARM operation — so without this there is no way in to perform it.
+# The people who can log in as an Entra admin and run the one-time
+# `pgaadauth_create_principal` + GRANT for the app's identity. Terraform can't
+# do that step itself — it's SQL against the server, not an ARM operation — so
+# without at least one of these there is no way in to perform it. A map, since
+# a deployment usually has more than one operator (or points at one group).
 resource "azurerm_postgresql_flexible_server_active_directory_administrator" "this" {
-  # Azure requires object_id AND principal_name together, so both gate the
-  # count — supplying only one would fail at apply with "principal_name is
-  # required" rather than simply skipping the admin.
-  #
-  # Empty string counts as unset, not just null: `${{ vars.FOO }}` in a GitHub
-  # Actions workflow renders as "" for a variable that hasn't been created,
-  # so TF_VAR_x="" is the normal shape of "not configured" in CI. Checking
-  # only for null lets that through and fails with "expected object_id to be
-  # a valid UUID, got ".
-  count               = local.use_entra_db_auth && local.entra_admin_configured ? 1 : 0
+  for_each            = local.use_entra_db_auth ? var.postgres_entra_administrators : {}
   server_name         = azurerm_postgresql_flexible_server.this.name
   resource_group_name = local.resource_group_name
   tenant_id           = data.azurerm_client_config.current.tenant_id
-  object_id           = var.postgres_entra_admin_object_id
-  principal_name      = var.postgres_entra_admin_principal_name
-  principal_type      = var.postgres_entra_admin_principal_type
+  object_id           = each.value.object_id
+  principal_name      = each.key
+  principal_type      = each.value.principal_type
 }
 
 resource "azurerm_postgresql_flexible_server_database" "this" {
