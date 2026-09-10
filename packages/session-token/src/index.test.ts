@@ -3,10 +3,10 @@ import * as crypto from "node:crypto";
 import { type SessionClaims, verifySessionToken } from "./index";
 
 // No `Signer` port here (this package doesn't depend on `effect` at all) — tests mint their
-// own tokens with a plain in-memory ed25519 keypair, mirroring exactly what
+// own tokens with a plain in-memory P-256 keypair, mirroring exactly what
 // `apps/control-plane/src/tunnel/session-token.ts`'s `mintSessionToken` does against a real
 // `Signer.sign()`.
-const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
 const publicKeyDer = new Uint8Array(publicKey.export({ format: "der", type: "spki" }));
 
 const toBase64Url = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64url");
@@ -30,7 +30,12 @@ function mint(
     ...overrides,
   };
   const claimsSegment = toBase64Url(utf8(JSON.stringify(claims)));
-  const signature = crypto.sign(null, Buffer.from(utf8(claimsSegment)), privateKey);
+  // "ieee-p1363" produces fixed-width r||s — the shape Key Vault's ES256
+  // returns, and what the verifier expects.
+  const signature = crypto.sign("sha256", Buffer.from(utf8(claimsSegment)), {
+    key: privateKey,
+    dsaEncoding: "ieee-p1363",
+  });
   return { token: `${claimsSegment}.${toBase64Url(signature)}`, claimsSegment };
 }
 
@@ -95,7 +100,7 @@ describe("verifySessionToken (pure)", () => {
 
   test("claims signed with a different keypair do not verify against this public key", () => {
     const { token } = mint();
-    const otherKeyPair = crypto.generateKeyPairSync("ed25519");
+    const otherKeyPair = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
     const otherPublicKeyDer = new Uint8Array(
       otherKeyPair.publicKey.export({ format: "der", type: "spki" }),
     );

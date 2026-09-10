@@ -15,15 +15,21 @@ interface KeyPair {
 }
 
 const generateKeyPair = (): KeyPair => {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
   return { publicKey, privateKey };
 };
 
 /**
- * Dev/test `Signer` implementation. Keys are ed25519, generated on first use
- * and held in memory for the lifetime of the process — deliberately simple
- * for a skeleton build (no Azure Key Vault account exists yet; see
- * `Signer.azure.ts`). Not durable across restarts, and not for production.
+ * Dev/test `Signer` implementation. Keys are ECDSA P-256, generated on first
+ * use and held in memory for the lifetime of the process. Not durable across
+ * restarts, and not for production — `Signer.azure.ts` is what a real
+ * deployment runs, keeping the key inside Key Vault.
+ *
+ * P-256 rather than Ed25519 specifically so this produces byte-identical
+ * certificates to the Azure signer (Key Vault has no Ed25519). A dev signer
+ * that emitted a different signature format would mean the certificate path
+ * exercised by tests wasn't the one that runs in production — exactly the
+ * divergence that hides format bugs until deploy.
  */
 export const LocalSignerLive = Layer.effect(
   SignerTag,
@@ -42,17 +48,26 @@ export const LocalSignerLive = Layer.effect(
 
     const sign: Signer["sign"] = (req: SignRequest) =>
       Effect.gen(function* () {
-        if (req.algorithm !== "ed25519") {
+        if (req.algorithm !== "ecdsa-sha2-nistp256") {
           return yield* Effect.fail(
             new SignerError({
               reason: "unsupported_algorithm",
-              cause: `local signer only supports ed25519, got: ${req.algorithm}`,
+              cause: `local signer only supports ecdsa-sha2-nistp256, got: ${req.algorithm}`,
             }),
           );
         }
         const { privateKey } = yield* getOrCreate(req.keyId);
         return yield* Effect.try({
-          try: () => new Uint8Array(crypto.sign(null, Buffer.from(req.data), privateKey)),
+          // ieee-p1363, not the node default DER: it produces fixed-width
+          // r||s, which is both what Key Vault's ES256 returns and what
+          // `encodeSignatureField` expects.
+          try: () =>
+            new Uint8Array(
+              crypto.sign("sha256", Buffer.from(req.data), {
+                key: privateKey,
+                dsaEncoding: "ieee-p1363",
+              }),
+            ),
           catch: (cause) => new SignerError({ reason: "sign_failed", cause }),
         });
       });

@@ -3,11 +3,11 @@ import * as crypto from "node:crypto";
 import { spawnSession as realSpawnSession } from "./pty";
 import { type SessionManagerDeps, createSessionManager } from "./session-manager";
 
-// Real ed25519 keypair, exactly like `packages/session-token`'s own test file — this
+// Real P-256 keypair, exactly like `packages/session-token`'s own test file — this
 // exercises the real `@cloudable/session-token` verify logic, not a stub of it.
-const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
 const publicKeyDer = new Uint8Array(publicKey.export({ format: "der", type: "spki" }));
-const wrongKeyPair = crypto.generateKeyPairSync("ed25519");
+const wrongKeyPair = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
 const wrongPublicKeyDer = new Uint8Array(
   wrongKeyPair.publicKey.export({ format: "der", type: "spki" }),
 );
@@ -33,11 +33,10 @@ function mintToken(
     expiresAt: overrides.expiresAt ?? new Date(now.getTime() + 15 * 60 * 1000).toISOString(),
   };
   const claimsSegment = toBase64Url(utf8(JSON.stringify(claims)));
-  const signature = crypto.sign(
-    null,
-    Buffer.from(utf8(claimsSegment)),
-    overrides.signingKey ?? privateKey,
-  );
+  const signature = crypto.sign("sha256", Buffer.from(utf8(claimsSegment)), {
+    key: overrides.signingKey ?? privateKey,
+    dsaEncoding: "ieee-p1363",
+  });
   return `${claimsSegment}.${toBase64Url(signature)}`;
 }
 

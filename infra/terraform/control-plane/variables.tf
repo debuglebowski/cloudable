@@ -109,9 +109,10 @@ variable "postgres_admin_username" {
 }
 
 variable "postgres_admin_password" {
-  description = "Administrator password for the Postgres Flexible Server. Marked sensitive; supply via a .tfvars file that is not committed, or via TF_VAR_postgres_admin_password."
+  description = "Administrator password for the Postgres Flexible Server. Marked sensitive; supply via a .tfvars file that is not committed, or via TF_VAR_postgres_admin_password. Not needed — and not used — when enable_postgres_entra_auth is set, since that disables password authentication entirely and no admin password exists."
   type        = string
   sensitive   = true
+  default     = null
 }
 
 variable "postgres_database_name" {

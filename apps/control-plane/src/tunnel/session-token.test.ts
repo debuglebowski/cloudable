@@ -83,7 +83,7 @@ describe("session-token", () => {
       const claimsSegment = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
       const signature = yield* signer.sign({
         keyId: SESSION_TOKEN_KEY_ID,
-        algorithm: "ed25519",
+        algorithm: "ecdsa-sha2-nistp256",
         data: new TextEncoder().encode(claimsSegment),
       });
       const token = `${claimsSegment}.${Buffer.from(signature).toString("base64url")}`;

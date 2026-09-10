@@ -7,11 +7,13 @@ import {
   CERT_TYPE_USER,
   type CertificateFields,
   assembleCertificate,
+  ecdsaP256PublicKeyBlob,
   ed25519PublicKeyBlob,
   encodeCertificateBody,
   encodeSignatureField,
   formatAsOpenSshLine,
   rawEd25519FromSpki,
+  rawP256PointFromSpki,
   sha256Fingerprint,
 } from "./openssh-cert";
 
@@ -24,10 +26,20 @@ function rawPublicKey(publicKey: crypto.KeyObject): Uint8Array {
   return rawEd25519FromSpki(new Uint8Array(publicKey.export({ type: "spki", format: "der" })));
 }
 
-function buildSignedCertificate(fields: Omit<CertificateFields, "caPublicKeyRaw">, ca: KeyPair) {
-  const full: CertificateFields = { ...fields, caPublicKeyRaw: rawPublicKey(ca.publicKey) };
+/** The CA's SSH key blob, from a P-256 keypair — matches what `SshCaService` builds from `Signer.publicKey()`. */
+function caBlob(ca: KeyPair): Uint8Array {
+  const spki = new Uint8Array(ca.publicKey.export({ type: "spki", format: "der" }));
+  return ecdsaP256PublicKeyBlob(rawP256PointFromSpki(spki));
+}
+
+function buildSignedCertificate(fields: Omit<CertificateFields, "caPublicKeyBlob">, ca: KeyPair) {
+  const full: CertificateFields = { ...fields, caPublicKeyBlob: caBlob(ca) };
   const body = encodeCertificateBody(full);
-  const signature = new Uint8Array(crypto.sign(null, Buffer.from(body), ca.privateKey));
+  // ieee-p1363 gives fixed-width r||s, the same shape Key Vault's ES256
+  // returns and what encodeSignatureField expects.
+  const signature = new Uint8Array(
+    crypto.sign("sha256", Buffer.from(body), { key: ca.privateKey, dsaEncoding: "ieee-p1363" }),
+  );
   const signatureField = encodeSignatureField(signature);
   return { blob: assembleCertificate(body, signatureField), body, signature };
 }
@@ -51,11 +63,11 @@ describe("openssh-cert", () => {
   });
 
   test("assembled certificate round-trips through the real OpenSSH parser (ssh-keygen -L)", () => {
-    const ca = crypto.generateKeyPairSync("ed25519");
+    const ca = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
     const subject = crypto.generateKeyPairSync("ed25519");
 
     const now = BigInt(Math.floor(Date.now() / 1000));
-    const fields: Omit<CertificateFields, "caPublicKeyRaw"> = {
+    const fields: Omit<CertificateFields, "caPublicKeyBlob"> = {
       nonce: crypto.randomBytes(32),
       subjectPublicKeyRaw: rawPublicKey(subject.publicKey),
       serial: 42n,
@@ -92,10 +104,10 @@ describe("openssh-cert", () => {
   });
 
   test("signature verifies against the CA public key and fails once the body is tampered", () => {
-    const ca = crypto.generateKeyPairSync("ed25519");
+    const ca = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
     const subject = crypto.generateKeyPairSync("ed25519");
     const now = BigInt(Math.floor(Date.now() / 1000));
-    const fields: Omit<CertificateFields, "caPublicKeyRaw"> = {
+    const fields: Omit<CertificateFields, "caPublicKeyBlob"> = {
       nonce: crypto.randomBytes(32),
       subjectPublicKeyRaw: rawPublicKey(subject.publicKey),
       serial: 1n,
@@ -108,13 +120,25 @@ describe("openssh-cert", () => {
     };
     const { body, signature } = buildSignedCertificate(fields, ca);
 
-    expect(crypto.verify(null, Buffer.from(body), ca.publicKey, Buffer.from(signature))).toBe(true);
+    expect(
+      crypto.verify(
+        "sha256",
+        Buffer.from(body),
+        { key: ca.publicKey, dsaEncoding: "ieee-p1363" },
+        Buffer.from(signature),
+      ),
+    ).toBe(true);
 
     const tamperedBody = new Uint8Array(body);
     const lastIndex = tamperedBody.length - 1;
     tamperedBody[lastIndex] = (tamperedBody[lastIndex] ?? 0) ^ 0xff;
     expect(
-      crypto.verify(null, Buffer.from(tamperedBody), ca.publicKey, Buffer.from(signature)),
+      crypto.verify(
+        "sha256",
+        Buffer.from(tamperedBody),
+        { key: ca.publicKey, dsaEncoding: "ieee-p1363" },
+        Buffer.from(signature),
+      ),
     ).toBe(false);
   });
 

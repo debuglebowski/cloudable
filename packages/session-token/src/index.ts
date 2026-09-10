@@ -68,8 +68,13 @@ export type VerifySessionTokenResult =
   | { ok: false; reason: VerifyFailureReason; cause?: unknown };
 
 /**
- * Verifies a session token's signature and expiry against the given ed25519
- * public key (DER/SPKI-encoded, as returned by `Signer.publicKey()`).
+ * Verifies a session token's signature and expiry against the given ECDSA
+ * P-256 public key (DER/SPKI-encoded, as returned by `Signer.publicKey()`).
+ *
+ * P-256 rather than Ed25519 because the signing key lives in Azure Key Vault
+ * in a real deployment, and Key Vault has no Ed25519 (RSA, EC and oct only) —
+ * see `apps/control-plane/src/services/Signer.azure.ts`. The signature is
+ * fixed-width r||s ("ieee-p1363"), which is what Key Vault's ES256 returns.
  *
  * `keyId` selection (which key this public key even corresponds to) is the
  * caller's job, deliberately — this function only ever checks the token
@@ -104,9 +109,9 @@ export function verifySessionToken(
   let signatureValid: boolean;
   try {
     signatureValid = crypto.verify(
-      null,
+      "sha256",
       Buffer.from(utf8(claimsSegment)),
-      publicKey,
+      { key: publicKey, dsaEncoding: "ieee-p1363" },
       Buffer.from(fromBase64Url(signatureSegment)),
     );
   } catch {

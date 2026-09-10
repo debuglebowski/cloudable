@@ -38,6 +38,7 @@ import { startReconcileDaemon } from "./reconcile/daemon";
 import { seedAzureImages } from "./services/CloudCatalogService";
 import { SwitchableProvisioningServiceLive } from "./services/ProvisioningService.switchable";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
+import { AzureSignerLive } from "./services/Signer.azure";
 import { LocalSignerLive } from "./services/Signer.local";
 import { TunnelRegistry } from "./tunnel/registry";
 
@@ -54,7 +55,10 @@ import { TunnelRegistry } from "./tunnel/registry";
 // `kind: "cloud"`), not a boot-time env var.
 const AppLive = buildAppLive({
   provisioning: SwitchableProvisioningServiceLive,
-  signer: LocalSignerLive,
+  // Key Vault when the deployment has one (the CA private key then never
+  // enters this process at all — invariant #9); the in-process generator
+  // otherwise, for local dev.
+  signer: config.keyVaultUri === null ? LocalSignerLive : AzureSignerLive(config.keyVaultUri),
   secrets: FakeSecretsProviderLive,
 });
 

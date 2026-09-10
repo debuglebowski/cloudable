@@ -227,20 +227,22 @@ resource "azurerm_postgresql_flexible_server" "this" {
   storage_mb = var.postgres_storage_mb
   sku_name   = var.postgres_sku_name
 
-  administrator_login    = var.postgres_admin_username
-  administrator_password = var.postgres_admin_password
+  # Both omitted entirely under Entra-only auth: with password_auth_enabled
+  # false there is no password to set, which is what finally removes the last
+  # secret value from Terraform state.
+  administrator_login    = local.use_entra_db_auth ? null : var.postgres_admin_username
+  administrator_password = local.use_entra_db_auth ? null : var.postgres_admin_password
 
-  # Password auth stays enabled alongside Entra, deliberately: it is the
-  # rollback path, reachable by flipping the app's DATABASE_AUTH_MODE back to
-  # "password" with no infrastructure change. The cost is that
-  # postgres_admin_password stays in state — turning password_auth_enabled
-  # off is the follow-up that finally removes it, once token auth has proven
-  # itself in production (see var.enable_postgres_entra_auth).
+  # Entra ONLY — password auth off. That means the sole way into this database
+  # is an Entra token: the app's managed identity for normal operation, and a
+  # human listed in postgres_entra_administrators for the role bootstrap. If
+  # token auth breaks, there is no password to fall back on; recovery is
+  # re-enabling password auth here and applying.
   dynamic "authentication" {
     for_each = local.use_entra_db_auth ? [1] : []
     content {
       active_directory_auth_enabled = true
-      password_auth_enabled         = true
+      password_auth_enabled         = false
       tenant_id                     = data.azurerm_client_config.current.tenant_id
     }
   }
@@ -670,6 +672,55 @@ resource "azurerm_user_assigned_identity" "app" {
   tags                = var.tags
 }
 
+# The two signing keys, generated INSIDE the vault. Terraform never sees the
+# private half: `azurerm_key_vault_key` with no imported material makes Key
+# Vault generate the pair and return only the public key, so unlike a secret's
+# `value` there is nothing private to land in state. That is what actually
+# satisfies invariant #9 ("the CA private key never enters the control plane") —
+# the app calls /sign, never /export.
+#
+# EC P-256, because Key Vault has no Ed25519 (RSA, EC, oct only). The
+# certificate format follows from that: see openssh-cert.ts's CA_KEY_TYPE.
+#
+# Creating a key is a data-plane operation, so the deploying identity needs
+# "Key Vault Crypto Officer" on the vault — granted below from
+# deploying_identity_principal_id, the same way this module already grants
+# that identity the role-assignment read it needs. That grant allows creating,
+# rotating and deleting keys; it does NOT allow reading private key material,
+# which Key Vault never returns for a key it generated.
+resource "azurerm_key_vault_key" "signing" {
+  # Names match the app's own key ids (SshCaService.SSH_CA_KEY_ID,
+  # session-token.ts's SESSION_TOKEN_KEY_ID) — the Signer port passes them
+  # straight through as Key Vault key names.
+  for_each = local.use_key_vault ? toset(["ssh-ca", "session-token"]) : toset([])
+
+  name         = each.key
+  key_vault_id = var.key_vault_id
+  key_type     = "EC"
+  curve        = "P-256"
+  key_opts     = ["sign", "verify"]
+
+  # RBAC propagation isn't instant — a first apply can still 403 here even
+  # with the grant ordered before it, and succeed on a re-run.
+  depends_on = [azurerm_role_assignment.deployer_key_vault_crypto]
+}
+
+resource "azurerm_role_assignment" "deployer_key_vault_crypto" {
+  count                = local.use_key_vault && var.deploying_identity_principal_id != null ? 1 : 0
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Crypto Officer"
+  principal_id         = var.deploying_identity_principal_id
+}
+
+# Sign and verify only — not Crypto Officer, which could create, import or
+# delete keys. The app never needs to do any of those.
+resource "azurerm_role_assignment" "app_key_vault_crypto" {
+  count                = local.use_key_vault ? 1 : 0
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Crypto User"
+  principal_id         = azurerm_user_assigned_identity.app[0].principal_id
+}
+
 resource "azurerm_role_assignment" "app_key_vault_secrets" {
   count = local.use_key_vault ? 1 : 0
   scope = var.key_vault_id
@@ -1043,6 +1094,17 @@ resource "azurerm_container_app" "this" {
           value = "entra"
         }
       }
+
+      # Switches the control plane from the in-process key generator
+      # (Signer.local.ts) to Key Vault (Signer.azure.ts) for the SSH CA and
+      # session-token keys.
+      dynamic "env" {
+        for_each = local.use_key_vault ? [1] : []
+        content {
+          name  = "KEY_VAULT_URI"
+          value = var.key_vault_uri
+        }
+      }
     }
   }
 
@@ -1076,6 +1138,10 @@ resource "azurerm_container_app" "this" {
     precondition {
       condition     = !var.enable_key_vault || (var.key_vault_id != null && var.key_vault_uri != null)
       error_message = "enable_key_vault requires both key_vault_id and key_vault_uri."
+    }
+    precondition {
+      condition     = var.enable_postgres_entra_auth || var.postgres_admin_password != null
+      error_message = "postgres_admin_password is required unless enable_postgres_entra_auth is set (which disables password auth entirely)."
     }
     precondition {
       condition     = !var.enable_postgres_entra_auth || local.use_key_vault

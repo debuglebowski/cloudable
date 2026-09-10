@@ -15,7 +15,16 @@
 
 export const CERT_KEY_TYPE = "ssh-ed25519-cert-v01@openssh.com";
 export const KEY_TYPE = "ssh-ed25519";
-export const SIGNATURE_FORMAT = "ssh-ed25519";
+
+// The CA signs with ECDSA P-256, not Ed25519, and this is forced by Key
+// Vault: its key types are RSA, EC (P-256/256K/384/521) and oct — Ed25519 is
+// not among them, and invariant #9 ("the CA private key never enters the
+// control plane") means the key has to live somewhere that can sign without
+// exporting. The certificate's own type is set by the SUBJECT key, which is
+// still Ed25519, so certificates remain `ssh-ed25519-cert-v01@openssh.com`;
+// only the `signature key` and `signature` fields carry the CA's ECDSA type.
+export const CA_KEY_TYPE = "ecdsa-sha2-nistp256";
+export const CA_CURVE_NAME = "nistp256";
 
 /** OpenSSH certificate `type` field: 1 = user certificate, 2 = host certificate. */
 export const CERT_TYPE_USER = 1;
@@ -38,8 +47,8 @@ export interface CertificateFields {
   validBefore: bigint;
   criticalOptions?: ReadonlyArray<KeyValueOption>;
   extensions?: ReadonlyArray<KeyValueOption>;
-  /** Raw 32-byte Ed25519 point of the CA — embedded so sshd/ssh-keygen can report it, not used for trust (trust comes from `TrustedUserCAKeys` naming the same key out of band). */
-  caPublicKeyRaw: Uint8Array;
+  /** The CA's SSH wire-format public key blob (see `ecdsaP256PublicKeyBlob`) — embedded so sshd/ssh-keygen can report it, not used for trust (trust comes from `TrustedUserCAKeys` naming the same key out of band). */
+  caPublicKeyBlob: Uint8Array;
 }
 
 function concat(...parts: ReadonlyArray<Uint8Array>): Uint8Array {
@@ -85,6 +94,40 @@ export function ed25519PublicKeyBlob(rawPublicKey: Uint8Array): Uint8Array {
 }
 
 /**
+ * The CA's SSH wire-format public key blob. ECDSA carries the curve name as
+ * its own field, unlike Ed25519: `string "ecdsa-sha2-nistp256"` + `string
+ * "nistp256"` + `string point`, where point is the uncompressed SEC1 form
+ * (0x04 || X || Y, 65 bytes for P-256).
+ */
+export function ecdsaP256PublicKeyBlob(uncompressedPoint: Uint8Array): Uint8Array {
+  if (uncompressedPoint.length !== 65 || uncompressedPoint[0] !== 0x04) {
+    throw new Error(
+      `expected a 65-byte uncompressed P-256 point starting with 0x04, got ${uncompressedPoint.length} bytes`,
+    );
+  }
+  return concat(
+    writeString(CA_KEY_TYPE),
+    writeString(CA_CURVE_NAME),
+    writeString(uncompressedPoint),
+  );
+}
+
+/**
+ * SSH encodes an ECDSA signature as two mpints, not the fixed-width r||s
+ * that both Key Vault (ES256) and WebCrypto/Node's "ieee-p1363" return. An
+ * mpint is minimally-encoded two's-complement, so leading zero bytes are
+ * stripped and a 0x00 is prepended whenever the top bit would otherwise read
+ * as negative.
+ */
+function toMpint(value: Uint8Array): Uint8Array {
+  let start = 0;
+  while (start < value.length - 1 && value[start] === 0) start++;
+  const trimmed = value.slice(start);
+  const needsPad = (trimmed[0] ?? 0) & 0x80;
+  return writeString(needsPad ? concat(new Uint8Array([0]), trimmed) : trimmed);
+}
+
+/**
  * Encodes every certificate field up to (but excluding) the `signature`
  * field. This exact byte string is what the CA signs — sshd recomputes it
  * the same way to verify.
@@ -103,13 +146,20 @@ export function encodeCertificateBody(fields: CertificateFields): Uint8Array {
     writeString(packOptions(fields.criticalOptions ?? [])),
     writeString(packOptions(fields.extensions ?? [])),
     writeString(new Uint8Array(0)), // reserved
-    writeString(ed25519PublicKeyBlob(fields.caPublicKeyRaw)), // "signature key"
+    writeString(fields.caPublicKeyBlob), // "signature key"
   );
 }
 
-/** Wraps a raw signature into the certificate's `signature` field: `string(string algo + string sig)`. */
+/**
+ * Wraps a raw P-256 signature (64 bytes, r||s) into the certificate's
+ * `signature` field: `string(string algo + string(mpint r + mpint s))`.
+ */
 export function encodeSignatureField(rawSignature: Uint8Array): Uint8Array {
-  const signatureBlob = concat(writeString(SIGNATURE_FORMAT), writeString(rawSignature));
+  if (rawSignature.length !== 64) {
+    throw new Error(`expected a 64-byte P-256 r||s signature, got ${rawSignature.length} bytes`);
+  }
+  const rs = concat(toMpint(rawSignature.slice(0, 32)), toMpint(rawSignature.slice(32)));
+  const signatureBlob = concat(writeString(CA_KEY_TYPE), writeString(rs));
   return writeString(signatureBlob);
 }
 
@@ -142,4 +192,19 @@ export function rawEd25519FromSpki(spkiDer: Uint8Array): Uint8Array {
     throw new Error(`expected a 44-byte Ed25519 SPKI DER blob, got ${spkiDer.length} bytes`);
   }
   return spkiDer.slice(12);
+}
+
+/**
+ * P-256 SubjectPublicKeyInfo has a fixed 26-byte DER header (SEQUENCE, the
+ * ecPublicKey + prime256v1 OIDs, BIT STRING header) followed by exactly the
+ * 65-byte uncompressed point — so, like Ed25519 above, the raw point is the
+ * tail of a constant-length blob. Used to turn `Signer.publicKey()`'s SPKI
+ * output into the point the SSH key blob needs; never touches private key
+ * material.
+ */
+export function rawP256PointFromSpki(spkiDer: Uint8Array): Uint8Array {
+  if (spkiDer.length !== 91) {
+    throw new Error(`expected a 91-byte P-256 SPKI DER blob, got ${spkiDer.length} bytes`);
+  }
+  return spkiDer.slice(26);
 }
