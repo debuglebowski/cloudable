@@ -49,16 +49,42 @@ locals {
   key_vault_secret_uri = local.use_key_vault ? "${var.key_vault_uri}secrets" : null
 
 
+  # How to generate the secrets this module expects in the vault, name ->
+  # { bytes }. Key Vault has no generate-secret API (its data plane offers
+  # Set/Get/Update/Delete and nothing else — only *keys* and certificates are
+  # generated in-vault), so the values are produced outside it. This map is
+  # the single definition of what to produce; `scripts/seed-vault-secrets.sh`
+  # consumes it via the `key_vault_secret_spec` output, so the names and
+  # lengths exist in exactly one place rather than being restated in prose.
+  #
+  # `bytes`, not characters, because bytes is what is actually generated and
+  # the character count follows from the encoding: base64url of B bytes is
+  # exactly ceil(B*8/6) characters. A consumer that caps a secret at N
+  # characters is therefore satisfied by bytes = floor(N*3/4) — 18 bytes is
+  # exactly 24 characters, carrying 144 bits. Never generate long and
+  # truncate: it yields the same entropy but reads like a bug, and invites a
+  # later "fix" that silently changes every secret's shape.
+  #
+  # base64url rather than standard base64: `+`, `/` and `=` are URI-reserved
+  # and have already cost this module once (see local.database_url's urlencode
+  # comment below). All four are HMAC keys or a BetterAuth signing secret
+  # today, none of which caps length, so the alphabet is insurance rather
+  # than a current requirement.
+  key_vault_secret_specs = {
+    "better-auth-secret"   = { bytes = 32 } # 43 chars, 256 bits
+    "join-token-secret"    = { bytes = 32 } # 43 chars, 256 bits
+    "agent-session-secret" = { bytes = 32 } # 43 chars, 256 bits
+    "cli-auth-code-secret" = { bytes = 32 } # 43 chars, 256 bits
+  }
+
   # Secret names expected in the vault, doubling as the Container App secret
   # names (the app-side env var each backs is wired below). Versionless URIs
   # on purpose: rotating a secret in the vault is then picked up by a
   # revision restart, with no Terraform change.
-  key_vault_backed_secrets = [
-    "better-auth-secret",
-    "join-token-secret",
-    "agent-session-secret",
-    "cli-auth-code-secret",
-  ]
+  #
+  # sort() so the Container App's `dynamic "secret"` blocks keep a stable,
+  # deterministic order regardless of how the map above is written.
+  key_vault_backed_secrets = sort(keys(local.key_vault_secret_specs))
   # urlencode both credential parts: a generated password commonly contains
   # URI-reserved characters (/, +, =, @, ...) that would otherwise break
   # connection-string parsing in the `postgres` client / drizzle-orm.
@@ -728,6 +754,81 @@ resource "azurerm_role_assignment" "app_key_vault_secrets" {
   # never writes or rotates a secret, it only resolves the four it's given.
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_user_assigned_identity.app[0].principal_id
+}
+
+# Metadata only: "Key Vault Reader" grants readMetadata — list secret names,
+# read their properties — and explicitly NOT getSecret. Microsoft's role
+# table describes it as "Cannot read sensitive values such as secret
+# contents". It exists solely so the `check` block below can tell you the
+# vault is unseeded; the deploying identity gains no ability to read a value.
+#
+# Same gate and rationale as deployer_key_vault_crypto above. Note this is
+# vault-scoped, so it needs Microsoft.Authorization/roleAssignments/write on
+# the vault, which Contributor does not grant — expect the same one-time
+# elevated creation the other vault role assignments need. Without it the
+# check degrades to a warning, which is annoying and never blocking.
+resource "azurerm_role_assignment" "deployer_key_vault_reader" {
+  count                = local.use_key_vault && var.deploying_identity_principal_id != null ? 1 : 0
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Reader"
+  principal_id         = var.deploying_identity_principal_id
+}
+
+# Confirms the vault actually holds the secrets this deployment references.
+#
+# `azurerm_key_vault_secrets` is the PLURAL, metadata-only data source: its
+# attributes are `names` and a `secrets` list of {enabled, id, name, tags}.
+# It has no `value` attribute at all, so unlike the singular
+# `azurerm_key_vault_secret` (whose `value` is sensitive) there is nothing
+# here that could put a secret into state. That is the entire reason it is
+# this data source.
+#
+# A `check` block rather than a lifecycle.precondition, deliberately: an
+# unseeded vault should warn loudly, but a vault that is momentarily
+# unreadable — RBAC still propagating, network rules added later, data-plane
+# throttling, or simply no Key Vault Reader grant — must not wedge every
+# future apply of an image bump that has nothing to do with secrets. Check
+# assertions and scoped data-source failures are warnings by design.
+#
+# This is early notice, not the only line of defence: Container Apps cannot
+# provision a revision whose key_vault_secret_id fails to resolve, so a
+# missing secret is already fatal at deploy time. The point is to say so at
+# plan time, with the fix, instead of at revision-provisioning time.
+#
+# The nested data block cannot take `count` ("The count meta-argument is not
+# supported within nested data blocks" — verified, not assumed), so with
+# enable_key_vault unset it is still evaluated, reads a null key_vault_id and
+# emits one warning per plan. That is the deliberate trade: the alternative
+# is a top-level counted data source, where a read failure becomes a HARD
+# error and any deployment whose identity lacks readMetadata on the vault
+# could no longer plan at all. A spurious warning for non-vault users is a
+# far better failure mode than a wedged pipeline for vault users.
+check "key_vault_secrets_seeded" {
+  data "azurerm_key_vault_secrets" "expected" {
+    key_vault_id = var.key_vault_id
+  }
+
+  assert {
+    # Ternary rather than `||` so the data source is never dereferenced when
+    # Key Vault is disabled (both branches of `||` get evaluated).
+    condition = !local.use_key_vault || length(setsubtract(
+      toset(local.key_vault_backed_secrets),
+      toset(data.azurerm_key_vault_secrets.expected.names)
+    )) == 0
+
+    error_message = join(" ", [
+      "Key Vault is missing secrets this deployment references:",
+      join(", ", sort(tolist(setsubtract(
+        toset(local.key_vault_backed_secrets),
+        toset(try(data.azurerm_key_vault_secrets.expected.names, []))
+      )))),
+      "— the Container App cannot provision a revision until they exist.",
+      "Seed them with scripts/seed-vault-secrets.sh (see README.md).",
+      "If the vault IS seeded, the deploying identity most likely lacks",
+      "Microsoft.KeyVault/vaults/secrets/readMetadata/action on it; grant it",
+      "'Key Vault Reader', which reads metadata only and never values.",
+    ])
+  }
 }
 
 resource "azurerm_role_definition" "machine_operator" {

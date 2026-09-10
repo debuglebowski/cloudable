@@ -17,8 +17,9 @@ export interface AppConfig {
    * `entra` swaps `databaseUrl`'s password for a managed-identity access
    * token per connection (see `db/connect.ts`) — what a real deployment
    * runs, so no database password exists anywhere. `password` (the default)
-   * uses the credential in `databaseUrl` itself: local dev, docker-compose,
-   * tests, and the rollback path if Entra auth misbehaves.
+   * uses the credential in `databaseUrl` itself: local dev, docker-compose
+   * and tests. It is not a rollback for a real deployment — that server has
+   * password auth disabled, so there is nothing to fall back to.
    */
   readonly databaseAuthMode: "password" | "entra";
   /**

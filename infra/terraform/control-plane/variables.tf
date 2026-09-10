@@ -168,7 +168,7 @@ variable "create_machines_resource_group" {
 }
 
 variable "deploying_identity_principal_id" {
-  description = "Object ID (not the application/client ID) of the identity running terraform plan/apply against this module, if it's a scoped-down deploying identity (e.g. a CI/CD OIDC service principal) rather than a subscription Owner/Contributor. Only relevant when enable_self_managed_machines is true, which creates azurerm_role_assignment.catalog_reader below at subscription scope: refreshing that resource on every plan/apply requires Microsoft.Authorization/roleAssignments/read at that same scope, which a narrowly-scoped deploying identity doesn't have by default — without it, terraform plan computes the right diff but then 403s trying to read the resource back. Leave null (default) when the deploying identity already has broader access (e.g. subscription Owner/Contributor) or enable_self_managed_machines is false. Setting this creates one more narrow, read-only role assignment granting exactly that permission, nothing else — like catalog_reader itself, the very first apply that creates it needs an identity that already has Microsoft.Authorization/roleAssignments/write at subscription scope (e.g. a human's own elevated login), since the deploying identity being granted access can't yet grant itself that access."
+  description = "Object ID (not the application/client ID) of the identity running terraform plan/apply against this module, if it's a scoped-down deploying identity (e.g. a CI/CD OIDC service principal) rather than a subscription Owner/Contributor. Relevant to two features. (1) enable_self_managed_machines creates azurerm_role_assignment.catalog_reader at subscription scope: refreshing that resource on every plan/apply requires Microsoft.Authorization/roleAssignments/read at that same scope, which a narrowly-scoped deploying identity doesn't have by default — without it, terraform plan computes the right diff but then 403s trying to read the resource back. (2) enable_key_vault grants this identity 'Key Vault Crypto Officer' on the vault, so it can create the signing keys, and 'Key Vault Reader' so the key_vault_secrets_seeded check can list secret NAMES — reader is metadata-only and cannot read a secret value. Leave null (default) when the deploying identity already has broader access (e.g. subscription Owner/Contributor), or when neither feature is enabled. Setting this creates only narrow role assignments granting exactly those permissions, nothing else — and as with catalog_reader, the very first apply that creates each one needs an identity that already has Microsoft.Authorization/roleAssignments/write at the relevant scope (e.g. a human's own elevated login), since the deploying identity being granted access can't yet grant itself that access."
   type        = string
   default     = null
 }
@@ -330,12 +330,15 @@ variable "enable_postgres_entra_auth" {
     Requires key_vault_id/key_vault_uri, since it depends on the same
     user-assigned identity those create.
 
-    Password authentication stays ENABLED alongside it, deliberately: it's
-    the rollback path (flip DATABASE_AUTH_MODE back to "password" without
-    touching infrastructure). That does mean postgres_admin_password remains
-    in state — turning password auth off entirely is a deliberate follow-up
-    once token auth is proven, not something to do in the same change that
-    introduces it.
+    Password authentication is turned OFF at the same time, so no admin
+    password exists on the server and postgres_admin_password is neither
+    required nor stored in state. That was the last secret value Terraform
+    still held.
+
+    There is therefore no instant rollback. Flipping the app's
+    DATABASE_AUTH_MODE back to "password" alone will not work, because the
+    server has no password to authenticate against. Recovery means setting
+    this to false, supplying a postgres_admin_password, and applying again.
 
     One manual step this module cannot do for you: an Entra admin on the
     server must create a database role for the identity and grant it what

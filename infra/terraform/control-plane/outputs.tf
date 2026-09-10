@@ -64,3 +64,31 @@ output "app_identity_principal_id" {
   description = "Principal (object) id of the user-assigned managed identity, for granting it access to resources outside this module. Null unless key_vault_id is set — with a system-assigned identity, use container_app_identity_principal_id instead."
   value       = local.use_key_vault ? azurerm_user_assigned_identity.app[0].principal_id : null
 }
+
+output "key_vault_secret_spec" {
+  description = <<-EOT
+    How to generate the Key Vault secrets this module expects, as
+    name -> { bytes, encoding, chars }.
+
+    NOT sensitive: this describes how the values are produced, never what
+    they are. Nothing here is derived from a secret value, and this module
+    never reads one.
+
+    Consumed by `scripts/seed-vault-secrets.sh`, so the names, lengths and
+    encoding have exactly one definition. Adding a fifth secret is then a
+    one-line change to local.key_vault_secret_specs that both the Container
+    App wiring and the seeding script pick up — which is the difference
+    between "generation is declared in code" and "the rules are written down
+    twice, in two languages, and drift".
+
+    Null unless enable_key_vault is set.
+  EOT
+  value = local.use_key_vault ? {
+    for name, spec in local.key_vault_secret_specs : name => {
+      bytes    = spec.bytes
+      encoding = "base64url"
+      # base64url of B bytes, unpadded: exactly ceil(B*8/6) characters.
+      chars = ceil(spec.bytes * 8 / 6)
+    }
+  } : null
+}
