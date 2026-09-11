@@ -1,0 +1,58 @@
+name: Docker provisioning check
+
+# `ProvisioningService.docker.integration-check.ts` split out of the main CI
+# job. It is the only check in the tree that builds rather than just talks to
+# Postgres: `bun build --compile` for the agent and tunnel-daemon binaries,
+# then a `docker build` that runs `apt-get` — all cold on every runner, none of
+# it cached between runs.
+#
+# It sat at 32-44s for the whole integration-check step until 2026-09-11, when
+# it started taking 112-377s. Nothing on our side changed: same runner image,
+# same Bun cache, no commit touching the agent, the tunnel-daemon or the
+# Dockerfile. A package mirror inside the build started stalling, and one run
+# hit the test's timeout and read as a code regression.
+#
+# The backend it covers is dev/demo only (see `apps/agent/docker/local-machine/
+# Dockerfile`), so the main job should not pay minutes for it on a console or
+# SSO commit. Here it runs only on the paths that can actually break it, and
+# `ci.yml` sets `SKIP_DOCKER_PROVISIONING_CHECK` to leave it to this workflow.
+on:
+  push:
+    branches: [main]
+    paths: &docker-provisioning-paths
+      - "apps/agent/**"
+      - "apps/tunnel-daemon/**"
+      - "apps/control-plane/src/services/ProvisioningService.docker.ts"
+      - "apps/control-plane/src/services/ProvisioningService.docker.integration-check.ts"
+      - ".github/workflows/docker-provisioning-check.yml"
+  pull_request:
+    paths: *docker-provisioning-paths
+
+concurrency:
+  group: docker-provisioning-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  docker-provisioning:
+    name: local Docker provisioning lifecycle
+    runs-on: ubuntu-latest
+    # The test's own timeout is 600s and the build ahead of it is unbounded
+    # from this repo's side. Cap the job so a stalled mirror fails in minutes
+    # with a named step rather than sitting on a runner for six hours.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Bun workspace
+        uses: ./.github/actions/setup-bun
+
+      # No Postgres service and no secrets: this check drives the real Docker
+      # daemon only. `create` mints its join token with `Effect.sync` and
+      # `JOIN_TOKEN_SECRET` has a dev fallback, so nothing here reaches a
+      # database. `SKIP_DOCKER_PROVISIONING_CHECK` is deliberately unset.
+      - name: Docker provisioning lifecycle (control-plane)
+        run: bun run --cwd apps/control-plane test:docker-provisioning
