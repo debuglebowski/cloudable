@@ -97,7 +97,15 @@ describe.skipIf(!dockerReachable)(
         ).stdout,
       ).text();
       expect(psAfter.trim()).toBe("");
-    }, 120_000);
+      // 120s was not enough on a cold CI runner. This test's first run does a
+      // real `docker build` with `apt-get update`/`install` inside it (see
+      // this file's header), so almost all of the budget is image build and
+      // registry pull, not anything this repo controls: it finishes in about
+      // a second locally where the layers are cached, took 20s on a warm
+      // runner, and timed out twice at exactly 120s on a cold one. Raised
+      // rather than pre-building in the workflow, which would move the same
+      // wait somewhere less obvious and duplicate the image definition.
+    }, 600_000);
 
     test("reconcile on an unknown machine fails with not_found", async () => {
       const result = await run(
