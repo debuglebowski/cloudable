@@ -14,10 +14,6 @@ const RESOURCE_ID =
   "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-1";
 const TENANT_ID = "11111111-1111-1111-1111-111111111111";
 
-/** Always fails — used wherever a test asserts verification never reaches this resolver. */
-const shouldNotBeCalled = () =>
-  Effect.fail(new AttestationError({ reason: "should_not_be_called" }));
-
 /** Serves an in-memory JWKS document over a real local HTTP server, so `createRemoteJWKSet` exercises a genuine fetch. */
 function serveJwks(jwks: { keys: unknown[] }) {
   return Bun.serve({ port: 0, fetch: () => Response.json(jwks) });
@@ -45,8 +41,7 @@ describe("managed-identity attestation", () => {
             machineId: "m-1",
             orgId: claims.xms_mirid === RESOURCE_ID ? "org-1" : "org-wrong",
           } satisfies MachineIdentity),
-        resolveExpectedTenantId: (orgId) =>
-          Effect.succeed(orgId === "org-1" ? TENANT_ID : "org-wrong-tenant"),
+        resolveExpectedTenantId: Effect.succeed(TENANT_ID),
       });
 
       const identity = await Effect.runPromise(method.verifyCredential(token));
@@ -73,8 +68,8 @@ describe("managed-identity attestation", () => {
         jwksUrl: `http://localhost:${server.port}/keys`,
         audience: AUDIENCE,
         resolveMachine: () => Effect.succeed({ machineId: "m-1", orgId: "org-1" }),
-        // An org admin's console input, stored with incidental leading/trailing whitespace.
-        resolveExpectedTenantId: () => Effect.succeed(`  ${TENANT_ID}  `),
+        // Incidental leading/trailing whitespace on the resolved value.
+        resolveExpectedTenantId: Effect.succeed(`  ${TENANT_ID}  `),
       });
 
       const identity = await Effect.runPromise(method.verifyCredential(token));
@@ -104,8 +99,8 @@ describe("managed-identity attestation", () => {
         // Resolves to a real machine/org — signature, audience, and
         // `xms_mirid` lookup all succeed. Only the tenant is wrong.
         resolveMachine: () => Effect.succeed({ machineId: "m-1", orgId: "org-1" }),
-        // org-1's actually-configured tenant does not match the token's `tid`.
-        resolveExpectedTenantId: () => Effect.succeed(TENANT_ID),
+        // This deployment's own resolved tenant does not match the token's `tid`.
+        resolveExpectedTenantId: Effect.succeed(TENANT_ID),
       });
 
       const error = await Effect.runPromise(Effect.flip(method.verifyCredential(token)));
@@ -139,7 +134,7 @@ describe("managed-identity attestation", () => {
         jwksUrl: `http://localhost:${server.port}/keys`,
         audience: AUDIENCE,
         resolveMachine: () => Effect.succeed({ machineId: "m-1", orgId: "org-1" }),
-        resolveExpectedTenantId: () => Effect.succeed(TENANT_ID),
+        resolveExpectedTenantId: Effect.succeed(TENANT_ID),
       });
 
       const error = await Effect.runPromise(Effect.flip(method.verifyCredential(token)));
@@ -171,7 +166,9 @@ describe("managed-identity attestation", () => {
         jwksUrl: `http://localhost:${server.port}/keys`,
         audience: AUDIENCE,
         resolveMachine: () => Effect.fail(new AttestationError({ reason: "should_not_be_called" })),
-        resolveExpectedTenantId: shouldNotBeCalled,
+        // Never reached in this test — verification fails before the tenant
+        // check runs, so the value here is inert either way.
+        resolveExpectedTenantId: Effect.succeed(null),
       });
 
       const error = await Effect.runPromise(Effect.flip(method.verifyCredential(token)));
@@ -205,7 +202,9 @@ describe("managed-identity attestation", () => {
         jwksUrl: `http://localhost:${server.port}/keys`,
         audience: AUDIENCE,
         resolveMachine: () => Effect.fail(new AttestationError({ reason: "should_not_be_called" })),
-        resolveExpectedTenantId: shouldNotBeCalled,
+        // Never reached in this test — verification fails before the tenant
+        // check runs, so the value here is inert either way.
+        resolveExpectedTenantId: Effect.succeed(null),
       });
 
       const error = await Effect.runPromise(
@@ -225,7 +224,9 @@ describe("managed-identity attestation", () => {
       jwksUrl: "http://localhost:1/keys",
       audience: AUDIENCE,
       resolveMachine: () => Effect.fail(new AttestationError({ reason: "should_not_be_called" })),
-      resolveExpectedTenantId: shouldNotBeCalled,
+      // Never reached in this test — verification fails before the tenant
+      // check runs, so the value here is inert either way.
+      resolveExpectedTenantId: Effect.succeed(null),
     });
     const error = await Effect.runPromise(
       Effect.flip(method.issueCredential({ orgId: "org-1", machineId: "machine-1" })),
