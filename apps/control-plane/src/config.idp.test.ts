@@ -37,6 +37,7 @@ const loadConfig = async (env: Record<string, string | undefined>) => {
 const VALID = JSON.stringify({
   entityId: "https://sts.windows.net/tenant/",
   ssoUrl: "https://login.microsoftonline.com/tenant/saml2",
+  sloUrl: "https://login.microsoftonline.com/tenant/saml2",
   certs: ["MIIC-fake-cert"],
 });
 
@@ -76,6 +77,7 @@ describe("idpSamlConfig", () => {
     const incomplete = JSON.stringify({
       entityId: "https://sts.windows.net/tenant/",
       ssoUrl: "https://login.microsoftonline.com/tenant/saml2",
+      sloUrl: "https://login.microsoftonline.com/tenant/saml2",
       certs: [],
     });
     await expect(
