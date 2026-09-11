@@ -39,7 +39,11 @@ const MANAGED_IDENTITY_TENANT_CLAIM = "tid";
 /** GUIDs are case-insensitive; trims incidental whitespace too — see the tenant-pinning comparison's own comment for why. */
 const normalizeTenantId = (value: string): string => value.trim().toLowerCase();
 
-let cachedOwnTenantId: string | null | undefined;
+/**
+ * Only ever holds a SUCCESSFUL resolution. A failure is deliberately not
+ * cached — see `resolveOwnTenantId`.
+ */
+let cachedOwnTenantId: string | undefined;
 
 /**
  * The Azure AD tenant *this control plane's own managed identity* lives in —
@@ -66,6 +70,10 @@ let cachedOwnTenantId: string | null | undefined;
  * Never fails — a transient resolution problem (network blip, IMDS not
  * reachable) degrades to `null`, which `verifyCredential` already treats as
  * "reject" (fail closed), same as an org's never-configured tenant used to.
+ *
+ * That `null` is NOT cached, which is the whole subtlety here: failing closed
+ * for one attempt is correct, failing closed forever is not. See the cache
+ * write below.
  */
 const resolveOwnTenantId = (): Effect.Effect<string | null> =>
   Effect.gen(function* () {
@@ -82,7 +90,20 @@ const resolveOwnTenantId = (): Effect.Effect<string | null> =>
       catch: () => null,
     }).pipe(Effect.catchAll(() => Effect.succeed(null)));
 
-    cachedOwnTenantId = resolved;
+    // Cache success only. Caching a null here would turn one transient
+    // failure into a permanent one: `verifyCredential` treats a null expected
+    // tenant as "reject", so a single bad resolution at startup would fail
+    // EVERY attestation for the lifetime of the process, recoverable only by
+    // a restart.
+    //
+    // That is not hypothetical. It happened in production: the managed
+    // identity is not always ready the instant the container starts serving
+    // (the same window that produced a burst of failed auth_session queries),
+    // and the result was 720 tenant_mismatch failures an hour from a machine
+    // whose token was perfectly valid — with the reason pointing at the
+    // token rather than at us. Agents retry every few seconds, so simply
+    // re-resolving costs nothing and self-heals within one poll.
+    if (resolved !== null) cachedOwnTenantId = resolved;
     return resolved;
   });
 
