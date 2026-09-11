@@ -14,7 +14,16 @@ import { makeDockerProvisioningServiceLive } from "./ProvisioningService.docker"
 // to reach and retry with backoff (harmless; see poll-report-loop.ts).
 const dockerReachable = await isDockerReachable();
 
-describe.skipIf(!dockerReachable)(
+// Opt-out, not opt-in, so a developer's local run is unchanged: with the image
+// already built this whole file takes about a second. Only the main CI job sets
+// this, because there the build is always cold — two `bun build --compile`
+// binaries plus a `docker build` that runs `apt-get`, which went from 14s to
+// nearly six minutes when a package mirror started stalling, with no change on
+// our side. `.github/workflows/docker-provisioning-check.yml` leaves it unset
+// and runs this on the paths that can actually break it.
+const skipRequested = process.env.SKIP_DOCKER_PROVISIONING_CHECK === "1";
+
+describe.skipIf(!dockerReachable || skipRequested)(
   "DockerProvisioningService (requires a local Docker daemon)",
   () => {
     const machineId = `test-${crypto.randomUUID()}`;

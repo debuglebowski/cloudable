@@ -1,6 +1,6 @@
-import { HttpApiBuilder, HttpMiddleware } from "@effect/platform";
+import { HttpApiBuilder, HttpMiddleware, HttpServerRequest } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
-import { Effect, Layer } from "effect";
+import { Cause, Effect, Layer } from "effect";
 import { bootstrapDefaultAdmin } from "./bootstrap-default-admin";
 import { config } from "./config";
 import { DbLive } from "./db/layer";
@@ -123,12 +123,40 @@ const TunnelRoutesLive = Layer.mergeAll(TunnelConnectRouteLive, AccessAttachRout
 // background from here on.
 const ReconcileDaemonLive = Layer.effectDiscard(Effect.forkDaemon(startReconcileDaemon));
 
+// A handler that dies (`Effect.die` — every infra failure the HTTP layer treats as
+// "not an outcome the caller can act on": ProvisioningError, ArchiveDbError,
+// TunnelError, ...) gets a bare, bodyless 500 from `HttpApp.toHandled`, which then
+// re-raises the cause and lets it fall off the end of the request fiber. Nothing in
+// @effect/platform, platform-bun, or Bun itself logs it: the reason a production 500
+// happened exists nowhere — not in the response, not in the container's logs, not in
+// the database. Verified against a minimal Bun+HttpApi server, not assumed.
+//
+// This taps that re-raised cause. `toHandled` has already sent the response by the
+// time it runs, so it can only ever add a log line, never change what the caller gets
+// — the 500 stays a 500 with no internal detail leaked over the wire.
+//
+// Interrupt-only causes are skipped: a browser navigating away mid-request cancels the
+// fiber, which is routine, not a failure worth a log line.
+const logDefects = HttpMiddleware.make((httpApp) =>
+  Effect.tapErrorCause(httpApp, (cause) =>
+    Cause.isInterruptedOnly(cause)
+      ? Effect.void
+      : Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+          Effect.logError(
+            `unhandled: ${request.method} ${request.url} -> 500\n${Cause.pretty(cause)}`,
+          ),
+        ),
+  ),
+);
+
 // Every console page fetches cross-origin (console and control-plane run on
 // different ports in local dev, and there's no reverse proxy in front of
 // either yet) — without this, the browser silently withholds every response
 // body from JS, which surfaces as every query on every page failing at once.
 const ServerLive = HttpApiBuilder.serve((httpApp) =>
-  HttpMiddleware.cors({ allowedOrigins: [config.consoleOrigin], credentials: true })(httpApp),
+  HttpMiddleware.cors({ allowedOrigins: [config.consoleOrigin], credentials: true })(
+    logDefects(httpApp),
+  ),
 ).pipe(
   Layer.provide(ApiLive),
   Layer.provide(AgentWakeLive),
