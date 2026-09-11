@@ -25,14 +25,20 @@ describe("UpgradeService", () => {
   let testDb: Awaited<ReturnType<typeof startTestDb>>;
   const runtimes: Array<ManagedRuntime.ManagedRuntime<never, never>> = [];
 
+  // Explicit timeouts for the same reason as agent-protocol's: bun defaults
+  // hooks to 5s, and starting a real Postgres testcontainer exceeds that on a
+  // cold runner that still has to pull the image. The file header above
+  // already warns this hook can hang on testcontainers-node#974 — a generous
+  // bound distinguishes "slow pull" from "genuinely wedged" instead of
+  // failing both the same way at 5s.
   beforeAll(async () => {
     testDb = await startTestDb();
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await Promise.all(runtimes.map((r) => r.dispose()));
     await testDb.stop();
-  });
+  }, 60_000);
 
   /**
    * Fresh org + running machine, plus a `ManagedRuntime` over the layer

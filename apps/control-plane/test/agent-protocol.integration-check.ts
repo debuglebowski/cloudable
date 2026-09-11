@@ -196,12 +196,18 @@ describe("agent-protocol handlers (integration)", () => {
     );
     handler = built.handler;
     dispose = built.dispose;
-  });
+    // Bun's default hook timeout is 5s, and this hook starts a real Postgres
+    // testcontainer: about a second locally with the image cached, longer
+    // than 5s on a cold CI runner that has to pull it first. It has timed out
+    // on two unrelated commits, each time reading as a code regression rather
+    // than a container pull. 120s is far more than it ever needs and still
+    // fails fast if the daemon is genuinely wedged.
+  }, 120_000);
 
   afterAll(async () => {
     await dispose();
     await testDb.stop();
-  });
+  }, 60_000);
 
   const eventsOfType = async (type: string) =>
     testDb.db.select().from(schema.events).where(eq(schema.events.type, type));
