@@ -15,6 +15,42 @@ import { HttpApiBuilder, HttpServerRequest, HttpServerResponse } from "@effect/p
 import { Effect } from "effect";
 import { auth } from "../../auth";
 
+/**
+ * Logs the reason a SAML sign-in was rejected.
+ *
+ * `@better-auth/sso` does not throw and does not log when it refuses an
+ * assertion: it answers the assertion-consumer POST with a redirect whose
+ * query string carries `?error=`. The browser then follows that redirect, the
+ * console's route guard sends an unauthenticated visitor to /login, and the
+ * reason is gone. From the outside a rejected assertion is indistinguishable
+ * from never having attempted one — the identity provider reports a clean
+ * sign-in, the container logs are silent, and no session or account row
+ * appears. That cost hours of real debugging.
+ *
+ * Deliberately a wrapper around the response rather than a BetterAuth hook:
+ * this holds true regardless of which internal path produced the redirect,
+ * and survives a plugin upgrade rearranging its internals.
+ */
+const logSsoFailure = (request: Request, response: Response): Effect.Effect<void> =>
+  Effect.sync(() => {
+    if (response.status < 300 || response.status >= 400) return;
+    const location = response.headers.get("location");
+    if (!location) return;
+    let error: string | null = null;
+    let description: string | null = null;
+    try {
+      const params = new URL(location, request.url).searchParams;
+      error = params.get("error");
+      description = params.get("error_description");
+    } catch {
+      return; // an unparseable Location is not worth failing a request over
+    }
+    if (!error) return;
+    console.error(
+      `[sso] rejected: ${error}${description ? ` — ${description}` : ""} (${new URL(request.url).pathname})`,
+    );
+  });
+
 export const AuthRouteLive = HttpApiBuilder.Router.use((router) =>
   Effect.gen(function* () {
     yield* router.all(
@@ -23,6 +59,7 @@ export const AuthRouteLive = HttpApiBuilder.Router.use((router) =>
         const request = yield* HttpServerRequest.HttpServerRequest;
         const webRequest = yield* HttpServerRequest.toWeb(request);
         const response = yield* Effect.tryPromise(() => auth.handler(webRequest));
+        yield* logSsoFailure(webRequest, response);
         return HttpServerResponse.fromWeb(response);
       }).pipe(
         // BetterAuth's own handler failing outright (not a normal 4xx it
