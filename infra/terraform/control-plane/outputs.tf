@@ -92,3 +92,31 @@ output "key_vault_secret_spec" {
     }
   } : null
 }
+
+output "idp_metadata_url" {
+  description = <<-EOT
+    The SAML federation metadata URL this deployment is configured against,
+    echoed back, or null when the identity provider is connected through the
+    console instead.
+
+    Not sensitive: a federation metadata document is public by design — it
+    describes how to verify the identity provider's assertions and contains no
+    secret.
+  EOT
+  value       = var.idp_metadata_url
+}
+
+output "sso_provider_id" {
+  description = <<-EOT
+    The SAML provider id this deployment uses when idp_metadata_url is set —
+    a fixed constant, matching CONFIGURED_IDP_PROVIDER_ID in the control
+    plane's config.ts.
+
+    Exported so a calling config can build the identity provider's Reply URL
+    (assertion consumer endpoint, ".../sso/saml2/sp/acs/<id>") without
+    hardcoding the same string twice. Null when no identity provider is
+    configured, since a console-connected one gets a generated id that does
+    not exist until someone connects it.
+  EOT
+  value       = var.idp_metadata_url != null ? "configured" : null
+}

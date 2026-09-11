@@ -58,6 +58,13 @@ interface IntegrationBase {
   identifier: string;
   connectedAt: string;
   removedAt: string | null;
+  /**
+   * True when this came from deployment configuration rather than the
+   * Integrations page — there is no row behind it, and nothing here can
+   * change it. The card renders as configured and read-only, the same shape
+   * as `lockedRegion` in the machine dialog.
+   */
+  managedByConfig: boolean;
 }
 
 export type Integration =

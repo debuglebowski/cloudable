@@ -279,6 +279,42 @@ For the check to say anything useful, the identity running Terraform needs
 values. The module creates that assignment when `deploying_identity_principal_id` is
 set. Without it the check simply warns and you carry on.
 
+## Identity provider from config (opt-in)
+
+Set `idp_metadata_url` to your IdP's SAML federation metadata URL (for Entra, the
+enterprise application's "App Federation Metadata Url") and the identity provider
+becomes deployment configuration rather than something an admin connects in the console.
+The Integrations card renders as managed and read-only, and the connect/disconnect
+endpoints refuse to change it.
+
+Same shape as the machines region: deployment config is authoritative, and the console
+stops offering a choice that isn't real.
+
+Three things follow from it, all of them the point rather than side effects:
+
+**The provider id becomes fixed.** `@better-auth/sso` routes its assertion consumer
+endpoint per provider (`.../sso/saml2/sp/acs/<id>`). A console-connected provider gets
+the integration row's generated UUID, which doesn't exist until someone clicks Connect —
+so the IdP has to be configured in two passes. A config-declared one uses a constant
+(exported as `sso_provider_id`), so the Reply URL is right on the first apply.
+
+**Terraform fetches the metadata, not the app.** The SSO plugin takes the metadata XML,
+never a URL it fetches, and the control plane builds its auth instance at module load
+where there is nowhere to await. So this module reads the document with an `http` data
+source and passes it as `IDP_METADATA_XML`. That also makes IdP certificate rotation
+*visible*: a rotated signing certificate changes the document, which shows up as a plan
+diff instead of silently breaking sign-in months later. The data source asserts the
+response is a 200 containing `EntityDescriptor` and `SingleSignOnService`, so a wrong URL
+fails at plan time rather than as a crash-looping container.
+
+**SAML identities can attach to existing accounts.** A config-declared provider is
+trusted, which is what lets someone who already has a local password account sign in
+through the IdP. Without it BetterAuth refuses to link the two and the sign-in dead-ends
+with nothing logged outside development.
+
+Leave it null — the default — and everything behaves exactly as before: the console
+connects the IdP, and local development needs no IdP at all.
+
 ## Postgres Entra authentication (opt-in)
 
 `enable_postgres_entra_auth = true` (requires `enable_key_vault`, since it

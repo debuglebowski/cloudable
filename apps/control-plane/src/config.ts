@@ -136,10 +136,62 @@ export interface AppConfig {
   readonly defaultAdminEmail: string | null;
   /** Password for `defaultAdminEmail`'s auto-created account. `null` disables the bootstrap. */
   readonly defaultAdminPassword: string | null;
+  /**
+   * SAML identity provider supplied by deployment config rather than
+   * connected through the console's Integrations page. When set, this
+   * deployment has exactly one IdP, it is declared in Terraform, and the
+   * console shows the card as configured instead of editable — the same
+   * "deployment config is authoritative" shape as `azureMachinesLocation`
+   * (see `MachineService.ts`'s comment on why config beats admin-editable
+   * state: the two drift, and physical reality wins).
+   *
+   * This is the metadata document's URL. It is not what BetterAuth
+   * authenticates against — `idpMetadataXml` is — but it is what the console
+   * displays, and keeping both means the UI can show where the XML came
+   * from. `null` (default) restores the fully console-driven behaviour.
+   */
+  readonly idpMetadataUrl: string | null;
+  /**
+   * The federation metadata XML itself, because `@better-auth/sso` takes the
+   * document, never a URL to fetch (`SAMLIdentityProviderMetadata` accepts
+   * `metadata` XML or an explicit `entityID` + certificate, and nothing
+   * else). `auth.ts` builds its BetterAuth instance at module load, where
+   * there is no opportunity to await a fetch — and adding one would delay the
+   * HTTP listener, which `server.ts` documents as a real Azure Container
+   * Apps startup-probe crash-loop.
+   *
+   * So the fetch happens in Terraform, with an `http` data source over
+   * `idpMetadataUrl`. That also makes IdP certificate rotation *visible*: a
+   * rotated signing cert changes this document, which shows up as a plan
+   * diff instead of silently breaking sign-in some months later.
+   *
+   * Ignored unless `idpMetadataUrl` is also set.
+   */
+  readonly idpMetadataXml: string | null;
+  /** Display name for the configured IdP, shown on the console's Integrations card. */
+  readonly idpDisplayName: string;
 }
+
+/**
+ * Provider id for the config-declared SAML provider. A fixed constant, not a
+ * generated id, and that is the point: `@better-auth/sso` routes its
+ * assertion consumer endpoint per provider
+ * (`/sso/saml2/sp/acs/:providerId`), so a stable id means the IdP's Reply URL
+ * is knowable before anything has been connected. Terraform can then
+ * configure the identity provider correctly in a single apply, instead of the
+ * two-phase dance a generated row id forces.
+ *
+ * `@better-auth/sso` refuses to register any provider whose id collides with
+ * a `defaultSSO` entry ("This providerId is reserved"), so this value is also
+ * what stops the console overriding deployment config.
+ */
+export const CONFIGURED_IDP_PROVIDER_ID = "configured";
 
 const readConfig = (): AppConfig => {
   const port = Number(process.env.PORT ?? 4780);
+  const idpConfigured =
+    (process.env.IDP_METADATA_URL ?? "").length > 0 &&
+    (process.env.IDP_METADATA_XML ?? "").length > 0;
   return {
     databaseUrl:
       process.env.DATABASE_URL ?? "postgres://cloudable:cloudable@localhost:5442/cloudable",
@@ -168,6 +220,13 @@ const readConfig = (): AppConfig => {
     consoleDistDir: process.env.CONSOLE_DIST_DIR ?? "/app/console-dist",
     defaultAdminEmail: process.env.DEFAULT_ADMIN_EMAIL ?? null,
     defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD ?? null,
+    // Both required together: a URL with no XML has nothing to authenticate
+    // against, and XML with no URL leaves the console unable to say where it
+    // came from. Either alone falls back to console-driven configuration
+    // rather than half-enabling this path.
+    idpMetadataUrl: idpConfigured ? (process.env.IDP_METADATA_URL ?? null) : null,
+    idpMetadataXml: idpConfigured ? (process.env.IDP_METADATA_XML ?? null) : null,
+    idpDisplayName: process.env.IDP_DISPLAY_NAME ?? "Microsoft Entra ID",
   };
 };
 

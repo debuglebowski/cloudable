@@ -18,6 +18,13 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    # Fetches the IdP federation metadata document for var.idp_metadata_url.
+    # Only used when that variable is set; a deployment without a
+    # config-declared identity provider never evaluates the data source.
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.4"
+    }
   }
 }
 

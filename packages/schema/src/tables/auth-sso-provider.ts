@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { authUser } from "./auth-user";
 
 /**
@@ -18,6 +18,18 @@ export const authSsoProvider = pgTable("auth_sso_provider", {
   providerId: text("provider_id").notNull().unique(),
   organizationId: text("organization_id"),
   domain: text("domain").notNull(),
+  // Added by `sso({ domainVerification: { enabled: true } })` in
+  // `apps/control-plane/src/auth.ts`, which extends the plugin's own
+  // ssoProvider model with this field. That option is enabled for exactly one
+  // reason: a provider declared in deployment config (`defaultSSO`) resolves
+  // as domainVerified, which is what makes it TRUSTED in BetterAuth's account
+  // linking check — without it, a SAML sign-in for an email that already has
+  // a local account is refused, silently.
+  //
+  // Rows registered through the console are never verified (there is no
+  // domain-verification flow here), so this defaults false rather than being
+  // nullable: "not verified" is the honest value, not "unknown".
+  domainVerified: boolean("domain_verified").notNull().default(false),
   // `.defaultNow()` here (unlike `auth-user.ts`/`auth-session.ts`, which
   // don't need it): `@better-auth/sso`'s own `/sso/register` handler builds
   // this row's insert directly against the raw adapter rather than through
