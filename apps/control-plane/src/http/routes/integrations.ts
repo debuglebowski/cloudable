@@ -16,6 +16,13 @@ const Integration = Schema.Struct({
   connectedAt: Schema.String,
   removedAt: Schema.NullOr(Schema.String),
   config: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  // True only for the synthetic `idp` entry a deployment gets from
+  // IDP_METADATA_URL/IDP_METADATA_XML (`config.ts`). There is no row behind
+  // it — the provider lives in BetterAuth's options, not the database — so
+  // the console uses this to render the card as configured rather than
+  // editable, the same way `lockedRegion` makes the machine dialog show a
+  // fixed value instead of a picker. Always false for real rows.
+  managedByConfig: Schema.Boolean,
 });
 
 const ListIntegrationsResponse = Schema.Struct({ items: Schema.Array(Integration) });
@@ -52,6 +59,9 @@ export const IntegrationsGroup = HttpApiGroup.make("integrations")
   .add(
     HttpApiEndpoint.post("disconnect", "/api/v1/integrations/:id/disconnect")
       .setPath(IntegrationIdPath)
-      .addSuccess(Schema.Struct({ ok: Schema.Literal(true) })),
+      .addSuccess(Schema.Struct({ ok: Schema.Literal(true) }))
+      // Refusing to disconnect a config-managed identity provider is the only
+      // way this fails today — see the handler.
+      .addError(BadRequestError, { status: 400 }),
   )
   .middleware(CurrentUserAuthentication);

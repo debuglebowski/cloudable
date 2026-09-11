@@ -383,3 +383,32 @@ variable "postgres_entra_administrators" {
   }))
   default = {}
 }
+
+variable "idp_metadata_url" {
+  description = <<-EOT
+    SAML federation metadata URL for this deployment's identity provider
+    (for Entra: the enterprise application's "App Federation Metadata Url").
+
+    Setting this makes the identity provider deployment configuration rather
+    than something an admin connects in the console: the Integrations page
+    shows it as managed and read-only, and the connect/disconnect endpoints
+    refuse to change it. Same "deployment config is authoritative" shape as
+    the machines region -- see MachineService.ts on why config beats
+    admin-editable state.
+
+    Terraform fetches the document and passes it to the container as
+    IDP_METADATA_XML, because the SSO plugin takes metadata XML, never a URL.
+    That means a rotated IdP signing certificate appears as a plan diff, and
+    is picked up by the next apply.
+
+    It also fixes the provider id, so the IdP's Reply URL (assertion consumer
+    endpoint) is knowable before anything is connected -- with a
+    console-connected provider that id is a generated row UUID, which forces
+    configuring the IdP in two passes.
+
+    Null (default) leaves the console fully in charge, which is what local
+    development and any deployment without an IdP wants.
+  EOT
+  type        = string
+  default     = null
+}

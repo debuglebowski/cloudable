@@ -12,8 +12,9 @@ import { APIError, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { config } from "./config";
+import { CONFIGURED_IDP_PROVIDER_ID, config } from "./config";
 import { openPostgres } from "./db/connect";
+import { entryPointFrom, spIssuer } from "./services/saml-metadata";
 
 // BetterAuth baseline: email/password, plus SAML SSO via `@better-auth/sso`
 // (`sso()` with no top-level `saml`/`oidc` config — every real provider's
@@ -82,6 +83,49 @@ interface AuthInstance {
   };
 }
 
+/**
+ * The SAML provider declared by deployment config, or `undefined` when this
+ * deployment is console-driven (the default, and what local dev always is).
+ *
+ * Built here rather than fetched, because `auth.ts` is evaluated at module
+ * load and there is nowhere to await: `server.ts` binds the HTTP listener
+ * before the boot chain precisely so a slow startup cannot trip Azure
+ * Container Apps' startup probe, and a network fetch on this path would put
+ * that back. The metadata XML therefore arrives already fetched, via
+ * `IDP_METADATA_XML` — see that config field for why Terraform is the right
+ * place to do the fetching.
+ */
+const configuredIdp = (() => {
+  const metadata = config.idpMetadataXml;
+  if (!metadata) return undefined;
+
+  const entryPoint = entryPointFrom(metadata);
+  if (!entryPoint) {
+    // Refuse to half-configure. A metadata document with no
+    // SingleSignOnService is not one this deployment can redirect anyone to,
+    // and silently falling back to console-driven setup would present an
+    // editable card on a deployment whose Terraform says otherwise.
+    throw new Error(
+      "IDP_METADATA_XML has no SingleSignOnService Location — not a usable SAML federation metadata document.",
+    );
+  }
+
+  return {
+    providerId: CONFIGURED_IDP_PROVIDER_ID,
+    // `@better-auth/sso`'s `domain` is for email-domain-based provider
+    // matching, which this deployment never uses — sign-in always resolves
+    // the provider by id (see `login-page.tsx`). `.invalid` is RFC 2606's
+    // reserved TLD, guaranteed never to resolve or collide with a real
+    // domain. Same reasoning as `IdpSsoService.ts`'s registration call.
+    domain: `${CONFIGURED_IDP_PROVIDER_ID}.invalid`,
+    samlConfig: {
+      issuer: spIssuer(),
+      entryPoint,
+      idpMetadata: { metadata },
+    },
+  };
+})();
+
 const options = {
   // The drizzle adapter's own model names (`user`/`session`/`account`/
   // `verification`) are mapped explicitly to this build's `auth_`-prefixed
@@ -102,7 +146,32 @@ const options = {
   }),
   secret: config.betterAuthSecret,
   baseURL: config.betterAuthUrl,
-  plugins: [sso()],
+  plugins: [
+    sso({
+      // Adds `domainVerified` to the plugin's ssoProvider model (hence the
+      // `domain_verified` column in `packages/schema`). Enabled for one
+      // reason: a `defaultSSO` provider resolves as `domainVerified: true`,
+      // which is what makes it a TRUSTED provider in BetterAuth's account
+      // linking check. Without it, a SAML sign-in for an email that already
+      // has a local account fails with "account not linked" and logs nothing
+      // outside development — see the accountLinking comment below.
+      domainVerification: { enabled: true },
+      // The identity provider declared by deployment config, if there is one.
+      //
+      // `defaultSSO` is checked by the plugin's `findSAMLProvider` BEFORE the
+      // database, so this needs no `auth_sso_provider` row and no boot-time
+      // reconcile. It is also self-defending: `registerSSOProvider` refuses
+      // any providerId that collides with a `defaultSSO` entry, so the
+      // console physically cannot override what Terraform declared.
+      //
+      // Upstream's docstring calls this option "for testing". It is used here
+      // deliberately and with that known — the code path is first-class, the
+      // dependency is pinned at @better-auth/sso 1.7.2, and
+      // `auth.default-sso.test.ts` fails loudly if the option stops being
+      // accepted on an upgrade.
+      ...(configuredIdp ? { defaultSSO: [configuredIdp] } : {}),
+    }),
+  ],
   // BetterAuth's own CSRF/origin check (separate from `HttpMiddleware.cors`
   // in server.ts) rejects any request that carries a session cookie unless
   // its `Origin` is in this list — every request after the very first
@@ -125,6 +194,29 @@ const options = {
   // consoleOrigin is here at all. Deduped so the list stays honest either way.
   trustedOrigins: [...new Set([config.betterAuthUrl, config.consoleOrigin])],
   emailAndPassword: { enabled: true },
+  account: {
+    accountLinking: {
+      // A SAML assertion for an email that already has a local password
+      // account must be allowed to attach to it. BetterAuth otherwise
+      // requires the LOCAL email to be verified first
+      // (`oauth2/link-account.mjs`: `requireLocalEmailVerified &&
+      // !dbUser.user.emailVerified`), and nothing in this deployment ever
+      // verifies an email — there is no mail sending at all. The bootstrap
+      // admin is therefore permanently unverified, so its owner could never
+      // sign in through the IdP. Observed live: the SAML round trip
+      // completed, linking was refused, and the console bounced back to
+      // /login with no error anywhere, because that branch only warns
+      // `if (isDevelopment())`.
+      //
+      // Safe here because of what the other half of that condition now
+      // guarantees: the only trusted provider is the one declared in
+      // deployment config, its assertions are signed by an IdP the operator
+      // put in Terraform, and `databaseHooks` below still requires a
+      // `people` row before any account is created. An assertion cannot
+      // claim an email that is not already on the roster.
+      requireLocalEmailVerified: false,
+    },
+  },
   // Root-cause fix for the class of bug that produced an orphaned
   // `dev@cloudable.local`: `emailAndPassword` sign-up on its own creates a
   // fully working BetterAuth account for any email, entirely independent of

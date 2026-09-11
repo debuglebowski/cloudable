@@ -2,7 +2,7 @@ import { authAccount, authSsoProvider } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { auth, authDb } from "../auth";
-import { config } from "../config";
+import { entryPointFrom, looksLikeSamlMetadata, spIssuer } from "./saml-metadata";
 
 /**
  * Bridges the `idp` integration row (`domain/integrations/integrations.ts`)
@@ -22,24 +22,6 @@ export class IdpSsoError extends Data.TaggedError("IdpSsoError")<{
   reason: "metadata_unreachable" | "metadata_invalid" | "register_failed";
   cause?: unknown;
 }> {}
-
-const looksLikeSamlMetadata = (xml: string): boolean =>
-  xml.includes("EntityDescriptor") && xml.includes("<");
-
-/**
- * `@better-auth/sso`'s SAML registration validates `entryPoint` as a
- * required, non-empty string regardless of whether `idpMetadata.metadata`
- * is also given (its own doc comment says the metadata XML's SSO endpoint
- * takes precedence over this value once both are present, but the field
- * itself still has to be filled in) — so the real SSO redirect URL is
- * pulled straight out of the fetched metadata's own `SingleSignOnService`
- * element rather than invented.
- */
-const entryPointFrom = (xml: string): string | undefined =>
-  /<(?:\w+:)?SingleSignOnService\b[^>]*\bLocation="([^"]+)"/.exec(xml)?.[1];
-
-/** This deployment's one SP identity — every registered provider shares it, matching the Okta-guide convention of using the SP metadata URL itself as `issuer`/entityID. */
-const spIssuer = (): string => `${config.betterAuthUrl}/api/auth/sso/saml2/sp/metadata`;
 
 export const registerSamlProvider = (input: {
   providerId: string;

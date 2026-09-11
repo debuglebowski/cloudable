@@ -1,0 +1,1 @@
+ALTER TABLE "auth_sso_provider" ADD COLUMN "domain_verified" boolean DEFAULT false NOT NULL;

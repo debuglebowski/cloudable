@@ -10,6 +10,35 @@
 #
 # See README.md in this directory for prerequisites and exact commands.
 
+# Federation metadata for var.idp_metadata_url. Re-read on every plan, which
+# is what makes an IdP certificate rotation show up as a diff instead of a
+# surprise. Public document -- it describes how to verify the IdP's
+# assertions, and contains no secret.
+data "http" "idp_metadata" {
+  count = var.idp_metadata_url != null ? 1 : 0
+  url   = var.idp_metadata_url
+
+  lifecycle {
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "idp_metadata_url returned HTTP ${self.status_code}, not 200 — check the URL is the IdP's federation metadata document."
+    }
+    postcondition {
+      # Cheap shape check, matching the control plane's own
+      # `looksLikeSamlMetadata`. Catches the realistic mistake: a sign-in page
+      # or an error page returned with a 200.
+      condition     = can(regex("EntityDescriptor", self.response_body))
+      error_message = "idp_metadata_url did not return SAML federation metadata (no EntityDescriptor element)."
+    }
+    postcondition {
+      # The control plane refuses to start without this element, so failing
+      # here turns a crash-looping container into a plan-time error.
+      condition     = can(regex("SingleSignOnService", self.response_body))
+      error_message = "idp_metadata_url has no SingleSignOnService element — the control plane would have nowhere to redirect sign-ins."
+    }
+  }
+}
+
 resource "random_string" "postgres_suffix" {
   length  = 6
   special = false
@@ -1204,6 +1233,37 @@ resource "azurerm_container_app" "this" {
         content {
           name  = "KEY_VAULT_URI"
           value = var.key_vault_uri
+        }
+      }
+
+      # The SAML identity provider, when this deployment declares one rather
+      # than having an admin connect it through the console. Appended last,
+      # deliberately: inserting an env block mid-list reads as every later
+      # entry changing (see the comment further up this container block).
+      dynamic "env" {
+        for_each = var.idp_metadata_url != null ? [1] : []
+        content {
+          name  = "IDP_METADATA_URL"
+          value = var.idp_metadata_url
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.idp_metadata_url != null ? [1] : []
+        content {
+          name = "IDP_METADATA_XML"
+          # The document itself, not a URL: @better-auth/sso takes metadata
+          # XML or an explicit entityID plus certificate, never a URL it
+          # fetches. The control plane builds its auth instance at module
+          # load, where there is nowhere to await a fetch -- and adding one
+          # would delay the HTTP listener, which is the Container Apps
+          # startup-probe crash-loop this module's README warns about.
+          #
+          # Fetching here instead also makes IdP certificate rotation
+          # visible: a rotated signing certificate changes this document,
+          # which shows up as a plan diff rather than silently breaking
+          # sign-in months later.
+          value = data.http.idp_metadata[0].response_body
         }
       }
     }

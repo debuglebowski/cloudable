@@ -83,7 +83,9 @@ export function IntegrationCard<K extends IntegrationKind>({
           <>
             {children(integration)}
             <span className="text-xs text-muted-foreground">
-              Connected {new Date(integration.connectedAt).toLocaleString()}
+              {integration.managedByConfig
+                ? "Set by deployment configuration"
+                : `Connected ${new Date(integration.connectedAt).toLocaleString()}`}
             </span>
           </>
         ) : (
@@ -91,7 +93,14 @@ export function IntegrationCard<K extends IntegrationKind>({
         )}
       </CardContent>
       <CardFooter className="gap-2">
-        {integration ? (
+        {integration?.managedByConfig ? (
+          // No Disconnect: there is no row to remove, and the deployment
+          // would keep authenticating against the configured provider
+          // regardless — a button that appears to work and changes nothing is
+          // worse than no button. Same reasoning as the machine dialog's
+          // "Fixed for this deployment" region.
+          <Badge variant="outline">Managed in Terraform</Badge>
+        ) : integration ? (
           <>
             {secondaryAction}
             <AlertDialog>
