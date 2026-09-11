@@ -81,7 +81,7 @@ export const IntegrationsLive = HttpApiBuilder.group(Api, "integrations", (handl
         // Disconnect that changes nothing, since sign-in resolves the
         // config-declared provider regardless (`defaultSSO` is checked before
         // the database).
-        const items = config.idpMetadataXml
+        const items = config.idpSamlConfig
           ? [
               ...rows.filter((row) => row.kind !== "idp").map(toWire),
               configuredIdpWire(currentUser.orgId),
@@ -98,7 +98,7 @@ export const IntegrationsLive = HttpApiBuilder.group(Api, "integrations", (handl
         // registration anyway (it reserves any providerId declared in
         // `defaultSSO`), but that failure surfaces as an opaque rollback —
         // this says what is actually going on, and to whom.
-        if (payload.kind === "idp" && config.idpMetadataXml !== null) {
+        if (payload.kind === "idp" && config.idpSamlConfig !== null) {
           return yield* Effect.fail({
             code: "bad_request" as const,
             message:
@@ -164,7 +164,7 @@ export const IntegrationsLive = HttpApiBuilder.group(Api, "integrations", (handl
         // auth_sso_provider row to remove, so a disconnect would silently do
         // nothing while the console showed a success toast. The UI hides the
         // button, but the endpoint is reachable regardless.
-        if (path.id === CONFIGURED_IDP_PROVIDER_ID && config.idpMetadataXml !== null) {
+        if (path.id === CONFIGURED_IDP_PROVIDER_ID && config.idpSamlConfig !== null) {
           return yield* Effect.fail({
             code: "bad_request" as const,
             message:

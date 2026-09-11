@@ -14,7 +14,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { CONFIGURED_IDP_PROVIDER_ID, config } from "./config";
 import { openPostgres } from "./db/connect";
-import { entryPointFrom, spIssuer } from "./services/saml-metadata";
+import { spIssuer } from "./services/saml-metadata";
 
 // BetterAuth baseline: email/password, plus SAML SSO via `@better-auth/sso`
 // (`sso()` with no top-level `saml`/`oidc` config — every real provider's
@@ -96,19 +96,8 @@ interface AuthInstance {
  * place to do the fetching.
  */
 const configuredIdp = (() => {
-  const metadata = config.idpMetadataXml;
-  if (!metadata) return undefined;
-
-  const entryPoint = entryPointFrom(metadata);
-  if (!entryPoint) {
-    // Refuse to half-configure. A metadata document with no
-    // SingleSignOnService is not one this deployment can redirect anyone to,
-    // and silently falling back to console-driven setup would present an
-    // editable card on a deployment whose Terraform says otherwise.
-    throw new Error(
-      "IDP_METADATA_XML has no SingleSignOnService Location — not a usable SAML federation metadata document.",
-    );
-  }
+  const idp = config.idpSamlConfig;
+  if (!idp) return undefined;
 
   return {
     providerId: CONFIGURED_IDP_PROVIDER_ID,
@@ -120,8 +109,19 @@ const configuredIdp = (() => {
     domain: `${CONFIGURED_IDP_PROVIDER_ID}.invalid`,
     samlConfig: {
       issuer: spIssuer(),
-      entryPoint,
-      idpMetadata: { metadata },
+      entryPoint: idp.ssoUrl,
+      // entityID + cert instead of the metadata XML: the plugin accepts
+      // either, and the document is not stable enough to be configuration
+      // (Entra regenerates its ID and Signature per request). Passing every
+      // advertised certificate is what makes an IdP key rotation a non-event
+      // — responses signed by any listed cert are accepted.
+      idpMetadata: {
+        entityID: idp.entityId,
+        cert: [...idp.certs],
+        singleSignOnService: [
+          { Binding: "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", Location: idp.ssoUrl },
+        ],
+      },
     },
   };
 })();

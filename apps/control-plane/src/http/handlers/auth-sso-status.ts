@@ -13,7 +13,7 @@ export const AuthSsoStatusLive = HttpApiBuilder.group(Api, "authSsoStatus", (han
     // that deliberately does not exist and report no SSO available — leaving
     // the login page with no button on a deployment whose whole point is that
     // Terraform configured one.
-    config.idpMetadataXml !== null
+    config.idpSamlConfig !== null
       ? Effect.succeed({ available: true, providerId: CONFIGURED_IDP_PROVIDER_ID })
       : findAnyActiveIdpIntegration().pipe(
           Effect.catchTag("IntegrationsDbError", (e) => Effect.die(e)),
