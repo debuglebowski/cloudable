@@ -412,3 +412,23 @@ variable "idp_metadata_url" {
   type        = string
   default     = null
 }
+
+variable "idp_email_domains" {
+  description = <<-EOT
+    Email domains the configured identity provider is authoritative for, e.g.
+    ["example.com"]. Required whenever idp_metadata_url is set.
+
+    This is load-bearing, not descriptive. @better-auth/sso only treats a SAML
+    provider as trusted when the signing-in user's email domain matches one of
+    these, and only a trusted provider may attach a SAML identity to an
+    account that already exists. Get it wrong and every sign-in fails with
+    `account_not_linked` -- which the plugin reports as a query parameter on a
+    redirect rather than an error, so it is easy to misread as a silent bounce
+    back to the login page.
+
+    Matching is exact or one level of subdomain, so "example.com" also covers
+    "user@eu.example.com".
+  EOT
+  type        = list(string)
+  default     = []
+}

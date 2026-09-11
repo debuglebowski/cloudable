@@ -99,6 +99,14 @@ locals {
     # silent bounce back to /login. Supplying the metadata XML hides this,
     # because samlify reads the element itself; supplying fields does not.
     sloUrl = regex("<(?:[A-Za-z0-9]+:)?SingleLogoutService[^>]*Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\"[^>]*Location=\"([^\"]+)\"", local.idp_metadata_body)[0]
+    # Email domains this identity provider is authoritative for, comma
+    # separated. Not cosmetic and not metadata-derived: @better-auth/sso only
+    # treats a provider as TRUSTED when the signing-in user's email domain
+    # matches (`validateEmailDomain(userInfo.email, provider.domain)`), and an
+    # untrusted provider cannot attach a SAML identity to an existing
+    # account -- every sign-in fails with `account_not_linked`. Matching is
+    # exact or one level of subdomain.
+    emailDomains = join(",", var.idp_email_domains)
   })
 
 
@@ -1320,6 +1328,10 @@ resource "azurerm_container_app" "this" {
     precondition {
       condition     = local.use_key_vault || var.better_auth_secret != null
       error_message = "better_auth_secret must be set unless enable_key_vault is (in which case the vault supplies it as `better-auth-secret`)."
+    }
+    precondition {
+      condition     = var.idp_metadata_url == null || length(var.idp_email_domains) > 0
+      error_message = "idp_email_domains is required with idp_metadata_url: @better-auth/sso only trusts a provider for users whose email domain matches, and without a match every SSO sign-in fails with account_not_linked."
     }
     precondition {
       condition     = !var.enable_key_vault || (var.key_vault_id != null && var.key_vault_uri != null)

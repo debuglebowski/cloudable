@@ -38,6 +38,7 @@ const VALID = JSON.stringify({
   entityId: "https://sts.windows.net/tenant/",
   ssoUrl: "https://login.microsoftonline.com/tenant/saml2",
   sloUrl: "https://login.microsoftonline.com/tenant/saml2",
+  emailDomains: "example.com",
   certs: ["MIIC-fake-cert"],
 });
 
@@ -78,6 +79,7 @@ describe("idpSamlConfig", () => {
       entityId: "https://sts.windows.net/tenant/",
       ssoUrl: "https://login.microsoftonline.com/tenant/saml2",
       sloUrl: "https://login.microsoftonline.com/tenant/saml2",
+      emailDomains: "example.com",
       certs: [],
     });
     await expect(

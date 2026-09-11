@@ -20,6 +20,17 @@ export interface IdpSamlConfig {
   /** Every advertised signing certificate, so a rotation window is a non-event. */
   readonly certs: readonly string[];
   /**
+   * Email domains this provider is authoritative for, comma separated.
+   *
+   * Load-bearing, not descriptive: `@better-auth/sso` only treats a provider
+   * as TRUSTED when the signing-in user's email domain matches
+   * (`validateEmailDomain(userInfo.email, provider.domain)`), and only a
+   * trusted provider may attach a SAML identity to an account that already
+   * exists. A wrong value fails every sign-in with `account_not_linked`.
+   * Matching is exact or one level of subdomain.
+   */
+  readonly emailDomains: string;
+  /**
    * HTTP-Redirect single-logout endpoint. Required even though this
    * deployment never initiates SAML logout: samlify refuses to construct an
    * identity provider from explicit configuration without one, and throws per
@@ -227,17 +238,20 @@ const parseIdpSamlConfig = (raw: string | undefined): IdpSamlConfig | null => {
     typeof value.entityId !== "string" ||
     typeof value.ssoUrl !== "string" ||
     typeof value.sloUrl !== "string" ||
+    typeof value.emailDomains !== "string" ||
+    value.emailDomains.length === 0 ||
     !Array.isArray(value.certs) ||
     value.certs.length === 0
   ) {
     throw new Error(
-      "IDP_SAML_CONFIG must be JSON with a non-empty entityId, ssoUrl, sloUrl and certs — Terraform builds it from the IdP's federation metadata.",
+      "IDP_SAML_CONFIG must be JSON with a non-empty entityId, ssoUrl, sloUrl, emailDomains and certs — Terraform builds it from the IdP's federation metadata plus idp_email_domains.",
     );
   }
   return {
     entityId: value.entityId,
     ssoUrl: value.ssoUrl,
     sloUrl: value.sloUrl,
+    emailDomains: value.emailDomains,
     certs: value.certs,
   };
 };
