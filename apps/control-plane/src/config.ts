@@ -11,6 +11,16 @@ import { Context, Layer } from "effect";
  * exposed as an `AppConfigTag`/`AppConfigLive` Effect service below, for
  * anything that prefers to depend on it through the layer graph.
  */
+/** Trust anchors for the configured SAML identity provider — see `idpSamlConfig`. */
+export interface IdpSamlConfig {
+  /** The IdP's entity id, checked against the assertion's Issuer. */
+  readonly entityId: string;
+  /** HTTP-Redirect SSO endpoint: where an SP-initiated AuthnRequest goes. */
+  readonly ssoUrl: string;
+  /** Every advertised signing certificate, so a rotation window is a non-event. */
+  readonly certs: readonly string[];
+}
+
 export interface AppConfig {
   readonly databaseUrl: string;
   /**
@@ -152,22 +162,25 @@ export interface AppConfig {
    */
   readonly idpMetadataUrl: string | null;
   /**
-   * The federation metadata XML itself, because `@better-auth/sso` takes the
-   * document, never a URL to fetch (`SAMLIdentityProviderMetadata` accepts
-   * `metadata` XML or an explicit `entityID` + certificate, and nothing
-   * else). `auth.ts` builds its BetterAuth instance at module load, where
-   * there is no opportunity to await a fetch — and adding one would delay the
-   * HTTP listener, which `server.ts` documents as a real Azure Container
-   * Apps startup-probe crash-loop.
+   * The IdP's trust anchors, as JSON: `{ entityId, ssoUrl, certs }`.
    *
-   * So the fetch happens in Terraform, with an `http` data source over
-   * `idpMetadataUrl`. That also makes IdP certificate rotation *visible*: a
-   * rotated signing cert changes this document, which shows up as a plan
-   * diff instead of silently breaking sign-in some months later.
+   * Not the metadata document. `@better-auth/sso` accepts either the XML or
+   * these fields directly (`SAMLIdentityProviderMetadata` is `metadata` OR
+   * `entityID` plus certificate and endpoint), and the document itself is
+   * unusable as configuration: Entra regenerates its EntityDescriptor ID and
+   * enclosing Signature on every request, so passing the XML made the
+   * Container App diff on every Terraform plan and restart on every apply.
+   * The extracted fields are stable until the IdP rotates a signing
+   * certificate, which is precisely when a change should be visible.
+   *
+   * Terraform does the fetching and extraction — `auth.ts` builds its
+   * BetterAuth instance at module load, where there is nowhere to await, and
+   * adding a fetch there would delay the HTTP listener, which `server.ts`
+   * documents as a real Azure Container Apps startup-probe crash-loop.
    *
    * Ignored unless `idpMetadataUrl` is also set.
    */
-  readonly idpMetadataXml: string | null;
+  readonly idpSamlConfig: IdpSamlConfig | null;
   /** Display name for the configured IdP, shown on the console's Integrations card. */
   readonly idpDisplayName: string;
 }
@@ -187,11 +200,40 @@ export interface AppConfig {
  */
 export const CONFIGURED_IDP_PROVIDER_ID = "configured";
 
+/**
+ * Parses IDP_SAML_CONFIG, refusing anything incomplete rather than
+ * half-configuring. A deployment that sets IDP_METADATA_URL has declared in
+ * Terraform that it federates against an identity provider — quietly falling
+ * back to console-driven setup would present an editable card that contradicts
+ * its own infrastructure.
+ */
+const parseIdpSamlConfig = (raw: string | undefined): IdpSamlConfig | null => {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    throw new Error(`IDP_SAML_CONFIG is not valid JSON: ${String(cause)}`);
+  }
+  const value = parsed as Partial<IdpSamlConfig>;
+  if (
+    typeof value.entityId !== "string" ||
+    typeof value.ssoUrl !== "string" ||
+    !Array.isArray(value.certs) ||
+    value.certs.length === 0
+  ) {
+    throw new Error(
+      "IDP_SAML_CONFIG must be JSON with a non-empty entityId, ssoUrl and certs — Terraform builds it from the IdP's federation metadata.",
+    );
+  }
+  return { entityId: value.entityId, ssoUrl: value.ssoUrl, certs: value.certs };
+};
+
 const readConfig = (): AppConfig => {
   const port = Number(process.env.PORT ?? 4780);
   const idpConfigured =
     (process.env.IDP_METADATA_URL ?? "").length > 0 &&
-    (process.env.IDP_METADATA_XML ?? "").length > 0;
+    (process.env.IDP_SAML_CONFIG ?? "").length > 0;
   return {
     databaseUrl:
       process.env.DATABASE_URL ?? "postgres://cloudable:cloudable@localhost:5442/cloudable",
@@ -225,7 +267,7 @@ const readConfig = (): AppConfig => {
     // came from. Either alone falls back to console-driven configuration
     // rather than half-enabling this path.
     idpMetadataUrl: idpConfigured ? (process.env.IDP_METADATA_URL ?? null) : null,
-    idpMetadataXml: idpConfigured ? (process.env.IDP_METADATA_XML ?? null) : null,
+    idpSamlConfig: idpConfigured ? parseIdpSamlConfig(process.env.IDP_SAML_CONFIG) : null,
     idpDisplayName: process.env.IDP_DISPLAY_NAME ?? "Microsoft Entra ID",
   };
 };

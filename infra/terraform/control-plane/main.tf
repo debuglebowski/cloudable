@@ -77,6 +77,23 @@ locals {
 
   key_vault_secret_uri = local.use_key_vault ? "${var.key_vault_uri}secrets" : null
 
+  # Trust anchors pulled out of the IdP's federation metadata. Only the
+  # regex-extracted parts, because the document as a whole is not stable --
+  # see the IDP_SAML_CONFIG env block below.
+  idp_metadata_body = var.idp_metadata_url != null ? data.http.idp_metadata[0].response_body : null
+  idp_saml_config = var.idp_metadata_url == null ? null : jsonencode({
+    # The IdP's own entity id, which the control plane checks the assertion's
+    # Issuer against. Distinct from the SP issuer this module's app advertises.
+    entityId = regex("entityID=\"([^\"]+)\"", local.idp_metadata_body)[0]
+    # HTTP-Redirect binding specifically: that is what an SP-initiated
+    # AuthnRequest uses, and a metadata document lists several bindings.
+    ssoUrl = regex("<(?:[A-Za-z0-9]+:)?SingleSignOnService[^>]*Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\"[^>]*Location=\"([^\"]+)\"", local.idp_metadata_body)[0]
+    # Every advertised signing certificate, de-duplicated: a metadata document
+    # lists more than one during a rotation, and accepting all of them is what
+    # makes a rotation a non-event rather than an outage.
+    certs = distinct(flatten(regexall("<(?:[A-Za-z0-9]+:)?X509Certificate>([^<]+)</(?:[A-Za-z0-9]+:)?X509Certificate>", local.idp_metadata_body)))
+  })
+
 
   # How to generate the secrets this module expects in the vault, name ->
   # { bytes }. Key Vault has no generate-secret API (its data plane offers
@@ -1251,19 +1268,20 @@ resource "azurerm_container_app" "this" {
       dynamic "env" {
         for_each = var.idp_metadata_url != null ? [1] : []
         content {
-          name = "IDP_METADATA_XML"
-          # The document itself, not a URL: @better-auth/sso takes metadata
-          # XML or an explicit entityID plus certificate, never a URL it
-          # fetches. The control plane builds its auth instance at module
-          # load, where there is nowhere to await a fetch -- and adding one
-          # would delay the HTTP listener, which is the Container Apps
-          # startup-probe crash-loop this module's README warns about.
+          name = "IDP_SAML_CONFIG"
+          # The trust anchors extracted from the metadata, NOT the document
+          # itself. Entra regenerates the EntityDescriptor's ID and its
+          # enclosing Signature on every single request, so passing the raw
+          # XML made this container app diff on every plan and restart on
+          # every apply -- measured, not theorised: two fetches a second
+          # apart differ, while entityID and the certificates are identical.
           #
-          # Fetching here instead also makes IdP certificate rotation
-          # visible: a rotated signing certificate changes this document,
-          # which shows up as a plan diff rather than silently breaking
-          # sign-in months later.
-          value = data.http.idp_metadata[0].response_body
+          # These three fields are what @better-auth/sso actually needs, and
+          # its SAMLIdentityProviderMetadata type accepts them directly in
+          # place of `metadata`. They are stable until the IdP rotates its
+          # signing certificate -- which is exactly when a diff here is the
+          # signal you want.
+          value = local.idp_saml_config
         }
       }
     }
