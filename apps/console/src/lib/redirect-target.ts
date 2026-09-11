@@ -32,3 +32,21 @@ export function safeRedirectTarget(search: string): string {
   if (candidate.startsWith("//") || candidate.startsWith("/\\")) return "/";
   return candidate;
 }
+
+/**
+ * The failure reason `@better-auth/sso` reports after a SAML round trip.
+ *
+ * It does not throw and does not log: on failure the plugin redirects to the
+ * callbackURL carrying `?error=` (and sometimes `?error_description=`). The
+ * route guard then sends an unauthenticated visitor to /login, which used to
+ * discard both — so a rejected assertion looked identical to never having
+ * tried, in the browser AND in the server logs. This is the only place that
+ * reason survives.
+ */
+export function ssoErrorFromSearch(search: string): string | null {
+  const params = new URLSearchParams(search);
+  const code = params.get("error");
+  if (!code) return null;
+  const description = params.get("error_description");
+  return description ? `${code}: ${description}` : code;
+}
