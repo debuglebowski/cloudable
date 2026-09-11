@@ -101,12 +101,16 @@ const configuredIdp = (() => {
 
   return {
     providerId: CONFIGURED_IDP_PROVIDER_ID,
-    // `@better-auth/sso`'s `domain` is for email-domain-based provider
-    // matching, which this deployment never uses — sign-in always resolves
-    // the provider by id (see `login-page.tsx`). `.invalid` is RFC 2606's
-    // reserved TLD, guaranteed never to resolve or collide with a real
-    // domain. Same reasoning as `IdpSsoService.ts`'s registration call.
-    domain: `${CONFIGURED_IDP_PROVIDER_ID}.invalid`,
+    // The email domains this IdP is authoritative for. NOT cosmetic, which
+    // is what an earlier version of this got wrong by copying the `.invalid`
+    // placeholder used for console-registered providers: the plugin only
+    // treats a provider as TRUSTED when the signing-in user's email domain
+    // matches this (`validateEmailDomain(userInfo.email, provider.domain)`),
+    // and only a trusted provider may attach a SAML identity to an account
+    // that already exists. With a placeholder here every sign-in failed with
+    // `account_not_linked` — reported as a query parameter on a redirect,
+    // never thrown or logged, so it read as a silent bounce to /login.
+    domain: idp.emailDomains,
     samlConfig: {
       issuer: spIssuer(),
       entryPoint: idp.ssoUrl,
