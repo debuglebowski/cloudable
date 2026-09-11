@@ -121,6 +121,13 @@ const configuredIdp = (() => {
         singleSignOnService: [
           { Binding: "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", Location: idp.ssoUrl },
         ],
+        // Never used — this deployment does not initiate SAML logout — but
+        // samlify throws "missing endpoint of SingleLogoutService" while
+        // constructing the IdP without it, on every sign-in, which reads as a
+        // silent redirect back to /login.
+        singleLogoutService: [
+          { Binding: "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", Location: idp.sloUrl },
+        ],
       },
     },
   };

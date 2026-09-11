@@ -19,6 +19,13 @@ export interface IdpSamlConfig {
   readonly ssoUrl: string;
   /** Every advertised signing certificate, so a rotation window is a non-event. */
   readonly certs: readonly string[];
+  /**
+   * HTTP-Redirect single-logout endpoint. Required even though this
+   * deployment never initiates SAML logout: samlify refuses to construct an
+   * identity provider from explicit configuration without one, and throws per
+   * sign-in attempt rather than at startup.
+   */
+  readonly sloUrl: string;
 }
 
 export interface AppConfig {
@@ -219,14 +226,20 @@ const parseIdpSamlConfig = (raw: string | undefined): IdpSamlConfig | null => {
   if (
     typeof value.entityId !== "string" ||
     typeof value.ssoUrl !== "string" ||
+    typeof value.sloUrl !== "string" ||
     !Array.isArray(value.certs) ||
     value.certs.length === 0
   ) {
     throw new Error(
-      "IDP_SAML_CONFIG must be JSON with a non-empty entityId, ssoUrl and certs — Terraform builds it from the IdP's federation metadata.",
+      "IDP_SAML_CONFIG must be JSON with a non-empty entityId, ssoUrl, sloUrl and certs — Terraform builds it from the IdP's federation metadata.",
     );
   }
-  return { entityId: value.entityId, ssoUrl: value.ssoUrl, certs: value.certs };
+  return {
+    entityId: value.entityId,
+    ssoUrl: value.ssoUrl,
+    sloUrl: value.sloUrl,
+    certs: value.certs,
+  };
 };
 
 const readConfig = (): AppConfig => {

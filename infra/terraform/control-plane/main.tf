@@ -92,6 +92,13 @@ locals {
     # lists more than one during a rotation, and accepting all of them is what
     # makes a rotation a non-event rather than an outage.
     certs = distinct(flatten(regexall("<(?:[A-Za-z0-9]+:)?X509Certificate>([^<]+)</(?:[A-Za-z0-9]+:)?X509Certificate>", local.idp_metadata_body)))
+    # Required, not optional: samlify (under @better-auth/sso) refuses to
+    # construct an identity provider from explicit configuration without a
+    # logout endpoint -- "Construct identity provider - missing endpoint of
+    # SingleLogoutService", thrown per sign-in attempt, which surfaced as a
+    # silent bounce back to /login. Supplying the metadata XML hides this,
+    # because samlify reads the element itself; supplying fields does not.
+    sloUrl = regex("<(?:[A-Za-z0-9]+:)?SingleLogoutService[^>]*Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\"[^>]*Location=\"([^\"]+)\"", local.idp_metadata_body)[0]
   })
 
 
