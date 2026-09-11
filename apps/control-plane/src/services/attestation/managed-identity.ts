@@ -1,9 +1,10 @@
+import { DefaultAzureCredential } from "@azure/identity";
 import type * as schema from "@cloudable/schema";
-import { integrations, machines } from "@cloudable/schema";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { machines } from "@cloudable/schema";
+import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
-import { type JWTPayload, createRemoteJWKSet, jwtVerify } from "jose";
+import { type JWTPayload, createRemoteJWKSet, decodeJwt, jwtVerify } from "jose";
 import { config } from "../../config";
 import { Db } from "../../db/layer";
 import {
@@ -25,19 +26,65 @@ const MANAGED_IDENTITY_RESOURCE_CLAIM = "xms_mirid";
 /**
  * Azure AD tenant id claim, present on every Entra ID token including
  * IMDS-issued managed-identity ones. This is the tenant isolation boundary
- * for this credential — the same principle as `sub` for the OIDC
+ * for this credential — the same principle as `sub` for the (removed) OIDC
  * federation flow (docs/cloud-auth.md: "the subject binding is the tenant
  * isolation boundary. A trust rule naming only the issuer accepts a token
- * minted for any customer."). Checked against the target org's own
- * configured Azure tenant (`resolveExpectedTenantId` below) so a
- * signature-valid token minted by the *wrong* Azure AD tenant is rejected
- * here, at verification time — not just incidentally by some unrelated
- * downstream lookup.
+ * minted for any customer."). Checked against *this deployment's own*
+ * Azure tenant (`resolveOwnTenantId` below) so a signature-valid token
+ * minted by some *other* Azure AD tenant is rejected here, at verification
+ * time — not just incidentally by some unrelated downstream lookup.
  */
 const MANAGED_IDENTITY_TENANT_CLAIM = "tid";
 
 /** GUIDs are case-insensitive; trims incidental whitespace too — see the tenant-pinning comparison's own comment for why. */
 const normalizeTenantId = (value: string): string => value.trim().toLowerCase();
+
+let cachedOwnTenantId: string | null | undefined;
+
+/**
+ * The Azure AD tenant *this control plane's own managed identity* lives in —
+ * resolved once, ambiently, from the same credential
+ * `ProvisioningService.azure.ts`'s `getClients()` already uses
+ * (`DefaultAzureCredential()`), then cached in-process.
+ *
+ * Replaces a per-org `integrations.config.tenantId` lookup that used to live
+ * here: that was part of the federated (BYOC) multi-tenant design
+ * `docs/cloud-auth.md` documents as explicitly **removed** ("The
+ * customer-federated (BYOC) path — removed... Enabling Azure for an org is
+ * therefore a plain policy toggle, not a connection... no tenant ID, no
+ * application ID, no subscription ID"). Nothing was ever built to populate
+ * that per-org field — no UI field on the Integrations page, no write path
+ * anywhere in `domain/integrations/integrations.ts` — so it was always
+ * `null`, and tenant pinning failed closed for every single machine on
+ * every real (self-hosted, single-tenant) deployment: confirmed live,
+ * `tenant_mismatch` on every attestation attempt. Since this deployment
+ * only ever has one Azure tenant — its own — that's also the only
+ * meaningful thing to check a token against, and it needs no admin input at
+ * all to know: it's the same ambient fact `DefaultAzureCredential()` already
+ * resolves for every other Azure call this control plane makes.
+ *
+ * Never fails — a transient resolution problem (network blip, IMDS not
+ * reachable) degrades to `null`, which `verifyCredential` already treats as
+ * "reject" (fail closed), same as an org's never-configured tenant used to.
+ */
+const resolveOwnTenantId = (): Effect.Effect<string | null> =>
+  Effect.gen(function* () {
+    if (cachedOwnTenantId !== undefined) return cachedOwnTenantId;
+
+    const resolved = yield* Effect.tryPromise({
+      try: async () => {
+        const credential = new DefaultAzureCredential();
+        const token = await credential.getToken(`${config.managedIdentityAudience}.default`);
+        if (!token) return null;
+        const tid = decodeJwt(token.token)[MANAGED_IDENTITY_TENANT_CLAIM];
+        return typeof tid === "string" && tid.length > 0 ? tid : null;
+      },
+      catch: () => null,
+    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+
+    cachedOwnTenantId = resolved;
+    return resolved;
+  });
 
 /**
  * Maps a `jose` verification failure to a fixed, safe reason string.
@@ -62,18 +109,13 @@ export interface ManagedIdentityAttestationOptions {
   /** Resolves a verified token's claims to a machine identity — injected so this is unit-testable without a database. */
   readonly resolveMachine: (claims: JWTPayload) => Effect.Effect<MachineIdentity, AttestationError>;
   /**
-   * Resolves the Azure AD tenant id (`tid`) the given org's machines are
-   * expected to present — sourced from that org's connected `cloud`
-   * integration (`integrations.config.tenantId`, set when an org admin
-   * connects Azure via the console's Integrations page — see
-   * `domain/integrations/integrations.ts`). `null` means the org has no
-   * such tenant configured, which is treated as a rejection (fail closed),
-   * not as "skip the check". Injected, like `resolveMachine`, so this is
-   * unit-testable without a database.
+   * Resolves the one Azure AD tenant id every machine token is expected to
+   * present — this deployment's own (see `resolveOwnTenantId`). `null`
+   * means it couldn't be resolved, which is treated as a rejection (fail
+   * closed), not as "skip the check". Injected, like `resolveMachine`, so
+   * this is unit-testable without hitting a real IMDS endpoint.
    */
-  readonly resolveExpectedTenantId: (
-    orgId: string,
-  ) => Effect.Effect<string | null, AttestationError>;
+  readonly resolveExpectedTenantId: Effect.Effect<string | null>;
 }
 
 /**
@@ -114,23 +156,23 @@ export const makeManagedIdentityAttestation = (
       const identity = yield* options.resolveMachine(payload);
 
       // Tenant pinning: a token that's signature-valid and correctly
-      // resolves to a real machine can still have been minted by the
-      // *wrong* Azure AD tenant — `resolveMachine`'s `xms_mirid` lookup
-      // says nothing about which tenant issued the token. Reject here,
-      // at verification time, rather than letting a tenant mismatch slip
-      // through and only ever get caught by an unrelated downstream check.
+      // resolves to a real machine can still have been minted by some
+      // *other* Azure AD tenant — `resolveMachine`'s `xms_mirid` lookup
+      // says nothing about which tenant issued the token (Azure resource
+      // ids across different subscriptions can't collide, but this check
+      // costs nothing and rejects a bad token at verification time instead
+      // of relying on that alone). Reject here, rather than letting a
+      // tenant mismatch slip through and only ever get caught by an
+      // unrelated downstream check.
       const tid = payload[MANAGED_IDENTITY_TENANT_CLAIM];
-      const expectedTenantId = yield* options.resolveExpectedTenantId(identity.orgId);
+      const expectedTenantId = yield* options.resolveExpectedTenantId;
       if (
         typeof tid !== "string" ||
         tid.length === 0 ||
         expectedTenantId === null ||
-        // Azure AD tenant ids are GUIDs — case-insensitive by definition —
-        // and `expectedTenantId` is whatever an org admin typed into a plain
-        // text field on the console's Integrations page (see
-        // `connect-dialogs.tsx`). Comparing normalized avoids permanently
-        // locking out a whole org's machines over stray whitespace or casing
-        // that both still name the exact same tenant.
+        // Azure AD tenant ids are GUIDs — case-insensitive by definition.
+        // Comparing normalized avoids a spurious mismatch over stray
+        // whitespace or casing that both still name the exact same tenant.
         normalizeTenantId(tid) !== normalizeTenantId(expectedTenantId)
       ) {
         return yield* Effect.fail(
@@ -160,11 +202,6 @@ export const makeManagedIdentityAttestation = (
   };
 };
 
-/**
- * The real, database-backed `managed_identity` `AttestationMethod`. Consumed
- * by `registry.ts`, which composes this Effect (and the other methods') into
- * the single `AttestationRegistryTag` layer.
- */
 /**
  * Looks up the machine owning a given Azure resource id — extracted and
  * exported (rather than an inline closure) so it's directly testable against
@@ -204,6 +241,11 @@ export const resolveMachineByResourceId = (
     return { machineId: machine.id, orgId: machine.orgId } satisfies MachineIdentity;
   });
 
+/**
+ * The real, database-backed `managed_identity` `AttestationMethod`. Consumed
+ * by `registry.ts`, which composes this Effect (and the other methods') into
+ * the single `AttestationRegistryTag` layer.
+ */
 export const managedIdentityAttestationEffect: Effect.Effect<AttestationMethod, never, Db> =
   Effect.gen(function* () {
     const db = yield* Db;
@@ -218,42 +260,10 @@ export const managedIdentityAttestationEffect: Effect.Effect<AttestationMethod, 
         return yield* resolveMachineByResourceId(db, resourceId);
       });
 
-    // The org's connected `cloud` integration (console Integrations page,
-    // `domain/integrations/integrations.ts`) is the one place an Azure
-    // tenant id is recorded per org — `config.tenantId` on the live
-    // (non-removed) `kind: "cloud"` row. `null` (no such row, or no
-    // `tenantId` in its config) fails closed in `verifyCredential` above,
-    // it does not skip the check.
-    const resolveExpectedTenantId = (
-      orgId: string,
-    ): Effect.Effect<string | null, AttestationError> =>
-      Effect.gen(function* () {
-        const rows = yield* Effect.tryPromise({
-          try: () =>
-            db
-              .select()
-              .from(integrations)
-              .where(
-                and(
-                  eq(integrations.orgId, orgId),
-                  eq(integrations.kind, "cloud"),
-                  isNull(integrations.removedAt),
-                ),
-              )
-              .limit(1),
-          catch: (cause) => new AttestationError({ reason: "lookup_failed", cause }),
-        });
-
-        const row = rows[0];
-        if (!row) return null;
-        const tenantId = (row.config as Record<string, unknown> | null)?.tenantId;
-        return typeof tenantId === "string" && tenantId.length > 0 ? tenantId : null;
-      });
-
     return makeManagedIdentityAttestation({
       jwksUrl: config.managedIdentityJwksUrl,
       audience: config.managedIdentityAudience,
       resolveMachine,
-      resolveExpectedTenantId,
+      resolveExpectedTenantId: resolveOwnTenantId(),
     });
   });
