@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthError } from "@/lib/auth-client";
-import { safeRedirectTarget } from "@/lib/redirect-target";
+import { safeRedirectTarget, ssoErrorFromSearch } from "@/lib/redirect-target";
 
 /** Where a successful sign-in lands — `root.tsx`'s guard sets this when it bounced an unauthenticated visit through here; falls back to `/` when there wasn't one, or when the value isn't a safe same-origin path (see `safeRedirectTarget`). */
 function redirectTarget(): string {
@@ -107,6 +107,11 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const mutation = useSignInMutation();
   const ssoProvider = useSsoProviderQuery();
+  // Either the plugin redirected straight here with `?error=`, or `root.tsx`'s
+  // guard carried it across as `ssoError` on its way to /login.
+  const returnedSsoError =
+    ssoErrorFromSearch(window.location.search) ??
+    new URLSearchParams(window.location.search).get("ssoError");
   const ssoMutation = useSignInSsoMutation();
   const navigate = useNavigate();
 
@@ -210,6 +215,18 @@ export function LoginPage() {
                 or
                 <div className="h-px flex-1 bg-border" />
               </div>
+              {/* The reason a completed SAML round trip was rejected. The plugin
+                  reports it as a `?error=` on the redirect rather than by
+                  throwing, so without this a rejected assertion is
+                  indistinguishable from never having tried — which cost real
+                  hours. Shown whether it arrived on this URL directly or was
+                  carried across the guard's bounce. */}
+              {returnedSsoError && !ssoMutation.isError && (
+                <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span>Single sign-on failed: {returnedSsoError}</span>
+                </div>
+              )}
               {ssoMutation.isError && (
                 <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
                   <AlertCircle className="size-4 shrink-0" />

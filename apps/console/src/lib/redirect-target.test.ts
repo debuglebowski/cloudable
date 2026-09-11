@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { safeRedirectTarget } from "./redirect-target";
+import { safeRedirectTarget, ssoErrorFromSearch } from "./redirect-target";
 
 describe("safeRedirectTarget", () => {
   it("returns the path for a normally-encoded param", () => {
@@ -31,5 +31,21 @@ describe("safeRedirectTarget", () => {
     expect(safeRedirectTarget("?redirect=%2F%2Fevil.com")).toBe("/");
     expect(safeRedirectTarget("?redirect=https%3A%2F%2Fevil.com")).toBe("/");
     expect(safeRedirectTarget("?redirect=%2F%5Cevil.com")).toBe("/");
+  });
+});
+
+describe("ssoErrorFromSearch", () => {
+  it("returns null when there was no failure", () => {
+    expect(ssoErrorFromSearch("?redirect=%2F")).toBeNull();
+  });
+
+  it("returns the code on its own", () => {
+    expect(ssoErrorFromSearch("?error=account_not_linked")).toBe("account_not_linked");
+  });
+
+  it("includes the description when the plugin supplies one", () => {
+    expect(ssoErrorFromSearch("?error=invalid_saml&error_description=bad%20signature")).toBe(
+      "invalid_saml: bad signature",
+    );
   });
 });

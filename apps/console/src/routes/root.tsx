@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { safeRedirectTarget } from "@/lib/redirect-target";
+import { safeRedirectTarget, ssoErrorFromSearch } from "@/lib/redirect-target";
 import { cn } from "@/lib/utils";
 import { NAV_BADGE_HOOKS, NAV_ITEMS, type NavItem } from "@/nav-config";
 
@@ -176,7 +176,11 @@ export function RootLayout() {
     // callbackURL", and the email/password path silently navigated to a
     // nonsense route for the same reason.
     const redirect = window.location.pathname + window.location.search;
-    return <Navigate to="/login" search={{ redirect }} />;
+    // Carry any SSO failure reason across the bounce. Without this the
+    // plugin's `?error=` lands on a page the guard immediately replaces, and
+    // the only record of why sign-in failed is gone.
+    const ssoError = ssoErrorFromSearch(window.location.search);
+    return <Navigate to="/login" search={ssoError ? { redirect, ssoError } : { redirect }} />;
   }
 
   return (
