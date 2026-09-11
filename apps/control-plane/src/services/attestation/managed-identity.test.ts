@@ -309,3 +309,29 @@ describe("resolveMachineByResourceId (requires Postgres)", () => {
     expect(error.reason).toBe("unknown_machine");
   });
 });
+
+/**
+ * `resolveOwnTenantId` is module-private and its cache is module-level, so
+ * this asserts the source rather than the behaviour.
+ *
+ * The invariant is narrow but expensive to lose: the cache must hold only a
+ * SUCCESSFUL resolution. Caching a null turns one transient failure at
+ * container start into a permanent one, because a null expected tenant makes
+ * `verifyCredential` reject — so every agent on the deployment fails
+ * `tenant_mismatch` until someone restarts it, with the reason pointing at
+ * the agent's token rather than at the control plane. That ran in production
+ * for hours at 720 failures an hour.
+ */
+describe("own-tenant resolution cache", () => {
+  test("never caches a failed resolution", async () => {
+    const source = await Bun.file(
+      new URL("./managed-identity.ts", import.meta.url).pathname,
+    ).text();
+    const write = source
+      .split("\n")
+      .find((line) => /^\s*(if \(resolved !== null\) )?cachedOwnTenantId = /.test(line));
+
+    expect(write).toBeDefined();
+    expect(write).toContain("resolved !== null");
+  });
+});
