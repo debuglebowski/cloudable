@@ -12,7 +12,8 @@
     "typecheck": "tsc -b",
     "test:unit": "bun test",
     "test:integration": "bun test ./src/services/reconcile-diff.integration.ts",
-    "test:integration-check": "bun test $(find . -path './node_modules/*' -prune -o -name '*.integration-check.ts' -print)"
+    "test:integration-check": "bun test $(find . -path './node_modules/*' -prune -o -name '*.integration-check.ts' -print)",
+    "test:docker-provisioning": "bun test ./src/services/ProvisioningService.docker.integration-check.ts"
   },
   "dependencies": {
     "@azure/arm-compute": "25.1.1",
