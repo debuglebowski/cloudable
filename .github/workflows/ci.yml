@@ -74,6 +74,33 @@ jobs:
       # them. Each spins up its own throwaway Postgres via testcontainers —
       # independent of the `postgres` service above — so they only need
       # Docker, which this runner already provides.
+      # Pre-warms what ProvisioningService.docker's integration check would
+      # otherwise build inside a single test's timeout: two
+      # `bun build --compile` binaries and a `docker build` that runs apt-get.
+      # Cached locally that test takes about a second; cold it takes minutes,
+      # and when a package mirror stalls it simply sits there until the
+      # timeout — which is how it burned two consecutive CI runs looking like
+      # a code regression rather than a slow dependency.
+      #
+      # Doing it here makes the cost attributable: a failure is this step,
+      # named, rather than an opaque "test timed out". continue-on-error
+      # because a warm cache is an optimisation, not a requirement — if this
+      # fails the test still builds what it needs and simply takes longer.
+      - name: Pre-build local-machine image (warms the Docker provisioning check)
+        continue-on-error: true
+        timeout-minutes: 12
+        run: |
+          bun run --cwd apps/agent build
+          bun run --cwd apps/tunnel-daemon build
+          cp apps/tunnel-daemon/dist/cloudable-tunnel-daemon-linux-x64 apps/agent/dist/ 2>/dev/null || true
+          docker build \
+            --build-arg BASE_IMAGE=ubuntu:22.04 \
+            --build-arg AGENT_BINARY=dist/cloudable-agent-linux-x64 \
+            --build-arg TUNNEL_DAEMON_BINARY=dist/cloudable-tunnel-daemon-linux-x64 \
+            -t cloudable-local-machine-v2:22.04 \
+            -f apps/agent/docker/local-machine/Dockerfile \
+            apps/agent
+
       - name: Integration-check tests (control-plane)
         run: bun run --cwd apps/control-plane test:integration-check
 

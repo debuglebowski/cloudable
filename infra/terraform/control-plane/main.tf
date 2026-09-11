@@ -1268,6 +1268,20 @@ resource "azurerm_container_app" "this" {
         }
       }
 
+      # Appended last, same reason as the blocks below.
+      #
+      # The console is served by THIS container, at every path outside
+      # /api/* and /_internal/*, so its origin is this deployment's own
+      # public URL. Left unset the app falls back to the vite dev server on
+      # localhost:5180 -- which is invisible in production until something
+      # compares against it, and then badly misleading: BetterAuth's
+      # trustedOrigins is one such place, and a deployment that trusted only
+      # a developer's laptop rejected every SSO callbackURL it was given.
+      env {
+        name  = "CONSOLE_ORIGIN"
+        value = local.public_url
+      }
+
       # The SAML identity provider, when this deployment declares one rather
       # than having an admin connect it through the console. Appended last,
       # deliberately: inserting an env block mid-list reads as every later
