@@ -50,6 +50,60 @@ jobs:
       - name: Set up Bun workspace
         uses: ./.github/actions/setup-bun
 
+      # The image build needs both binaries in `apps/agent/dist` first: the
+      # Dockerfile `COPY`s them, and the tunnel-daemon is staged across from
+      # its own package (the build context stays `apps/agent` so the repo
+      # root's `.dockerignore`, which excludes `**/dist`, does not apply —
+      # see `ensureImageBuilt`'s comment). Same work `ensureAgentBinaryBuilt`
+      # and `ensureTunnelDaemonBinaryBuilt` would do inside the test, hoisted
+      # so a failure here is named rather than an opaque test timeout.
+      - name: Build agent and tunnel-daemon binaries
+        run: |
+          bun run --cwd apps/agent build
+          bun run --cwd apps/tunnel-daemon build
+          cp apps/tunnel-daemon/dist/cloudable-tunnel-daemon-linux-x64 apps/agent/dist/
+
+      # Read the tag out of the source constant rather than repeating it. The
+      # test only skips its own build when `docker image inspect` finds this
+      # exact tag, so a rename of `IMAGE_NAME` would otherwise silently put us
+      # back on the slow path with everything still green.
+      - name: Resolve image tag from IMAGE_NAME
+        id: image-tag
+        run: |
+          name=$(sed -n 's/^const IMAGE_NAME = "\(.*\)";$/\1/p' \
+            apps/control-plane/src/services/ProvisioningService.docker.ts)
+          if [ -z "$name" ]; then
+            echo "could not read IMAGE_NAME from ProvisioningService.docker.ts" >&2
+            exit 1
+          fi
+          echo "tag=${name}:22.04" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      # The point of this step. The Dockerfile's `apt-get` layer sits ahead of
+      # the binary `COPY`s, so it stays cached even on an agent change — which
+      # is what takes the package mirror off the critical path. It cost 7.7s on
+      # a healthy connection and was unbounded on 2026-09-11 when a mirror
+      # stalled. `load: true` puts the result in the local daemon, where the
+      # test's `docker image inspect` finds it and skips building entirely.
+      # Nothing is pushed; this image is dev/demo only and not a release
+      # artifact.
+      - name: Build local-machine image (cached)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: apps/agent
+          file: apps/agent/docker/local-machine/Dockerfile
+          push: false
+          load: true
+          tags: ${{ steps.image-tag.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BASE_IMAGE=ubuntu:22.04
+            AGENT_BINARY=dist/cloudable-agent-linux-x64
+            TUNNEL_DAEMON_BINARY=dist/cloudable-tunnel-daemon-linux-x64
+
       # No Postgres service and no secrets: this check drives the real Docker
       # daemon only. `create` mints its join token with `Effect.sync` and
       # `JOIN_TOKEN_SECRET` has a dev fallback, so nothing here reaches a
