@@ -97,8 +97,14 @@ jobs:
           push: false
           load: true
           tags: ${{ steps.image-tag.outputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Explicit scope. `type=gha` defaults every build in the repo to
+          # one shared scope, so this and `rebuild-base-image.yml` were both
+          # writing `index-buildkit-1-f921bd05` and evicting each other's
+          # index — each workflow missing whenever the other ran last, which
+          # would have quietly defeated the caching this step exists for.
+          # That one keeps the default; this one moves out of its way.
+          cache-from: type=gha,scope=local-machine
+          cache-to: type=gha,mode=max,scope=local-machine
           build-args: |
             BASE_IMAGE=ubuntu:22.04
             AGENT_BINARY=dist/cloudable-agent-linux-x64
