@@ -911,6 +911,15 @@ resource "azurerm_role_definition" "machine_operator" {
       "Microsoft.Compute/disks/read",
       "Microsoft.Compute/disks/write",
       "Microsoft.Compute/disks/delete",
+      # Snapshotting a disk is authorized against BOTH scopes: `snapshots/write`
+      # on the snapshot being created, and `disks/beginGetAccess/action` on the
+      # source disk it copies from. Without the second, archive fails at the
+      # snapshot step with `LinkedAuthorizationFailed` — and ARM does not record
+      # a linked-authorization failure in the Activity Log at all, so the only
+      # evidence is the control plane's own error. `endGetAccess` is its pair,
+      # releasing the access `begin` takes.
+      "Microsoft.Compute/disks/beginGetAccess/action",
+      "Microsoft.Compute/disks/endGetAccess/action",
       "Microsoft.Compute/snapshots/read",
       "Microsoft.Compute/snapshots/write",
       "Microsoft.Compute/snapshots/delete",
