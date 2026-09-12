@@ -63,19 +63,31 @@ function parseMachineScope(raw: string | undefined): MachineScope {
     .filter((s) => s.length > 0);
 }
 
+const LOGIN_FLAGS = new Set(["os-user", "machine-scope"]);
+
+/** Every bad-argument message points at the same help, so nobody has to guess the flag names. */
+function loginUsageError(problem: string): Error {
+  return new Error(`${problem}\n\nRun \`cloudable login --help\` for the options.`);
+}
+
 export function parseLoginArgs(argv: ReadonlyArray<string>): LoginOptions {
   const flags = new Map<string, string>();
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg?.startsWith("--")) {
-      const key = arg.slice(2);
-      const value = argv[i + 1];
-      if (value === undefined || value.startsWith("--")) {
-        throw new Error(`missing value for --${key}`);
-      }
-      flags.set(key, value);
-      i++;
+    if (arg === undefined) continue;
+    if (!arg.startsWith("--")) {
+      throw loginUsageError(`cloudable login takes no positional arguments, got '${arg}'.`);
     }
+    const key = arg.slice(2);
+    if (!LOGIN_FLAGS.has(key)) {
+      throw loginUsageError(`unknown option '${arg}' for \`cloudable login\`.`);
+    }
+    const value = argv[i + 1];
+    if (value === undefined || value.startsWith("--")) {
+      throw loginUsageError(`missing value for ${arg}.`);
+    }
+    flags.set(key, value);
+    i++;
   }
 
   return {

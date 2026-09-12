@@ -50,21 +50,12 @@ export async function triggerReconcile(machineId: string): Promise<ReconcileTrig
 export async function runMachinesReconcileCommand(argv: ReadonlyArray<string>): Promise<void> {
   const machineId = argv[0];
   if (!machineId) {
-    throw new Error("usage: cloudable machines reconcile <machineId>");
+    throw new Error(
+      "cloudable machines reconcile needs a machine id.\n\nusage: cloudable machines reconcile <machineId>\n\nRun `cloudable machines list` to see their names, or `cloudable machines reconcile --help`.",
+    );
   }
   const result = await triggerReconcile(machineId);
   console.log(
     `Desired state for ${result.machineId} is now version ${result.desiredStateVersion}. The agent applies it on its next poll (~30s) — not instantly.`,
   );
-}
-
-export async function runMachinesCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const subcommand = argv[0];
-  if (subcommand === "list") {
-    await runMachinesListCommand();
-  } else if (subcommand === "reconcile") {
-    await runMachinesReconcileCommand(argv.slice(1));
-  } else {
-    console.log("usage: cloudable machines <list|reconcile>");
-  }
 }
