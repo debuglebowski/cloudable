@@ -1,6 +1,11 @@
-import { HttpApiBuilder, HttpMiddleware, HttpServerRequest } from "@effect/platform";
+import {
+  HttpApiBuilder,
+  HttpMiddleware,
+  HttpServerError,
+  HttpServerRequest,
+} from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
-import { Cause, Effect, Layer } from "effect";
+import { Cause, Effect, Layer, Option } from "effect";
 import { bootstrapDefaultAdmin } from "./bootstrap-default-admin";
 import { config } from "./config";
 import { DbLive } from "./db/layer";
@@ -135,18 +140,29 @@ const ReconcileDaemonLive = Layer.effectDiscard(Effect.forkDaemon(startReconcile
 // time it runs, so it can only ever add a log line, never change what the caller gets
 // — the 500 stays a 500 with no internal detail leaked over the wire.
 //
-// Interrupt-only causes are skipped: a browser navigating away mid-request cancels the
-// fiber, which is routine, not a failure worth a log line.
+// `causeResponseStripped` takes the `HttpServerResponse` the platform already decided
+// to send back out of the cause, leaving only whatever actually went wrong — so the
+// line carries the status the caller really got, and the printed cause is the failure
+// rather than a JSON dump of the response.
+//
+// A client that hangs up mid-request leaves nothing behind once that response is
+// stripped, which is the whole point of checking: `/tunnel/connect`, `/agent/wake` and
+// `/tunnel/signal` are long polls that get abandoned constantly, and each one was
+// logging a false "-> 500" (the response is a 499, and nothing failed). Silence for
+// those, a real line for everything else.
 const logDefects = HttpMiddleware.make((httpApp) =>
-  Effect.tapErrorCause(httpApp, (cause) =>
-    Cause.isInterruptedOnly(cause)
+  Effect.tapErrorCause(httpApp, (cause) => {
+    const [response, stripped] = HttpServerError.causeResponseStripped(cause);
+    // `None` means the response defect WAS the whole cause — nothing failed.
+    const failure = Option.getOrElse(stripped, () => Cause.empty);
+    return Cause.isEmptyType(failure) || Cause.isInterruptedOnly(failure)
       ? Effect.void
       : Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
           Effect.logError(
-            `unhandled: ${request.method} ${request.url} -> 500\n${Cause.pretty(cause)}`,
+            `unhandled: ${request.method} ${request.url} -> ${response.status}\n${Cause.pretty(failure)}`,
           ),
-        ),
-  ),
+        );
+  }),
 );
 
 // Every console page fetches cross-origin (console and control-plane run on
