@@ -334,6 +334,27 @@ const runArm = <A>(op: () => Promise<A>): Effect.Effect<A, ProvisioningError> =>
     catch: (cause) => new ProvisioningError({ reason: classifyAzureError(cause), cause }),
   });
 
+/**
+ * For one teardown step whose target being absent IS its goal state: a 404 means the
+ * resource is already gone, so the step has nothing left to do and the sequence
+ * continues. Every other failure still fails the archive.
+ *
+ * Without this, a single mid-sequence 404 propagated out of `archive`, and
+ * `domain/archive/archive.ts` reads any `not_found` from this port as "no live infra
+ * for this machine" and marks the machine archived. Observed in production on
+ * 2026-09-12: a machine whose VM was deleted and snapshotted reported a successful
+ * archive while its OS disk, data disk, NIC and public IP stayed alive and billing.
+ * Only `resolveVmNames` should be able to produce that "nothing exists" signal.
+ */
+const tolerateAlreadyGone = <A>(
+  effect: Effect.Effect<A, ProvisioningError>,
+): Effect.Effect<A | null, ProvisioningError> =>
+  effect.pipe(
+    Effect.catchTag("ProvisioningError", (error) =>
+      error.reason === "not_found" ? Effect.succeed(null) : Effect.fail(error),
+    ),
+  );
+
 /** Azure requires either an admin password or an SSH public key on every
  * Linux VM at creation — there is no "neither" option. A random, per-VM,
  * never-stored password satisfies that requirement; it's never logged,
@@ -504,36 +525,58 @@ const service: ProvisioningService = {
       const rg = config.azureMachinesResourceGroup;
       const { names } = yield* resolveVmNames(clients, rg, machineId, externalId);
 
-      yield* runArm(() => clients.compute.virtualMachines.beginDeallocateAndWait(rg, names.vm));
+      yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.virtualMachines.beginDeallocateAndWait(rg, names.vm)),
+      );
 
       // A snapshot's location must match its source disk's — fetch the disk
-      // first rather than assuming it matches the machine's own region.
-      const osDisk = yield* runArm(() => clients.compute.disks.get(rg, names.osDisk));
+      // first rather than assuming it matches the machine's own region. A disk
+      // that is already gone is nothing to snapshot, not a reason to abandon
+      // the rest of the teardown.
+      const osDisk = yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.disks.get(rg, names.osDisk)),
+      );
 
       // Real snapshot of the OS disk — its `diskSizeGB` is the real size an
       // eventual pricing-estimate wire-up would read, in place of
       // `PLACEHOLDER_SNAPSHOT_SIZE_BYTES` (domain/archive/pricing.ts). Not
       // wired up by this change — `MachineStatus` has no `sizeBytes` field
       // yet; that's a small, separate follow-up.
-      yield* runArm(() =>
-        clients.compute.snapshots.beginCreateOrUpdateAndWait(rg, `${names.osDisk}-snap`, {
-          location: osDisk.location ?? "",
-          creationData: {
-            createOption: "Copy",
-            sourceResourceId: osDisk.id as string,
-          },
-        }),
-      );
+      if (osDisk) {
+        yield* runArm(() =>
+          clients.compute.snapshots.beginCreateOrUpdateAndWait(rg, `${names.osDisk}-snap`, {
+            location: osDisk.location ?? "",
+            creationData: {
+              createOption: "Copy",
+              sourceResourceId: osDisk.id as string,
+            },
+          }),
+        );
+      }
 
       // No restore-side ARM code exists in this build at all
       // (docs/lifecycle.md: "adding one is out of this unit's file scope") —
       // the data disk buys nothing kept around, so it's deleted along with
       // everything else rather than orphaned.
-      yield* runArm(() => clients.compute.virtualMachines.beginDeleteAndWait(rg, names.vm));
-      yield* runArm(() => clients.compute.disks.beginDeleteAndWait(rg, names.osDisk));
-      yield* runArm(() => clients.compute.disks.beginDeleteAndWait(rg, names.dataDisk));
-      yield* runArm(() => clients.network.networkInterfaces.beginDeleteAndWait(rg, names.nic));
-      yield* runArm(() => clients.network.publicIPAddresses.beginDeleteAndWait(rg, names.pip));
+      //
+      // Each delete tolerates only its OWN target being gone, and the sequence
+      // always runs to the end: these five resources are independent, and one
+      // missing NIC must never leave a public IP or a disk behind.
+      yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.virtualMachines.beginDeleteAndWait(rg, names.vm)),
+      );
+      yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.disks.beginDeleteAndWait(rg, names.osDisk)),
+      );
+      yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.disks.beginDeleteAndWait(rg, names.dataDisk)),
+      );
+      yield* tolerateAlreadyGone(
+        runArm(() => clients.network.networkInterfaces.beginDeleteAndWait(rg, names.nic)),
+      );
+      yield* tolerateAlreadyGone(
+        runArm(() => clients.network.publicIPAddresses.beginDeleteAndWait(rg, names.pip)),
+      );
 
       return { machineId, state: "archived", externalId: null } satisfies MachineStatus;
     }),
