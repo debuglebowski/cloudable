@@ -9,7 +9,13 @@ import type { DesiredMachineState, ReconcileMachineResult } from "./types";
 export class ReconcileError extends Data.TaggedError("ReconcileError")<{
   reason: "archived_requires_restore";
   machineId: string;
-}> {}
+}> {
+  /** Same reasoning as `ProvisioningError`'s: without this, every renderer prints the
+   * tag alone and the fields that identify the failure are lost. */
+  override get message(): string {
+    return `${this.reason} (machine ${this.machineId})`;
+  }
+}
 
 /**
  * Packages reported as running that aren't in the declared manifest.

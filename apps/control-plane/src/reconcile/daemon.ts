@@ -3,36 +3,10 @@ import { openPostgres } from "../db/connect";
 import type { Db } from "../db/layer";
 import type { MachineService } from "../domain/machine/MachineService";
 import type { EventBus } from "../services/EventBus";
-import type { ProvisioningError, ProvisioningServiceTag } from "../services/ProvisioningService";
+import type { ProvisioningServiceTag } from "../services/ProvisioningService";
 import { listReconcilableMachines } from "./list-machines";
 import { runReconcileLoop } from "./loop";
 import { persistReconcileResult } from "./persist-result";
-import type { ReconcileError } from "./reconcile-machine";
-
-/**
- * `String(error)` on a `Data.TaggedError` prints its tag and nothing else, so every
- * failed pass logged the literal, useless line "failed this pass: ProvisioningError" —
- * no reason, no underlying ARM or Docker error. Production has hundreds of them, and
- * they are the only record that exists of a machine the loop cannot reconcile.
- *
- * Azure SDK failures arrive as `RestError`-shaped causes; `code`/`statusCode` are what
- * identify them (`AuthorizationFailed`, `Conflict`, a 403), so they are read the same
- * defensively-typed way `ProvisioningService.azure.ts`'s `classifyAzureError` reads them.
- */
-const describeCause = (cause: unknown): string => {
-  if (cause instanceof Error) {
-    const { code, statusCode } = cause as Error & { code?: unknown; statusCode?: unknown };
-    const identifiers = [statusCode, code].filter((part) => part !== undefined).join(" ");
-    return identifiers ? `${identifiers} ${cause.message}` : cause.message;
-  }
-  return String(cause);
-};
-
-const describeFailure = (error: ProvisioningError | ReconcileError): string => {
-  const cause =
-    "cause" in error && error.cause !== undefined ? `: ${describeCause(error.cause)}` : "";
-  return `${error._tag}(${error.reason})${cause}`;
-};
 
 /** Distinct from every other lock key already in use in this codebase (each on its
  * own dedicated `max:1` connection, since `pg_advisory_lock`/`unlock` are scoped to
@@ -141,9 +115,12 @@ export const startReconcileDaemon: Effect.Effect<
       listMachines: listReconcilableMachines,
       interval: RECONCILE_INTERVAL,
       onResult: (result) => Effect.provide(persistReconcileResult(result), persistenceContext),
+      // `${error}` alone prints the tag and nothing else; `.message` is where each
+      // error type puts the reason and, for `ProvisioningError`, whatever Azure or
+      // Docker actually said.
       onError: (machineId, error) =>
         Effect.logWarning(
-          `reconcile: machine ${machineId} failed this pass: ${describeFailure(error)}`,
+          `reconcile: machine ${machineId} failed this pass: ${error._tag}: ${error.message}`,
         ),
     });
 

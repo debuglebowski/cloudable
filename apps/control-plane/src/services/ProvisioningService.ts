@@ -1,9 +1,36 @@
 import { Context, Data, type Effect } from "effect";
 
+/**
+ * Azure SDK failures arrive as `RestError`-shaped causes, where `statusCode` and `code`
+ * (`404`, `AuthorizationFailed`, `Conflict`) are what actually identify the failure —
+ * read defensively, the same way `ProvisioningService.azure.ts`'s `classifyAzureError`
+ * reads them, rather than depending on a class from `@azure/core-rest-pipeline`.
+ */
+const describeCause = (cause: unknown): string => {
+  if (cause instanceof Error) {
+    const { code, statusCode } = cause as Error & { code?: unknown; statusCode?: unknown };
+    const identifiers = [statusCode, code].filter((part) => part !== undefined).join(" ");
+    return identifiers ? `${identifiers} ${cause.message}` : cause.message;
+  }
+  return String(cause);
+};
+
 export class ProvisioningError extends Data.TaggedError("ProvisioningError")<{
   reason: "quota_exceeded" | "region_unavailable" | "not_found" | "provider_error";
   cause?: unknown;
-}> {}
+}> {
+  /**
+   * Without this, every renderer of this error prints the tag and nothing else:
+   * `Cause.pretty` gives "ProvisioningError: An error has occurred" and `String(error)`
+   * gives "ProvisioningError". Production hit exactly that — an archive failing at an
+   * ARM call with no record anywhere of which call, or what Azure said. The fields that
+   * make this error actionable belong in its message, so every log site gets them
+   * without knowing anything about this type.
+   */
+  override get message(): string {
+    return this.cause === undefined ? this.reason : `${this.reason}: ${describeCause(this.cause)}`;
+  }
+}
 
 /** Which backend a call dispatches to — see `ProvisioningService.switchable.ts`. */
 export type Provider = "azure" | "docker" | "fake";
