@@ -201,9 +201,15 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
     );
   }
 
-  // Saved before the ssh-agent step, which is the part that can fail on a
-  // box with no agent. Being signed in to the API should not depend on
-  // whether this machine happens to run an ssh-agent.
+  // Two writes on purpose. The token has to be on disk before
+  // `currentIdentity()` can use it to ask `/api/v1/me` who this is, and the
+  // email is worth storing so `whoami --local` can answer without a round
+  // trip. Nothing looks the caller up BY that email — the token carries a
+  // person id — so the empty one in between is inert, not a half-session.
+  //
+  // Both writes land before the ssh-agent step, which is the part that can
+  // fail on a box with no agent. Being signed in to the API should not depend
+  // on whether this machine happens to run one.
   saveSession({ token: response.token, email: "" });
   const identity = await currentIdentity();
   saveSession({ token: response.token, email: identity.email });

@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import {
   type PersonRow,
   createPerson,
+  getPersonById,
   listPeopleByOrg,
   setPersonActive,
   updatePerson,
@@ -23,6 +24,21 @@ const toWire = (row: PersonRow) => ({
 
 export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
   handlers
+    .handle("me", () =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        const row = yield* getPersonById(currentUser.personId);
+        // The middleware resolved this id from a live `people` row moments
+        // ago, so a miss here means the row was deleted mid-request. Dying is
+        // right: it is not a 404 the caller can act on.
+        if (!row) {
+          return yield* Effect.die(
+            new Error(`person ${currentUser.personId} vanished between auth and handler`),
+          );
+        }
+        return toWire(row);
+      }).pipe(Effect.catchTag("PeopleDbError", (e) => Effect.die(e))),
+    )
     .handle("list", () =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;

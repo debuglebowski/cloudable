@@ -48,6 +48,21 @@ export class PeopleDbError extends Data.TaggedError("PeopleDbError")<{
 const dbTry = <A>(thunk: () => Promise<A>, reason: string): Effect.Effect<A, PeopleDbError> =>
   Effect.tryPromise({ try: thunk, catch: (cause) => new PeopleDbError({ reason, cause }) });
 
+/** The one person a request is already known to be — `CurrentUserTag.personId`
+ * came from a verified credential, so this is a primary-key read, not a search.
+ * Undefined only if the row went away between authentication and here. */
+export const getPersonById = (
+  id: string,
+): Effect.Effect<PersonRow | undefined, PeopleDbError, Db> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rows = yield* dbTry(
+      () => db.select().from(people).where(eq(people.id, id)).limit(1),
+      "get_person_failed",
+    );
+    return rows[0];
+  });
+
 export const listPeopleByOrg = (orgId: string): Effect.Effect<PersonRow[], PeopleDbError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
