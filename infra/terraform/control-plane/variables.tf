@@ -293,11 +293,11 @@ variable "key_vault_id" {
     identity, secrets passed as plain values from var.better_auth_secret and
     friends.
 
-    The vault must contain these four secrets (create them out-of-band, e.g.
+    The vault must contain these five secrets (create them out-of-band, e.g.
     `az keyvault secret set` — putting them there via Terraform would defeat
     the purpose by writing the values back into state):
       better-auth-secret, join-token-secret, agent-session-secret,
-      cli-auth-code-secret
+      cli-auth-code-secret, cli-token-secret
   EOT
   type        = string
   default     = null
