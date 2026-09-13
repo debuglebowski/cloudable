@@ -245,12 +245,17 @@ characters, so 18 bytes is exactly 24 characters at 144 bits. The script verifie
 generated length against the spec before writing, so the constraint is enforced rather
 than documented.
 
-`join-token-secret`, `agent-session-secret` and `cli-auth-code-secret` have **no
-plain-value fallback** on purpose. Without Key Vault the app falls back to the literal
-`dev-only-change-me` compiled into it — a published default in a public repo — so
-agent join tokens, agent session tokens and CLI sign-in codes would be signed with a
-key anyone can read. There is intentionally no way to set them to a real value without
-a vault, so a deployment can't quietly keep running on the default.
+`join-token-secret`, `agent-session-secret`, `cli-auth-code-secret` and
+`cli-token-secret` have **no plain-value fallback** on purpose. Without Key Vault the
+app falls back to the literal `dev-only-change-me` compiled into it — a published
+default in a public repo — so agent join tokens, agent session tokens, CLI sign-in
+codes and CLI API tokens would be signed with a key anyone can read. There is
+intentionally no way to set them to a real value without a vault, so a deployment can't
+quietly keep running on the default.
+
+`cli-token-secret` is the one with the longest reach: it signs the bearer token
+`cloudable login` stores, which carries a person id and is accepted by every
+authenticated endpoint for 30 days. A forged one is a session as anybody.
 
 Rotating any of them is `scripts/seed-vault-secrets.sh --rotate <name>` plus a revision
 restart — the references are versionless, so no Terraform change. Note that rotating

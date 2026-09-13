@@ -136,6 +136,7 @@ locals {
     "join-token-secret"    = { bytes = 32 } # 43 chars, 256 bits
     "agent-session-secret" = { bytes = 32 } # 43 chars, 256 bits
     "cli-auth-code-secret" = { bytes = 32 } # 43 chars, 256 bits
+    "cli-token-secret"     = { bytes = 32 } # 43 chars, 256 bits
   }
 
   # Secret names expected in the vault, doubling as the Container App secret
@@ -1243,6 +1244,22 @@ resource "azurerm_container_app" "this" {
         content {
           name        = "CLI_AUTH_CODE_SECRET"
           secret_name = "cli-auth-code-secret"
+        }
+      }
+
+      # Signs the CLI's API bearer token (services/CliToken.ts). Separate from
+      # CLI_AUTH_CODE_SECRET above on purpose: that one signs a 60-second
+      # single-use sign-in code, this one a 30-day API credential, so they
+      # rotate independently and a leak of one is not a leak of the other.
+      #
+      # Unset, the image falls back to the "dev-only-change-me" default it is
+      # published with, and anyone who can read a public MIT repo can forge a
+      # token that authenticates as any person id.
+      dynamic "env" {
+        for_each = local.use_key_vault ? [1] : []
+        content {
+          name        = "CLI_TOKEN_SECRET"
+          secret_name = "cli-token-secret"
         }
       }
 
