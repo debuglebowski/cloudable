@@ -80,6 +80,66 @@ distributing a KRL to every machine's sshd, out of scope for this build.
 `serial` is left at `0` (unspecified) for the same reason — this CA does not track per-certificate
 serials for KRL purposes.
 
+### `machineScope` is recorded, not enforced
+
+`issueCertificate` takes a `machineScope` (`"all"`, or a list of machine ids from `cloudable login
+--machine-scope`), writes it to the `certificates` row and puts it in `access.certificate_issued`
+— and then builds a certificate that does not mention it. The only principal is the OS user, and
+the only extension is `permit-pty`. sshd never learns the scope, so a certificate issued for
+`m-abc` authenticates to `m-def` exactly as well.
+
+Nothing is exploitable through this today, because no machine trusts the CA yet: the agent
+observes `sshd` (`apps/agent/src/access-methods.ts`) but never configures it, and
+`TrustedUserCAKeys` appears nowhere in this repo. Cloudable certificates currently authenticate to
+nothing. `cloudable connect` is the live path to a shell, and it is control-plane mediated
+(section 4).
+
+What is live is the *claim*. The evidence projection and the schema comment have both been
+reworded to say "requested" rather than "scoped", because an auditor reading "scope: m-abc" would
+take it as a restriction that held. Do not quietly reword them back when the field starts looking
+authoritative — reword them when it *is*.
+
+### Making it real: scope in the principal
+
+This belongs to whoever wires up CA trust on the machine, in the same change, not to a later
+bolt-on. The certificate is the wrong place to fix it alone; the two halves only work together.
+
+Issue the scope as the principal rather than the bare OS user:
+
+| `--machine-scope` | `validPrincipals` |
+| :-- | :-- |
+| `all` | `["cloudable-all:alice"]` |
+| `m-abc` | `["m-abc:alice"]` |
+| `m-abc,m-def` | `["m-abc:alice", "m-def:alice"]` |
+
+On each machine, the agent writes `/etc/ssh/auth_principals/<osUser>` containing that machine's
+own id and the wildcard, one per line:
+
+```
+m-abc:alice
+cloudable-all:alice
+```
+
+with `sshd_config` naming `TrustedUserCAKeys /etc/ssh/cloudable_ca.pub` and
+`AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u`.
+
+sshd then matches offline. A certificate whose principals are all for other machines matches
+nothing on this one and is refused, with no call to the control plane and no new failure mode when
+the control plane is down (invariant 7). Multi-machine scope needs no second certificate, because
+a certificate carries a list of principals natively.
+
+Two things to get right when building it:
+
+- **Cap the principal list.** A scope naming hundreds of machines would produce an enormous
+  certificate. Reject past a sane bound at issue time rather than emitting something sshd will
+  struggle with.
+- **The agent rewrites the file, it does not append.** Desired state is edited and live machines
+  are not (invariant 10); an append-only principals file would accumulate stale grants that
+  nothing ever removes, which is the drift this product exists to catch.
+
+This still does not give per-certificate revocation — that needs a KRL, see above. It gives
+*scope*, which is a different property and a cheaper one.
+
 ## 2. `cloudable login` (`apps/cli/src/login.ts`)
 
 ### One sign-in, two credentials
