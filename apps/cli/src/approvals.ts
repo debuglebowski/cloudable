@@ -10,6 +10,7 @@ import { oneOf, parseArgs, positiveInt, readSpec, required, requiredFlag } from 
 import { UsageError } from "./errors";
 import { authenticatedApiRequest, postJson, query } from "./http-client";
 import { dash, printEmpty, printFields, printJson, printTable, shortTime } from "./output";
+import { usageFor } from "./program";
 import { machineId } from "./resolve";
 
 const ACTION_TYPES = ["snapshot_restore", "break_glass", "admin_access", "offboarding"] as const;
@@ -85,7 +86,7 @@ export async function runApprovalsListCommand(argv: ReadonlyArray<string>): Prom
 
 export async function runApprovalsGetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const id = required(args, 0, "an approval id", "usage: cloudable approvals get <id>");
+  const id = required(args, 0, "an approval id", usageFor("approvals get <id>"));
   const approval = await authenticatedApiRequest<Approval>(`/api/v1/approvals/${id}`);
   if (args.booleans.has("json")) {
     printJson(approval);
@@ -95,7 +96,7 @@ export async function runApprovalsGetCommand(argv: ReadonlyArray<string>): Promi
 }
 
 export async function runApprovalsDecideCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable approvals decide <id> --approve|--deny [--reason <reason>]";
+  const usage = usageFor("approvals decide <id> --approve|--deny [--reason <reason>]");
   const args = parseArgs(argv, readSpec({ values: ["reason"], booleans: ["approve", "deny"] }));
   const id = required(args, 0, "an approval id", usage);
 
@@ -122,7 +123,9 @@ export async function runApprovalsDecideCommand(argv: ReadonlyArray<string>): Pr
 }
 
 export async function runApprovalsCreateCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = `usage: cloudable approvals create --action ${ACTION_TYPES.join("|")} --reason <reason> [--machine <machine>]`;
+  const usage = usageFor(
+    `approvals create --action ${ACTION_TYPES.join("|")} --reason <reason> [--machine <machine>]`,
+  );
   const args = parseArgs(argv, readSpec({ values: ["action", "reason", "machine"] }));
   const actionType = oneOf(requiredFlag(args, "action", usage), ACTION_TYPES, "action");
   const targetMachineId = args.flags.machine ? await machineId(args.flags.machine) : null;

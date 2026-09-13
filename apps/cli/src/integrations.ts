@@ -12,6 +12,7 @@ import { oneOf, parseArgs, readSpec, required, requiredFlag } from "./args";
 import { CliError, EXIT } from "./errors";
 import { authenticatedApiRequest, postJson } from "./http-client";
 import { dash, printEmpty, printFields, printJson, printTable, shortTime } from "./output";
+import { usageFor } from "./program";
 
 const KINDS = ["idp", "cloud", "secret_store"] as const;
 const PROVIDERS = ["azure", "docker", "fake"] as const;
@@ -53,7 +54,9 @@ export async function runIntegrationsListCommand(argv: ReadonlyArray<string>): P
 }
 
 export async function runIntegrationsConnectCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = `usage: cloudable integrations connect --kind ${KINDS.join("|")} --identifier <identifier> [--provider ${PROVIDERS.join("|")}] [--config <json>]`;
+  const usage = usageFor(
+    `integrations connect --kind ${KINDS.join("|")} --identifier <identifier> [--provider ${PROVIDERS.join("|")}] [--config <json>]`,
+  );
   const args = parseArgs(argv, readSpec({ values: ["kind", "identifier", "provider", "config"] }));
   const kind = oneOf(requiredFlag(args, "kind", usage), KINDS, "kind");
   const identifier = requiredFlag(args, "identifier", usage);
@@ -96,12 +99,7 @@ export async function runIntegrationsConnectCommand(argv: ReadonlyArray<string>)
 
 export async function runIntegrationsDisconnectCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const id = required(
-    args,
-    0,
-    "an integration id",
-    "usage: cloudable integrations disconnect <id>",
-  );
+  const id = required(args, 0, "an integration id", usageFor("integrations disconnect <id>"));
   await authenticatedApiRequest<{ ok: true }>(
     `/api/v1/integrations/${id}/disconnect`,
     postJson({}),

@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 // ---------------------------------------------------------------------------
 // Entry point and router. The command path is resolved against the registry
 // in `help.ts`, so the commands that run and the commands that help lists
@@ -14,6 +15,7 @@ import {
   COMMANDS,
   commandPath,
   isHelpFlag,
+  isVersionFlag,
   renderCommandHelp,
   renderRootHelp,
   resolve,
@@ -36,6 +38,14 @@ async function main(): Promise<void> {
 
   if (argv.length === 0 || isHelpFlag(argv[0])) {
     console.log(renderRootHelp());
+    return;
+  }
+
+  // `--version` is a flag as well as a command, because both are what people
+  // try. The command carries `--json`; the flag is the bare report.
+  if (isVersionFlag(argv[0])) {
+    const { runVersionCommand } = await import("./version");
+    runVersionCommand(argv.slice(1));
     return;
   }
 

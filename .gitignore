@@ -4,6 +4,8 @@ dist/
 build/
 *.log
 *.tsbuildinfo
+# `bun build --compile` scratch file, left behind when a build is interrupted
+*.bun-build
 .env
 .env.*
 !.env.example

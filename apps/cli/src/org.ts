@@ -13,6 +13,7 @@ import { authenticatedApiRequest, patchJson, query } from "./http-client";
 import { type OrgWire, currentActor, currentIdentity, fetchOrg } from "./identity";
 import { packageEdits } from "./machines";
 import { dash, printEmpty, printFields, printJson, printTable } from "./output";
+import { usageFor } from "./program";
 
 const APPROVAL_ACTIONS = [
   "snapshot_restore",
@@ -76,8 +77,9 @@ function approvalModes(values: ReadonlyArray<string>): Record<string, string> {
 }
 
 export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage =
-    "usage: cloudable org update [--name <name>] [--logging-tier 1|2|3] [--retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode>]";
+  const usage = usageFor(
+    "org update [--name <name>] [--logging-tier 1|2|3] [--retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode>]",
+  );
   const args = parseArgs(
     argv,
     readSpec({
@@ -144,8 +146,9 @@ export async function runOrgPackagesListCommand(argv: ReadonlyArray<string>): Pr
 }
 
 export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage =
-    "usage: cloudable org packages set [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>]";
+  const usage = usageFor(
+    "org packages set [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>]",
+  );
   const args = parseArgs(argv, readSpec({ repeatable: ["add", "pin", "remove"] }));
   const { upserts, removals } = packageEdits(args);
   if (upserts.length === 0 && removals.length === 0) {

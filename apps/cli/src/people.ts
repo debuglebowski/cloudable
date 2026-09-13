@@ -11,6 +11,7 @@ import { UsageError } from "./errors";
 import { authenticatedApiRequest, patchJson, postJson } from "./http-client";
 import { type PersonWire, listPeople } from "./identity";
 import { printEmpty, printFields, printJson, printTable, shortTime } from "./output";
+import { usageFor } from "./program";
 import { personId } from "./resolve";
 
 interface OffboardResult {
@@ -50,7 +51,7 @@ export async function runPeopleListCommand(argv: ReadonlyArray<string>): Promise
 }
 
 export async function runPeopleCreateCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable people create --email <email> --role <role>";
+  const usage = usageFor("people create --email <email> --role <role>");
   const args = parseArgs(argv, readSpec({ values: ["email", "role"] }));
   const person = await authenticatedApiRequest<PersonWire>(
     "/api/v1/people",
@@ -67,7 +68,7 @@ export async function runPeopleCreateCommand(argv: ReadonlyArray<string>): Promi
 }
 
 export async function runPeopleUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable people update <email|id> [--email <email>] [--role <role>]";
+  const usage = usageFor("people update <email|id> [--email <email>] [--role <role>]");
   const args = parseArgs(argv, readSpec({ values: ["email", "role"] }));
   const id = await personId(required(args, 0, "a person", usage));
   const payload = patchable(args, ["email", "role"]);
@@ -87,9 +88,7 @@ export async function runPeopleUpdateCommand(argv: ReadonlyArray<string>): Promi
 async function setActive(argv: ReadonlyArray<string>, active: boolean): Promise<void> {
   const verb = active ? "activate" : "deactivate";
   const args = parseArgs(argv, readSpec());
-  const id = await personId(
-    required(args, 0, "a person", `usage: cloudable people ${verb} <email|id>`),
-  );
+  const id = await personId(required(args, 0, "a person", usageFor(`people ${verb} <email|id>`)));
   const person = await authenticatedApiRequest<PersonWire>(
     `/api/v1/people/${id}/active`,
     patchJson({ active }),
@@ -133,7 +132,7 @@ function printOffboard(result: OffboardResult): void {
 }
 
 export async function runOffboardStartCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable offboard start <email|id> --reason <reason>";
+  const usage = usageFor("offboard start <email|id> --reason <reason>");
   const args = parseArgs(argv, readSpec({ values: ["reason"] }));
   const target = await personId(required(args, 0, "a person", usage));
   const result = await authenticatedApiRequest<OffboardResult>(
@@ -149,12 +148,7 @@ export async function runOffboardStartCommand(argv: ReadonlyArray<string>): Prom
 
 export async function runOffboardSyncCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const approvalId = required(
-    args,
-    0,
-    "an approval id",
-    "usage: cloudable offboard sync <approvalId>",
-  );
+  const approvalId = required(args, 0, "an approval id", usageFor("offboard sync <approvalId>"));
   const result = await authenticatedApiRequest<OffboardResult>(
     `/api/v1/offboarding/${approvalId}/sync`,
     postJson({}),

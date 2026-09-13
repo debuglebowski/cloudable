@@ -9,6 +9,7 @@
 import { oneOf, parseArgs, positiveInt, readSpec, required, requiredFlag } from "./args";
 import { authenticatedApiRequest, postJson, query } from "./http-client";
 import { dash, printEmpty, printFields, printJson, printTable, shortTime } from "./output";
+import { usageFor } from "./program";
 import { machineId } from "./resolve";
 
 interface SnapshotView {
@@ -87,7 +88,7 @@ export async function runSnapshotsListCommand(argv: ReadonlyArray<string>): Prom
 
 export async function runSnapshotsGetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const id = required(args, 0, "a snapshot id", "usage: cloudable snapshots get <snapshotId>");
+  const id = required(args, 0, "a snapshot id", usageFor("snapshots get <snapshotId>"));
   const snapshot = await authenticatedApiRequest<SnapshotView>(`/api/v1/archive/snapshots/${id}`);
   if (args.booleans.has("json")) {
     printJson(snapshot);
@@ -112,7 +113,7 @@ export async function runSnapshotsGetCommand(argv: ReadonlyArray<string>): Promi
 
 export async function runSnapshotsCostCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const id = required(args, 0, "a snapshot id", "usage: cloudable snapshots cost <snapshotId>");
+  const id = required(args, 0, "a snapshot id", usageFor("snapshots cost <snapshotId>"));
   const estimate = await authenticatedApiRequest<{
     snapshotId: string;
     estimatedCostUsd: number;
@@ -131,8 +132,9 @@ export async function runSnapshotsCostCommand(argv: ReadonlyArray<string>): Prom
 }
 
 export async function runSnapshotsRestoreCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage =
-    "usage: cloudable snapshots restore <snapshotId> --mode data|config|full --target <machine> --reason <reason> [--confirm-secret-bindings]";
+  const usage = usageFor(
+    "snapshots restore <snapshotId> --mode data|config|full --target <machine> --reason <reason> [--confirm-secret-bindings]",
+  );
   const args = parseArgs(
     argv,
     readSpec({
@@ -182,7 +184,7 @@ export async function runSnapshotsRestoreSyncCommand(argv: ReadonlyArray<string>
     args,
     0,
     "an approval id",
-    "usage: cloudable snapshots restore-sync <approvalId>",
+    usageFor("snapshots restore-sync <approvalId>"),
   );
   const result = await authenticatedApiRequest<RestoreResult>(
     `/api/v1/archive/restores/${approvalId}/sync`,
@@ -201,8 +203,8 @@ export async function runSnapshotsRestoreSyncCommand(argv: ReadonlyArray<string>
 
 async function legalHold(argv: ReadonlyArray<string>, on: boolean): Promise<void> {
   const usage = on
-    ? "usage: cloudable snapshots legal-hold set <snapshotId> --reason <reason>"
-    : "usage: cloudable snapshots legal-hold clear <snapshotId>";
+    ? usageFor("snapshots legal-hold set <snapshotId> --reason <reason>")
+    : usageFor("snapshots legal-hold clear <snapshotId>");
   const args = parseArgs(argv, readSpec({ values: on ? ["reason"] : [] }));
   const id = required(args, 0, "a snapshot id", usage);
 

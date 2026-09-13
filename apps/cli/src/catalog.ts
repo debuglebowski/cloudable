@@ -11,6 +11,7 @@
 import { oneOf, parseArgs, readSpec, required } from "./args";
 import { authenticatedApiRequest } from "./http-client";
 import { dash, printEmpty, printFields, printJson, printTable } from "./output";
+import { usageFor } from "./program";
 
 const KINDS = ["region", "image", "sku"] as const;
 
@@ -34,7 +35,7 @@ interface Capabilities {
 }
 
 export async function runCatalogListCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = `usage: cloudable catalog list ${KINDS.join("|")} [--provider azure]`;
+  const usage = usageFor(`catalog list ${KINDS.join("|")} [--provider azure]`);
   const args = parseArgs(argv, readSpec({ values: ["provider"] }));
   const kind = oneOf(required(args, 0, "a kind", usage), KINDS, "kind");
   const provider = oneOf(args.flags.provider ?? "azure", ["azure"] as const, "provider");
@@ -71,7 +72,7 @@ export async function runCatalogListCommand(argv: ReadonlyArray<string>): Promis
 }
 
 export async function runCatalogSyncCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable catalog sync regions|sizes";
+  const usage = usageFor("catalog sync regions|sizes");
   const args = parseArgs(argv, readSpec());
   const what = oneOf(required(args, 0, "regions or sizes", usage), ["regions", "sizes"], "kind");
 

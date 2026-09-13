@@ -278,4 +278,8 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     const { runHealthCommand } = await import("./health");
     await runHealthCommand(rest);
   },
+  version: async (rest) => {
+    const { runVersionCommand } = await import("./version");
+    runVersionCommand(rest);
+  },
 };

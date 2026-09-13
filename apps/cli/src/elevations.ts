@@ -10,6 +10,7 @@
 import { oneOf, parseArgs, readSpec, required, requiredFlag } from "./args";
 import { authenticatedApiRequest, postJson } from "./http-client";
 import { dash, printEmpty, printFields, printJson, printTable, shortTime } from "./output";
+import { usageFor } from "./program";
 import { machineId } from "./resolve";
 
 type ElevationLevel = "file_recovery" | "shell";
@@ -54,8 +55,9 @@ function printElevation(elevation: Elevation): void {
 }
 
 export async function runElevationRequestCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage =
-    "usage: cloudable elevation request --machine <machine> --level file_recovery|shell --reason <reason>";
+  const usage = usageFor(
+    "elevation request --machine <machine> --level file_recovery|shell --reason <reason>",
+  );
   const args = parseArgs(argv, readSpec({ values: ["machine", "level", "reason"] }));
   const level = oneOf(
     requiredFlag(args, "level", usage),
@@ -109,7 +111,7 @@ async function elevationAction(
   verb: "get" | "sync" | "expire",
 ): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const id = required(args, 0, "an elevation id", `usage: cloudable elevation ${verb} <id>`);
+  const id = required(args, 0, "an elevation id", usageFor(`elevation ${verb} <id>`));
   const path = verb === "get" ? `/api/v1/elevations/${id}` : `/api/v1/elevations/${id}/${verb}`;
   const elevation = await authenticatedApiRequest<Elevation>(
     path,
