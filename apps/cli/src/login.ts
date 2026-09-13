@@ -39,6 +39,7 @@ import type {
 } from "@cloudable/contracts";
 import { config } from "./config";
 import { generateRawEd25519KeyPair } from "./ed25519-keys";
+import { CliError, EXIT } from "./errors";
 import { apiRequest } from "./http-client";
 import { currentIdentity } from "./identity";
 import { saveSession } from "./session";
@@ -180,6 +181,25 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
 
   const expiresAt = new Date(response.expiresAt);
   const certificateBlob = certificateBlobFromLine(response.certificate);
+
+  // A control plane older than this CLI answers without a `token` — it
+  // still has the two separate logins this replaced. Caught here, because
+  // storing an empty session and letting the next call report "not logged
+  // in" describes the user's situation as the exact opposite of what it is:
+  // the browser sign-in worked and the certificate below was issued.
+  if (typeof response.token !== "string" || response.token === "") {
+    throw new CliError(
+      [
+        `${config.apiUrl} did not return an API token.`,
+        "",
+        "That control plane is older than this CLI, from before `cloudable login` replaced",
+        "`cloudable auth login`. Your certificate was issued and loaded, so SSH access is",
+        "unaffected; every other command needs the control plane updated to a build that",
+        "returns one.",
+      ].join("\n"),
+      EXIT.conflict,
+    );
+  }
 
   // Saved before the ssh-agent step, which is the part that can fail on a
   // box with no agent. Being signed in to the API should not depend on
