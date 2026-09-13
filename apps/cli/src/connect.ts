@@ -1,22 +1,4 @@
-// ---------------------------------------------------------------------------
-// `cloudable connect <machine>` — an interactive terminal on a machine, from
-// a terminal.
-//
-// Same two legs the console's web terminal uses (`apps/console/src/components/
-// terminal/terminal-session.tsx`): mint a session, then attach to it over a
-// websocket that the control plane relays to the machine's tunnel daemon. No
-// inbound port is involved anywhere (invariant 7) — the daemon's connection is
-// outbound and already established; this rides it.
-//
-// The attach route runs the same credential check as every other endpoint
-// and rejects only a *wrong* `Origin`, so a CLI that sends none passes it
-// (`http/handlers/tunnel.ts`). The session token is replayed server-side; it
-// never touches this process.
-//
-// Ctrl-] detaches. Ctrl-C is the remote shell's, not ours — raw mode means
-// every keystroke goes down the wire, which is the point.
-// ---------------------------------------------------------------------------
-import * as os from "node:os";
+import { MACHINE_OS_USER } from "@cloudable/contracts";
 import { parseArgs, required } from "./args";
 import { config } from "./config";
 import { CliError, EXIT } from "./errors";
@@ -72,7 +54,7 @@ export async function runConnectCommand(argv: ReadonlyArray<string>): Promise<vo
   const usage = usageFor("connect <machine> [--os-user <user>]");
   const args = parseArgs(argv, { values: ["os-user"] });
   const target = required(args, 0, "a machine", usage);
-  const osUser = args.flags["os-user"] ?? os.userInfo().username;
+  const osUser = args.flags["os-user"] ?? MACHINE_OS_USER;
 
   const { orgId } = await currentIdentity();
   const id = await machineId(target);

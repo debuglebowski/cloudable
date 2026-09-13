@@ -1,5 +1,23 @@
 import type { PageInfo, PaginatedRequest } from "../common";
 
+/**
+ * The single Unix user every Cloudable machine is provisioned with
+ * (`ProvisioningService.azure.ts`'s `osProfile.adminUsername`).
+ *
+ * Shared rather than repeated because the CLI has to agree with the
+ * provisioner exactly: `cloudable connect` hands this to `su` on the
+ * machine, and `cloudable login` bakes it into the certificate's sole
+ * principal. Both used to default to the *local* username instead, which
+ * works only if your laptop account happens to be named the same as a user
+ * on a VM you have never logged into — so `connect` failed with "su: user
+ * kalle does not exist" for everyone whose account is not called
+ * "cloudable".
+ *
+ * One machine, one owner, one OS user (invariant 3). There is no per-person
+ * account to look up, so this is a constant and not a lookup.
+ */
+export const MACHINE_OS_USER = "cloudable";
+
 export type MachineState =
   | "provisioning"
   | "running"
