@@ -318,6 +318,32 @@ const getClients = (): Effect.Effect<ArmClients, ProvisioningError> =>
     return cached;
   });
 
+/**
+ * Azure reports a VM's power state as `PowerState/<x>` in its instance view, or omits
+ * it entirely while the VM is still being built or has failed provisioning.
+ *
+ * A machine that is off is `stopped`, not an error. Reporting every non-running state
+ * as `error` is what made a merely deallocated machine show up in the console as
+ * "Error — provider reconcile reported state error", which is both wrong and alarming.
+ * Transitional states report `provisioning`: the machine is mid-move, and the next
+ * reconcile pass a minute later sees where it landed.
+ */
+export function machineStateForPowerState(powerState: string | undefined): MachineStatus["state"] {
+  switch (powerState) {
+    case "PowerState/running":
+      return "running";
+    case "PowerState/stopped":
+    case "PowerState/deallocated":
+      return "stopped";
+    case "PowerState/starting":
+    case "PowerState/stopping":
+    case "PowerState/deallocating":
+      return "provisioning";
+    default:
+      return "error";
+  }
+}
+
 /** Azure SDK errors are `RestError`-shaped (`.statusCode`) but not a class
  * this package depends on directly — read the field defensively rather
  * than importing `@azure/core-rest-pipeline` just for an instanceof check. */
@@ -436,6 +462,54 @@ const dataDiskIdFor = (
 ): string =>
   `/subscriptions/${clients.subscriptionId}/resourceGroups/${resourceGroup}/providers/Microsoft.Compute/disks/${names.dataDisk}`;
 
+/**
+ * Deletes whatever a failed `create` had already built. The NIC, public IP and data
+ * disk are created before the VM, so a VM creation that fails — a rejected SKU, an
+ * over-long admin password, a region without capacity — used to leave all three behind
+ * permanently, billing, with nothing in the system that would ever clean them up. Four
+ * machines' worth were found orphaned in production on 2026-09-13.
+ *
+ * Best-effort by construction: every delete swallows its own failure, because this runs
+ * while an error is already on its way to the caller and must never replace it with a
+ * second one. Safe to run against resources that were never created — `create` is only
+ * called for a machine with no live infrastructure (see `reconcile-machine.ts`), and
+ * every name here is derived from that machine's own id.
+ */
+const rollbackPartialCreate = (
+  clients: ArmClients,
+  rg: string,
+  names: ReturnType<typeof namesFor>,
+): Effect.Effect<void> =>
+  Effect.all(
+    [
+      runArm(() => clients.compute.virtualMachines.beginDeleteAndWait(rg, names.vm)),
+      runArm(() => clients.compute.disks.beginDeleteAndWait(rg, names.osDisk)),
+      runArm(() => clients.compute.disks.beginDeleteAndWait(rg, names.dataDisk)),
+      runArm(() => clients.network.networkInterfaces.beginDeleteAndWait(rg, names.nic)),
+      runArm(() => clients.network.publicIPAddresses.beginDeleteAndWait(rg, names.pip)),
+    ].map((step) => step.pipe(Effect.ignore)),
+    // Sequential, not concurrent: a NIC cannot be deleted while the VM still
+    // references it, nor a public IP while the NIC does.
+    { discard: true },
+  );
+
+/**
+ * Point-in-time copy of one disk, named after it. A snapshot's location must match its
+ * source disk's, so it is read off the disk rather than assumed to match the machine's
+ * own region.
+ */
+const snapshotOf = (
+  clients: ArmClients,
+  rg: string,
+  disk: { name?: string; id?: string; location?: string },
+): Effect.Effect<unknown, ProvisioningError> =>
+  runArm(() =>
+    clients.compute.snapshots.beginCreateOrUpdateAndWait(rg, `${disk.name}-snap`, {
+      location: disk.location ?? "",
+      creationData: { createOption: "Copy", sourceResourceId: disk.id as string },
+    }),
+  );
+
 const service: ProvisioningService = {
   create: (desc: MachineDescriptor) =>
     Effect.gen(function* () {
@@ -463,6 +537,9 @@ const service: ProvisioningService = {
       const names = namesFor(desc.machineId, desc.name);
       const tags = { "cloudable-machine-id": desc.machineId, "cloudable-org-id": desc.orgId };
 
+      // Everything from here on creates real resources, so anything that fails part
+      // way through has to take its own leftovers with it — see
+      // `rollbackPartialCreate`.
       const nic = yield* createNetworking(
         clients,
         config.azureMachinesResourceGroup,
@@ -517,7 +594,24 @@ const service: ProvisioningService = {
         externalId: vm.id ?? null,
         reportedPackages: desc.packages ?? [],
       } satisfies MachineStatus;
-    }),
+    }).pipe(
+      // `catchTag` rather than `tapError`: the rollback needs the clients and names,
+      // which only exist inside the generator, so it is re-derived here from the
+      // descriptor — the same pure `namesFor(machineId, name)` the body used.
+      Effect.catchTag("ProvisioningError", (error) =>
+        Effect.gen(function* () {
+          const clients = yield* getClients().pipe(Effect.option);
+          if (clients._tag === "Some") {
+            yield* rollbackPartialCreate(
+              clients.value,
+              config.azureMachinesResourceGroup,
+              namesFor(desc.machineId, desc.name),
+            );
+          }
+          return yield* Effect.fail(error);
+        }),
+      ),
+    ),
 
   archive: (machineId: string, _provider, externalId) =>
     Effect.gen(function* () {
@@ -529,39 +623,30 @@ const service: ProvisioningService = {
         runArm(() => clients.compute.virtualMachines.beginDeallocateAndWait(rg, names.vm)),
       );
 
-      // A snapshot's location must match its source disk's — fetch the disk
-      // first rather than assuming it matches the machine's own region. A disk
-      // that is already gone is nothing to snapshot, not a reason to abandon
-      // the rest of the teardown.
+      // BOTH disks are snapshotted, not just the OS disk. The console's own archive
+      // dialog tells the person clicking it that "its data can still be restored from
+      // Archive until the retention window expires" — with only the OS disk copied and
+      // the data disk deleted outright, that sentence was false, and the machine's
+      // actual data was destroyed by the operation that promised to keep it.
+      //
+      // Restoring from these is still unbuilt (docs/lifecycle.md), but a snapshot that
+      // exists can be restored from later, while data deleted today cannot.
+      //
+      // A disk that is already gone is nothing to snapshot, not a reason to abandon the
+      // rest of the teardown.
       const osDisk = yield* tolerateAlreadyGone(
         runArm(() => clients.compute.disks.get(rg, names.osDisk)),
       );
+      if (osDisk) yield* snapshotOf(clients, rg, osDisk);
 
-      // Real snapshot of the OS disk — its `diskSizeGB` is the real size an
-      // eventual pricing-estimate wire-up would read, in place of
-      // `PLACEHOLDER_SNAPSHOT_SIZE_BYTES` (domain/archive/pricing.ts). Not
-      // wired up by this change — `MachineStatus` has no `sizeBytes` field
-      // yet; that's a small, separate follow-up.
-      if (osDisk) {
-        yield* runArm(() =>
-          clients.compute.snapshots.beginCreateOrUpdateAndWait(rg, `${names.osDisk}-snap`, {
-            location: osDisk.location ?? "",
-            creationData: {
-              createOption: "Copy",
-              sourceResourceId: osDisk.id as string,
-            },
-          }),
-        );
-      }
+      const dataDisk = yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.disks.get(rg, names.dataDisk)),
+      );
+      if (dataDisk) yield* snapshotOf(clients, rg, dataDisk);
 
-      // No restore-side ARM code exists in this build at all
-      // (docs/lifecycle.md: "adding one is out of this unit's file scope") —
-      // the data disk buys nothing kept around, so it's deleted along with
-      // everything else rather than orphaned.
-      //
-      // Each delete tolerates only its OWN target being gone, and the sequence
-      // always runs to the end: these five resources are independent, and one
-      // missing NIC must never leave a public IP or a disk behind.
+      // Teardown. Each delete tolerates only its OWN target being gone, and the
+      // sequence always runs to the end: these five resources are independent, and
+      // one missing NIC must never leave a public IP or a disk behind.
       yield* tolerateAlreadyGone(
         runArm(() => clients.compute.virtualMachines.beginDeleteAndWait(rg, names.vm)),
       );
@@ -592,7 +677,7 @@ const service: ProvisioningService = {
 
       return {
         machineId,
-        state: powerState === "PowerState/running" ? "running" : "error",
+        state: machineStateForPowerState(powerState),
         externalId: resourceId,
       } satisfies MachineStatus;
     }),

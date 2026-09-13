@@ -31,8 +31,10 @@ const PROVISIONING_GRACE_PERIOD_SQL = sql`interval '3 minutes'`;
  * entirely). */
 function isWritableState(
   state: MachineStatus["state"],
-): state is "provisioning" | "running" | "error" {
-  return state === "provisioning" || state === "running" || state === "error";
+): state is "provisioning" | "running" | "stopped" | "error" {
+  return (
+    state === "provisioning" || state === "running" || state === "stopped" || state === "error"
+  );
 }
 
 /**
