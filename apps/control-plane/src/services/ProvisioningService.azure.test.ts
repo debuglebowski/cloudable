@@ -4,6 +4,7 @@ import {
   classifyAzureError,
   cloudInitFor,
   imageReferenceFor,
+  machineStateForPowerState,
   namesFor,
   parseVmNameFromResourceId,
   throwawayAdminPassword,
@@ -224,5 +225,27 @@ describe("classifyAzureError", () => {
     expect(classifyAzureError({ statusCode: 500 })).toBe("provider_error");
     expect(classifyAzureError(new Error("boom"))).toBe("provider_error");
     expect(classifyAzureError(undefined)).toBe("provider_error");
+  });
+});
+
+describe("machineStateForPowerState", () => {
+  test("a machine that is off is stopped, not an error", () => {
+    expect(machineStateForPowerState("PowerState/deallocated")).toBe("stopped");
+    expect(machineStateForPowerState("PowerState/stopped")).toBe("stopped");
+  });
+
+  test("running is running", () => {
+    expect(machineStateForPowerState("PowerState/running")).toBe("running");
+  });
+
+  test("a machine mid-transition is not settled yet, not broken", () => {
+    expect(machineStateForPowerState("PowerState/starting")).toBe("provisioning");
+    expect(machineStateForPowerState("PowerState/stopping")).toBe("provisioning");
+    expect(machineStateForPowerState("PowerState/deallocating")).toBe("provisioning");
+  });
+
+  test("no power state at all means the VM never came up", () => {
+    expect(machineStateForPowerState(undefined)).toBe("error");
+    expect(machineStateForPowerState("PowerState/unknown")).toBe("error");
   });
 });

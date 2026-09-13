@@ -92,7 +92,15 @@ export interface ReimageDescriptor {
 
 export interface MachineStatus {
   machineId: string;
-  state: "provisioning" | "running" | "archived" | "missing" | "error";
+  /**
+   * `stopped` is a machine that is deliberately off, not a fault. `machines.state`
+   * has carried that value since the schema was written and the console has a badge
+   * for it, but no adapter ever produced it: the azure adapter reported every power
+   * state other than `running` as `error`, so a deallocated machine showed up in the
+   * console as "Error — provider reconcile reported state error". Observed in
+   * production on 2026-09-12, on machines a failed archive had deallocated.
+   */
+  state: "provisioning" | "running" | "stopped" | "archived" | "missing" | "error";
   externalId: string | null;
   /**
    * Packages/software actually observed running on the machine as of this
