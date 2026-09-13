@@ -17,6 +17,7 @@ beforeEach(() => {
 
 afterEach(() => {
   process.env.CLOUDABLE_HOME = undefined;
+  process.env.CLOUDABLE_TOKEN = undefined;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -26,10 +27,10 @@ describe("session", () => {
   });
 
   test("saveSession then loadSession round-trips, with 0600 permissions", () => {
-    saveSession({ cookie: "token=abc123", email: "priya@acme.com" });
+    saveSession({ token: "cli-token.abc123", email: "priya@acme.com" });
 
     const loaded = loadSession();
-    expect(loaded).toEqual({ cookie: "token=abc123", email: "priya@acme.com" });
+    expect(loaded).toEqual({ token: "cli-token.abc123", email: "priya@acme.com" });
 
     const filePath = path.join(tmpDir, "session.json");
     const mode = fs.statSync(filePath).mode & 0o777;
@@ -37,7 +38,7 @@ describe("session", () => {
   });
 
   test("clearSession removes a saved session, and is a no-op when there isn't one", () => {
-    saveSession({ cookie: "token=abc123", email: "priya@acme.com" });
+    saveSession({ token: "cli-token.abc123", email: "priya@acme.com" });
     expect(loadSession()).toBeDefined();
 
     clearSession();
@@ -48,7 +49,7 @@ describe("session", () => {
   });
 
   test("requireSession throws a clear, actionable error when not logged in", () => {
-    expect(() => requireSession()).toThrow(/cloudable auth login/);
+    expect(() => requireSession()).toThrow(/cloudable login/);
   });
 
   test("loadSession returns undefined for a malformed session file rather than throwing", () => {
@@ -57,9 +58,20 @@ describe("session", () => {
     expect(loadSession()).toBeUndefined();
   });
 
+  test("CLOUDABLE_TOKEN is used when set, without a session file", () => {
+    process.env.CLOUDABLE_TOKEN = "cli-token.from-ci";
+    expect(loadSession()).toEqual({ token: "cli-token.from-ci", email: "(CLOUDABLE_TOKEN)" });
+  });
+
+  test("CLOUDABLE_TOKEN wins over a saved session, so CI is never silently the wrong account", () => {
+    saveSession({ token: "cli-token.on-disk", email: "priya@acme.com" });
+    process.env.CLOUDABLE_TOKEN = "cli-token.from-ci";
+    expect(loadSession()?.token).toBe("cli-token.from-ci");
+  });
+
   test("loadSession returns undefined when the stored shape is missing fields", () => {
     fs.mkdirSync(tmpDir, { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "session.json"), JSON.stringify({ cookie: "only-cookie" }));
+    fs.writeFileSync(path.join(tmpDir, "session.json"), JSON.stringify({ token: "only-a-token" }));
     expect(loadSession()).toBeUndefined();
   });
 });

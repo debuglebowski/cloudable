@@ -45,9 +45,13 @@ From a checkout:
 ```bash
 bun link --cwd apps/cli          # puts both `cloudable` and `cable` on PATH
 export CLOUDABLE_API_URL=https://cloudable.example.com
-cloudable auth login
+cloudable login
 cloudable machines list
 ```
+
+`cloudable login` opens your browser to sign in, with a password or your org's SSO, and comes back
+with both credentials you need: an API token every command uses, and an SSH certificate in your
+ssh-agent. For CI, where there is no browser to sign in with, set `CLOUDABLE_TOKEN` instead.
 
 From a release: take `cloudable-cli-linux-x64` or `-arm64` off the GitHub release, put it on your
 PATH as `cloudable`, and symlink the alias next to it.

@@ -71,6 +71,8 @@ const IssueCertificateResponse = Schema.Struct({
   certificate: Schema.String,
   fingerprint: Schema.String,
   expiresAt: Schema.String,
+  token: Schema.String,
+  tokenExpiresAt: Schema.String,
 });
 
 const CertificateSummary = Schema.Struct({

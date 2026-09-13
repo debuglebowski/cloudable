@@ -36,6 +36,15 @@ export interface IssueCertificateResponse {
   certificate: string;
   fingerprint: string;
   expiresAt: string;
+  /**
+   * The CLI's API credential, sent as `Authorization: Bearer` on every other
+   * `cloudable` command (see `apps/control-plane/src/services/CliToken.ts`).
+   * Returned here so one browser sign-in yields both credentials: the
+   * certificate gets you onto a machine over SSH, this gets you into the API.
+   */
+  token: string;
+  /** When `token` stops being accepted. Much longer than `expiresAt` — a bearer token is re-checked against the live `people` row on every call, an SSH certificate is checked by nothing once issued. */
+  tokenExpiresAt: string;
 }
 
 export interface CertificateSummary {

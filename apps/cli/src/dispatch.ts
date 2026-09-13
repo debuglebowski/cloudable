@@ -20,21 +20,13 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     await runConnectCommand(rest);
   },
 
-  "auth login": async (rest) => {
-    const { runAuthLoginCommand } = await import("./auth");
-    await runAuthLoginCommand(rest);
+  logout: async () => {
+    const { runLogoutCommand } = await import("./auth");
+    runLogoutCommand();
   },
-  "auth logout": async () => {
-    const { runAuthLogoutCommand } = await import("./auth");
-    runAuthLogoutCommand();
-  },
-  "auth status": async () => {
-    const { runAuthStatusCommand } = await import("./auth");
-    runAuthStatusCommand();
-  },
-  "auth whoami": async (rest) => {
-    const { runAuthWhoamiCommand } = await import("./auth");
-    await runAuthWhoamiCommand(rest);
+  whoami: async (rest) => {
+    const { runWhoamiCommand } = await import("./auth");
+    await runWhoamiCommand(rest);
   },
 
   "machines list": async (rest) => {
