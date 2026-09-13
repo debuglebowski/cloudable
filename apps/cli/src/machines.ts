@@ -18,6 +18,7 @@ import { type Args, oneOf, parseArgs, positiveInt, readSpec, required, requiredF
 import { UsageError } from "./errors";
 import { authenticatedApiRequest, patchJson, postJson } from "./http-client";
 import { dash, printEmpty, printFields, printJson, printTable, shortTime } from "./output";
+import { usageFor } from "./program";
 import { listMachines, machineId, personId } from "./resolve";
 
 /** The runtime response carries two fields the contracts copy has not caught up with. */
@@ -108,9 +109,7 @@ function printManifest(manifest: ReadonlyArray<ResolvedPackageManifestEntry>): v
 
 export async function runMachinesGetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const id = await machineId(
-    required(args, 0, "a machine", "usage: cloudable machines get <machine>"),
-  );
+  const id = await machineId(required(args, 0, "a machine", usageFor("machines get <machine>")));
   const machine = await authenticatedApiRequest<MachineDetailWire>(`/api/v1/machines/${id}`);
 
   if (args.booleans.has("json")) {
@@ -158,8 +157,9 @@ export async function runMachinesGetCommand(argv: ReadonlyArray<string>): Promis
 // create
 // ---------------------------------------------------------------------------
 
-const CREATE_USAGE =
-  "usage: cloudable machines create --owner <email|id> --provider azure|docker|fake --size <sku> --image <image> [--region <region>] [--name <name>]";
+const CREATE_USAGE = usageFor(
+  "machines create --owner <email|id> --provider azure|docker|fake --size <sku> --image <image> [--region <region>] [--name <name>]",
+);
 
 export async function runMachinesCreateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(
@@ -199,7 +199,7 @@ export async function runMachinesCreateCommand(argv: ReadonlyArray<string>): Pro
 export async function runMachinesRestartCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
   const id = await machineId(
-    required(args, 0, "a machine", "usage: cloudable machines restart <machine>"),
+    required(args, 0, "a machine", usageFor("machines restart <machine>")),
   );
   const result = await authenticatedApiRequest<RestartResponse>(
     `/api/v1/machines/${id}/restart`,
@@ -213,7 +213,7 @@ export async function runMachinesRestartCommand(argv: ReadonlyArray<string>): Pr
 }
 
 export async function runMachinesUpgradeCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable machines upgrade <machine> --image <image>";
+  const usage = usageFor("machines upgrade <machine> --image <image>");
   const args = parseArgs(argv, readSpec({ values: ["image"] }));
   const id = await machineId(required(args, 0, "a machine", usage));
   const targetImage = requiredFlag(args, "image", usage);
@@ -243,7 +243,7 @@ export async function runMachinesUpgradeCommand(argv: ReadonlyArray<string>): Pr
 export async function runMachinesReconcileCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
   const id = await machineId(
-    required(args, 0, "a machine", "usage: cloudable machines reconcile <machine>"),
+    required(args, 0, "a machine", usageFor("machines reconcile <machine>")),
   );
   const result = await authenticatedApiRequest<ReconcileTriggerResponse>(
     `/api/v1/config/machines/${id}/reconcile`,
@@ -261,7 +261,7 @@ export async function runMachinesReconcileCommand(argv: ReadonlyArray<string>): 
 export async function runMachinesArchiveCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec({ values: ["approval"] }));
   const id = await machineId(
-    required(args, 0, "a machine", "usage: cloudable machines archive <machine> [--approval <id>]"),
+    required(args, 0, "a machine", usageFor("machines archive <machine> [--approval <id>]")),
   );
   const result = await authenticatedApiRequest<ArchiveResponse>(
     `/api/v1/archive/machines/${id}/archive`,
@@ -309,7 +309,7 @@ export function packageEdits(args: Args): {
 export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
   const id = await machineId(
-    required(args, 0, "a machine", "usage: cloudable machines packages list <machine>"),
+    required(args, 0, "a machine", usageFor("machines packages list <machine>")),
   );
   const machine = await authenticatedApiRequest<MachineDetailWire>(`/api/v1/machines/${id}`);
   if (args.booleans.has("json")) {
@@ -332,8 +332,9 @@ export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>
 }
 
 export async function runMachinesPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage =
-    "usage: cloudable machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>]";
+  const usage = usageFor(
+    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>]",
+  );
   const args = parseArgs(argv, readSpec({ repeatable: ["add", "pin", "remove"] }));
   const id = await machineId(required(args, 0, "a machine", usage));
   const { upserts, removals } = packageEdits(args);

@@ -12,6 +12,7 @@ import { UsageError } from "./errors";
 import { authenticatedApiRequest, authenticatedApiText, patchJson, query } from "./http-client";
 import { currentIdentity } from "./identity";
 import { dash, printEmpty, printJson, printTable } from "./output";
+import { usageFor } from "./program";
 
 const CONTROL_STATUSES = ["implemented", "manual_action_required", "not_covered"] as const;
 
@@ -118,7 +119,9 @@ export async function runComplianceFindingsCommand(argv: ReadonlyArray<string>):
 }
 
 export async function runComplianceOverrideCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = `usage: cloudable compliance override <controlId> --status ${CONTROL_STATUSES.join("|")} | --clear`;
+  const usage = usageFor(
+    `compliance override <controlId> --status ${CONTROL_STATUSES.join("|")} | --clear`,
+  );
   const args = parseArgs(argv, readSpec({ values: ["status"], booleans: ["clear"] }));
   const controlId = required(args, 0, "a control id", usage);
   const clear = args.booleans.has("clear");

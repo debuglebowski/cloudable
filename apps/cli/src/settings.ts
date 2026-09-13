@@ -14,6 +14,7 @@ import { CliError, EXIT, UsageError } from "./errors";
 import { authenticatedApiRequest, patchJson, postJson } from "./http-client";
 import { currentIdentity } from "./identity";
 import { printJson, printTable } from "./output";
+import { usageFor } from "./program";
 import { machineId } from "./resolve";
 
 interface SettingChange {
@@ -50,7 +51,7 @@ function printChanges(changes: ReadonlyArray<SettingChange>): void {
 }
 
 export async function runConfigSetCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable config set <key> <value> [--machine <machine>] [--pinned]";
+  const usage = usageFor("config set <key> <value> [--machine <machine>] [--pinned]");
   const args = parseArgs(argv, readSpec({ values: ["machine"], booleans: ["pinned"] }));
   const key = required(args, 0, "a key", usage);
   const rawValue = args.positionals[1];
@@ -92,7 +93,7 @@ async function readImportFile(path: string): Promise<unknown> {
 }
 
 export async function runConfigImportCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable config import <file|-> [--correlation-id <id>]";
+  const usage = usageFor("config import <file|-> [--correlation-id <id>]");
   const args = parseArgs(argv, readSpec({ values: ["correlation-id"] }));
   const path = required(args, 0, "a file (or - for stdin)", usage);
   const document = await readImportFile(path);

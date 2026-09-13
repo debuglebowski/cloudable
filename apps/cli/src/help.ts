@@ -10,6 +10,7 @@
 // CLOUDABLE_API_URL is set, which is exactly when someone is most likely to
 // be reading it.
 // ---------------------------------------------------------------------------
+import { programName } from "./program";
 
 export interface OptionSpec {
   readonly flag: string;
@@ -527,6 +528,13 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
     notes: ["The only command that needs no session."],
   },
   {
+    name: "version",
+    summary: "Show the version, commit and runtime",
+    notes: [
+      "Also `--version` or `-v`. Reports the build it was compiled from, so a bug report can name one.",
+    ],
+  },
+  {
     name: "help",
     summary: "Show help for a command",
     args: "[<command>] [<subcommand>]",
@@ -542,6 +550,11 @@ const ENVIRONMENT: ReadonlyArray<OptionSpec> = [
 
 export function isHelpFlag(arg: string | undefined): boolean {
   return arg === "--help" || arg === "-h";
+}
+
+/** `--version`/`-v` at the root, the same shape as the help flags. */
+export function isVersionFlag(arg: string | undefined): boolean {
+  return arg === "--version" || arg === "-v";
 }
 
 /**
@@ -576,7 +589,7 @@ export function resolve(argv: ReadonlyArray<string>): Resolved {
 }
 
 export function commandPath(chain: ReadonlyArray<CommandSpec>): string {
-  return ["cloudable", ...chain.map((c) => c.name)].join(" ");
+  return [programName(), ...chain.map((c) => c.name)].join(" ");
 }
 
 function columns(rows: ReadonlyArray<OptionSpec>): string[] {
@@ -598,7 +611,7 @@ export function renderRootHelp(): string {
   const lines = [
     TAGLINE,
     "",
-    "usage: cloudable <command> [subcommand] [options]",
+    `usage: ${programName()} <command> [subcommand] [options]`,
     "",
     "commands:",
     ...commandColumns(COMMANDS, false),
@@ -608,7 +621,7 @@ export function renderRootHelp(): string {
     "",
     "Most read commands take --json. Failures exit 2 usage, 3 not signed in, 4 denied, 5 not found, 6 refused, 7 server, 8 unreachable.",
     "",
-    "Run `cloudable <command> --help` for its subcommands and options.",
+    `Run \`${programName()} <command> --help\` for its subcommands and options.`,
   ];
   return lines.join("\n");
 }
@@ -677,7 +690,7 @@ export function unknownCommandMessage(
   candidates: ReadonlyArray<CommandSpec>,
 ): string {
   const what = chain.length === 0 ? "command" : "subcommand";
-  const prefix = chain.length === 0 ? "cloudable" : commandPath(chain);
+  const prefix = chain.length === 0 ? programName() : commandPath(chain);
   const guess = suggest(input, candidates);
   const lines = [`unknown ${what} '${input}' for \`${prefix}\``];
   if (guess) lines.push("", `did you mean '${guess}'?`);

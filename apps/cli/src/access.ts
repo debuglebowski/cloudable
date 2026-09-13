@@ -11,6 +11,7 @@ import { parseArgs, readSpec, required, requiredFlag } from "./args";
 import { authenticatedApiRequest, postJson, query } from "./http-client";
 import { currentIdentity } from "./identity";
 import { dash, printEmpty, printJson, printTable, shortTime } from "./output";
+import { usageFor } from "./program";
 
 interface SessionSummary {
   id: string;
@@ -59,7 +60,7 @@ export async function runSessionsListCommand(argv: ReadonlyArray<string>): Promi
 
 export async function runSessionsEndCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const sessionId = required(args, 0, "a session id", "usage: cloudable sessions end <sessionId>");
+  const sessionId = required(args, 0, "a session id", usageFor("sessions end <sessionId>"));
   const { orgId } = await currentIdentity();
   await authenticatedApiRequest<{ ok: true }>(
     "/api/v1/access/sessions/end",
@@ -96,7 +97,7 @@ export async function runCertsListCommand(argv: ReadonlyArray<string>): Promise<
 }
 
 export async function runCertsRevokeCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable certs revoke <certificateId> --reason <reason>";
+  const usage = usageFor("certs revoke <certificateId> --reason <reason>");
   const args = parseArgs(argv, readSpec({ values: ["reason"] }));
   const certificateId = required(args, 0, "a certificate id", usage);
   const reason = requiredFlag(args, "reason", usage);

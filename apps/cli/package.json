@@ -3,10 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "cloudable": "./src/index.ts",
+    "cable": "./src/index.ts"
+  },
   "scripts": {
     "dev": "bun run src/index.ts",
-    "build": "bun build ./src/index.ts --compile --target=bun-linux-x64 --outfile=dist/cloudable-cli-linux-x64",
-    "build:arm64": "bun build ./src/index.ts --compile --target=bun-linux-arm64 --outfile=dist/cloudable-cli-linux-arm64",
+    "build": "CLOUDABLE_BUILD_VERSION=$(bun -e \"const tag=(process.env.GITHUB_REF_NAME||'').replace(/^v/,''); console.log(tag||require('./package.json').version)\") CLOUDABLE_BUILD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) CLOUDABLE_BUILD_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) bun build ./src/index.ts --compile --target=bun-linux-x64 --env 'CLOUDABLE_BUILD_*' --outfile=dist/cloudable-cli-linux-x64",
+    "build:arm64": "CLOUDABLE_BUILD_VERSION=$(bun -e \"const tag=(process.env.GITHUB_REF_NAME||'').replace(/^v/,''); console.log(tag||require('./package.json').version)\") CLOUDABLE_BUILD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) CLOUDABLE_BUILD_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) bun build ./src/index.ts --compile --target=bun-linux-arm64 --env 'CLOUDABLE_BUILD_*' --outfile=dist/cloudable-cli-linux-arm64",
     "typecheck": "tsc -b",
     "test:unit": "bun test",
     "test:integration": "exit 0"

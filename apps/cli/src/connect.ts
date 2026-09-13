@@ -22,6 +22,7 @@ import { config } from "./config";
 import { CliError, EXIT } from "./errors";
 import { authenticatedApiRequest, postJson } from "./http-client";
 import { currentIdentity } from "./identity";
+import { usageFor } from "./program";
 import { machineId } from "./resolve";
 import { requireSession } from "./session";
 
@@ -68,7 +69,7 @@ function parseFrame(data: unknown): Frame | undefined {
 }
 
 export async function runConnectCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = "usage: cloudable connect <machine> [--os-user <user>]";
+  const usage = usageFor("connect <machine> [--os-user <user>]");
   const args = parseArgs(argv, { values: ["os-user"] });
   const target = required(args, 0, "a machine", usage);
   const osUser = args.flags["os-user"] ?? os.userInfo().username;
