@@ -57,13 +57,8 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
     name: "connect",
     summary: "Open a terminal on a machine",
     args: "<machine>",
-    options: [
-      {
-        flag: "--os-user <user>",
-        description: "Unix user to be on the machine (default: cloudable)",
-      },
-    ],
     notes: [
+      "You arrive as the machine's own Unix user, `cloudable`. There is no flag for this — one machine, one owner, one user.",
       "Rides the machine's outbound tunnel, the same path the console's web terminal uses. No inbound port is involved.",
       "Ctrl-] detaches and ends the session. Every other key goes to the remote shell, Ctrl-C included.",
       "The machine must be running and its tunnel daemon connected.",

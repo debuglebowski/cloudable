@@ -103,7 +103,6 @@ describe("TunnelRelay (against local dev Postgres)", () => {
             personId: crypto.randomUUID(),
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
-            targetOsUser: "ubuntu",
             method: "terminal",
           });
         }),
@@ -153,7 +152,6 @@ describe("TunnelRelay (against local dev Postgres)", () => {
             personId: crypto.randomUUID(),
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
-            targetOsUser: "ubuntu",
             method: "terminal",
           });
         }),
@@ -192,7 +190,6 @@ describe("TunnelRelay (against local dev Postgres)", () => {
               personId: crypto.randomUUID(),
               idpIdentity: "kalle@normain.com",
               targetMachineId: machineId,
-              targetOsUser: "ubuntu",
               method: "terminal",
             });
           }),

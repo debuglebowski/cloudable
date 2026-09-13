@@ -1,7 +1,8 @@
-// Runs against the local dev Postgres — see `../services/ssh-ca/SshCaService.test.ts` for why
-// (testcontainers timed out in this sandbox). Every row is scoped to a fresh random `orgId`.
 import { describe, expect, test } from "bun:test";
 import * as crypto from "node:crypto";
+// Runs against the local dev Postgres — see `../services/ssh-ca/SshCaService.test.ts` for why
+// (testcontainers timed out in this sandbox). Every row is scoped to a fresh random `orgId`.
+import { MACHINE_OS_USER } from "@cloudable/contracts";
 import {
   events,
   elevations,
@@ -87,7 +88,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId,
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
-          targetOsUser: "ubuntu",
           method: "terminal",
         });
       });
@@ -131,7 +131,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId: crypto.randomUUID(),
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
-          targetOsUser: "ubuntu",
           method: "ssh",
         });
       });
@@ -161,7 +160,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId: crypto.randomUUID(),
           idpIdentity: "kalle@normain.com",
           targetMachineId: crypto.randomUUID(),
-          targetOsUser: "ubuntu",
           method: "terminal",
         });
       });
@@ -186,7 +184,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId: crypto.randomUUID(),
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
-          targetOsUser: "ubuntu",
           method: "terminal",
         });
       });
@@ -209,10 +206,20 @@ describe("TunnelServer (against local dev Postgres)", () => {
     });
   });
 
-  // REQUIRED FAILURE PATH: a malformed targetOsUser must never reach a signed token — see
-  // `server.ts`'s `OS_USERNAME_PATTERN` doc comment for the real privilege-escalation
-  // scenario this closes (a value like "-c" hijacking `su`'s own argument parsing daemon-side).
-  test("REQUIRED FAILURE PATH: mintSession rejects a malformed targetOsUser before ever minting a token", async () => {
+  /**
+   * Supersedes an older test that fed `mintSession` a `targetOsUser` of
+   * `"-c"` and asserted it was refused. There is no such input any more: the
+   * field left the wire, because shape-checking it was never the point. It
+   * accepted `"root"`, and the console's terminal dialog sent exactly that,
+   * so every web terminal session ran as root on a machine whose whole model
+   * is one unprivileged user.
+   *
+   * The property worth guarding is now stronger and simpler — the session is
+   * for the machine's own user, and nothing a caller sends can change that.
+   * Asserted on the signed token's claims, which is what the daemon reads and
+   * hands to `su`.
+   */
+  test("mintSession always targets the machine's own OS user, never root", async () => {
     await withOrgAndMachine("running", async ({ orgId, machineId }) => {
       const program = Effect.gen(function* () {
         const tunnel = yield* TunnelServer;
@@ -221,23 +228,16 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId: crypto.randomUUID(),
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
-          targetOsUser: "-c",
           method: "terminal",
         });
       });
-      const error = await Effect.runPromise(Effect.provide(Effect.flip(program), TestLayer));
-      expect(error.reason).toBe("denied");
-      expect(error.detail).toBe("invalid_target_os_user");
 
-      const deniedEvents = await queryDb(
-        Effect.gen(function* () {
-          const db = yield* Db;
-          return yield* Effect.tryPromise(() =>
-            db.select().from(events).where(eq(events.machineId, machineId)),
-          );
-        }),
-      );
-      expect(deniedEvents.some((e) => e.type === "access.session_denied")).toBe(true);
+      const minted = await Effect.runPromise(Effect.provide(program, TestLayer));
+      const [claimsSegment] = minted.token.split(".") as [string, string];
+      const claims = JSON.parse(Buffer.from(claimsSegment, "base64url").toString("utf8"));
+
+      expect(claims.targetOsUser).toBe(MACHINE_OS_USER);
+      expect(claims.targetOsUser).not.toBe("root");
     });
   });
 
@@ -259,7 +259,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
                   personId: crypto.randomUUID(),
                   idpIdentity: "kalle@normain.com",
                   targetMachineId: machineId,
-                  targetOsUser: "ubuntu",
                   method,
                 });
               }),
@@ -295,7 +294,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
             personId: crypto.randomUUID(),
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
-            targetOsUser: "ubuntu",
             method: "terminal",
           });
         });
@@ -340,7 +338,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
                 personId: crypto.randomUUID(),
                 idpIdentity: "kalle@normain.com",
                 targetMachineId: machineId,
-                targetOsUser: "ubuntu",
                 method: "terminal",
               });
             }),
@@ -375,7 +372,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
             personId: crypto.randomUUID(),
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
-            targetOsUser: "ubuntu",
             method: "ssh",
           });
         });
@@ -485,7 +481,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId,
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
-          targetOsUser: "ubuntu",
           method: "terminal",
         });
       });
@@ -572,7 +567,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId: crypto.randomUUID(),
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
-          targetOsUser: "ubuntu",
           method: "terminal",
         });
       });
@@ -625,7 +619,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId: crypto.randomUUID(),
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
-          targetOsUser: "ubuntu",
           method: "terminal",
         });
 
@@ -654,7 +647,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
             personId,
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
-            targetOsUser: "ubuntu",
             method: "terminal",
           });
         });
@@ -720,7 +712,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId: crypto.randomUUID(),
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
-          targetOsUser: "ubuntu",
           method: "terminal",
         });
         const signal = yield* TunnelSignal;
@@ -743,7 +734,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
             personId: crypto.randomUUID(),
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
-            targetOsUser: "ubuntu",
             method: "terminal",
           }),
         );
@@ -766,7 +756,6 @@ describe("TunnelServer (against local dev Postgres)", () => {
             personId,
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
-            targetOsUser: "ubuntu",
             method: "terminal",
           });
         });

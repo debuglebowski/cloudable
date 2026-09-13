@@ -1,4 +1,3 @@
-import { machines, sessions } from "@cloudable/schema";
 // ---------------------------------------------------------------------------
 // Control-plane side of session brokering (web terminal, and the
 // SSH-certificate path's session accounting). Mints signed session tokens,
@@ -20,6 +19,8 @@ import { machines, sessions } from "@cloudable/schema";
 // stop". See `signal.ts`'s own header comment for why this is a new channel
 // rather than a repurposed `wake`.
 // ---------------------------------------------------------------------------
+import { MACHINE_OS_USER } from "@cloudable/contracts";
+import { machines, sessions } from "@cloudable/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { isMachineStale } from "../compliance/checks/machines-reporting";
@@ -30,15 +31,6 @@ import type { SignerTag } from "../services/Signer";
 import { isAuthorizedForInteractiveAccess } from "./access-authorization";
 import { type SessionMethod, mintSessionToken } from "./session-token";
 import { TunnelSignal } from "./signal";
-
-/**
- * A real Linux username — never starting with `-` (the exact
- * privilege-escalation-adjacent scenario this guards: a value like `"-c"`
- * hijacking `su`'s/`ssh`'s own argument parsing once this string reaches a
- * real shell daemon-side), lowercase, digits, underscore, hyphen only,
- * capped at the real POSIX username length limit.
- */
-const OS_USERNAME_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/;
 
 export class TunnelError extends Data.TaggedError("TunnelError")<{
   reason: "denied" | "not_found" | "lookup_failed" | "persist_failed" | "sign_failed";
@@ -51,7 +43,6 @@ export interface MintSessionInput {
   personId: string;
   idpIdentity: string;
   targetMachineId: string;
-  targetOsUser: string;
   method: SessionMethod;
 }
 
@@ -114,9 +105,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
           ? "machine_not_found"
           : machine.state !== "running"
             ? `machine_${machine.state}`
-            : !OS_USERNAME_PATTERN.test(input.targetOsUser)
-              ? "invalid_target_os_user"
-              : null;
+            : null;
 
         // Admin-disablable at any level — refusing new
         // sessions once a method is disabled is the other half of the gap
@@ -189,7 +178,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
         const minted = yield* mintSessionToken({
           idpIdentity: input.idpIdentity,
           targetMachineId: input.targetMachineId,
-          targetOsUser: input.targetOsUser,
+          targetOsUser: MACHINE_OS_USER,
           method: input.method,
         }).pipe(Effect.mapError((cause) => new TunnelError({ reason: "sign_failed", cause })));
 
@@ -202,7 +191,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
                 machineId: input.targetMachineId,
                 personId: input.personId,
                 method: input.method,
-                osUser: input.targetOsUser,
+                osUser: MACHINE_OS_USER,
                 startedAt: now,
                 sessionToken: minted.token,
               })
@@ -226,7 +215,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
               machineId: input.targetMachineId,
               correlationId: sessionId,
               schemaVersion: 1,
-              payload: { method: input.method, osUser: input.targetOsUser },
+              payload: { method: input.method, osUser: MACHINE_OS_USER },
             },
           ])
           .pipe(Effect.mapError((cause) => new TunnelError({ reason: "persist_failed", cause })));

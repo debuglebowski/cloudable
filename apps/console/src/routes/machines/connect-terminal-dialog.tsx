@@ -43,7 +43,7 @@ export function ConnectTerminalDialog({ machine, open, onOpenChange }: ConnectTe
 
   function handleConnect() {
     mutation.mutate(
-      { targetMachineId: machine.id, targetOsUser: "root" },
+      { targetMachineId: machine.id },
       {
         onSuccess: (session) => {
           handleOpenChange(false);
