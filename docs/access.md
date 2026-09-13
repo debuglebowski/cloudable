@@ -340,13 +340,23 @@ into the real signal-driven attach path, only reachable via an explicit env-var 
 
 `session-manager.ts`'s `attach` verifies the session token — the same real signature check this
 doc's earlier sections describe — before ever spawning a PTY, on every attach including a
-reconnect, not just the first one. `pty.ts` drops privilege to the session's `targetOsUser` via
-`su`, with its own username-shape validation to close an argv-injection vector into `su`. Its own
-header comment flags one still-open, honestly-unresolved question: nothing today enforces
-`targetOsUser` at the OS level the way the SSH path's certificate `validPrincipals` does (only the
-username's *shape* is validated, not whether it's an *allowed* value) — a real design question,
-not an assumed-safe gap, and not necessarily a bug given a machine's owner is expected to have
-full shell access to their own machine.
+reconnect, not just the first one. `pty.ts` then drops privilege to the session's `targetOsUser`
+via `su`.
+
+**`targetOsUser` is no longer the caller's to choose.** It used to be a request field, validated
+only against a username-shaped regex — which `"root"` passes. The console's own terminal dialog
+sent exactly that, so every web terminal session in the product was a root shell on a machine
+whose entire model is one unprivileged user. It also meant an admin holding a `shell` elevation
+against someone else's machine silently got root, which is more than that grant describes.
+
+`mintSession` now sets it to `MACHINE_OS_USER` (`packages/contracts`), the same constant the
+provisioner uses for `osProfile.adminUsername`, and the field is gone from the wire. The daemon's
+own username-shape check stays as defence-in-depth against an argv-injection vector into `su`,
+rather than being the only thing standing between a caller and an arbitrary account.
+
+This removes the class rather than validating around it, and it costs no capability: `cloudable`
+is the Azure admin user and holds passwordless sudo, so root remains one `sudo` away — as a
+logged action inside a session, rather than the session itself.
 
 ### TLS terminates at the control plane, by construction
 

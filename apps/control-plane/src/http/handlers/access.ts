@@ -114,7 +114,6 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
           personId: currentUser.personId,
           idpIdentity: currentUser.email,
           targetMachineId: payload.targetMachineId,
-          targetOsUser: payload.targetOsUser,
           method: payload.method,
         });
         return {

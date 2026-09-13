@@ -69,7 +69,6 @@ export interface RevokeCertificateRequest {
 
 export interface MintSessionTokenRequest {
   targetMachineId: string;
-  targetOsUser: string;
   method: "terminal" | "ssh";
 }
 

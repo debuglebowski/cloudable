@@ -232,7 +232,6 @@ export function useTerminateSession() {
 
 export interface MintSessionInput {
   targetMachineId: string;
-  targetOsUser: string;
 }
 
 export interface MintedSession {
@@ -247,11 +246,14 @@ export interface MintedSession {
  * login`'s certificate flow instead, not this dialog. `orgId`/`personId`/`idpIdentity`
  * are derived server-side from the caller's own session, never sent here — a wrong or
  * client-supplied identity on this specific call is a real access-control bug, not just a
- * missing convenience (see `http/routes/access.ts`'s header comment on `mintSession`). */
+ * missing convenience (see `http/routes/access.ts`'s header comment on `mintSession`).
+ *
+ * `targetOsUser` is gone for the same reason, and it was not hypothetical: this dialog
+ * sent `"root"`, and the server took it, so every web terminal session was a root shell.
+ * The machine's one Unix user is now derived server-side like the rest. */
 async function mintSessionRequest(input: MintSessionInput): Promise<MintedSession> {
   return apiPost<MintedSession>("/api/v1/access/sessions", {
     targetMachineId: input.targetMachineId,
-    targetOsUser: input.targetOsUser,
     method: "terminal",
   });
 }

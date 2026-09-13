@@ -95,9 +95,14 @@ const RevokeCertificateRequest = Schema.Struct({
   reason: Schema.String,
 });
 
+// No `targetOsUser`. It used to be the caller's to choose, checked only
+// against a username-shaped regex that "root" passes — and the console's own
+// terminal dialog sent exactly that, so every web terminal session was a root
+// session. A machine is provisioned with one Unix user and has one owner, so
+// the control plane already knows the answer and the client has no business
+// supplying it. See `tunnel/server.ts`'s `mintSession`.
 const MintSessionTokenRequest = Schema.Struct({
   targetMachineId: Schema.String,
-  targetOsUser: Schema.String,
   method: Schema.Literal("terminal", "ssh"),
 });
 

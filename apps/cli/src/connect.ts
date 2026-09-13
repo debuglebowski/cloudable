@@ -51,10 +51,9 @@ function parseFrame(data: unknown): Frame | undefined {
 }
 
 export async function runConnectCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = usageFor("connect <machine> [--os-user <user>]");
-  const args = parseArgs(argv, { values: ["os-user"] });
+  const usage = usageFor("connect <machine>");
+  const args = parseArgs(argv, {});
   const target = required(args, 0, "a machine", usage);
-  const osUser = args.flags["os-user"] ?? MACHINE_OS_USER;
 
   const { orgId } = await currentIdentity();
   const id = await machineId(target);
@@ -62,7 +61,7 @@ export async function runConnectCommand(argv: ReadonlyArray<string>): Promise<vo
 
   const minted = await authenticatedApiRequest<MintSessionResponse>(
     "/api/v1/access/sessions",
-    postJson({ targetMachineId: id, targetOsUser: osUser, method: "terminal" }),
+    postJson({ targetMachineId: id, method: "terminal" }),
   );
 
   const { cols, rows } = terminalSize();
@@ -176,7 +175,7 @@ export async function runConnectCommand(argv: ReadonlyArray<string>): Promise<vo
         process.stdin.resume();
         process.stdin.on("data", onStdin);
         process.stdout.on("resize", onResize);
-        process.stderr.write(`Connected to ${target} as ${osUser}. Ctrl-] to detach.\r\n`);
+        process.stderr.write(`Connected to ${target} as ${MACHINE_OS_USER}. Ctrl-] to detach.\r\n`);
         return;
       }
       if (frame.kind === "attach_rejected") {

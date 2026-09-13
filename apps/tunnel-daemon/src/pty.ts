@@ -9,13 +9,18 @@
 // keystroke-generated signals (Ctrl-C/Ctrl-Z) are a confirmed, documented
 // limitation, not something this file works around.
 //
-// Real open gap, NOT solved here (flagged in the approved plan, not
-// silently assumed safe): nothing today enforces `targetOsUser` at the OS
-// level for this path the way the SSH path does via certificate
-// `validPrincipals`. The daemon runs as root and drops privilege via
-// `su - <targetOsUser>` — this needs its own security review before it
-// ships (sudoers-style scoping, PAM session setup, etc. are all still
-// open questions), not an assumption that a bare `su` call is sufficient.
+// The gap this comment used to flag is closed at the source rather than
+// here: `targetOsUser` was a caller-supplied field checked only for shape,
+// and "root" is well-shaped — the console's terminal dialog sent it, so
+// every web terminal session was a root shell. The control plane now sets
+// it to `MACHINE_OS_USER` and the field is off the wire entirely
+// (`tunnel/server.ts`'s `mintSession`, docs/access.md).
+//
+// The daemon still runs as root and still drops privilege with `su`, so the
+// deeper questions this comment raised (PAM session setup, sudoers scoping)
+// remain open as hardening. They are no longer load-bearing: the value
+// reaching `su` is one constant the control plane chose, not anything a
+// caller can steer.
 // `spawnSession` below DOES validate `targetOsUser`'s shape before ever
 // building the `su` argv (see `OS_USERNAME_PATTERN`) — that closes a
 // specific argv-injection vector (a value like `"-c"` hijacking `su`'s own
