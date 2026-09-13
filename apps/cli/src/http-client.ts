@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Every request this CLI makes. Two entry points: `apiRequest` for the one
 // flow that carries its own credential (`cloudable login`'s signed code) and
-// `authenticatedApiRequest` for everything else, which sends the session
-// cookie `cloudable auth login` stored.
+// `authenticatedApiRequest` for everything else, which sends the bearer
+// token `cloudable login` stored.
 //
 // Failures arrive as three different shapes depending on which layer refused
 // — Effect's tagged errors, the access routes' `{code, message}`, and
@@ -99,23 +99,23 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   return res.json() as Promise<T>;
 }
 
-/** Same as `apiRequest`, but attaches the real BetterAuth session cookie from
- * `cloudable auth login` (see `session.ts`) — for every endpoint that now
- * requires a real session (`http/middleware/auth.ts`), which is most of
- * them. Throws a clear "not logged in" error if there's no stored session,
- * rather than letting the request 401 with no context. */
+/** Same as `apiRequest`, but attaches the bearer token `cloudable login`
+ * stored (see `session.ts`) — for every endpoint that requires an
+ * authenticated caller (`http/middleware/auth.ts`), which is most of them.
+ * Throws a clear "not logged in" error if there's no stored session, rather
+ * than letting the request 401 with no context. */
 export async function authenticatedApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const session = requireSession();
   return apiRequest<T>(path, {
     ...init,
-    headers: { Cookie: session.cookie, ...init?.headers },
+    headers: { authorization: `Bearer ${session.token}`, ...init?.headers },
   });
 }
 
 /** For the CSV exports, which answer `text/csv` rather than JSON. */
 export async function authenticatedApiText(path: string): Promise<string> {
   const session = requireSession();
-  const res = await send(path, { headers: { Cookie: session.cookie } });
+  const res = await send(path, { headers: { authorization: `Bearer ${session.token}` } });
   if (!res.ok) throw new ApiError(res.status, await bodyOf(res));
   return res.text();
 }

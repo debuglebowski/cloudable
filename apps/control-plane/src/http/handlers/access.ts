@@ -1,6 +1,7 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import { verifyCliAuthCode } from "../../services/CliAuthCode";
+import { CLI_TOKEN_TTL_MS, issueCliToken } from "../../services/CliToken";
 import { SignerTag } from "../../services/Signer";
 import { SshCaService } from "../../services/ssh-ca/SshCaService";
 import { listActiveSessionsByOrg } from "../../tunnel/queries";
@@ -61,11 +62,17 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
           machineScope: payload.machineScope,
           subjectPublicKeyRaw,
         });
+        // One sign-in, both credentials. The certificate is for sshd on the
+        // machine, which verifies it offline; the token is for this API,
+        // which re-checks the person on every call. See `CliToken.ts` for
+        // why the CLI no longer signs in with a password of its own.
         return {
           certificateId: issued.certificateId,
           certificate: issued.certificate,
           fingerprint: issued.fingerprint,
           expiresAt: issued.expiresAt.toISOString(),
+          token: issueCliToken({ personId: verified.personId }),
+          tokenExpiresAt: new Date(Date.now() + CLI_TOKEN_TTL_MS).toISOString(),
         };
       }).pipe(Effect.catchTag("SshCaError", (e) => Effect.fail(asAccessError(e)))),
     )

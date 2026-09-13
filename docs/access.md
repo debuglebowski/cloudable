@@ -82,6 +82,32 @@ serials for KRL purposes.
 
 ## 2. `cloudable login` (`apps/cli/src/login.ts`)
 
+### One sign-in, two credentials
+
+`cloudable login` is the CLI's only way in. It returns two credentials from a single browser
+sign-in, because two different things verify them:
+
+| | Verified by | Lifetime | Revocation |
+| :-- | :-- | :-- | :-- |
+| SSH certificate | `sshd` on the machine, offline | ~8h | The TTL. Nothing re-checks it once issued. |
+| API bearer token | The control plane, on every call | 30d | Immediate. The `people` row is re-read per request. |
+
+The certificate goes into ssh-agent and never touches disk. The token goes to
+`~/.cloudable/<host>/session.json` at `0600` and rides `Authorization: Bearer` from there
+(`services/CliToken.ts`, `http/middleware/auth.ts`).
+
+There used to be a second command, `cloudable auth login`, which posted an email and password to
+BetterAuth's `/api/auth/sign-in/email` and kept the session cookie. It is gone, and not because
+two commands were confusing (they were). A CLI that collects a password collects it into argv, so
+into shell history and the process table, checks it against whatever host `CLOUDABLE_API_URL`
+names, and bypasses SSO completely — an org that had connected SAML could still hand out
+passwords and never see it. Password sign-in itself is untouched: it happens at the console's
+`/login`, which is where SSO is also offered and which `/cli-auth` already routes through.
+
+The headless case that password flow was really serving is now `CLOUDABLE_TOKEN`, read in place
+of the session file. CI gets a credential with no browser and no password.
+
+
 ### The real IdP seam: SAML, not the old dev flags
 
 Build order step 10 is partially here: real login SSO (SAML, via `@better-auth/sso` — see

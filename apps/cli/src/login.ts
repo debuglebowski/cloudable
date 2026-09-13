@@ -40,6 +40,8 @@ import type {
 import { config } from "./config";
 import { generateRawEd25519KeyPair } from "./ed25519-keys";
 import { apiRequest } from "./http-client";
+import { currentIdentity } from "./identity";
+import { saveSession } from "./session";
 import { addCertifiedIdentity } from "./ssh-agent-client";
 
 export interface LoginOptions {
@@ -53,6 +55,8 @@ export interface LoginResult {
   expiresAt: Date;
   /** Whether the certificate was actually loaded into a running ssh-agent (false when `SSH_AUTH_SOCK` is unset/unreachable). */
   loadedIntoAgent: boolean;
+  email: string;
+  tokenExpiresAt: Date;
 }
 
 function parseMachineScope(raw: string | undefined): MachineScope {
@@ -177,6 +181,13 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
   const expiresAt = new Date(response.expiresAt);
   const certificateBlob = certificateBlobFromLine(response.certificate);
 
+  // Saved before the ssh-agent step, which is the part that can fail on a
+  // box with no agent. Being signed in to the API should not depend on
+  // whether this machine happens to run an ssh-agent.
+  saveSession({ token: response.token, email: "" });
+  const identity = await currentIdentity();
+  saveSession({ token: response.token, email: identity.email });
+
   const sshAuthSock = process.env.SSH_AUTH_SOCK;
   let loadedIntoAgent = false;
   if (sshAuthSock) {
@@ -196,6 +207,8 @@ export async function login(options: LoginOptions): Promise<LoginResult> {
     fingerprint: response.fingerprint,
     expiresAt,
     loadedIntoAgent,
+    email: identity.email,
+    tokenExpiresAt: new Date(response.tokenExpiresAt),
   };
 }
 
@@ -213,6 +226,7 @@ export async function runLoginCommand(argv: ReadonlyArray<string>): Promise<void
   const options = parseLoginArgs(argv);
   const result = await login(options);
 
+  console.log(`Signed in as ${result.email}.`);
   console.log(`Certificate issued: ${result.certificateId}`);
   console.log(`  fingerprint: ${result.fingerprint}`);
   console.log(`  principal:   ${options.osUser}`);
@@ -221,8 +235,9 @@ export async function runLoginCommand(argv: ReadonlyArray<string>): Promise<void
     console.log("Loaded into ssh-agent (SSH_AUTH_SOCK) — ready to use.");
   } else {
     console.log(
-      "SSH_AUTH_SOCK is not set — certificate was issued but not loaded into any ssh-agent. " +
-        "Start one (e.g. `eval $(ssh-agent)`) and run `cloudable login` again.",
+      "SSH_AUTH_SOCK is not set — the certificate was issued but not loaded into any ssh-agent. " +
+        "Every other command still works; for SSH, start an agent " +
+        "(e.g. `eval $(ssh-agent)`) and run `cloudable login` again.",
     );
   }
 }

@@ -1,75 +1,55 @@
 // ---------------------------------------------------------------------------
-// `cloudable auth login`/`auth logout` — email/password sign-in against the
-// real control plane's BetterAuth instance (`apps/control-plane/src/auth.ts`,
-// mounted at `/api/auth/*`), the same credential check the console's login
-// page uses. Distinct from `cloudable login`'s SSH-certificate flow — see
-// `session.ts`'s header comment for why these are two mechanisms, not one.
+// `cloudable logout` / `cloudable whoami` — what is left of the CLI's own
+// account handling once `cloudable login` became the only way in.
+//
+// There used to be a `cloudable auth login` here that posted an email and a
+// password to `/api/auth/sign-in/email` and kept the session cookie it got
+// back. It is gone. Password sign-in is not: it moved to the browser, at the
+// console's `/login`, which is where SSO is also on offer and which
+// `cloudable login` already goes through. What that removed is a CLI that
+// handles passwords — taken from argv, so from shell history and the process
+// table, and checked against whatever host CLOUDABLE_API_URL happened to
+// name. See `services/CliToken.ts` in the control plane for the credential
+// that replaced the cookie.
 // ---------------------------------------------------------------------------
 import { parseArgs, readSpec } from "./args";
 import { config } from "./config";
 import { currentIdentity, fetchOrg } from "./identity";
 import { printFields, printJson } from "./output";
-import { promptPassword, promptText } from "./prompt";
-import { clearSession, loadSession, saveSession } from "./session";
+import { clearSession, loadSession, requireSession } from "./session";
 
-interface SignInResponse {
-  user: { email: string };
-}
-
-function cookieHeaderFromSetCookies(setCookies: ReadonlyArray<string>): string {
-  return setCookies
-    .filter(Boolean)
-    .map((sc) => sc.split(";")[0])
-    .join("; ");
-}
-
-export async function authLogin(email: string, password: string): Promise<string> {
-  const res = await fetch(`${config.apiUrl}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => undefined);
-    const message =
-      body &&
-      typeof body === "object" &&
-      typeof (body as { message?: unknown }).message === "string"
-        ? (body as { message: string }).message
-        : `sign-in failed with status ${res.status}`;
-    throw new Error(message);
-  }
-  const setCookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
-  const cookie = cookieHeaderFromSetCookies(setCookies);
-  if (!cookie) throw new Error("sign-in succeeded but no session cookie was returned");
-  const body = (await res.json()) as SignInResponse;
-  saveSession({ cookie, email: body.user.email });
-  return body.user.email;
-}
-
-export async function runAuthLoginCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const email = argv[0] ?? (await promptText("Email: "));
-  const password = argv[1] ?? (await promptPassword("Password: "));
-  const signedInEmail = await authLogin(email, password);
-  console.log(`Signed in as ${signedInEmail}.`);
-}
-
-export function runAuthLogoutCommand(): void {
+export function runLogoutCommand(): void {
   const existing = loadSession();
   clearSession();
   console.log(existing ? `Signed out ${existing.email}.` : "Not signed in.");
+  // The certificate is not ours to clear: it lives in ssh-agent under its own
+  // lifetime constraint and expires on its own within ~8 hours. `ssh-add -D`
+  // is the way to drop it early, and dropping every other identity with it is
+  // the user's call, not a side effect of signing out of an API.
 }
 
-export function runAuthStatusCommand(): void {
-  const session = loadSession();
-  console.log(session ? `Signed in as ${session.email}.` : "Not signed in.");
-}
+/**
+ * Asks the control plane rather than reading the file, so an expired or
+ * revoked token fails here instead of being reported as signed in. `--local`
+ * is the offline answer, for when you want to know which account is stored
+ * without a round trip.
+ */
+export async function runWhoamiCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const args = parseArgs(argv, readSpec({ booleans: ["local"] }));
 
-/** The live check `status` deliberately isn't: this asks the control plane who
- * the stored cookie belongs to, so an expired session fails here rather than
- * being reported as signed in. */
-export async function runAuthWhoamiCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const args = parseArgs(argv, readSpec());
+  if (args.booleans.has("local")) {
+    const session = requireSession();
+    if (args.booleans.has("json")) {
+      printJson({ email: session.email, apiUrl: config.apiUrl, live: false });
+      return;
+    }
+    printFields([
+      ["email", session.email],
+      ["control plane", config.apiUrl],
+    ]);
+    return;
+  }
+
   const identity = await currentIdentity();
   const org = await fetchOrg();
 

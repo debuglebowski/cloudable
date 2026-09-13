@@ -8,7 +8,7 @@
 // inbound port is involved anywhere (invariant 7) — the daemon's connection is
 // outbound and already established; this rides it.
 //
-// The attach route runs the same session-cookie check as every other endpoint
+// The attach route runs the same credential check as every other endpoint
 // and rejects only a *wrong* `Origin`, so a CLI that sends none passes it
 // (`http/handlers/tunnel.ts`). The session token is replayed server-side; it
 // never touches this process.
@@ -86,7 +86,7 @@ export async function runConnectCommand(argv: ReadonlyArray<string>): Promise<vo
   const { cols, rows } = terminalSize();
   const WebSocketWithHeaders = WebSocket as unknown as HeaderCapableWebSocket;
   const socket = new WebSocketWithHeaders(websocketUrl(minted.sessionId, cols, rows), {
-    headers: { Cookie: session.cookie },
+    headers: { authorization: `Bearer ${session.token}` },
   });
 
   await new Promise<void>((resolve, reject) => {

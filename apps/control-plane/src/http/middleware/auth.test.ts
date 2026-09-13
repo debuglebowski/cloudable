@@ -10,7 +10,7 @@ import {
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
 import { Effect, Layer, Schema } from "effect";
-import { AuthenticationRequired } from "./auth";
+import { AuthenticationRequired, bearerToken } from "./auth";
 
 /**
  * Regression coverage for the bug where every `CurrentUserAuthentication`
@@ -77,5 +77,40 @@ describe("AuthenticationRequired HTTP status", () => {
 
     expect(status).toBe(401);
     expect(body).toMatchObject({ _tag: "AuthenticationRequired", reason: "no_session" });
+  });
+});
+
+/**
+ * Which credential a request is claiming. Getting this wrong in either
+ * direction is a security bug rather than a cosmetic one: reading a bearer
+ * token that isn't there sends every console request down the token path and
+ * locks the console out, and failing to read one that is there sends a CLI
+ * request down the cookie path, where it is anonymous.
+ */
+describe("bearerToken", () => {
+  test("reads the token out of a well-formed header", () => {
+    expect(bearerToken({ authorization: "Bearer cli-token.abc" })).toBe("cli-token.abc");
+  });
+
+  test("accepts any casing of the scheme, as RFC 7235 requires", () => {
+    expect(bearerToken({ authorization: "bearer cli-token.abc" })).toBe("cli-token.abc");
+    expect(bearerToken({ authorization: "BEARER cli-token.abc" })).toBe("cli-token.abc");
+  });
+
+  test("ignores a header that is absent, empty, or another scheme", () => {
+    expect(bearerToken({})).toBeUndefined();
+    expect(bearerToken({ authorization: "" })).toBeUndefined();
+    expect(bearerToken({ authorization: "Basic dXNlcjpwYXNz" })).toBeUndefined();
+  });
+
+  /**
+   * `Bearer` with nothing after it must read as "no token offered", not as
+   * an empty token — an empty string would reach `verifyCliToken` and be
+   * refused there, but it would also mean a request with a blank header
+   * could never fall through to the cookie it might legitimately carry.
+   */
+  test("ignores a scheme with no value", () => {
+    expect(bearerToken({ authorization: "Bearer" })).toBeUndefined();
+    expect(bearerToken({ authorization: "Bearer " })).toBeUndefined();
   });
 });

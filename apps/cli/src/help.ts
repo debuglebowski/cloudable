@@ -34,7 +34,7 @@ export const TAGLINE = "cloudable — governed cloud Linux machines, one per per
 export const COMMANDS: ReadonlyArray<CommandSpec> = [
   {
     name: "login",
-    summary: "Get an SSH certificate into your ssh-agent",
+    summary: "Sign in, and get an SSH certificate into your ssh-agent",
     options: [
       {
         flag: "--os-user <user>",
@@ -46,9 +46,11 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       },
     ],
     notes: [
-      "Opens your browser to sign in, then loads a certificate that lasts about 8 hours into your running ssh-agent.",
-      "Needs SSH_AUTH_SOCK set. Start an agent with `eval $(ssh-agent)` if it is not.",
-      "No machine trusts the CA yet, so `ssh` cannot use this certificate. For a shell today, use `cloudable connect`.",
+      "Opens your browser to sign in with your password or your org's SSO, whichever it is set up for.",
+      "One sign-in, two credentials: an API token every other command uses, and an SSH certificate lasting about 8 hours loaded into your running ssh-agent.",
+      "The certificate needs SSH_AUTH_SOCK set. Without an agent everything else still works.",
+      "No machine trusts the CA yet, so `ssh` cannot use the certificate. For a shell today, use `cloudable connect`.",
+      "For CI, where there is no browser: set CLOUDABLE_TOKEN instead of running this.",
     ],
   },
   {
@@ -68,26 +70,17 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
     ],
   },
   {
-    name: "auth",
-    summary: "Sign in to the control plane API",
-    subcommands: [
-      {
-        name: "login",
-        summary: "Sign in with email and password",
-        args: "[<email>] [<password>]",
-        notes: ["Prompts for whatever you leave out. The password is not echoed."],
-      },
-      { name: "logout", summary: "Forget the saved session" },
-      {
-        name: "status",
-        summary: "Show who the saved session says you are",
-        notes: ["Reads the file only. Use `whoami` to check the session is still live."],
-      },
-      { name: "whoami", summary: "Ask the control plane who you are" },
-    ],
+    name: "logout",
+    summary: "Forget the saved sign-in",
     notes: [
-      "This is the session every command below uses. It is separate from `cloudable login`, which issues SSH certificates for reaching the machines themselves.",
+      "Clears the API token. The SSH certificate expires on its own within about 8 hours; `ssh-add -D` drops it now.",
     ],
+  },
+  {
+    name: "whoami",
+    summary: "Ask the control plane who you are",
+    options: [{ flag: "--local", description: "Read the saved file instead of asking" }],
+    notes: ["Without --local this is a live check, so an expired sign-in fails here."],
   },
   {
     name: "machines",
