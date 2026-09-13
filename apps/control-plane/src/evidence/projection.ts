@@ -162,8 +162,15 @@ function summarize(row: RawEventRow): string {
     case "machine.first_seen":
       return `Control agent (v${event.payload.agentVersion}) contacted the control plane for the first time.`;
 
+    // "requested", not "scope", deliberately. `machineScope` is what the
+    // caller asked `cloudable login` for; it is recorded here and on the
+    // `certificates` row, but it is not carried in the certificate, so sshd
+    // never sees it and nothing narrows the certificate to those machines.
+    // An auditor reading "scope: m-abc" would reasonably take it as a
+    // restriction that held. Until `docs/access.md`'s principal scheme is
+    // wired up, this sentence must not imply one.
     case "access.certificate_issued":
-      return `SSH certificate issued to ${event.payload.principal}, expiring ${event.payload.expiresAt} (scope: ${event.payload.machineScope}).`;
+      return `SSH certificate issued to ${event.payload.principal}, expiring ${event.payload.expiresAt} (machines requested: ${event.payload.machineScope}; not enforced by the certificate).`;
     case "access.certificate_revoked":
       return `SSH certificate ${event.payload.certificateId} was revoked: ${event.payload.reason}.`;
     case "access.session_started":
