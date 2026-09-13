@@ -42,6 +42,11 @@ const UpdatePersonPayload = Schema.Struct({
 const SetActivePayload = Schema.Struct({ active: Schema.Boolean });
 
 export const PeopleGroup = HttpApiGroup.make("people")
+  // Who the caller is, according to the credential they just presented.
+  // The CLI needs this because a bearer token is all it holds — it has no
+  // email of its own to match on, and listing an entire org to find yourself
+  // is both a scan and a permission the caller may not have.
+  .add(HttpApiEndpoint.get("me", "/api/v1/me").addSuccess(Person))
   .add(HttpApiEndpoint.get("list", "/api/v1/people").addSuccess(ListPeopleResponse))
   .add(
     HttpApiEndpoint.post("create", "/api/v1/people")

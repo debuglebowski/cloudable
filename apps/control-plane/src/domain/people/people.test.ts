@@ -10,6 +10,7 @@ import { isDbReachable } from "../../testing/db-reachable";
 import {
   PersonNotFoundError,
   createPerson,
+  getPersonById,
   listPeopleByOrg,
   setPersonActive,
   updatePerson,
@@ -50,6 +51,31 @@ describe.skipIf(!dbReachable)("people — tenant isolation (requires Postgres)",
     if (!org) throw new Error("seed failed");
     return org;
   }
+
+  /**
+   * What `GET /api/v1/me` is built on. Deliberately NOT org-scoped, unlike
+   * every other lookup here: the id comes from `CurrentUserTag`, which the
+   * auth middleware already resolved from a verified credential, so there is
+   * no untrusted org to scope against and nothing to cross tenants with.
+   */
+  test("getPersonById returns the row, and undefined for an id that isn't one", async () => {
+    const org = await seedOrg();
+    const person = await run(
+      createPerson({
+        orgId: org.id,
+        email: `p-${crypto.randomUUID()}@example.com`,
+        role: "member",
+      }),
+    );
+
+    const found = await run(getPersonById(person.id));
+    expect(found?.id).toBe(person.id);
+    expect(found?.orgId).toBe(org.id);
+    expect(found?.email).toBe(person.email);
+    expect(found?.role).toBe("member");
+
+    expect(await run(getPersonById(crypto.randomUUID()))).toBeUndefined();
+  });
 
   test("updatePerson succeeds for its own org, and fails with PersonNotFoundError for a different org", async () => {
     const org = await seedOrg();

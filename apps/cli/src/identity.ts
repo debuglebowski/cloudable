@@ -1,15 +1,3 @@
-// ---------------------------------------------------------------------------
-// Who the stored session belongs to.
-//
-// Several endpoints still take `orgId` (and `notifications` a `personId`) as
-// plain parameters rather than deriving them from the session — see the
-// comments on `http/routes/compliance.ts` and `organisation.ts`. The console
-// answers that with a hardcoded org id; this CLI instead reads the caller's
-// own `people` row, which the session middleware has already resolved by
-// email, so nothing here assumes a seed org. Cached for the process: several
-// commands need it more than once, and it cannot change mid-command.
-// ---------------------------------------------------------------------------
-import { CliError, EXIT } from "./errors";
 import { authenticatedApiRequest, query } from "./http-client";
 import { requireSession } from "./session";
 
@@ -48,18 +36,22 @@ export async function listPeople(): Promise<PersonWire[]> {
 
 let cached: Identity | undefined;
 
+/**
+ * `GET /api/v1/me` — the control plane resolved the caller from the
+ * credential before the handler ran, so it can just say who that is.
+ *
+ * This used to list every person in the org and match on the email stored
+ * beside the session. That could not survive the move to a bearer token: the
+ * token carries a person id and the CLI never learns an email of its own, so
+ * there was nothing to match on (and `CLOUDABLE_TOKEN`, which has no stored
+ * email at all, could never have worked). It also meant a self-lookup needed
+ * permission to read the whole org.
+ */
 export async function currentIdentity(): Promise<Identity> {
   if (cached) return cached;
-  const session = requireSession();
-  const people = await listPeople();
-  const match = people.find((p) => p.email.toLowerCase() === session.email.toLowerCase());
-  if (!match) {
-    throw new CliError(
-      `signed in as ${session.email}, but that address has no person record.\n\nAsk an admin to add it with \`cloudable people create --email ${session.email} --role member\`.`,
-      EXIT.notFound,
-    );
-  }
-  cached = { personId: match.id, orgId: match.orgId, email: match.email, role: match.role };
+  requireSession();
+  const me = await authenticatedApiRequest<PersonWire>("/api/v1/me");
+  cached = { personId: me.id, orgId: me.orgId, email: me.email, role: me.role };
   return cached;
 }
 
