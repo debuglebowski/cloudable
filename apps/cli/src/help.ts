@@ -38,7 +38,7 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
     options: [
       {
         flag: "--os-user <user>",
-        description: "Unix user the certificate is valid for (default: your local username)",
+        description: "Unix user the certificate is valid for (default: cloudable)",
       },
       {
         flag: "--machine-scope all|<id>,<id>",
@@ -60,7 +60,7 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
     options: [
       {
         flag: "--os-user <user>",
-        description: "Unix user to be on the machine (default: your local username)",
+        description: "Unix user to be on the machine (default: cloudable)",
       },
     ],
     notes: [

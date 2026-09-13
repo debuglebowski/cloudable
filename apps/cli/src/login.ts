@@ -31,11 +31,11 @@
 // ---------------------------------------------------------------------------
 import * as childProcess from "node:child_process";
 import * as http from "node:http";
-import * as os from "node:os";
-import type {
-  IssueCertificateRequest,
-  IssueCertificateResponse,
-  MachineScope,
+import {
+  type IssueCertificateRequest,
+  type IssueCertificateResponse,
+  MACHINE_OS_USER,
+  type MachineScope,
 } from "@cloudable/contracts";
 import { config } from "./config";
 import { generateRawEd25519KeyPair } from "./ed25519-keys";
@@ -96,7 +96,7 @@ export function parseLoginArgs(argv: ReadonlyArray<string>): LoginOptions {
   }
 
   return {
-    osUser: flags.get("os-user") ?? os.userInfo().username,
+    osUser: flags.get("os-user") ?? MACHINE_OS_USER,
     machineScope: parseMachineScope(flags.get("machine-scope")),
   };
 }

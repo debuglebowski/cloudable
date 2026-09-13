@@ -19,6 +19,7 @@ import { ComputeManagementClient } from "@azure/arm-compute";
 import type { NetworkInterface, PublicIPAddress } from "@azure/arm-network";
 import { NetworkManagementClient } from "@azure/arm-network";
 import { DefaultAzureCredential } from "@azure/identity";
+import { MACHINE_OS_USER } from "@cloudable/contracts";
 import { Effect, Layer } from "effect";
 import { config } from "../config";
 import {
@@ -579,7 +580,7 @@ const service: ProvisioningService = {
             },
             osProfile: {
               computerName: names.computerName,
-              adminUsername: "cloudable",
+              adminUsername: MACHINE_OS_USER,
               adminPassword: throwawayAdminPassword(),
               customData: cloudInitFor(desc, DATA_DISK_LUN),
             },
@@ -745,7 +746,7 @@ const service: ProvisioningService = {
           },
           osProfile: {
             computerName: names.computerName,
-            adminUsername: "cloudable",
+            adminUsername: MACHINE_OS_USER,
             adminPassword: throwawayAdminPassword(),
             customData: cloudInitFor(
               {
