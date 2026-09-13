@@ -5,7 +5,10 @@
 // page uses. Distinct from `cloudable login`'s SSH-certificate flow — see
 // `session.ts`'s header comment for why these are two mechanisms, not one.
 // ---------------------------------------------------------------------------
+import { parseArgs, readSpec } from "./args";
 import { config } from "./config";
+import { currentIdentity, fetchOrg } from "./identity";
+import { printFields, printJson } from "./output";
 import { promptPassword, promptText } from "./prompt";
 import { clearSession, loadSession, saveSession } from "./session";
 
@@ -60,4 +63,25 @@ export function runAuthLogoutCommand(): void {
 export function runAuthStatusCommand(): void {
   const session = loadSession();
   console.log(session ? `Signed in as ${session.email}.` : "Not signed in.");
+}
+
+/** The live check `status` deliberately isn't: this asks the control plane who
+ * the stored cookie belongs to, so an expired session fails here rather than
+ * being reported as signed in. */
+export async function runAuthWhoamiCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const args = parseArgs(argv, readSpec());
+  const identity = await currentIdentity();
+  const org = await fetchOrg();
+
+  if (args.booleans.has("json")) {
+    printJson({ ...identity, org: { id: org.id, name: org.name }, apiUrl: config.apiUrl });
+    return;
+  }
+  printFields([
+    ["email", identity.email],
+    ["person", identity.personId],
+    ["role", identity.role],
+    ["org", `${org.name} (${org.id})`],
+    ["control plane", config.apiUrl],
+  ]);
 }

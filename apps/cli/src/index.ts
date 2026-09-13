@@ -9,6 +9,7 @@
 // `config.ts` only reads the variable when a request is actually made.
 // ---------------------------------------------------------------------------
 import { HANDLERS } from "./dispatch";
+import { UsageError, exitCodeOf } from "./errors";
 import {
   COMMANDS,
   commandPath,
@@ -19,9 +20,6 @@ import {
   unknownCommandMessage,
   wantsHelp,
 } from "./help";
-
-/** A bad invocation. Printed to stderr, exits non-zero — it is a failure, not output. */
-class UsageError extends Error {}
 
 /** Prints help for whatever `cloudable help ...` names. */
 function runHelpCommand(argv: ReadonlyArray<string>): void {
@@ -78,9 +76,11 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  // A clean one-line message, not a raw stack trace, for expected failures
-  // (not logged in, a 4xx from the API, bad args) — this is a CLI, not a
-  // stack a developer debugging this codebase needs to see.
+  // A clean message, not a raw stack trace, for expected failures (not logged
+  // in, a 4xx from the API, bad args) — this is a CLI, not a stack a developer
+  // debugging this codebase needs to see. The exit code says which kind of
+  // failure it was, so a script does not have to read the message: see
+  // `errors.ts` for the table.
   console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
+  process.exit(exitCodeOf(err));
 });

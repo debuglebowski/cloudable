@@ -47,6 +47,23 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
     notes: [
       "Opens your browser to sign in, then loads a certificate that lasts about 8 hours into your running ssh-agent.",
       "Needs SSH_AUTH_SOCK set. Start an agent with `eval $(ssh-agent)` if it is not.",
+      "No machine trusts the CA yet, so `ssh` cannot use this certificate. For a shell today, use `cloudable connect`.",
+    ],
+  },
+  {
+    name: "connect",
+    summary: "Open a terminal on a machine",
+    args: "<machine>",
+    options: [
+      {
+        flag: "--os-user <user>",
+        description: "Unix user to be on the machine (default: your local username)",
+      },
+    ],
+    notes: [
+      "Rides the machine's outbound tunnel, the same path the console's web terminal uses. No inbound port is involved.",
+      "Ctrl-] detaches and ends the session. Every other key goes to the remote shell, Ctrl-C included.",
+      "The machine must be running and its tunnel daemon connected.",
     ],
   },
   {
@@ -60,28 +77,454 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         notes: ["Prompts for whatever you leave out. The password is not echoed."],
       },
       { name: "logout", summary: "Forget the saved session" },
-      { name: "status", summary: "Show who you are signed in as" },
+      {
+        name: "status",
+        summary: "Show who the saved session says you are",
+        notes: ["Reads the file only. Use `whoami` to check the session is still live."],
+      },
+      { name: "whoami", summary: "Ask the control plane who you are" },
     ],
     notes: [
-      "This is the session that `cloudable machines` uses. It is separate from `cloudable login`, which issues SSH certificates for reaching the machines themselves.",
+      "This is the session every command below uses. It is separate from `cloudable login`, which issues SSH certificates for reaching the machines themselves.",
     ],
   },
   {
     name: "machines",
-    summary: "List your machines and trigger reconcile",
+    summary: "Create, inspect and edit machines",
     subcommands: [
-      { name: "list", summary: "List your machines with state, region and image" },
+      {
+        name: "list",
+        summary: "List machines with state, region and image",
+        options: [
+          { flag: "--limit <n>", description: "Rows per page" },
+          { flag: "--cursor <cursor>", description: "Continue from a previous page" },
+        ],
+      },
+      { name: "get", summary: "Show one machine, with its resolved manifest", args: "<machine>" },
+      {
+        name: "create",
+        summary: "Create a machine for a person",
+        options: [
+          { flag: "--owner <email|id>", description: "The one person who owns it (required)" },
+          { flag: "--provider azure|docker|fake", description: "Where it runs (required)" },
+          { flag: "--size <sku>", description: "Size SKU (required)" },
+          { flag: "--image <image>", description: "Base image (required)" },
+          { flag: "--region <region>", description: "Required for azure, ignored otherwise" },
+          { flag: "--name <name>", description: "Defaults to a generated, org-unique name" },
+        ],
+        notes: [
+          "A machine has exactly one owner, always a person. Check what this deployment can provision with `cloudable capabilities`.",
+        ],
+      },
+      { name: "restart", summary: "Reboot a running machine", args: "<machine>" },
+      {
+        name: "upgrade",
+        summary: "Move a machine to a new image, with rollback",
+        args: "<machine>",
+        options: [{ flag: "--image <image>", description: "Image to upgrade to (required)" }],
+        notes: ["Snapshots first, then applies, then verifies. A failed verify rolls back."],
+      },
       {
         name: "reconcile",
         summary: "Apply a machine's desired state on the agent's next poll",
-        args: "<machineId>",
+        args: "<machine>",
         notes: [
           "Reconcile only closes gaps. It removes undeclared software, it never installs.",
           "The agent picks the change up on its next poll, roughly 30 seconds, not instantly.",
         ],
       },
+      {
+        name: "archive",
+        summary: "Snapshot a machine and archive it",
+        args: "<machine>",
+        options: [{ flag: "--approval <id>", description: "An approval already granted for this" }],
+        notes: ["Machines are archived, never deleted. The data expires; the record is permanent."],
+      },
+      {
+        name: "packages",
+        summary: "The machine layer of the package manifest",
+        subcommands: [
+          {
+            name: "list",
+            summary: "Show the resolved manifest and where each entry came from",
+            args: "<machine>",
+          },
+          {
+            name: "set",
+            summary: "Declare, pin or drop packages for one machine",
+            args: "<machine>",
+            options: [
+              { flag: "--add <pkg>[@<ver>]", description: "Declare a package (repeatable)" },
+              { flag: "--pin <pkg>[@<ver>]", description: "Declare it pinned (repeatable)" },
+              { flag: "--remove <pkg>", description: "Drop this machine's entry (repeatable)" },
+            ],
+            notes: ["Edits desired state only. Run `cloudable machines reconcile` to apply it."],
+          },
+        ],
+      },
     ],
-    notes: ["Sign in first with `cloudable auth login`."],
+    notes: ["Every command takes a machine name or a machine id."],
+  },
+  {
+    name: "sessions",
+    summary: "Open terminal and SSH sessions",
+    subcommands: [
+      { name: "list", summary: "List sessions that are still open" },
+      { name: "end", summary: "End a session now", args: "<sessionId>" },
+    ],
+  },
+  {
+    name: "certs",
+    summary: "Live SSH certificates",
+    subcommands: [
+      { name: "list", summary: "Who holds a certificate, for what, expiring when" },
+      {
+        name: "revoke",
+        summary: "Mark a certificate revoked",
+        args: "<certificateId>",
+        options: [{ flag: "--reason <reason>", description: "Why (required)" }],
+        notes: [
+          "sshd is not told. The certificate's own 8 hour lifetime is what actually stops it.",
+        ],
+      },
+    ],
+  },
+  {
+    name: "elevation",
+    summary: "Ask for access to a machine you do not own",
+    subcommands: [
+      {
+        name: "request",
+        summary: "Request elevated access",
+        options: [
+          { flag: "--machine <machine>", description: "The machine (required)" },
+          { flag: "--level file_recovery|shell", description: "How much access (required)" },
+          { flag: "--reason <reason>", description: "Why (required)" },
+        ],
+      },
+      { name: "list", summary: "List elevations in your org" },
+      { name: "get", summary: "Show one elevation", args: "<id>" },
+      {
+        name: "sync",
+        summary: "Pick up an approval decision",
+        args: "<id>",
+        notes: ["Deciding an approval does not grant the elevation by itself. This finishes it."],
+      },
+      { name: "expire", summary: "Give access back now", args: "<id>" },
+    ],
+  },
+  {
+    name: "snapshots",
+    summary: "Snapshots left by archived and upgraded machines",
+    subcommands: [
+      {
+        name: "list",
+        summary: "List snapshots with retention and legal hold",
+        options: [
+          { flag: "--limit <n>", description: "Rows per page" },
+          { flag: "--cursor <cursor>", description: "Continue from a previous page" },
+        ],
+      },
+      { name: "get", summary: "Show one snapshot", args: "<snapshotId>" },
+      { name: "cost", summary: "Estimate what a snapshot costs to keep", args: "<snapshotId>" },
+      {
+        name: "restore",
+        summary: "Restore a snapshot onto a machine",
+        args: "<snapshotId>",
+        options: [
+          { flag: "--mode data|config|full", description: "What to restore (required)" },
+          { flag: "--target <machine>", description: "Machine to restore onto (required)" },
+          { flag: "--reason <reason>", description: "Why (required)" },
+          {
+            flag: "--confirm-secret-bindings",
+            description: "Acknowledge that a full restore rebinds secrets",
+          },
+        ],
+        notes: ["Approval gated. It may come back pending; `restore-sync` finishes it."],
+      },
+      {
+        name: "restore-sync",
+        summary: "Resume a restore once its approval is decided",
+        args: "<approvalId>",
+      },
+      {
+        name: "legal-hold",
+        summary: "Stop retention expiring a snapshot",
+        subcommands: [
+          {
+            name: "set",
+            summary: "Put a snapshot on legal hold",
+            args: "<snapshotId>",
+            options: [{ flag: "--reason <reason>", description: "Why (required)" }],
+          },
+          { name: "clear", summary: "Release a legal hold", args: "<snapshotId>" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "people",
+    summary: "The people who can own machines",
+    subcommands: [
+      { name: "list", summary: "List people, with role and source" },
+      {
+        name: "create",
+        summary: "Add a person",
+        options: [
+          { flag: "--email <email>", description: "Their address (required)" },
+          { flag: "--role <role>", description: "Their role (required)" },
+        ],
+      },
+      {
+        name: "update",
+        summary: "Change a person's email or role",
+        args: "<email|id>",
+        options: [
+          { flag: "--email <email>", description: "New address" },
+          { flag: "--role <role>", description: "New role" },
+        ],
+        notes: ["Only people this org manages itself. A SCIM-sourced person is refused."],
+      },
+      { name: "activate", summary: "Let a person sign in again", args: "<email|id>" },
+      {
+        name: "deactivate",
+        summary: "Stop a person signing in",
+        args: "<email|id>",
+        notes: ["Leaves their machines alone. `cloudable offboard start` archives those."],
+      },
+    ],
+  },
+  {
+    name: "offboard",
+    summary: "Archive everything a leaver owns",
+    subcommands: [
+      {
+        name: "start",
+        summary: "Start offboarding a person",
+        args: "<email|id>",
+        options: [{ flag: "--reason <reason>", description: "Why (required)" }],
+        notes: ["Stops, unowns and archives every machine they own. Approval gated."],
+      },
+      {
+        name: "sync",
+        summary: "Resume offboarding once its approval is decided",
+        args: "<approvalId>",
+      },
+    ],
+  },
+  {
+    name: "approvals",
+    summary: "The gate in front of privileged actions",
+    subcommands: [
+      {
+        name: "list",
+        summary: "List approvals",
+        options: [
+          { flag: "--status pending|approved|rejected|expired", description: "Filter by status" },
+          { flag: "--limit <n>", description: "Rows per page" },
+          { flag: "--cursor <cursor>", description: "Continue from a previous page" },
+        ],
+      },
+      { name: "get", summary: "Show one approval", args: "<id>" },
+      {
+        name: "decide",
+        summary: "Approve or reject",
+        args: "<id>",
+        options: [
+          { flag: "--approve", description: "Approve it" },
+          { flag: "--deny", description: "Reject it" },
+          { flag: "--reason <reason>", description: "Why" },
+        ],
+        notes: ["Dual mode needs two different people. Your decision counts once."],
+      },
+      {
+        name: "create",
+        summary: "Raise an approval yourself",
+        options: [
+          {
+            flag: "--action snapshot_restore|break_glass|admin_access|offboarding",
+            description: "What it is for (required)",
+          },
+          { flag: "--reason <reason>", description: "Why (required)" },
+          { flag: "--machine <machine>", description: "Machine it concerns" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "org",
+    summary: "Org-wide settings and the org package manifest",
+    subcommands: [
+      { name: "get", summary: "Show settings, logging tier and retention" },
+      {
+        name: "update",
+        summary: "Change org settings",
+        options: [
+          { flag: "--name <name>", description: "Organisation name" },
+          { flag: "--logging-tier 1|2|3", description: "Default logging tier" },
+          { flag: "--retention-days <n>", description: "Default retention in days" },
+          {
+            flag: "--retention-location customer|cloudable_sweden_central",
+            description: "Where snapshots live",
+          },
+          {
+            flag: "--approval-mode <action>=<mode>",
+            description: "none|single|dual per action (repeatable)",
+          },
+        ],
+      },
+      {
+        name: "packages",
+        summary: "The org layer every machine inherits",
+        subcommands: [
+          { name: "list", summary: "Show the org manifest" },
+          {
+            name: "set",
+            summary: "Declare, pin or drop packages for the whole org",
+            options: [
+              { flag: "--add <pkg>[@<ver>]", description: "Declare a package (repeatable)" },
+              { flag: "--pin <pkg>[@<ver>]", description: "Declare it pinned (repeatable)" },
+              { flag: "--remove <pkg>", description: "Drop the org entry (repeatable)" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    name: "config",
+    summary: "Desired state, one setting or a whole file",
+    subcommands: [
+      {
+        name: "set",
+        summary: "Set one setting at org or machine scope",
+        args: "<key> <value>",
+        options: [
+          { flag: "--machine <machine>", description: "Set it on one machine instead of the org" },
+          { flag: "--pinned", description: "Stop lower scopes overriding it" },
+        ],
+        notes: ["Values are read as JSON when they look like it, otherwise as text."],
+      },
+      {
+        name: "import",
+        summary: "Apply a desired-state file",
+        args: "<file|->",
+        options: [
+          { flag: "--correlation-id <id>", description: "Tie the changes together in the log" },
+        ],
+        notes: [
+          'Takes an array of entries or a `{"entries": [...]}` document. `-` reads stdin.',
+          "Same path as the console's own edits, so the events are the same.",
+        ],
+      },
+    ],
+    notes: ["Both write desired state only. Nothing here touches a live machine."],
+  },
+  {
+    name: "catalog",
+    summary: "Provider regions, images and sizes",
+    subcommands: [
+      {
+        name: "list",
+        summary: "List catalog entries",
+        args: "region|image|sku",
+        options: [{ flag: "--provider azure", description: "Provider (default: azure)" }],
+      },
+      { name: "sync", summary: "Re-read the catalog from Azure", args: "regions|sizes" },
+    ],
+  },
+  {
+    name: "capabilities",
+    summary: "What this deployment can actually provision",
+  },
+  {
+    name: "compliance",
+    summary: "Checks, findings and control coverage",
+    subcommands: [
+      { name: "checks", summary: "The control map: what each control is evidenced by" },
+      {
+        name: "findings",
+        summary: "Per-check findings, newest first",
+        options: [{ flag: "--csv", description: "The export CSV instead of a table" }],
+        notes: ["Exits non-zero when a check is failing, so CI can gate on it."],
+      },
+      {
+        name: "override",
+        summary: "Record a control as met, or clear that",
+        args: "<controlId>",
+        options: [
+          {
+            flag: "--status implemented|manual_action_required|not_covered",
+            description: "What to report",
+          },
+          { flag: "--clear", description: "Go back to the computed status" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "export",
+    summary: "Evidence as CSV",
+    subcommands: [
+      {
+        name: "asset-inventory",
+        summary: "Every machine, owner and state",
+        options: [{ flag: "--output <path>", description: "Write a file instead of stdout" }],
+      },
+      {
+        name: "findings",
+        summary: "Every finding, with age",
+        options: [{ flag: "--output <path>", description: "Write a file instead of stdout" }],
+      },
+    ],
+  },
+  {
+    name: "events",
+    summary: "The append-only log, newest first",
+    options: [
+      { flag: "--limit <n>", description: "Rows per page (default: 50)" },
+      { flag: "--cursor <cursor>", description: "Continue from a previous page" },
+    ],
+    notes: ["Events are never updated or deleted. Retention expires them; nothing edits them."],
+  },
+  {
+    name: "integrations",
+    summary: "Identity provider, clouds and secret stores",
+    subcommands: [
+      { name: "list", summary: "What this org has connected" },
+      {
+        name: "connect",
+        summary: "Connect an integration",
+        options: [
+          { flag: "--kind idp|cloud|secret_store", description: "What kind (required)" },
+          {
+            flag: "--identifier <identifier>",
+            description: "Tenant, subscription or vault (required)",
+          },
+          { flag: "--provider azure|docker|fake", description: "Required for kind cloud" },
+          { flag: "--config <json>", description: "Non-secret configuration" },
+        ],
+        notes: ["No credential is ever stored. Federation only."],
+      },
+      { name: "disconnect", summary: "Disconnect an integration", args: "<id>" },
+    ],
+  },
+  {
+    name: "notifications",
+    summary: "What you were told about your machines",
+    subcommands: [
+      {
+        name: "list",
+        summary: "List notifications",
+        options: [{ flag: "--unread", description: "Only the unread ones" }],
+      },
+      { name: "read", summary: "Mark everything read" },
+    ],
+  },
+  {
+    name: "health",
+    summary: "Check the control plane is up",
+    notes: ["The only command that needs no session."],
   },
   {
     name: "help",
@@ -162,6 +605,8 @@ export function renderRootHelp(): string {
     "",
     "environment:",
     ...columns(ENVIRONMENT),
+    "",
+    "Most read commands take --json. Failures exit 2 usage, 3 not signed in, 4 denied, 5 not found, 6 refused, 7 server, 8 unreachable.",
     "",
     "Run `cloudable <command> --help` for its subcommands and options.",
   ];
