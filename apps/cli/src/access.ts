@@ -9,7 +9,7 @@
 // None of these pass an `orgId`: the control plane reads it from the bearer
 // token these calls already carry (`http/middleware/auth.ts`).
 // ---------------------------------------------------------------------------
-import type { MachineScope } from "@cloudable/contracts";
+import type { MachineScope, SessionMethod } from "@cloudable/contracts";
 import { parseArgs, readSpec, required, requiredFlag } from "./args";
 import { authenticatedApiRequest, postJson } from "./http-client";
 import { dash, printEmpty, printJson, printTable, shortTime } from "./output";
@@ -20,7 +20,7 @@ interface SessionSummary {
   machineId: string;
   machineName: string;
   personId: string;
-  method: "terminal" | "ssh";
+  method: SessionMethod;
   osUser: string;
   startedAt: string;
 }

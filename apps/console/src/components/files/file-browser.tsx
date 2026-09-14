@@ -155,9 +155,8 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
   );
 
   const openFile = useCallback(
-    async (entry: FsEntry) => {
+    async (full: string) => {
       if (dirty && !confirm("Discard unsaved changes?")) return;
-      const full = joinPath(path, entry.name);
       setBusy(true);
       const { result } = await run({ op: "read", path: full });
       setBusy(false);
@@ -169,7 +168,52 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
       const text = decodeText(result.contentBase64);
       setOpen({ path: result.path, original: text, draft: text, modifiedAt: result.modifiedAt });
     },
-    [dirty, path, run],
+    [dirty, run],
+  );
+
+  /**
+   * A symlink can point at either a file or a directory, and nothing in the listing says
+   * which — `lstat` describes the link, not its target. So try to open it as a directory
+   * and fall back to reading it as a file.
+   *
+   * The fallback matters more than it looks: this tool is aimed squarely at `/etc` and
+   * `/var/log`, both full of symlinks. Treating every symlink as a directory made a
+   * symlinked file unopenable AND blanked the listing behind a `not_a_directory` error,
+   * with the breadcrumb still showing the old path.
+   */
+  const activate = useCallback(
+    async (entry: FsEntry) => {
+      const full = joinPath(path, entry.name);
+      if (entry.type === "directory") {
+        navigate(full);
+        return;
+      }
+      if (entry.type !== "symlink") {
+        void openFile(full);
+        return;
+      }
+      if (dirty && !confirm("Discard unsaved changes?")) return;
+      setBusy(true);
+      const { result } = await run({ op: "list", path: full });
+      setBusy(false);
+      if (result.ok && result.op === "list") {
+        setOpen(null);
+        setListError(null);
+        setEntries(result.entries);
+        setParent(result.parent);
+        setTruncated(result.truncated);
+        setPath(result.path);
+        return;
+      }
+      if (!result.ok && result.reason === "not_a_directory") {
+        void openFile(full);
+        return;
+      }
+      toast.error("Couldn't open that link", {
+        description: result.ok ? GENERIC_FAILURE : describeFailure(result.reason),
+      });
+    },
+    [dirty, navigate, openFile, path, run],
   );
 
   const save = useCallback(async () => {
@@ -212,12 +256,18 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
         });
         return;
       }
+      // Attached to the document before clicking, and revoked on a later tick. A detached
+      // anchor does not start a download in Firefox, and revoking synchronously after
+      // `click()` can cancel the download before it begins.
       const url = URL.createObjectURL(new Blob([outcome.bytes as BlobPart]));
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.download = entry.name;
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
       anchor.click();
-      URL.revokeObjectURL(url);
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     },
     [path, run],
   );
@@ -383,8 +433,7 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
                   key={entry.name}
                   entry={entry}
                   busy={busy}
-                  onOpenDirectory={() => navigate(joinPath(path, entry.name))}
-                  onOpenFile={() => void openFile(entry)}
+                  onActivate={() => void activate(entry)}
                   onDownload={() => void download(entry)}
                   onRename={() => void rename(entry)}
                 />
@@ -457,22 +506,22 @@ function Breadcrumbs({
 function EntryRow({
   entry,
   busy,
-  onOpenDirectory,
-  onOpenFile,
+  onActivate,
   onDownload,
   onRename,
 }: {
   entry: FsEntry;
   busy: boolean;
-  onOpenDirectory: () => void;
-  onOpenFile: () => void;
+  onActivate: () => void;
   onDownload: () => void;
   onRename: () => void;
 }) {
-  // A symlink navigates like whatever it points at — the helper follows it on the next
-  // call. It's still SHOWN as a symlink so what's actually on disk stays legible.
-  const navigable = entry.type === "directory" || entry.type === "symlink";
-  const editable = entry.type === "file" && entry.sizeBytes <= FS_MAX_INLINE_BYTES;
+  // A symlink is shown as itself so what is on disk stays legible, but it gets the same
+  // actions a file does — `activate` resolves what it actually points at, and its
+  // `sizeBytes` is the link's own, not the target's, so it can't be size-gated here.
+  const editable =
+    entry.type === "symlink" || (entry.type === "file" && entry.sizeBytes <= FS_MAX_INLINE_BYTES);
+  const downloadable = entry.type === "file" || entry.type === "symlink";
 
   const Icon =
     entry.type === "directory" ? FolderIcon : entry.type === "symlink" ? Link2 : FileIcon;
@@ -483,7 +532,7 @@ function EntryRow({
         <button
           type="button"
           className="flex items-center gap-2 text-left font-mono text-xs hover:underline"
-          onClick={navigable ? onOpenDirectory : onOpenFile}
+          onClick={onActivate}
         >
           <Icon className="size-3.5 shrink-0 text-muted-foreground" />
           <span>{entry.name}</span>
@@ -502,11 +551,11 @@ function EntryRow({
       <TableCell className="text-right">
         <div className="flex justify-end gap-1">
           {editable && (
-            <Button variant="ghost" size="sm" onClick={onOpenFile} disabled={busy} title="Edit">
+            <Button variant="ghost" size="sm" onClick={onActivate} disabled={busy} title="Edit">
               <Pencil className="size-3.5" />
             </Button>
           )}
-          {entry.type === "file" && (
+          {downloadable && (
             <Button variant="ghost" size="sm" onClick={onDownload} disabled={busy} title="Download">
               <Download className="size-3.5" />
             </Button>

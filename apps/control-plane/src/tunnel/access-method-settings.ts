@@ -25,6 +25,20 @@ import type { SessionMethod } from "./session-token";
 
 type DbHandle = PostgresJsDatabase<typeof schema>;
 
+/**
+ * SUPERSEDED, and currently unreferenced.
+ *
+ * `domain/machine/settings.ts`'s `ACCESS_METHODS_ENABLED_KEY` /
+ * `resolveAccessMethodsEnabled` is the live path — that is what `mintSession` and
+ * `MachineService` actually call, and it resolves an `AccessMethodsEnabled` OBJECT through
+ * the org -> template -> machine chain rather than a flat list under a different key.
+ *
+ * Kept rather than deleted because nothing here is wrong on its own terms, but do not wire
+ * it up: two resolvers for "which access methods are on" that read different keys is how a
+ * method ends up enabled by one and disabled by the other. If you need this behaviour, use
+ * the live path. `"files"` is listed below only so this does not sit here contradicting the
+ * live definition while it waits to be removed.
+ */
 export const ACCESS_METHODS_KEY = "access_methods";
 
 /**
@@ -32,7 +46,7 @@ export const ACCESS_METHODS_KEY = "access_methods";
  * restricted at all — CLAUDE.md's "no wizard prefill of any kind" applies just as much to
  * defaults as to prefilled values: nothing should be silently disabled by omission.
  */
-export const DEFAULT_ACCESS_METHODS: readonly SessionMethod[] = ["terminal", "ssh"];
+export const DEFAULT_ACCESS_METHODS: readonly SessionMethod[] = ["terminal", "ssh", "files"];
 
 export class AccessMethodSettingsError extends Data.TaggedError("AccessMethodSettingsError")<{
   reason: string;

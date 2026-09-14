@@ -31,6 +31,20 @@ import { type EndSessionInput, TunnelError, TunnelServer } from "./server";
  *
  * The access-method policy path (`domain/config/apply-setting-change.ts`) does pass a
  * filter — it calls `TunnelServer` directly rather than going through here.
+ *
+ * ⚠️ KNOWN GAP, pre-existing and not closed by the method filter: because that path calls
+ * `TunnelServer` and not this wrapper, disabling an access method updates `sessions` rows
+ * and emits `access.session_ended`, but never tears down the live websocket relay — the
+ * PTY (or `su` helper) keeps running and the browser stays connected. So
+ * "disabling terminates live sessions" (spec §11.1) is currently only true of the record,
+ * not the connection, for BOTH `webTerminal` and `files`. The filter makes that operation
+ * precise about which sessions it ends; it does not make it reach the transport.
+ *
+ * Closing it means routing that path through `TunnelRelay` AND teaching the registry to
+ * close a specific set of sessions: `closeAllForMachine` keys on machine id alone, so a
+ * method-scoped call through here today would end the right rows and then drop every
+ * socket on the machine anyway. The natural shape is `TunnelServer.terminateSessionsForMachine`
+ * returning the session ids it ended, with this wrapper closing exactly those.
  */
 export interface TerminateSessionsForMachineInput {
   orgId: string;
