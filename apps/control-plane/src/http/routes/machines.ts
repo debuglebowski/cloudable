@@ -1,3 +1,4 @@
+import type { AccessMethodsEnabled } from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import {
@@ -35,8 +36,30 @@ const resolvedPersistentPathsSchema = Schema.Struct({
   resolvedFromScopeId: Schema.String,
 });
 
+/**
+ * Every key of `AccessMethodsEnabled` must appear here. An Effect `Schema.Struct` STRIPS
+ * fields it does not declare when encoding the response, so a key missing from this list
+ * is computed correctly server-side and then silently deleted on the way out — which is
+ * exactly what happened when `files` was added: the resolver merged it, the policy gate
+ * honoured it, and the wire never carried it, so the CLI and console both reported a
+ * machine as having only a web terminal and SSH.
+ *
+ * TypeScript cannot catch that on its own, because a Schema is a runtime value and not the
+ * interface. The `satisfies` below is the link: it fails to compile if this struct and
+ * `AccessMethodsEnabled` ever disagree about which keys exist.
+ */
+const accessMethodsEnabledValueSchema = Schema.Struct({
+  webTerminal: Schema.Boolean,
+  ssh: Schema.Boolean,
+  files: Schema.Boolean,
+});
+
+const _accessMethodsKeysMatchContract = {} as Schema.Schema.Type<
+  typeof accessMethodsEnabledValueSchema
+> satisfies AccessMethodsEnabled;
+
 const resolvedAccessMethodsEnabledSchema = Schema.Struct({
-  value: Schema.Struct({ webTerminal: Schema.Boolean, ssh: Schema.Boolean }),
+  value: accessMethodsEnabledValueSchema,
   source: manifestScopeSchema,
   resolvedFromScopeId: Schema.String,
 });
