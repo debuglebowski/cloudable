@@ -99,7 +99,7 @@ export function spawnFilesSession(options: SpawnFilesSessionOptions): FilesSessi
     } catch {}
   };
 
-  void (async () => {
+  const readHelperOutput = async () => {
     // Line-buffered reassembly. A chunk message is ~88 KiB of base64 and will not
     // arrive in one read, so partial lines have to be carried across reads — splitting
     // on whatever a single read happened to contain would corrupt every large transfer.
@@ -124,11 +124,23 @@ export function spawnFilesSession(options: SpawnFilesSessionOptions): FilesSessi
         else if ("chunk" in message) options.onChunk(message.id, message.chunk);
       }
     }
-  })();
+  };
 
-  void proc.exited.then((exitCode) => {
-    options.onExit({ exitCode, signalCode: proc.signalCode ?? null });
+  // Both of these are fire-and-forget, so both need their own catch: an unhandled rejection
+  // is fatal in Bun, and this process is the tunnel daemon — it would take every session on
+  // the machine with it, not just this one. `proc.stdout` rejects when the helper is killed
+  // mid-read, which is the ordinary way a file session ends.
+  void readHelperOutput().catch((error) => {
+    console.error(`files session: helper output reader failed: ${String(error)}`);
   });
+
+  void proc.exited
+    .then((exitCode) => {
+      options.onExit({ exitCode, signalCode: proc.signalCode ?? null });
+    })
+    .catch((error) => {
+      console.error(`files session: exit handler failed: ${String(error)}`);
+    });
 
   return {
     request(requestId, op) {

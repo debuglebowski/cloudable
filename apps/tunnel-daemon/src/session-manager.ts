@@ -13,12 +13,13 @@ import type { FsOp } from "@cloudable/contracts";
 // `createDefaultSessionManagerDeps` below wires the real
 // `session-token-key.ts` + `pty.ts` for actual use.
 // ---------------------------------------------------------------------------
-import { verifySessionToken } from "@cloudable/session-token";
+import { type VerifySessionTokenResult, verifySessionToken } from "@cloudable/session-token";
 import {
   type FilesSession,
   type SpawnFilesSessionOptions,
   spawnFilesSession as realSpawnFilesSession,
 } from "./files-session";
+import { ApiError } from "./http-client";
 import { type PtySession, type SpawnSessionOptions, spawnSession as realSpawnSession } from "./pty";
 import { clearCachedSessionTokenPublicKey, getSessionTokenPublicKey } from "./session-token-key";
 
@@ -37,11 +38,19 @@ export interface SessionManagerDeps {
    * mis-scoped SSH certificate's `validPrincipals` would be: a token minted for a different
    * machine must never be honored just because it reached this daemon's socket. */
   machineId: string;
-  /** The daemon's current bearer session token (`attestation.ts`'s `attest()`), read fresh on
-   * every call rather than captured once — the cached session refreshes itself over time. */
-  getBearerToken: () => string;
-  /** Wraps `session-token-key.ts`'s cache; returns the raw DER bytes, not the base64 string. */
-  getSessionTokenPublicKeyBytes: (bearerToken: string) => Promise<Uint8Array>;
+  /**
+   * The session-token signer's public key, as raw DER bytes.
+   *
+   * Takes no bearer token, deliberately: authenticating this call is the implementation's
+   * own job (`createDefaultSessionManagerDeps` below), because the credential has to be
+   * acquired *at call time*. It used to take one, supplied by a `getBearerToken()` that
+   * returned whatever the last attestation had cached — a 15-minute token refreshed only
+   * when the tunnel reconnects. On a connection that stayed up longer than that, every
+   * attach fetched the key with an expired bearer, got a 401, and the rejection killed the
+   * daemon (see `attach`'s own catch). Nothing here can hold a credential long enough for
+   * that to happen again.
+   */
+  getSessionTokenPublicKeyBytes: () => Promise<Uint8Array>;
   /** Wraps `session-token-key.ts`'s `clearCachedSessionTokenPublicKey` — called once, for one
    * eager retry, specifically on an `invalid_signature` verification failure (the key may
    * have rotated since the last fetch); never on `expired`/`malformed`, which a fresh key
@@ -57,14 +66,36 @@ export interface SessionManagerDeps {
  * `index.ts`; tests supply their own fakes instead of this. */
 export function createDefaultSessionManagerDeps(options: {
   machineId: string;
-  getBearerToken: () => string;
+  /** A bearer token that is valid *now* — `attestation.ts`'s `attest()`, which re-attests
+   * when the cached session is within a minute of expiry. Not `currentBearerToken()`, which
+   * hands back an expired token once the connection has been up longer than the 15-minute
+   * session TTL. */
+  getBearerToken: () => Promise<string>;
+  /** Drops the cached attestation, so the next `getBearerToken()` re-attests from scratch
+   * (`attestation.ts`'s `clearCachedSession`). */
+  invalidateBearerToken: () => void;
 }): SessionManagerDeps {
+  const fetchKeyBytes = async (bearerToken: string): Promise<Uint8Array> => {
+    const { publicKeyDerBase64 } = await getSessionTokenPublicKey(bearerToken);
+    return new Uint8Array(Buffer.from(publicKeyDerBase64, "base64"));
+  };
+
   return {
     machineId: options.machineId,
-    getBearerToken: options.getBearerToken,
-    getSessionTokenPublicKeyBytes: async (bearerToken) => {
-      const { publicKeyDerBase64 } = await getSessionTokenPublicKey(bearerToken);
-      return new Uint8Array(Buffer.from(publicKeyDerBase64, "base64"));
+    getSessionTokenPublicKeyBytes: async () => {
+      try {
+        return await fetchKeyBytes(await options.getBearerToken());
+      } catch (cause) {
+        // A 401 means the control plane rejected the bearer itself — the cached attestation
+        // is dead (expired in the gap, or its signing key rotated) and re-sending it will
+        // fail the same way. One eager re-attest and retry, the same shape as the
+        // `invalid_signature` retry in `attach`. Any other failure is transient or real and
+        // propagates to `attach`, which turns it into a refused session rather than a
+        // crashed daemon.
+        if (!(cause instanceof ApiError) || cause.status !== 401) throw cause;
+        options.invalidateBearerToken();
+        return await fetchKeyBytes(await options.getBearerToken());
+      }
     },
     invalidateSessionTokenPublicKey: clearCachedSessionTokenPublicKey,
     spawnSession: realSpawnSession,
@@ -128,19 +159,35 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
   const fileSessions = new Map<string, FilesSession>();
 
   const verifyOnce = async (sessionToken: string) => {
-    const publicKeyDer = await deps.getSessionTokenPublicKeyBytes(deps.getBearerToken());
+    const publicKeyDer = await deps.getSessionTokenPublicKeyBytes();
     return verifySessionToken(sessionToken, publicKeyDer);
   };
 
   const attach: SessionManager["attach"] = async (input, callbacks) => {
-    let result = await verifyOnce(input.sessionToken);
-
-    // One eager refresh-and-retry, only for a signature that doesn't verify against the
-    // currently cached key — it may simply be stale after a key rotation. Never retried for
-    // `expired`/`malformed`, which no amount of re-fetching the key fixes.
-    if (!result.ok && result.reason === "invalid_signature") {
-      deps.invalidateSessionTokenPublicKey();
+    let result: VerifySessionTokenResult;
+    try {
       result = await verifyOnce(input.sessionToken);
+
+      // One eager refresh-and-retry, only for a signature that doesn't verify against the
+      // currently cached key — it may simply be stale after a key rotation. Never retried for
+      // `expired`/`malformed`, which no amount of re-fetching the key fixes.
+      if (!result.ok && result.reason === "invalid_signature") {
+        deps.invalidateSessionTokenPublicKey();
+        result = await verifyOnce(input.sessionToken);
+      }
+    } catch (cause) {
+      // VERIFICATION FAILING TO RUN MUST NOT KILL THE DAEMON.
+      //
+      // `verifyOnce` reaches the network (the public-key fetch, and the attestation behind
+      // it), so it can reject for reasons that have nothing to do with this token: an
+      // expired bearer, a control plane that is restarting, a DNS blip. This function is
+      // called from `connection.ts`'s inbound-frame dispatch, which does not await it, so a
+      // rejection escaping here used to be an unhandled rejection — fatal in Bun. The daemon
+      // exited, systemd restarted it five seconds later, and EVERY session on this machine
+      // died with it (the control plane closes them all when a daemon connection drops).
+      // One person's attach failing must cost one attach, not every live session on the box.
+      console.error(`session ${input.sessionId}: could not verify session token: ${String(cause)}`);
+      return { ok: false, reason: "verify_failed" };
     }
 
     if (!result.ok) {
@@ -163,10 +210,9 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     //
     // Both spawns throw synchronously for a `targetOsUser` that doesn't look like a real
     // username (`pty.ts`'s `InvalidOsUserError`) or, in principle, any other real spawn
-    // failure — caught here rather than left to propagate as an unhandled rejection out of
-    // `attach` (an `async` function whose caller, `connection.ts`'s inbound-frame dispatch,
-    // invokes it as `void handleInboundFrame(...)` specifically because it does NOT await or
-    // otherwise handle a rejection from it).
+    // failure — caught here so the attach is refused rather than the daemon killed. Same
+    // rule as the verification catch above: `connection.ts` now also catches whatever
+    // escapes this function, but that is a backstop, not the place a known failure belongs.
     // A re-attach on a live `sessionId` is expected, not an error (`registry.ts` permits
     // it on reconnect), but the previous child has to die first. Overwriting the map entry
     // alone orphans a process running as the session user with an open stdin pipe, and

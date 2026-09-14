@@ -49,16 +49,13 @@ export function clearCachedSession(): void {
   cached = undefined;
 }
 
-/**
- * The most recently attested bearer token, read synchronously — for a caller (`session-
- * manager.ts`'s `getBearerToken` dependency, via `index.ts`) that needs "whatever we're
- * currently authenticated as" without awaiting a fresh network round trip on every call.
- * `undefined` only before the very first successful `attest()` — every real caller only
- * reads this after `index.ts`'s own initial `attest()` has already resolved.
- */
-export function currentBearerToken(): string | undefined {
-  return cached?.bearerToken;
-}
+// There is deliberately no `currentBearerToken()` accessor here any more. It returned the
+// cached token without awaiting a round trip, which on any tunnel connection older than the
+// 15-minute session TTL meant an expired one — the cache is only refilled by `attest()`, and
+// the daemon only called that on reconnect. Its one caller (`daemon-main.ts`, for the
+// session-token-key fetch) therefore 401'd on every attach after a long-lived connection,
+// and that rejection killed the daemon. `attest()` is cheap on a cache hit and correct on a
+// miss; nothing needs the other thing.
 
 /**
  * Exchanges `MACHINE_TOKEN` for a short-lived bearer token, caching it
