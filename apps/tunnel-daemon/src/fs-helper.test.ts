@@ -274,6 +274,58 @@ describe("download", () => {
   });
 });
 
+describe("operation validation (the browser's JSON is not trusted)", () => {
+  // `op` arrives as whatever JSON the browser sent — the control plane relays it
+  // structurally rather than re-validating the union, so this is the validation boundary
+  // and the TypeScript type is a claim, not a guarantee.
+  test("REQUIRED FAILURE PATH: a non-numeric sizeBytes cannot disable the upload cap", async () => {
+    const uploads = new Map();
+    // Math.min("abc", cap) is NaN, and every `written + len > NaN` is false — without the
+    // guard this is an unbounded write that can fill the machine's disk.
+    const result = await run(
+      {
+        op: "upload",
+        path: path.join(dir, "x.bin"),
+        sizeBytes: "abc" as unknown as number,
+        replace: false,
+      },
+      uploads,
+    );
+    expectFailure(result, "invalid_path");
+    expect(uploads.size).toBe(0);
+  });
+
+  test("REQUIRED FAILURE PATH: a negative sizeBytes is refused", async () => {
+    expectFailure(
+      await run({ op: "upload", path: path.join(dir, "x.bin"), sizeBytes: -1, replace: false }),
+      "invalid_path",
+    );
+  });
+
+  test("REQUIRED FAILURE PATH: an unknown op answers instead of hanging the request", async () => {
+    // Falling through the switch would return undefined, send nothing, and leave the
+    // browser's promise unsettled forever.
+    const result = await run({ op: "chmod", path: "/etc/passwd" } as unknown as FsOp);
+    expectFailure(result, "invalid_path");
+  });
+
+  test("REQUIRED FAILURE PATH: a non-string path is refused rather than coerced", async () => {
+    expectFailure(await run({ op: "list", path: 42 as unknown as string }), "invalid_path");
+  });
+
+  test("REQUIRED FAILURE PATH: a write with a non-string body is refused", async () => {
+    expectFailure(
+      await run({
+        op: "write",
+        path: path.join(dir, "x.txt"),
+        contentBase64: { evil: true } as unknown as string,
+        expectedModifiedAt: null,
+      }),
+      "invalid_path",
+    );
+  });
+});
+
 describe("upload", () => {
   test("refuses an existing path unless replace was explicitly asked for", async () => {
     const file = path.join(dir, "there.txt");
