@@ -40,7 +40,9 @@ export interface SessionClaims {
   idpIdentity: string;
   targetMachineId: string;
   targetOsUser: string;
-  method: SessionMethod;
+  /** `string`, not `SessionMethod` — see `RawClaims.method` for why. A consumer must match
+   * it exhaustively and refuse what it does not recognise, never fall through to a default. */
+  method: string;
   issuedAt: Date;
   expiresAt: Date;
 }
@@ -49,7 +51,24 @@ interface RawClaims {
   idpIdentity: string;
   targetMachineId: string;
   targetOsUser: string;
-  method: SessionMethod;
+  /**
+   * Deliberately `string`, not `SessionMethod`.
+   *
+   * This is the VERSION-SKEW seam. A machine runs a compiled daemon that can be older than
+   * the control plane by weeks, and the claim set is additive — `"files"` was added after
+   * daemons were already deployed. When the guard below required a known literal, an older
+   * daemon rejected a perfectly well-formed, correctly-signed token naming a newer method as
+   * `"malformed"`, and the operator saw "This session has ended (malformed)" with nothing to
+   * act on. The token was fine; the daemon simply could not serve that method, which is a
+   * different fact and deserves to be said out loud (`session-manager.ts` answers
+   * `unsupported_method`).
+   *
+   * Widening this is safe because the signature is verified BEFORE these claims are parsed:
+   * whatever is here was put there by the control plane, so it is authentic data rather than
+   * caller input. What it is NOT is a capability check — the daemon must still decide whether
+   * it implements the named method, and must refuse rather than fall back to a default.
+   */
+  method: string;
   issuedAt: string;
   expiresAt: string;
 }
@@ -61,7 +80,7 @@ function isRawClaims(value: unknown): value is RawClaims {
     typeof v.idpIdentity === "string" &&
     typeof v.targetMachineId === "string" &&
     typeof v.targetOsUser === "string" &&
-    (v.method === "terminal" || v.method === "ssh" || v.method === "files") &&
+    typeof v.method === "string" &&
     typeof v.issuedAt === "string" &&
     typeof v.expiresAt === "string"
   );

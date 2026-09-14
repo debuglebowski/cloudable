@@ -13,6 +13,7 @@
 // signing needs the vault, anyone holding the public key can verify.
 // ---------------------------------------------------------------------------
 import {
+  type SessionClaims,
   type SessionMethod,
   verifySessionToken as verifySessionTokenPure,
 } from "@cloudable/session-token";
@@ -56,15 +57,19 @@ export interface MintedSessionToken {
   expiresAt: Date;
 }
 
-export interface SessionClaims {
-  idpIdentity: string;
-  targetMachineId: string;
-  targetOsUser: string;
-  method: SessionMethod;
-  issuedAt: Date;
-  expiresAt: Date;
-}
+/**
+ * Re-exported rather than redeclared, so this cannot drift from what the shared verifier
+ * actually returns.
+ *
+ * Note the deliberate asymmetry with `MintSessionTokenInput` above, which keeps `method:
+ * SessionMethod`: strict in what we sign, liberal in what we accept. The minter should only
+ * ever be able to name a method this build knows; a verifier reading a token that may have
+ * been signed by a newer control plane must be able to report what it found rather than
+ * call it malformed. See `@cloudable/session-token`'s `RawClaims.method`.
+ */
+export type { SessionClaims } from "@cloudable/session-token";
 
+/** What this file SIGNS. Strict on `method` on purpose — see `SessionClaims` above. */
 interface RawClaims {
   idpIdentity: string;
   targetMachineId: string;

@@ -357,6 +357,43 @@ describe("SessionManager", () => {
       expect(spawned).toEqual(["pty"]);
     });
 
+    // Version skew: a machine runs a compiled daemon that can trail the control plane by
+    // weeks. This exact case shipped and was seen in production as
+    // "This session has ended (malformed)" — a well-formed, correctly-signed token naming
+    // `files`, rejected by an older daemon whose claims guard only knew terminal/ssh.
+    // The token was fine; the daemon could not serve the method. Those are different facts.
+    test("REQUIRED FAILURE PATH: a method this daemon does not implement is refused, not served as a PTY", async () => {
+      const spawned: string[] = [];
+      const { deps } = makeDeps({
+        spawnSession: () => {
+          spawned.push("pty");
+          throw new Error("an unknown method must never reach spawnSession");
+        },
+        spawnFilesSession: () => {
+          spawned.push("files");
+          throw new Error("an unknown method must never reach spawnFilesSession");
+        },
+      });
+      manager = createSessionManager(deps);
+
+      const outcome = await manager.attach(
+        {
+          sessionId: "s1",
+          sessionToken: mintToken({ method: "readonly" as never }),
+          cols: 80,
+          rows: 24,
+        },
+        { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
+      );
+
+      // Not "malformed": the token verified. The daemon simply has no such session kind.
+      expect(outcome).toEqual({ ok: false, reason: "unsupported_method" });
+      // And critically it did not fall through to a shell, which is what the old
+      // `else` branch did for anything that was not exactly "files".
+      expect(spawned).toEqual([]);
+      expect(manager.has("s1")).toBe(false);
+    });
+
     test("REQUIRED FAILURE PATH: fsRequest on a terminal session does nothing", async () => {
       const { deps } = makeDeps();
       manager = createSessionManager(deps);

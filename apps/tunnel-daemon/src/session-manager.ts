@@ -174,6 +174,24 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     // it again.
     closeSession(input.sessionId);
 
+    // Exhaustive, with no default branch — a method this daemon does not implement is
+    // REFUSED, never served as something else.
+    //
+    // This used to be `if (files) ... else ...`, which meant anything that was not exactly
+    // "files" spawned a full PTY. That was safe only because the claims guard in
+    // `@cloudable/session-token` rejected unknown methods before they reached here — a
+    // load-bearing coupling that was invisible from either file. The guard is now
+    // deliberately permissive so version skew reports honestly (see its own comment), which
+    // makes this the place that decides capability, so it has to fail closed. A future
+    // lower-privilege method reaching an older daemon must not become a shell.
+    if (
+      result.claims.method !== "files" &&
+      result.claims.method !== "terminal" &&
+      result.claims.method !== "ssh"
+    ) {
+      return { ok: false, reason: "unsupported_method" };
+    }
+
     try {
       if (result.claims.method === "files") {
         const files = deps.spawnFilesSession({

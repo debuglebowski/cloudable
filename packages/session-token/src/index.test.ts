@@ -119,3 +119,25 @@ describe("verifySessionToken (pure)", () => {
     expect(result.reason).toBe("malformed_key");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Forward compatibility. The claim set is additive and machines run compiled
+// daemons that trail the control plane, so a token naming a method this build
+// has never heard of must still VERIFY — it was signed by a control plane that
+// did know it. Calling it "malformed" sent an operator chasing a corrupt token
+// that was not corrupt; the daemon decides capability separately
+// (`session-manager.ts` answers `unsupported_method`).
+// ---------------------------------------------------------------------------
+test("a method this build does not know still verifies, rather than reading as malformed", () => {
+  const { token } = mint({ method: "some-future-method" });
+  const result = verifySessionToken(token, publicKeyDer);
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.claims.method).toBe("some-future-method");
+});
+
+test("REQUIRED FAILURE PATH: a non-string method is still malformed", () => {
+  const { token } = mint({ method: 42 as unknown as string });
+  const result = verifySessionToken(token, publicKeyDer);
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.reason).toBe("malformed");
+});
