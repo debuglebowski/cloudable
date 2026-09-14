@@ -12,7 +12,10 @@
 // than via the `Signer` port, mirroring how a real KMS/HSM works: only
 // signing needs the vault, anyone holding the public key can verify.
 // ---------------------------------------------------------------------------
-import { verifySessionToken as verifySessionTokenPure } from "@cloudable/session-token";
+import {
+  type SessionMethod,
+  verifySessionToken as verifySessionTokenPure,
+} from "@cloudable/session-token";
 import { Effect } from "effect";
 import { SignerError, SignerTag } from "../services/Signer";
 
@@ -32,7 +35,14 @@ export const SESSION_TOKEN_KEY_ID = "session-token";
  */
 export const SESSION_TOKEN_TTL_SECONDS = 15 * 60;
 
-export type SessionMethod = "terminal" | "ssh";
+/**
+ * Re-exported from `@cloudable/session-token` rather than redeclared. This used to be a
+ * second, independent copy of the same union; the daemon verifies tokens against the
+ * package's definition, so a copy that drifted would mean the control plane minting a
+ * `method` the daemon's own claims guard rejects as malformed — a whole class of session
+ * that fails only on the machine, after the token is already signed and persisted.
+ */
+export type { SessionMethod } from "@cloudable/session-token";
 
 export interface MintSessionTokenInput {
   idpIdentity: string;

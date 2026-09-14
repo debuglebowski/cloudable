@@ -68,6 +68,12 @@ function fakeSessionManager(overrides: Partial<SessionManager> = {}): {
     data: (sessionId) => {
       calls.push(`data:${sessionId}`);
     },
+    fsRequest: (sessionId, requestId, op) => {
+      calls.push(`fsRequest:${sessionId}:${requestId}:${op.op}`);
+    },
+    fsChunk: (sessionId, requestId, chunk) => {
+      calls.push(`fsChunk:${sessionId}:${requestId}:${chunk.seq}`);
+    },
     resize: (sessionId, cols, rows) => {
       calls.push(`resize:${sessionId}:${cols}x${rows}`);
     },

@@ -24,6 +24,19 @@ FROM ${BASE_IMAGE}
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# The one Unix user sessions run as. `MACHINE_OS_USER` ("cloudable") is chosen
+# server-side and baked into every session token's `targetOsUser` claim
+# (`tunnel/server.ts`); both `pty.ts` and `files-session.ts` then `su - ` into it
+# on this box. Without the account, `su` fails and EVERY session — web terminal
+# and file session alike — dies at spawn on the local Docker provider, which is
+# exactly what was happening: this image predates the change that moved sessions
+# off root, and nothing here had created the user since.
+#
+# A real home directory matters as well as the account: `su -` is a login shell
+# and the file browser opens at `/home/cloudable`.
+ARG MACHINE_OS_USER=cloudable
+RUN useradd --create-home --shell /bin/bash ${MACHINE_OS_USER}
+
 ARG AGENT_BINARY=dist/cloudable-agent-linux-x64
 ARG TUNNEL_DAEMON_BINARY=dist/cloudable-tunnel-daemon-linux-x64
 COPY ${AGENT_BINARY} /usr/local/bin/cloudable-agent

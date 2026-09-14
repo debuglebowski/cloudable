@@ -1,3 +1,4 @@
+import type { AccessMethodsEnabled } from "@cloudable/contracts";
 import type * as schema from "@cloudable/schema";
 import { type SettingRow, resolveSetting, settingValues } from "@cloudable/schema";
 import { and, eq, inArray } from "drizzle-orm";
@@ -36,16 +37,20 @@ export const ACCESS_METHODS_ENABLED_KEY = "machine.accessMethodsEnabled";
 export type PersistentPaths = string[];
 export const DEFAULT_PERSISTENT_PATHS: PersistentPaths = [];
 
-/** Which of the two access methods are turned on for a machine. */
-export interface AccessMethodsEnabled {
-  webTerminal: boolean;
-  ssh: boolean;
-}
+/**
+ * Re-exported from `@cloudable/contracts` rather than redeclared. This was a local copy of
+ * the same interface, which meant the wire shape the console reads and the shape the policy
+ * gate resolves could gain a field independently — and a method the control plane thinks is
+ * enabled by default while the console never renders a toggle for it is a silent hole in
+ * "admin-disablable at any level".
+ */
+export type { AccessMethodsEnabled } from "@cloudable/contracts";
 
-/** Both methods on by default — an org must deliberately disable one (admin-disablable at any level). */
+/** Every method on by default — an org must deliberately disable one (admin-disablable at any level). */
 export const DEFAULT_ACCESS_METHODS_ENABLED: AccessMethodsEnabled = {
   webTerminal: true,
   ssh: true,
+  files: true,
 };
 
 export interface ResolvedMachineSetting<T> {
@@ -132,4 +137,13 @@ export const resolveAccessMethodsEnabled = (
 export function webTerminalEnabledOf(value: unknown): boolean {
   const v = value as Partial<AccessMethodsEnabled> | null | undefined;
   return v?.webTerminal ?? DEFAULT_ACCESS_METHODS_ENABLED.webTerminal;
+}
+
+/** The `files` counterpart of `webTerminalEnabledOf`, same fallback rule. Separate from
+ * the web terminal because the two are separately disablable — see `AccessMethodsEnabled`
+ * in `packages/contracts` for why. A value stored before `files` existed has no such key
+ * and resolves to the default, so nothing needs backfilling. */
+export function filesEnabledOf(value: unknown): boolean {
+  const v = value as Partial<AccessMethodsEnabled> | null | undefined;
+  return v?.files ?? DEFAULT_ACCESS_METHODS_ENABLED.files;
 }

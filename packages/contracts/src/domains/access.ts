@@ -67,9 +67,24 @@ export interface RevokeCertificateRequest {
   reason: string;
 }
 
+/**
+ * The kinds of session `sessions.method` records and the tunnel can carry.
+ *
+ * `"files"` is deliberately its own method rather than a mode of `"terminal"`: it is
+ * separately disablable (`AccessMethodsEnabled`), it is satisfied by a lower elevation
+ * level for a machine you don't own (`file_recovery` as well as `shell`), and the signed
+ * session token carries it as a claim the machine enforces — a token minted for files
+ * cannot open a shell. Folding it into `"terminal"` would erase all three.
+ *
+ * Mirrored by `@cloudable/session-token`'s own `SessionMethod` (the daemon can't depend on
+ * this package) and by the `method` payload field on `access.session_*` in
+ * `@cloudable/events`. All three must be widened together.
+ */
+export type SessionMethod = "terminal" | "ssh" | "files";
+
 export interface MintSessionTokenRequest {
   targetMachineId: string;
-  method: "terminal" | "ssh";
+  method: SessionMethod;
 }
 
 export interface MintSessionTokenResponse {

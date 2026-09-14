@@ -25,7 +25,16 @@
 // ---------------------------------------------------------------------------
 import * as crypto from "node:crypto";
 
-export type SessionMethod = "terminal" | "ssh";
+/**
+ * Which kind of session a token authorizes. The daemon branches on this claim
+ * — and ONLY on this claim, never on anything the `attach` frame carries — to
+ * decide whether to spawn a PTY or a file-browsing helper. That is what keeps
+ * the two elevation levels (`file_recovery` vs `shell`,
+ * `apps/control-plane/src/tunnel/access-authorization.ts`) apart in practice:
+ * a token minted for `"files"` cannot be made to open a shell by a caller who
+ * rewrites the frame, because the frame is not consulted.
+ */
+export type SessionMethod = "terminal" | "ssh" | "files";
 
 export interface SessionClaims {
   idpIdentity: string;
@@ -52,7 +61,7 @@ function isRawClaims(value: unknown): value is RawClaims {
     typeof v.idpIdentity === "string" &&
     typeof v.targetMachineId === "string" &&
     typeof v.targetOsUser === "string" &&
-    (v.method === "terminal" || v.method === "ssh") &&
+    (v.method === "terminal" || v.method === "ssh" || v.method === "files") &&
     typeof v.issuedAt === "string" &&
     typeof v.expiresAt === "string"
   );

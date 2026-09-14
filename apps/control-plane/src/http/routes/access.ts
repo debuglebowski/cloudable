@@ -106,7 +106,7 @@ const RevokeCertificateRequest = Schema.Struct({
 // supplying it. See `tunnel/server.ts`'s `mintSession`.
 const MintSessionTokenRequest = Schema.Struct({
   targetMachineId: Schema.String,
-  method: Schema.Literal("terminal", "ssh"),
+  method: Schema.Literal("terminal", "ssh", "files"),
 });
 
 const MintSessionTokenResponse = Schema.Struct({
@@ -122,7 +122,7 @@ const SessionSummary = Schema.Struct({
   machineId: Schema.String,
   machineName: Schema.String,
   personId: Schema.String,
-  method: Schema.Literal("terminal", "ssh"),
+  method: Schema.Literal("terminal", "ssh", "files"),
   osUser: Schema.String,
   startedAt: Schema.String,
 });

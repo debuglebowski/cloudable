@@ -19,11 +19,9 @@ export interface ConnectTerminalDialogProps {
 }
 
 /**
- * Always connects as "root" for now — a deliberate first-cut simplification, not a policy
- * statement: nothing server-side treats OS user as anything but a shape-validated string
- * (`tunnel/server.ts`'s `OS_USERNAME_PATTERN`), and access is gated on who's connecting
- * (owner/elevation), not which OS user they asked for. A per-machine/org default, with this
- * overridable per-connection, is the next step once that's actually needed.
+ * The OS user is chosen server-side (`MACHINE_OS_USER`), not here. This dialog used to send
+ * `"root"` and the server took it, which made every web terminal session a root shell;
+ * the field is off the wire entirely now.
  *
  * Real `POST /api/v1/access/sessions` (method: "terminal") — mints a session token, then
  * navigates to the terminal page, which attaches to it over a websocket. A
@@ -43,7 +41,7 @@ export function ConnectTerminalDialog({ machine, open, onOpenChange }: ConnectTe
 
   function handleConnect() {
     mutation.mutate(
-      { targetMachineId: machine.id },
+      { targetMachineId: machine.id, method: "terminal" },
       {
         onSuccess: (session) => {
           handleOpenChange(false);
@@ -62,8 +60,8 @@ export function ConnectTerminalDialog({ machine, open, onOpenChange }: ConnectTe
         <DialogHeader>
           <DialogTitle>Connect to {machine.name}</DialogTitle>
           <DialogDescription>
-            Opens a web terminal routed through the tunnel daemon as "root" — never a public
-            endpoint. The session is tied to your own signed-in identity.
+            Opens a web terminal routed through the tunnel daemon, never a public endpoint. The
+            session runs as the machine's own Unix user and is tied to your signed-in identity.
           </DialogDescription>
         </DialogHeader>
         {mutation.isError && (

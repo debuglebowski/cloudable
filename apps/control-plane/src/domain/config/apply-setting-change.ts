@@ -6,8 +6,13 @@ import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import { TunnelServer } from "../../tunnel/server";
+import type { SessionMethod } from "../../tunnel/session-token";
 import { machineSettingChangedEvent } from "../machine/events";
-import { ACCESS_METHODS_ENABLED_KEY, webTerminalEnabledOf } from "../machine/settings";
+import {
+  ACCESS_METHODS_ENABLED_KEY,
+  filesEnabledOf,
+  webTerminalEnabledOf,
+} from "../machine/settings";
 import {
   InvalidScopeError,
   MachineNotFoundError,
@@ -285,7 +290,7 @@ export const applySettingChange = (
       );
 
     // --- Disabling terminates live sessions, not merely
-    // refuses new ones. Only a webTerminal:true → false transition matters
+    // refuses new ones. Only a true → false transition matters
     // here — enabling, or a no-op re-save of an already-disabled value,
     // never needs to end anything. `terminateSessionsForMachine` itself is
     // idempotent (ends only currently-open sessions), so an imprecise
@@ -294,24 +299,42 @@ export const applySettingChange = (
     // durably published, not before: if this step fails, the setting
     // change itself is still fully recorded rather than silently lost
     // behind the resulting error.
+    //
+    // Per-method, because `webTerminal` and `files` are independently disablable and a
+    // person may well be using one and not the other. Termination is scoped to the
+    // method that was actually turned off: disabling the web terminal must not drop a
+    // live file session (or an SSH one), which is what an unfiltered
+    // `terminateSessionsForMachine` here used to do.
     if (input.key === ACCESS_METHODS_ENABLED_KEY) {
-      const wasEnabled = webTerminalEnabledOf(previous);
-      const nowEnabled = webTerminalEnabledOf(input.value);
-      if (wasEnabled && !nowEnabled) {
+      const newlyDisabled: { method: SessionMethod; reason: string }[] = [];
+      if (webTerminalEnabledOf(previous) && !webTerminalEnabledOf(input.value)) {
+        newlyDisabled.push({ method: "terminal", reason: "access.web_terminal_disabled" });
+      }
+      if (filesEnabledOf(previous) && !filesEnabledOf(input.value)) {
+        newlyDisabled.push({ method: "files", reason: "access.files_disabled" });
+      }
+
+      if (newlyDisabled.length > 0) {
         const tunnelServer = yield* TunnelServer;
         const terminate = (targetMachineId: string) =>
-          tunnelServer
-            .terminateSessionsForMachine({
-              orgId: input.orgId,
-              machineId: targetMachineId,
-              reason: "access.web_terminal_disabled",
-            })
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new SettingWriteError({ message: `terminating sessions: ${cause.reason}` }),
-              ),
-            );
+          Effect.forEach(
+            newlyDisabled,
+            (disabled) =>
+              tunnelServer
+                .terminateSessionsForMachine({
+                  orgId: input.orgId,
+                  machineId: targetMachineId,
+                  reason: disabled.reason,
+                  methods: [disabled.method],
+                })
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new SettingWriteError({ message: `terminating sessions: ${cause.reason}` }),
+                  ),
+                ),
+            { discard: true },
+          );
 
         if (input.scopeType === "machine") {
           yield* terminate(input.scopeId);

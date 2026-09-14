@@ -18,6 +18,20 @@ import { isAuthorizedForInteractiveAccess } from "./access-authorization";
 import { TunnelRegistry } from "./registry";
 import { type EndSessionInput, TunnelError, TunnelServer } from "./server";
 
+/**
+ * Deliberately has NO `methods` filter, unlike `TunnelServer.terminateSessionsForMachine`
+ * which this wraps.
+ *
+ * Every caller of this wrapper (archive, restart, offboarding) is a whole-machine event
+ * that wants every session gone, so nothing needs one. More to the point, adding one would
+ * be half-working: `TunnelRegistry.closeAllForMachine` below keys on machine id alone and
+ * has no idea which method a live relay belongs to, so a filtered call would end the right
+ * DB rows and then tear down every socket anyway. If a method-scoped caller ever needs the
+ * registry teardown too, `closeAllForMachine` has to learn about methods first.
+ *
+ * The access-method policy path (`domain/config/apply-setting-change.ts`) does pass a
+ * filter — it calls `TunnelServer` directly rather than going through here.
+ */
 export interface TerminateSessionsForMachineInput {
   orgId: string;
   machineId: string;
@@ -91,8 +105,10 @@ export class TunnelRelay extends Effect.Service<TunnelRelay>()("TunnelRelay", {
  * Reuses `isAuthorizedForInteractiveAccess` from `access-authorization.ts` verbatim — the
  * mint-time gate and this steady-state re-check are the same authorization question, asked
  * at two different moments, and must never drift apart into two separately-maintained
- * copies of "who's allowed on this machine". A null-owner machine, or a session belonging to
- * the machine's current owner, is exempt for the identical reason it's exempt at mint time.
+ * copies of "who's allowed on this machine". That question is per-method, so the select
+ * carries `sessions.method` through to the gate. A null-owner machine, or a session
+ * belonging to the machine's current owner, is exempt for the identical reason it's exempt
+ * at mint time.
  */
 export const closeSessionsWithLapsedAuthorization = (): Effect.Effect<
   number,
@@ -111,6 +127,7 @@ export const closeSessionsWithLapsedAuthorization = (): Effect.Effect<
             orgId: sessions.orgId,
             personId: sessions.personId,
             machineId: sessions.machineId,
+            method: sessions.method,
             ownerPersonId: machines.ownerPersonId,
           })
           .from(sessions)
@@ -121,10 +138,16 @@ export const closeSessionsWithLapsedAuthorization = (): Effect.Effect<
 
     let closedCount = 0;
     for (const row of openSessions) {
+      // `row.method`, not a fixed level: the sweep must ask the same question `mintSession`
+      // asked about THIS session. Asking the terminal question about a files session would
+      // close every file session held on a `file_recovery` grant on the very next tick —
+      // the session would mint successfully and then die seconds later, for no visible
+      // reason, and only for the non-owner case that elevation exists to serve.
       const authorized = yield* isAuthorizedForInteractiveAccess(db, {
         personId: row.personId,
         machineId: row.machineId,
         ownerPersonId: row.ownerPersonId,
+        method: row.method,
       }).pipe(Effect.mapError((cause) => new TunnelError({ reason: "persist_failed", cause })));
 
       if (!authorized) {
