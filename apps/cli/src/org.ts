@@ -9,8 +9,8 @@
 // ---------------------------------------------------------------------------
 import { oneOf, parseArgs, positiveInt, readSpec } from "./args";
 import { UsageError } from "./errors";
-import { authenticatedApiRequest, patchJson, query } from "./http-client";
-import { type OrgWire, currentActor, currentIdentity, fetchOrg } from "./identity";
+import { authenticatedApiRequest, patchJson } from "./http-client";
+import { type OrgWire, fetchOrg } from "./identity";
 import { packageEdits } from "./machines";
 import { dash, printEmpty, printFields, printJson, printTable } from "./output";
 import { usageFor } from "./program";
@@ -89,10 +89,7 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
   );
 
   const modes = approvalModes(args.all["approval-mode"] ?? []);
-  const payload: Record<string, unknown> = {
-    orgId: (await currentIdentity()).orgId,
-    actor: await currentActor(),
-  };
+  const payload: Record<string, unknown> = {};
   if (args.flags.name) payload.name = args.flags.name;
   if (args.flags["logging-tier"]) {
     payload.loggingTier = Number(
@@ -123,9 +120,8 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
 
 export async function runOrgPackagesListCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const { orgId } = await currentIdentity();
   const res = await authenticatedApiRequest<{ items: OrgPackageEntry[] }>(
-    `/api/v1/organisation/packages${query({ orgId })}`,
+    "/api/v1/organisation/packages",
   );
   if (args.booleans.has("json")) {
     printJson(res);
@@ -158,8 +154,6 @@ export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Pro
   const res = await authenticatedApiRequest<{ items: OrgPackageEntry[] }>(
     "/api/v1/organisation/packages",
     patchJson({
-      orgId: (await currentIdentity()).orgId,
-      actor: await currentActor(),
       ...(upserts.length > 0 ? { upserts } : {}),
       ...(removals.length > 0 ? { removals } : {}),
     }),

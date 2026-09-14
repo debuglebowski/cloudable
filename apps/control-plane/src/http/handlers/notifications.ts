@@ -6,13 +6,16 @@ import {
   markAllNotificationsRead,
 } from "../../domain/notifications/queries";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 const asInfraError = (e: { reason: string }) => new NotificationInfraError({ reason: e.reason });
 
 export const NotificationsLive = HttpApiBuilder.group(Api, "notifications", (handlers) =>
   handlers
-    .handle("list", ({ urlParams }) =>
-      listNotificationsForPerson(urlParams.orgId, urlParams.personId).pipe(
+    .handle("list", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) =>
+        listNotificationsForPerson(currentUser.orgId, currentUser.personId),
+      ).pipe(
         Effect.map((rows) => ({
           items: rows.map((row) => ({
             id: row.id,
@@ -25,8 +28,10 @@ export const NotificationsLive = HttpApiBuilder.group(Api, "notifications", (han
         Effect.catchTag("NotificationQueryError", (e) => Effect.fail(asInfraError(e))),
       ),
     )
-    .handle("markRead", ({ payload }) =>
-      markAllNotificationsRead(payload.orgId, payload.personId).pipe(
+    .handle("markRead", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) =>
+        markAllNotificationsRead(currentUser.orgId, currentUser.personId),
+      ).pipe(
         Effect.map((updated) => ({ updated })),
         Effect.catchTag("NotificationQueryError", (e) => Effect.fail(asInfraError(e))),
       ),

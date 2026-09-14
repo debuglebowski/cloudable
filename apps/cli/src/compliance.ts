@@ -9,8 +9,7 @@
 import * as fs from "node:fs";
 import { oneOf, parseArgs, readSpec, required } from "./args";
 import { UsageError } from "./errors";
-import { authenticatedApiRequest, authenticatedApiText, patchJson, query } from "./http-client";
-import { currentIdentity } from "./identity";
+import { authenticatedApiRequest, authenticatedApiText, patchJson } from "./http-client";
 import { dash, printEmpty, printJson, printTable } from "./output";
 import { usageFor } from "./program";
 
@@ -45,9 +44,8 @@ interface ControlMapEntry {
 
 export async function runComplianceChecksCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const { orgId } = await currentIdentity();
   const res = await authenticatedApiRequest<{ controls: ControlMapEntry[] }>(
-    `/api/v1/compliance/control-map${query({ orgId })}`,
+    "/api/v1/compliance/control-map",
   );
   if (args.booleans.has("json")) {
     printJson(res);
@@ -71,12 +69,9 @@ export async function runComplianceChecksCommand(argv: ReadonlyArray<string>): P
 
 export async function runComplianceFindingsCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec({ booleans: ["csv"] }));
-  const { orgId } = await currentIdentity();
 
   if (args.booleans.has("csv")) {
-    process.stdout.write(
-      await authenticatedApiText(`/api/v1/compliance/findings/export${query({ orgId })}`),
-    );
+    process.stdout.write(await authenticatedApiText("/api/v1/compliance/findings/export"));
     return;
   }
 
@@ -84,7 +79,7 @@ export async function runComplianceFindingsCommand(argv: ReadonlyArray<string>):
     orgId: string;
     generatedAt: string;
     checks: CheckResult[];
-  }>(`/api/v1/compliance/findings${query({ orgId })}`);
+  }>("/api/v1/compliance/findings");
   if (args.booleans.has("json")) {
     printJson(res);
     return;
@@ -129,11 +124,10 @@ export async function runComplianceOverrideCommand(argv: ReadonlyArray<string>):
     throw new UsageError(`pass exactly one of --status or --clear\n\n${usage}`);
   }
   const status = clear ? null : oneOf(args.flags.status ?? "", CONTROL_STATUSES, "status");
-  const { orgId } = await currentIdentity();
 
   const res = await authenticatedApiRequest<{ controls: ControlMapEntry[] }>(
     `/api/v1/compliance/control-map/${encodeURIComponent(controlId)}/override`,
-    patchJson({ orgId, status }),
+    patchJson({ status }),
   );
   if (args.booleans.has("json")) {
     printJson(res);
@@ -154,8 +148,7 @@ async function exportCsv(
   defaultName: string,
 ): Promise<void> {
   const args = parseArgs(argv, { values: ["output"] });
-  const { orgId } = await currentIdentity();
-  const csv = await authenticatedApiText(`${path}${query({ orgId })}`);
+  const csv = await authenticatedApiText(path);
 
   const output = args.flags.output;
   if (output === undefined) {

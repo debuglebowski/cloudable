@@ -6,8 +6,7 @@
 // what the endpoint does — there is no per-notification write.
 // ---------------------------------------------------------------------------
 import { parseArgs, readSpec } from "./args";
-import { authenticatedApiRequest, postJson, query } from "./http-client";
-import { currentIdentity } from "./identity";
+import { authenticatedApiRequest, postJson } from "./http-client";
 import { printEmpty, printJson, printTable, shortTime } from "./output";
 
 interface Notification {
@@ -20,10 +19,7 @@ interface Notification {
 
 export async function runNotificationsListCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec({ booleans: ["unread"] }));
-  const { orgId, personId } = await currentIdentity();
-  const res = await authenticatedApiRequest<{ items: Notification[] }>(
-    `/api/v1/notifications${query({ orgId, personId })}`,
-  );
+  const res = await authenticatedApiRequest<{ items: Notification[] }>("/api/v1/notifications");
 
   const items = args.booleans.has("unread")
     ? res.items.filter((item) => item.readAt === null)
@@ -49,10 +45,9 @@ export async function runNotificationsListCommand(argv: ReadonlyArray<string>): 
 
 export async function runNotificationsReadCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const { orgId, personId } = await currentIdentity();
   const res = await authenticatedApiRequest<{ updated: number }>(
     "/api/v1/notifications/read",
-    postJson({ orgId, personId }),
+    postJson({}),
   );
   if (args.booleans.has("json")) {
     printJson(res);

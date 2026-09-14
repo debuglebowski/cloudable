@@ -11,6 +11,7 @@ import {
   updateOrgSettings,
 } from "../../domain/organisation/settings";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 /** Which `OrgSettingsError` reasons are genuine client-facing validation
  * failures (worth a typed 4xx) versus our own infrastructure breaking
@@ -35,34 +36,42 @@ const rethrowPackagesInfraAsDefect = (e: OrgPackagesError) =>
 
 export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handlers) =>
   handlers
-    .handle("get", ({ urlParams }) =>
-      getOrgSettings(urlParams.orgId).pipe(
+    .handle("get", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) => getOrgSettings(currentUser.orgId)).pipe(
         Effect.catchTag("OrgSettingsError", rethrowInfraAsDefect),
       ),
     )
     .handle("update", ({ payload }) =>
-      updateOrgSettings({
-        orgId: payload.orgId,
-        name: payload.name,
-        approvalModes: payload.approvalModes,
-        loggingTier: payload.loggingTier,
-        retentionDefaultDays: payload.retentionDefaultDays,
-        retentionLocation: payload.retentionLocation,
-        actor: { actorType: payload.actor.type, actorId: payload.actor.id },
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* updateOrgSettings({
+          orgId: currentUser.orgId,
+          name: payload.name,
+          approvalModes: payload.approvalModes,
+          loggingTier: payload.loggingTier,
+          retentionDefaultDays: payload.retentionDefaultDays,
+          retentionLocation: payload.retentionLocation,
+          // The authenticated caller, never a name they chose for themselves. This is the
+          // actor on a permanent `organisation.updated` event.
+          actor: { actorType: "person", actorId: currentUser.personId },
+        });
       }).pipe(Effect.catchTag("OrgSettingsError", rethrowInfraAsDefect)),
     )
-    .handle("listPackages", ({ urlParams }) =>
-      listOrgPackages(urlParams.orgId).pipe(
+    .handle("listPackages", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) => listOrgPackages(currentUser.orgId)).pipe(
         Effect.map((items) => ({ items })),
         Effect.catchTag("OrgPackagesError", rethrowPackagesInfraAsDefect),
       ),
     )
     .handle("updatePackages", ({ payload }) =>
-      updateOrgPackages({
-        orgId: payload.orgId,
-        upserts: payload.upserts,
-        removals: payload.removals,
-        actor: { actorType: payload.actor.type, actorId: payload.actor.id },
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        return yield* updateOrgPackages({
+          orgId: currentUser.orgId,
+          upserts: payload.upserts,
+          removals: payload.removals,
+          actor: { actorType: "person", actorId: currentUser.personId },
+        });
       }).pipe(
         Effect.map((items) => ({ items })),
         Effect.catchTag("OrgPackagesError", rethrowPackagesInfraAsDefect),
