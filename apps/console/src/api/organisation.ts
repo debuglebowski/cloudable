@@ -2,8 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { apiGet, apiPatch } from "@/lib/api-client";
-import { CURRENT_ORG_ID } from "@/lib/current-org";
-import { CURRENT_PERSON_ID } from "@/lib/current-person";
+import { currentActor, currentOrgId } from "@/lib/current-user";
 
 /**
  * Organisation settings — wired to the real `apps/control-plane/src/http/
@@ -96,7 +95,7 @@ interface OrgPackagesResponse {
 export function useOrgSettings() {
   return useQuery({
     queryKey: organisationKeys.settings(),
-    queryFn: () => apiGet<OrgSettings>(`/api/v1/organisation?orgId=${CURRENT_ORG_ID}`),
+    queryFn: async () => apiGet<OrgSettings>(`/api/v1/organisation?orgId=${await currentOrgId()}`),
   });
 }
 
@@ -107,11 +106,11 @@ export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id" | "loggingTi
 export function useUpdateOrgSettings() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: UpdateOrgSettingsInput) =>
+    mutationFn: async (input: UpdateOrgSettingsInput) =>
       apiPatch<OrgSettings>("/api/v1/organisation", {
-        orgId: CURRENT_ORG_ID,
+        orgId: await currentOrgId(),
         ...input,
-        actor: { type: "person", id: CURRENT_PERSON_ID },
+        actor: await currentActor(),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: organisationKeys.all });
@@ -133,20 +132,20 @@ export function useUpdateOrgSettings() {
 export function useOrgPackages() {
   return useQuery({
     queryKey: organisationKeys.packages(),
-    queryFn: () =>
-      apiGet<OrgPackagesResponse>(`/api/v1/organisation/packages?orgId=${CURRENT_ORG_ID}`).then(
-        (res) => res.items,
-      ),
+    queryFn: async () =>
+      apiGet<OrgPackagesResponse>(
+        `/api/v1/organisation/packages?orgId=${await currentOrgId()}`,
+      ).then((res) => res.items),
   });
 }
 
 function useUpdateOrgPackages() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { upserts?: OrgPackageEdit[]; removals?: string[] }) =>
+    mutationFn: async (input: { upserts?: OrgPackageEdit[]; removals?: string[] }) =>
       apiPatch<OrgPackagesResponse>("/api/v1/organisation/packages", {
-        orgId: CURRENT_ORG_ID,
-        actor: { type: "person", id: CURRENT_PERSON_ID },
+        orgId: await currentOrgId(),
+        actor: await currentActor(),
         ...input,
       }),
     onSuccess: () => {

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import type { BadgeProps } from "@/components/ui/badge";
 import { BASE_URL, apiGet } from "@/lib/api-client";
-import { CURRENT_ORG_ID } from "@/lib/current-org";
+import { currentOrgId } from "@/lib/current-user";
 
 /**
  * Audit domain: timeline (raw event feed) and evidence export (events →
@@ -183,15 +183,12 @@ function mapFindings(check: ComplianceCheckResultWire): OpenFinding[] {
 
 async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
   // `/api/v1/compliance/*` still takes `orgId` as a plain query param, not derived from
-  // the session — same known gap `api/compliance.ts`'s `useControlMap` already works
-  // around with this exact constant (see its own doc comment).
+  // the session — same known gap `api/compliance.ts`'s `useControlMap` works around the
+  // same way (see `lib/current-user.ts`).
+  const orgId = await currentOrgId();
   const [controlMap, findingsRes] = await Promise.all([
-    apiGet<{ controls: ControlMapEntryWire[] }>(
-      `/api/v1/compliance/control-map?orgId=${CURRENT_ORG_ID}`,
-    ),
-    apiGet<{ checks: ComplianceCheckResultWire[] }>(
-      `/api/v1/compliance/findings?orgId=${CURRENT_ORG_ID}`,
-    ),
+    apiGet<{ controls: ControlMapEntryWire[] }>(`/api/v1/compliance/control-map?orgId=${orgId}`),
+    apiGet<{ checks: ComplianceCheckResultWire[] }>(`/api/v1/compliance/findings?orgId=${orgId}`),
   ]);
   const checksById = new Map(findingsRes.checks.map((c) => [c.checkId, c]));
 
@@ -251,7 +248,7 @@ export interface ComplianceCheckSummary {
 
 async function fetchComplianceChecks(): Promise<ComplianceCheckSummary[]> {
   const findingsRes = await apiGet<{ checks: ComplianceCheckResultWire[] }>(
-    `/api/v1/compliance/findings?orgId=${CURRENT_ORG_ID}`,
+    `/api/v1/compliance/findings?orgId=${await currentOrgId()}`,
   );
   return findingsRes.checks.map((check) => ({
     id: check.checkId,

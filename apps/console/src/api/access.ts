@@ -3,7 +3,7 @@ import { toast } from "sonner";
 
 import type { BadgeProps } from "@/components/ui/badge";
 import { apiGet, apiPost } from "@/lib/api-client";
-import { CURRENT_ORG_ID } from "@/lib/current-org";
+import { currentOrgId } from "@/lib/current-user";
 import { listMachines } from "./machines";
 import { listPeople } from "./people-directory";
 
@@ -17,7 +17,7 @@ import { listPeople } from "./people-directory";
 // real `/api/v1/people` and machines lists; sessions/elevations already come
 // back with `machineName` pre-joined server-side.
 //
-// Certificate/session-listing/end calls here still send `orgId: CURRENT_ORG_ID`
+// Certificate/session-listing/end calls here still send `orgId: await currentOrgId()`
 // explicitly (see `routes/access.ts`'s own header comment for exactly which
 // endpoints and why — mostly "not actually wrong yet, hasn't needed
 // migrating"). `mintSession` below is the one exception that DOES need a real
@@ -110,9 +110,10 @@ interface ElevationListItemWire {
 }
 
 async function fetchLiveCertificates(): Promise<LiveCertificate[]> {
+  const orgId = await currentOrgId();
   const [res, people, machines] = await Promise.all([
     apiGet<{ certificates: CertificateSummaryWire[] }>(
-      `/api/v1/access/certificates?orgId=${CURRENT_ORG_ID}`,
+      `/api/v1/access/certificates?orgId=${orgId}`,
     ),
     listPeople(),
     listMachines(),
@@ -133,15 +134,16 @@ async function fetchLiveCertificates(): Promise<LiveCertificate[]> {
 
 async function revokeCertificateRequest(id: string, reason: string): Promise<void> {
   await apiPost("/api/v1/access/certificates/revoke", {
-    orgId: CURRENT_ORG_ID,
+    orgId: await currentOrgId(),
     certificateId: id,
     reason,
   });
 }
 
 async function fetchActiveSessions(): Promise<ActiveSession[]> {
+  const orgId = await currentOrgId();
   const [res, people] = await Promise.all([
-    apiGet<{ sessions: SessionSummaryWire[] }>(`/api/v1/access/sessions?orgId=${CURRENT_ORG_ID}`),
+    apiGet<{ sessions: SessionSummaryWire[] }>(`/api/v1/access/sessions?orgId=${orgId}`),
     listPeople(),
   ]);
   return res.sessions.map((s) => ({
@@ -155,7 +157,7 @@ async function fetchActiveSessions(): Promise<ActiveSession[]> {
 }
 
 async function terminateSessionRequest(id: string): Promise<void> {
-  await apiPost("/api/v1/access/sessions/end", { orgId: CURRENT_ORG_ID, sessionId: id });
+  await apiPost("/api/v1/access/sessions/end", { orgId: await currentOrgId(), sessionId: id });
 }
 
 async function fetchElevations(): Promise<ElevationGrant[]> {
