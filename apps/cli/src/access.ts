@@ -5,11 +5,13 @@
 // This is the whole surface on purpose: which certificates are live, for whom,
 // expiring when, and which sessions are open. No key uploads, no per-machine
 // passwords (docs/access.md).
+//
+// None of these pass an `orgId`: the control plane reads it from the bearer
+// token these calls already carry (`http/middleware/auth.ts`).
 // ---------------------------------------------------------------------------
 import type { MachineScope } from "@cloudable/contracts";
 import { parseArgs, readSpec, required, requiredFlag } from "./args";
-import { authenticatedApiRequest, postJson, query } from "./http-client";
-import { currentIdentity } from "./identity";
+import { authenticatedApiRequest, postJson } from "./http-client";
 import { dash, printEmpty, printJson, printTable, shortTime } from "./output";
 import { usageFor } from "./program";
 
@@ -40,9 +42,8 @@ function scopeLabel(scope: MachineScope): string {
 
 export async function runSessionsListCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const { orgId } = await currentIdentity();
   const res = await authenticatedApiRequest<{ sessions: SessionSummary[] }>(
-    `/api/v1/access/sessions${query({ orgId })}`,
+    "/api/v1/access/sessions",
   );
   if (args.booleans.has("json")) {
     printJson(res);
@@ -61,19 +62,17 @@ export async function runSessionsListCommand(argv: ReadonlyArray<string>): Promi
 export async function runSessionsEndCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
   const sessionId = required(args, 0, "a session id", usageFor("sessions end <sessionId>"));
-  const { orgId } = await currentIdentity();
   await authenticatedApiRequest<{ ok: true }>(
     "/api/v1/access/sessions/end",
-    postJson({ orgId, sessionId }),
+    postJson({ sessionId }),
   );
   console.log(`Ended session ${sessionId}.`);
 }
 
 export async function runCertsListCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const { orgId } = await currentIdentity();
   const res = await authenticatedApiRequest<{ certificates: CertificateSummary[] }>(
-    `/api/v1/access/certificates${query({ orgId })}`,
+    "/api/v1/access/certificates",
   );
   if (args.booleans.has("json")) {
     printJson(res);
@@ -101,11 +100,9 @@ export async function runCertsRevokeCommand(argv: ReadonlyArray<string>): Promis
   const args = parseArgs(argv, readSpec({ values: ["reason"] }));
   const certificateId = required(args, 0, "a certificate id", usage);
   const reason = requiredFlag(args, "reason", usage);
-  const { orgId } = await currentIdentity();
-
   await authenticatedApiRequest<{ ok: true }>(
     "/api/v1/access/certificates/revoke",
-    postJson({ orgId, certificateId, reason }),
+    postJson({ certificateId, reason }),
   );
   console.log(`Revoked ${certificateId}.`);
   console.log(

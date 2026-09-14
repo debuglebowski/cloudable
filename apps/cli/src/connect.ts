@@ -3,7 +3,6 @@ import { parseArgs, required } from "./args";
 import { config } from "./config";
 import { CliError, EXIT } from "./errors";
 import { authenticatedApiRequest, postJson } from "./http-client";
-import { currentIdentity } from "./identity";
 import { usageFor } from "./program";
 import { machineId } from "./resolve";
 import { requireSession } from "./session";
@@ -55,7 +54,6 @@ export async function runConnectCommand(argv: ReadonlyArray<string>): Promise<vo
   const args = parseArgs(argv, {});
   const target = required(args, 0, "a machine", usage);
 
-  const { orgId } = await currentIdentity();
   const id = await machineId(target);
   const session = requireSession();
 
@@ -155,7 +153,7 @@ export async function runConnectCommand(argv: ReadonlyArray<string>): Promise<vo
       try {
         await authenticatedApiRequest<{ ok: true }>(
           "/api/v1/access/sessions/end",
-          postJson({ orgId, sessionId: minted.sessionId }),
+          postJson({ sessionId: minted.sessionId }),
         );
       } catch {
         // Detaching is not worth failing over; the session's own token expires.
