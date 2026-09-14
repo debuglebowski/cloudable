@@ -398,6 +398,24 @@ describe("upload", () => {
     expect(uploads.size).toBe(0);
   });
 
+  test("REQUIRED FAILURE PATH: a malformed chunk closes the handle instead of leaking it", async () => {
+    const uploads = new Map();
+    await run(
+      { op: "upload", path: path.join(dir, "up.bin"), sizeBytes: 8, replace: false },
+      uploads,
+    );
+
+    const result = await applyUploadChunk(
+      "req-1",
+      { seq: 0, dataBase64: 42 as unknown as string, final: false },
+      uploads,
+    );
+    expectFailure(result, "invalid_path");
+    // The entry is gone, which is what proves the descriptor was closed rather than
+    // stranded behind a throw.
+    expect(uploads.size).toBe(0);
+  });
+
   test("chunks arriving after a refusal are dropped, not answered a second time", async () => {
     const uploads = new Map();
     const result = await applyUploadChunk(

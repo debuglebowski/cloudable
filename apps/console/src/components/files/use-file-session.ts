@@ -51,6 +51,9 @@ export interface FileSession {
 
 const SOCKET_CLOSED: FsResult = { ok: false, reason: "io_error" };
 
+/** High-water mark for the upload send loop — a few chunks in flight, not a whole file. */
+const MAX_BUFFERED_BYTES = 4 * FS_CHUNK_BYTES;
+
 export function useFileSession(sessionId: string): FileSession {
   const [state, setState] = useState<ConnectionState>("connecting");
   const [closeReason, setCloseReason] = useState<string | null>(null);
@@ -64,6 +67,15 @@ export function useFileSession(sessionId: string): FileSession {
     // with the terminal and does not branch on session kind.
     const ws = new WebSocket(attachUrl(sessionId, 80, 24));
     socketRef.current = ws;
+
+    /** Settles everything still in flight as a failure. Callers render a failed result;
+     * an unsettled promise is a leak they can never recover from. */
+    const drainPending = () => {
+      for (const [id, entry] of pending) {
+        pending.delete(id);
+        entry.resolve({ result: SOCKET_CLOSED });
+      }
+    };
 
     /** A download settles only once BOTH its result and its final chunk have arrived —
      * they race, and settling on the first would either lose the tail of the file or
@@ -104,6 +116,12 @@ export function useFileSession(sessionId: string): FileSession {
         case "close":
           setCloseReason(frame.reason);
           setState((prev) => (prev === "attached" ? "closed" : prev));
+          // The session is over, so nothing will answer what is still in flight. This has
+          // to drain here and not only in `onclose`: when the helper exits on its own the
+          // daemon sends `close`, and the control plane forwards it WITHOUT closing the
+          // browser socket — so `onclose` may never fire and every pending promise would
+          // hang unresolved, leaving the UI stuck on `busy` forever.
+          drainPending();
           break;
         case "fs_response": {
           const entry = pending.get(frame.requestId);
@@ -125,12 +143,7 @@ export function useFileSession(sessionId: string): FileSession {
 
     ws.onclose = () => {
       setState((prev) => (prev === "rejected" ? prev : "closed"));
-      // Nothing will ever answer these now. Settling them as a failure keeps every caller's
-      // `await` from hanging forever behind a dead socket.
-      for (const [id, entry] of pending) {
-        pending.delete(id);
-        entry.resolve({ result: SOCKET_CLOSED });
-      }
+      drainPending();
     };
     ws.onerror = () => setState((prev) => (prev === "attached" ? "closed" : prev));
 
@@ -138,10 +151,7 @@ export function useFileSession(sessionId: string): FileSession {
       ws.onclose = null;
       ws.close();
       socketRef.current = null;
-      for (const [id, entry] of pending) {
-        pending.delete(id);
-        entry.resolve({ result: SOCKET_CLOSED });
-      }
+      drainPending();
     };
   }, [sessionId]);
 
@@ -150,6 +160,17 @@ export function useFileSession(sessionId: string): FileSession {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     ws.send(JSON.stringify(frame));
     return true;
+  }, []);
+
+  /** Resolves once the socket's send queue is under the high-water mark, or false if it
+   * died while we waited. */
+  const waitForDrain = useCallback(async (): Promise<boolean> => {
+    for (;;) {
+      const ws = socketRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      if (ws.bufferedAmount <= MAX_BUFFERED_BYTES) return true;
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    }
   }, []);
 
   const begin = useCallback((isDownload: boolean) => {
@@ -211,6 +232,13 @@ export function useFileSession(sessionId: string): FileSession {
           pendingRef.current.delete(requestId);
           return { result: SOCKET_CLOSED };
         }
+        // Without this the whole file goes into `bufferedAmount` in one synchronous loop:
+        // ~67 MiB of base64 for a 50 MiB upload, queued in the tab with nothing draining
+        // it. Yielding while the socket is behind also lets the tab stay responsive.
+        if (!(await waitForDrain())) {
+          pendingRef.current.delete(requestId);
+          return { result: SOCKET_CLOSED };
+        }
       }
 
       // An empty file sends no chunks at all, so nothing would ever mark it final.
@@ -220,7 +248,7 @@ export function useFileSession(sessionId: string): FileSession {
 
       return promise;
     },
-    [begin, send, sessionId],
+    [begin, send, sessionId, waitForDrain],
   );
 
   return { state, closeReason, run, upload };

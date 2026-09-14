@@ -391,6 +391,20 @@ export async function applyUploadChunk(
     return { ok: false, reason };
   };
 
+  // The chunk half of the same validation boundary `invalidOp` guards for operations. A
+  // non-string `dataBase64` makes `Buffer.from` throw straight past `fail()`, leaving the
+  // entry in `uploads` with an open descriptor while the outer handler answers the request
+  // — a leaked file handle per malformed chunk.
+  if (
+    typeof chunk !== "object" ||
+    chunk === null ||
+    typeof chunk.dataBase64 !== "string" ||
+    !Number.isInteger(chunk.seq) ||
+    typeof chunk.final !== "boolean"
+  ) {
+    return fail("invalid_path");
+  }
+
   // Out of order means the stream is not what the sender thinks it is. Writing it
   // anyway would produce a file that is the right length and the wrong contents,
   // which is worse than a failed upload.

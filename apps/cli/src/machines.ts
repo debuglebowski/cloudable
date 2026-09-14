@@ -142,6 +142,7 @@ export async function runMachinesGetCommand(argv: ReadonlyArray<string>): Promis
       [
         machine.accessMethodsEnabled.value.webTerminal ? "web terminal" : undefined,
         machine.accessMethodsEnabled.value.ssh ? "ssh" : undefined,
+        machine.accessMethodsEnabled.value.files ? "files" : undefined,
       ]
         .filter(Boolean)
         .join(", ") || "none",

@@ -167,6 +167,13 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     // `attach` (an `async` function whose caller, `connection.ts`'s inbound-frame dispatch,
     // invokes it as `void handleInboundFrame(...)` specifically because it does NOT await or
     // otherwise handle a rejection from it).
+    // A re-attach on a live `sessionId` is expected, not an error (`registry.ts` permits
+    // it on reconnect), but the previous child has to die first. Overwriting the map entry
+    // alone orphans a process running as the session user with an open stdin pipe, and
+    // nothing ever reaps it — the session it belonged to is gone, so no `close` will name
+    // it again.
+    closeSession(input.sessionId);
+
     try {
       if (result.claims.method === "files") {
         const files = deps.spawnFilesSession({
@@ -215,18 +222,28 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     fileSessions.get(sessionId)?.chunk(requestId, chunk);
   };
 
-  const close: SessionManager["close"] = (sessionId) => {
+  /**
+   * Kills whatever this id names, in BOTH maps.
+   *
+   * Deliberately not an early return after the PTY branch: an id should only ever be in one
+   * map, but "should only ever" is exactly the assumption that leaves a `su` child running
+   * as the session user forever when it turns out to be wrong. Checking both is two map
+   * lookups and removes the failure mode.
+   */
+  const closeSession = (sessionId: string): void => {
     const pty = sessions.get(sessionId);
     if (pty) {
       pty.kill();
       sessions.delete(sessionId);
-      return;
     }
     const files = fileSessions.get(sessionId);
-    if (!files) return;
-    files.kill();
-    fileSessions.delete(sessionId);
+    if (files) {
+      files.kill();
+      fileSessions.delete(sessionId);
+    }
   };
+
+  const close: SessionManager["close"] = closeSession;
 
   const has: SessionManager["has"] = (sessionId) =>
     sessions.has(sessionId) || fileSessions.has(sessionId);

@@ -126,11 +126,41 @@ export const resolvePersistentPaths = (
 ): Effect.Effect<ResolvedMachineSetting<PersistentPaths>, MachineSettingsError> =>
   resolveWithDefault(db, PERSISTENT_PATHS_KEY, chain, DEFAULT_PERSISTENT_PATHS);
 
+/**
+ * Merges the resolved row ONTO the default, per key, rather than returning it verbatim.
+ *
+ * This is the one setting that needs it, because it is the only one whose value is an
+ * object with independently-added keys. `resolveWithDefault` falls back to the default only
+ * when NO row exists at any level; when a row does exist it wins whole. So a value written
+ * before `files` was added — `{"webTerminal":true,"ssh":true}` — resolved with
+ * `files: undefined`, which is falsy, so `mintSession` denied every file session
+ * `method_disabled` and the file interface was invisibly dead on every org that had ever
+ * configured access methods at all.
+ *
+ * It failed closed, so it was never a hole. But "adding a key needs no migration" is only
+ * true if something actually applies the default for a key the stored object predates, and
+ * doing it here means every consumer gets it — the policy gate, `MachineService`'s detail
+ * response, and the console toggles built from it — instead of each remembering to.
+ *
+ * `source`/`resolvedFromScopeId` still describe where the row came from, unchanged: the
+ * lineage answer is about which scope set this setting, and filling a missing key from the
+ * default does not move it.
+ */
 export const resolveAccessMethodsEnabled = (
   db: DbHandle,
   chain: MachineSettingChain,
 ): Effect.Effect<ResolvedMachineSetting<AccessMethodsEnabled>, MachineSettingsError> =>
-  resolveWithDefault(db, ACCESS_METHODS_ENABLED_KEY, chain, DEFAULT_ACCESS_METHODS_ENABLED);
+  resolveWithDefault<Partial<AccessMethodsEnabled>>(
+    db,
+    ACCESS_METHODS_ENABLED_KEY,
+    chain,
+    DEFAULT_ACCESS_METHODS_ENABLED,
+  ).pipe(
+    Effect.map((resolved) => ({
+      ...resolved,
+      value: { ...DEFAULT_ACCESS_METHODS_ENABLED, ...(resolved.value ?? {}) },
+    })),
+  );
 
 /** `value?.webTerminal ?? DEFAULT_ACCESS_METHODS_ENABLED.webTerminal` — shared by
  * `apply-setting-change.ts`'s termination side effect so both read the same fallback. */

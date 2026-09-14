@@ -270,6 +270,86 @@ describe("TunnelServer (against local dev Postgres)", () => {
       });
     });
 
+    // A row written before `files` existed has only the two old keys. `resolveWithDefault`
+    // returns a stored value VERBATIM — it does not merge per-key defaults — so without
+    // `resolveAccessMethodsEnabled` merging onto the default, `value.files` is `undefined`,
+    // every mint is denied `method_disabled`, and the file interface is invisibly dead on
+    // every org that had ever configured access methods. Fails closed, so not a hole; it
+    // just means the feature silently does not exist for existing installs.
+    test("a stored access_methods row predating `files` still resolves files as enabled", async () => {
+      await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+        await queryDb(
+          Effect.gen(function* () {
+            const db = yield* Db;
+            yield* Effect.tryPromise(() =>
+              db.insert(settingValues).values({
+                scopeType: "org",
+                scopeId: orgId,
+                key: ACCESS_METHODS_ENABLED_KEY,
+                value: { webTerminal: true, ssh: true },
+                source: "org",
+              }),
+            );
+          }),
+        );
+
+        const minted = await Effect.runPromise(
+          Effect.provide(
+            Effect.gen(function* () {
+              const tunnel = yield* TunnelServer;
+              return yield* tunnel.mintSession({
+                orgId,
+                personId: crypto.randomUUID(),
+                idpIdentity: "kalle@normain.com",
+                targetMachineId: machineId,
+                method: "files",
+              });
+            }),
+            TestLayer,
+          ),
+        );
+        expect(minted.sessionId).toBeTruthy();
+      });
+    });
+
+    test("REQUIRED FAILURE PATH: an explicit files:false still denies a files session", async () => {
+      await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+        await queryDb(
+          Effect.gen(function* () {
+            const db = yield* Db;
+            yield* Effect.tryPromise(() =>
+              db.insert(settingValues).values({
+                scopeType: "org",
+                scopeId: orgId,
+                key: ACCESS_METHODS_ENABLED_KEY,
+                value: { webTerminal: true, ssh: true, files: false },
+                source: "org",
+              }),
+            );
+          }),
+        );
+
+        const error = await Effect.runPromise(
+          Effect.provide(
+            Effect.flip(
+              Effect.gen(function* () {
+                const tunnel = yield* TunnelServer;
+                return yield* tunnel.mintSession({
+                  orgId,
+                  personId: crypto.randomUUID(),
+                  idpIdentity: "kalle@normain.com",
+                  targetMachineId: machineId,
+                  method: "files",
+                });
+              }),
+            ),
+            TestLayer,
+          ),
+        );
+        expect(error.detail).toBe("method_disabled");
+      });
+    });
+
     test("REQUIRED FAILURE PATH: an org-level access_methods setting that excludes a method denies mintSession with method_disabled", async () => {
       await withOrgAndMachine("running", async ({ orgId, machineId }) => {
         await queryDb(

@@ -459,6 +459,16 @@ has to mean disabling *that* method terminates *that* method's sessions.
 with its own reason. Whole-machine events (archive, restart, offboarding) pass no filter and
 still close everything.
 
+⚠️ **Known gap, pre-existing.** That path calls `TunnelServer` rather than `TunnelRelay`, so
+it updates `sessions` rows and emits `access.session_ended` but never tears down the live
+websocket relay — the PTY or `su` helper keeps running and the browser stays connected. So
+"disabling terminates live sessions" is currently true of the record and not the connection,
+for `webTerminal` just as much as `files`. The method filter makes that operation precise
+about which sessions it ends; it does not make it reach the transport. Closing it needs
+`terminateSessionsForMachine` to return the ids it ended so the relay can close exactly
+those — `TunnelRegistry.closeAllForMachine` keys on machine id alone and would otherwise
+drop every socket on the machine. See `tunnel/relay.ts`'s own note.
+
 ### The privilege drop is the security property
 
 The tunnel daemon runs as root, because `pty.ts` needs root to `su` into an arbitrary OS user.
