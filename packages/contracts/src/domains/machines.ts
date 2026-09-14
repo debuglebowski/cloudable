@@ -106,10 +106,26 @@ export interface ResolvedMachineSetting<T> {
  * absolute paths on the machine that survive an OS reimage/upgrade. */
 export type PersistentPaths = string[];
 
-/** Which of the two access methods are turned on for a machine. */
+/**
+ * Which access methods are turned on for a machine. Admin-disablable at any level in the
+ * org -> template -> machine chain, and disabling one terminates its live sessions
+ * (`domain/config/apply-setting-change.ts`) rather than merely refusing new ones.
+ *
+ * `files` is a separate flag from `webTerminal` on purpose. It is the lower of the two
+ * elevation levels in `docs/spec.md` §15 — file recovery cannot read injected secrets the
+ * way an interactive shell can — so an admin can be granted file access to a machine they
+ * do not own without also being granted a shell on it. Folding it into `webTerminal` would
+ * collapse that distinction and leave `elevations.level = "file_recovery"` with nothing to
+ * authorize.
+ *
+ * A stored value predating `files` simply lacks the key and falls back to
+ * `DEFAULT_ACCESS_METHODS_ENABLED` (`apps/control-plane/src/domain/machine/settings.ts`),
+ * so this addition needs no migration.
+ */
 export interface AccessMethodsEnabled {
   webTerminal: boolean;
   ssh: boolean;
+  files: boolean;
 }
 
 export interface MachineDetail extends MachineSummary {

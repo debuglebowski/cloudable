@@ -367,5 +367,43 @@ committing to it:
   behavior, and is worth revisiting only if this doesn't get fixed
   upstream. Worth filing as a Bun issue.
 
-See `docs/access.md` for the web terminal / SSH certificate model this
-daemon serves.
+### Two kinds of session, and one binary that serves both
+
+The daemon carries `method: "terminal"` sessions (a PTY, `pty.ts`) and
+`method: "files"` sessions (a filesystem helper, `fs-helper.ts`). Which one
+an attach becomes is read from the **verified session token's `method`
+claim**, never from the `attach` frame — a token minted for files cannot be
+made to spawn a shell by a caller who rewrites the frame, because the frame
+is not consulted. That check is what keeps `file_recovery` and `shell`
+genuinely different elevation levels rather than two names for one.
+
+**The file helper runs unprivileged, and that is the point.** The daemon runs
+as root because `pty.ts` needs root to `su` into an arbitrary OS user. Running
+filesystem operations in the daemon process would run them as root, and a
+`file_recovery` elevation would then grant strictly *more* than a `shell` one:
+readable `/etc/shadow`, readable secret material a `cloudable` shell cannot
+touch. `docs/spec.md` §15 puts file recovery below interactive shell precisely
+because a shell can read injected secrets — a root file browser inverts that
+and makes the cheaper approval the dangerous one.
+
+So `files-session.ts` spawns a child through
+`su - <osUser> -c '<self> --fs-helper'` and talks newline-delimited JSON to it
+over stdio. One child per session, killed with the session, exactly like a PTY.
+`isValidOsUsername` from `pty.ts` is reused verbatim, guarding the same
+argv-injection vector on the same `su` call.
+
+**Re-exec rather than a second binary.** `bun build --compile` produces one
+executable at one install path, and `process.execPath` inside it is that path —
+so `--fs-helper` needs no new build target, nothing extra to install, and offers
+no way for the privileged and unprivileged halves to be at different versions on
+the same machine.
+
+**`index.ts` is a dispatcher with dynamic imports on both branches**, which is
+not stylistic. A static import of the daemon's startup path would attest and open
+a tunnel merely by *loading* the entrypoint, and the helper has no credentials to
+attest with: `su -` resets the environment, so `CONTROL_PLANE_URL` and
+`MACHINE_TOKEN` are gone by the time it starts. Every file session would spawn a
+child that immediately failed on a missing env var.
+
+See `docs/access.md` for the web terminal / file session / SSH certificate model
+this daemon serves, including the wire frames and size limits.

@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 import { MACHINE_OS_USER } from "@cloudable/contracts";
 import { machines, sessions } from "@cloudable/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { isMachineStale } from "../compliance/checks/machines-reporting";
 import { Db } from "../db/layer";
@@ -120,7 +120,11 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
             machineId: machine.id,
           }).pipe(Effect.mapError((cause) => new TunnelError({ reason: "lookup_failed", cause })));
           const methodEnabled =
-            input.method === "terminal" ? accessMethods.value.webTerminal : accessMethods.value.ssh;
+            input.method === "terminal"
+              ? accessMethods.value.webTerminal
+              : input.method === "files"
+                ? accessMethods.value.files
+                : accessMethods.value.ssh;
           if (!methodEnabled) {
             denialReason = "method_disabled";
           }
@@ -138,15 +142,16 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
           denialReason = "machine_not_reporting";
         }
 
-        // Admin access to a machine you don't own needs the owner
-        // themselves, or a granted, unexpired, shell-level elevation — see
-        // `access-authorization.ts`'s own doc comment for the exact rule and
-        // why this was, until now, the one check `mintSession` skipped.
+        // Admin access to a machine you don't own needs the owner themselves, or a
+        // granted, unexpired elevation at a level this METHOD accepts — `files` is
+        // satisfied by `file_recovery` or `shell`, a terminal only by `shell`. See
+        // `access-authorization.ts`'s own doc comment for the exact rule.
         if (!denialReason && machine) {
           const authorized = yield* isAuthorizedForInteractiveAccess(db, {
             personId: input.personId,
             machineId: machine.id,
             ownerPersonId: machine.ownerPersonId,
+            method: input.method,
           }).pipe(Effect.mapError((cause) => new TunnelError({ reason: "lookup_failed", cause })));
           if (!authorized) {
             denialReason = "elevation_required";
@@ -326,9 +331,25 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
       orgId: string;
       machineId: string;
       reason: string;
+      /**
+       * Restrict termination to these session methods. Omitted means every method, which
+       * is what whole-machine events (archive, restart, offboarding) want.
+       *
+       * The access-method policy path needs the filter. `webTerminal` and `files` are
+       * separately disablable, and "disabling terminates live sessions" has to mean
+       * disabling THAT method terminates THAT method's sessions — without this, turning
+       * off the web terminal would also drop every live file session on the machine, and
+       * a person who never had the disabled method taken away from them would be
+       * disconnected by a policy change that did not apply to them.
+       */
+      methods?: ReadonlyArray<SessionMethod>;
     }): Effect.Effect<number, TunnelError> =>
       Effect.gen(function* () {
         const now = new Date();
+        const methodFilter =
+          input.methods && input.methods.length > 0
+            ? inArray(sessions.method, [...input.methods])
+            : undefined;
         const active = yield* Effect.tryPromise({
           try: () =>
             db
@@ -339,6 +360,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
                   eq(sessions.machineId, input.machineId),
                   eq(sessions.orgId, input.orgId),
                   isNull(sessions.endedAt),
+                  ...(methodFilter ? [methodFilter] : []),
                 ),
               ),
           catch: (cause) => new TunnelError({ reason: "persist_failed", cause }),

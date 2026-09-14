@@ -284,17 +284,28 @@ export function AccessPage() {
                       <TableCell>{formatDateTime(session.startedAt)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {/* Rejoining an existing session, not a fresh mint — the attach
+                              endpoint replays the token already stored on this row (see
+                              `api/access.ts`'s `useMintSession` doc comment), so these are
+                              plain links, no dialog needed. An `ssh` row gets neither:
+                              there is no browser leg to rejoin. */}
                           {session.method === "terminal" && (
-                            // Rejoining an existing session, not a fresh mint — the attach
-                            // endpoint replays the token already stored on this row (see
-                            // `api/access.ts`'s `useMintSession` doc comment), so this is a
-                            // plain link straight to the terminal page, no dialog needed.
                             <Button type="button" variant="outline" size="sm" asChild>
                               <Link
                                 to="/access/sessions/$sessionId/terminal"
                                 params={{ sessionId: session.id }}
                               >
                                 Connect
+                              </Link>
+                            </Button>
+                          )}
+                          {session.method === "files" && (
+                            <Button type="button" variant="outline" size="sm" asChild>
+                              <Link
+                                to="/access/sessions/$sessionId/files"
+                                params={{ sessionId: session.id }}
+                              >
+                                Browse
                               </Link>
                             </Button>
                           )}

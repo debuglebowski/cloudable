@@ -473,7 +473,12 @@ describe("TunnelServer (against local dev Postgres)", () => {
         }),
       );
 
-    const mint = (personId: string, orgId: string, machineId: string) =>
+    const mint = (
+      personId: string,
+      orgId: string,
+      machineId: string,
+      method: "terminal" | "ssh" | "files" = "terminal",
+    ) =>
       Effect.gen(function* () {
         const tunnel = yield* TunnelServer;
         return yield* tunnel.mintSession({
@@ -481,7 +486,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
           personId,
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
-          method: "terminal",
+          method,
         });
       });
 
@@ -535,6 +540,74 @@ describe("TunnelServer (against local dev Postgres)", () => {
 
       const error = await Effect.runPromise(
         Effect.provide(Effect.flip(mint(stranger.id, orgId, machineId)), TestLayer),
+      );
+      expect(error.detail).toBe("elevation_required");
+    });
+
+    // The four (grant, method) combinations that define the two elevation levels. Read
+    // together they are the whole rule: `shell` opens everything, `file_recovery` opens
+    // only files. If any one of these four flips, the levels have collapsed into one and
+    // the cheaper approval floor in `domain/elevation/policy.ts` has become a route to the
+    // dearer one.
+    test("a file_recovery elevation DOES satisfy a files session", async () => {
+      const { orgId, machineId } = await seedOrgAndOwnedMachine();
+      const stranger = await seedPerson(orgId);
+      await seedElevation({
+        orgId,
+        personId: stranger.id,
+        machineId,
+        level: "file_recovery",
+        status: "granted",
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
+
+      const minted = await Effect.runPromise(
+        Effect.provide(mint(stranger.id, orgId, machineId, "files"), TestLayer),
+      );
+      expect(minted.sessionId).toBeTruthy();
+    });
+
+    test("a shell elevation also satisfies a files session — shell dominates", async () => {
+      const { orgId, machineId } = await seedOrgAndOwnedMachine();
+      const stranger = await seedPerson(orgId);
+      await seedElevation({
+        orgId,
+        personId: stranger.id,
+        machineId,
+        level: "shell",
+        status: "granted",
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
+
+      const minted = await Effect.runPromise(
+        Effect.provide(mint(stranger.id, orgId, machineId, "files"), TestLayer),
+      );
+      expect(minted.sessionId).toBeTruthy();
+    });
+
+    test("REQUIRED FAILURE PATH: a non-owner with no elevation is denied a files session too", async () => {
+      const { orgId, machineId } = await seedOrgAndOwnedMachine();
+      const stranger = await seedPerson(orgId);
+      const error = await Effect.runPromise(
+        Effect.provide(Effect.flip(mint(stranger.id, orgId, machineId, "files")), TestLayer),
+      );
+      expect(error.detail).toBe("elevation_required");
+    });
+
+    test("REQUIRED FAILURE PATH: an expired file_recovery elevation does not satisfy a files session", async () => {
+      const { orgId, machineId } = await seedOrgAndOwnedMachine();
+      const stranger = await seedPerson(orgId);
+      await seedElevation({
+        orgId,
+        personId: stranger.id,
+        machineId,
+        level: "file_recovery",
+        status: "granted",
+        expiresAt: new Date(Date.now() - 1_000),
+      });
+
+      const error = await Effect.runPromise(
+        Effect.provide(Effect.flip(mint(stranger.id, orgId, machineId, "files")), TestLayer),
       );
       expect(error.detail).toBe("elevation_required");
     });
@@ -743,6 +816,95 @@ describe("TunnelServer (against local dev Postgres)", () => {
 
       const result = await Effect.runPromise(Effect.provide(program, TestLayer));
       expect(result._tag).toBe("Left"); // timed out — nothing was ever pushed to signal
+    });
+  });
+
+  // `webTerminal` and `files` are separately disablable, so "disabling terminates live
+  // sessions" has to mean disabling THAT method terminates THAT method's sessions.
+  // Unfiltered, turning off the web terminal would also drop every live file session on
+  // the machine — disconnecting people from a method that was never taken away from them.
+  test("terminateSessionsForMachine with a methods filter ends only those methods' sessions", async () => {
+    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      const mint = (method: "terminal" | "files") =>
+        Effect.gen(function* () {
+          const tunnel = yield* TunnelServer;
+          return yield* tunnel.mintSession({
+            orgId,
+            personId: crypto.randomUUID(),
+            idpIdentity: "kalle@normain.com",
+            targetMachineId: machineId,
+            method,
+          });
+        });
+
+      const terminal = await Effect.runPromise(Effect.provide(mint("terminal"), TestLayer));
+      const files = await Effect.runPromise(Effect.provide(mint("files"), TestLayer));
+
+      const terminated = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const tunnel = yield* TunnelServer;
+            return yield* tunnel.terminateSessionsForMachine({
+              orgId,
+              machineId,
+              reason: "access.web_terminal_disabled",
+              methods: ["terminal"],
+            });
+          }),
+          TestLayer,
+        ),
+      );
+      expect(terminated).toBe(1);
+
+      const rows = await queryDb(
+        Effect.gen(function* () {
+          const db = yield* Db;
+          return yield* Effect.tryPromise(() =>
+            db.select().from(sessions).where(eq(sessions.machineId, machineId)),
+          );
+        }),
+      );
+      const terminalRow = rows.find((r) => r.id === terminal.sessionId);
+      const filesRow = rows.find((r) => r.id === files.sessionId);
+      expect(terminalRow?.endedAt).not.toBeNull();
+      expect(terminalRow?.terminationReason).toBe("access.web_terminal_disabled");
+      expect(filesRow?.endedAt).toBeNull();
+    });
+  });
+
+  test("terminateSessionsForMachine with no methods filter still ends every session", async () => {
+    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      const mint = (method: "terminal" | "files") =>
+        Effect.gen(function* () {
+          const tunnel = yield* TunnelServer;
+          return yield* tunnel.mintSession({
+            orgId,
+            personId: crypto.randomUUID(),
+            idpIdentity: "kalle@normain.com",
+            targetMachineId: machineId,
+            method,
+          });
+        });
+
+      await Effect.runPromise(Effect.provide(mint("terminal"), TestLayer));
+      await Effect.runPromise(Effect.provide(mint("files"), TestLayer));
+
+      // Whole-machine events (archive, restart, offboarding) pass no filter and must keep
+      // closing everything — the filter is opt-in, not a behaviour change for them.
+      const terminated = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const tunnel = yield* TunnelServer;
+            return yield* tunnel.terminateSessionsForMachine({
+              orgId,
+              machineId,
+              reason: "machine archived",
+            });
+          }),
+          TestLayer,
+        ),
+      );
+      expect(terminated).toBe(2);
     });
   });
 

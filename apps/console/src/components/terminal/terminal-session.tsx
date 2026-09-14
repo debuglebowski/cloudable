@@ -3,43 +3,17 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState } from "react";
 
-import { BASE_URL } from "@/lib/api-client";
+import {
+  type ConnectionState,
+  attachUrl,
+  base64ToBytes,
+  bytesToBase64,
+} from "@/components/session/transport";
 
 import "@xterm/xterm/css/xterm.css";
 
 export interface TerminalSessionProps {
   sessionId: string;
-}
-
-type ConnectionState = "connecting" | "attached" | "closed" | "rejected";
-
-/** Binary-safe base64 <-> bytes, matching `TunnelFrame`'s `data` kind (the wire
- * protocol — see `packages/contracts/src/domains/tunnel.ts`). Plain `atob`/`btoa` on a raw
- * string would corrupt any multi-byte UTF-8 the shell emits (box-drawing characters, unicode
- * filenames, etc.) — going through bytes first keeps this correct. */
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-function attachUrl(sessionId: string, cols: number, rows: number): string {
-  // `BASE_URL` is the control plane's http(s) origin (`@/lib/api-client`) — swap the scheme
-  // for its websocket equivalent rather than hardcoding a second config value. The
-  // BetterAuth session cookie rides along automatically (no credentials option exists on the
-  // WebSocket constructor, unlike fetch) — console and control plane are same-SITE in every
-  // deployment this build supports (differ only by port locally; a real deployment would
-  // need matching registrable domains for this to keep working, same as every other
-  // authenticated console call).
-  const wsBase = BASE_URL.replace(/^http/, "ws");
-  return `${wsBase}/api/v1/access/sessions/${sessionId}/attach?cols=${cols}&rows=${rows}`;
 }
 
 /**

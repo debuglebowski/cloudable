@@ -19,7 +19,7 @@ export type AccessEvent =
     })
   | (EventEnvelope & {
       type: "access.session_started";
-      payload: { method: "terminal" | "ssh"; osUser: string };
+      payload: { method: "terminal" | "ssh" | "files"; osUser: string };
     })
   | (EventEnvelope & {
       type: "access.session_ended";
@@ -30,7 +30,7 @@ export type AccessEvent =
     })
   | (EventEnvelope & {
       type: "access.session_denied";
-      payload: { reason: string; method: "terminal" | "ssh" };
+      payload: { reason: string; method: "terminal" | "ssh" | "files" };
     })
   | (EventEnvelope & {
       type: "access.elevation_requested";

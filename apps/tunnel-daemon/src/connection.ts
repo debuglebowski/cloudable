@@ -80,11 +80,22 @@ async function handleInboundFrame(
               sessionId: frame.sessionId,
               dataBase64: Buffer.from(bytes).toString("base64"),
             }),
-          // The PTY's own child process exited on its own (the shell was closed, the
-          // program ran to completion) — this is a real, valid way for a session to end,
-          // distinct from either side deliberately closing it.
+          // The session's own child process exited on its own (the shell was closed, the
+          // program ran to completion, the file helper died) — this is a real, valid way
+          // for a session to end, distinct from either side deliberately closing it.
           onExit: () =>
             send({ kind: "close", sessionId: frame.sessionId, reason: "process_exited" }),
+          onFsResult: (requestId, result) =>
+            send({ kind: "fs_response", sessionId: frame.sessionId, requestId, result }),
+          onFsChunk: (requestId, chunk) =>
+            send({
+              kind: "fs_chunk",
+              sessionId: frame.sessionId,
+              requestId,
+              seq: chunk.seq,
+              dataBase64: chunk.dataBase64,
+              final: chunk.final,
+            }),
         },
       );
       send(
@@ -103,10 +114,24 @@ async function handleInboundFrame(
     case "close":
       sessionManager.close(frame.sessionId);
       break;
-    // "attached"/"attach_rejected" are frames THIS daemon sends, not receives — the control
-    // plane never sends them back. Nothing to do if one somehow arrives here.
+    // Both are no-ops unless `sessionId` names a live FILE session — a terminal session
+    // is in a different map and these never reach it (`session-manager.ts`).
+    case "fs_request":
+      sessionManager.fsRequest(frame.sessionId, frame.requestId, frame.op);
+      break;
+    case "fs_chunk":
+      sessionManager.fsChunk(frame.sessionId, frame.requestId, {
+        seq: frame.seq,
+        dataBase64: frame.dataBase64,
+        final: frame.final,
+      });
+      break;
+    // "attached"/"attach_rejected"/"fs_response" are frames THIS daemon sends, not
+    // receives — the control plane never sends them back. Nothing to do if one somehow
+    // arrives here.
     case "attached":
     case "attach_rejected":
+    case "fs_response":
       break;
   }
 }

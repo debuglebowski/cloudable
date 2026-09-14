@@ -386,6 +386,140 @@ session's TLS through rather than re-encrypting; tier 3 (full command capture) i
 sold consequence is "Cloudable is on the plaintext path" — this is the same
 structural fact stated two ways, not two different claims to keep consistent by hand.
 
+## 4b. File sessions (`method: "files"`)
+
+The consumer of `elevations.level = "file_recovery"`. That level has existed since the
+elevation unit landed, with a passing test asserting it cannot open a shell — and until this,
+nothing in the product let anyone actually recover a file with it, so the lower of the two
+levels was unreachable.
+
+`docs/spec.md` §15 orders the two deliberately: file recovery is lower risk, interactive shell
+higher, because a shell can read injected secrets on a live machine.
+`domain/elevation/policy.ts` charges a lower approval floor for file recovery on that basis.
+Everything below exists to keep that ordering true in practice rather than only on paper.
+
+### It is a session, not a page
+
+A file session goes through the same path a terminal does: `POST /api/v1/access/sessions` with
+`method: "files"`, the same signed token, the same `sessions` row, the same tunnel signal, the
+same `GET /api/v1/access/sessions/:id/attach` websocket. It appears on the Access page, can be
+terminated, and is closed by `closeSessionsWithLapsedAuthorization` when the elevation behind
+it lapses.
+
+Three things followed for free, and all three are load-bearing:
+
+- `sessions.method` is plain `text` with no check constraint, so `"files"` needed **no
+  migration**.
+- `accessMethodsEnabled` is JSON resolved against a code default, so adding its `files` key
+  needed **no migration** and no backfill — a value stored before the key existed simply falls
+  back to the default.
+- `access.session_started` / `session_ended` / `session_denied` already carried `method` in
+  their payload, so this added **no new event type**. The catalogue snapshot is unchanged,
+  which is the check that proves it (invariant 11).
+
+### Audit: the session, not the file
+
+A files session is recorded exactly like a terminal one — start, end, denial, with `method`
+in the payload — and nothing is emitted per file read or written.
+
+That is a deliberate choice, not a gap. The same edit made with `vi` in the web terminal emits
+nothing, so a per-write event here would produce a record that *looks* complete to an auditor
+and is not: it would cover only the edits that happened to go through this interface. A
+partial trail presented as a whole one is worse than an honest session-level trail. Per-operation
+capture belongs with `access.command_recorded` (tier 3, its own table, deliberately outside the
+catalogue) if and when that is built, and should cover both surfaces at once.
+
+### Authorization is per-method
+
+`isAuthorizedForInteractiveAccess` (`tunnel/access-authorization.ts`) takes the session method
+and consults `ACCEPTED_ELEVATION_LEVELS`:
+
+| Method | Satisfied by |
+| :--- | :--- |
+| `terminal`, `ssh` | `shell` |
+| `files` | `file_recovery` **or** `shell` |
+
+`shell` dominates — someone trusted with a shell is already trusted with the files. The reverse
+must never hold, or the cheaper approval floor becomes a route to the dearer one.
+
+**The parameter is required and has no default, on purpose.** There are two callers: the
+mint-time gate, and the steady-state re-authorization sweep. The sweep re-checks every open
+session on a timer, so if it asked the terminal question about a files session, every file
+session held on a `file_recovery` grant would be closed on the next tick — minted successfully,
+then killed seconds later with `policy_terminated` and no visible cause, and only for the
+non-owner case elevation exists to serve. `closeSessionsWithLapsedAuthorization` selects
+`sessions.method` and passes it through for exactly this reason.
+
+### Termination is per-method too
+
+`webTerminal` and `files` are separately disablable, so "disabling terminates live sessions"
+has to mean disabling *that* method terminates *that* method's sessions.
+`terminateSessionsForMachine` takes an optional `methods` filter, and
+`domain/config/apply-setting-change.ts` compares both flags and terminates each affected set
+with its own reason. Whole-machine events (archive, restart, offboarding) pass no filter and
+still close everything.
+
+### The privilege drop is the security property
+
+The tunnel daemon runs as root, because `pty.ts` needs root to `su` into an arbitrary OS user.
+If file operations ran in the daemon process they would run **as root**, and a `file_recovery`
+elevation would then grant strictly more than a `shell` one: readable `/etc/shadow`, readable
+secret material a `cloudable` shell on the same machine cannot touch. That inverts the ordering
+the whole feature rests on and makes the cheaper approval the dangerous one.
+
+So operations run in a separate unprivileged process. `files-session.ts` spawns
+`su - <osUser> -c '<self> --fs-helper'`, re-executing the daemon's own compiled binary — one
+artifact, one install path, no way for the two halves to be at different versions. The helper
+(`fs-helper.ts`) speaks newline-delimited JSON on stdio and calls plain `node:fs/promises`;
+every success and failure is the OS's decision against the uid it was dropped to.
+
+`index.ts` is a thin argv dispatcher with *dynamic* imports for both branches. A static import
+of the daemon's startup path would attest and open a tunnel merely by loading the entrypoint,
+and the helper has no credentials to attest with — `su -` resets the environment, so
+`CONTROL_PLANE_URL` and `MACHINE_TOKEN` are gone by the time it runs.
+
+There is **no path allowlist and no chroot**, also deliberately. File recovery legitimately
+reaches `/etc` and `/var/log`, and a restriction the web terminal does not share would be
+theatre rather than security. The OS permission model is the boundary, exactly as it is for a
+shell.
+
+### The token decides the kind, never the frame
+
+`session-manager.ts` branches on `claims.method` from the *verified* token, not on anything in
+the `attach` frame. A token minted for `"files"` cannot be made to spawn a PTY by rewriting the
+frame, because the frame is not consulted. Behind that, file and PTY sessions live in separate
+maps keyed by the same id, so an `fs_request` naming a live terminal session finds nothing to
+run against.
+
+### Wire and limits
+
+Three frames on the existing envelope: `fs_request`, `fs_response`, and `fs_chunk` (downloads
+and uploads, 64 KiB each). `requestId` correlates within a session; `sessionId` stays the
+session-level key both `isTunnelFrame` guards require, and the attach route forces it to its own
+path param regardless of what a frame claims.
+
+| Limit | Value | Why |
+| :--- | :--- | :--- |
+| Inline read/edit | 1 MiB | Held as a base64 string in a browser tab |
+| Download/upload | 50 MiB | |
+| Directory listing | 10,000 entries | Then `truncated`, rather than one enormous frame |
+
+Reads also refuse anything containing a NUL byte (`is_binary`): the editor round-trips content
+through a JavaScript string, so a non-text file would come back subtly different from what went
+in. It is still downloadable.
+
+Operations are `list`, `read`, `write`, `mkdir`, `rename`, `download`, `upload`. **No delete and
+no chmod** — neither is needed to recover or fix a file, and both are easy to fire by accident
+through a pointer interface. Because there is no delete, the two operations that could clobber
+something are guarded: `rename` refuses an existing destination, and `upload` refuses one unless
+`replace` was explicitly set. A save pins `expectedModifiedAt` to what was read and fails with
+`changed_on_disk` if anyone else touched the file meanwhile, rather than silently discarding
+their work.
+
+Failures are a fixed reason vocabulary and never carry the raw errno string, which would echo
+paths and internals into a browser and the control plane's logs — the same rule
+`AttestationError` follows for credentials.
+
 ## 5. HTTP surface (`apps/control-plane/src/http/routes/access.ts` + `handlers/access.ts`)
 
 | Method | Path | Purpose |
@@ -393,7 +527,7 @@ structural fact stated two ways, not two different claims to keep consistent by 
 | `POST` | `/api/v1/access/certificates` | Issue a certificate (`cloudable login`'s call) |
 | `GET` | `/api/v1/access/certificates?orgId=...` | The Access surface's read view (see above) |
 | `POST` | `/api/v1/access/certificates/revoke` | Revoke a certificate (org-scoped) |
-| `POST` | `/api/v1/access/sessions` | Mint a session (web terminal / SSH session start) |
+| `POST` | `/api/v1/access/sessions` | Mint a session (web terminal / file session / SSH session start) |
 | `POST` | `/api/v1/access/sessions/end` | End a session |
 
 Not part of this group (bearer-authenticated like the agent protocol, not `orgId`/`personId`-in-body like the table above) — `GET /api/v1/tunnel/signal`, the tunnel-signal long poll, `apps/control-plane/src/http/routes/tunnel-signal.ts` + `handlers/tunnel-signal.ts`. See `docs/agents.md`'s own section on it.

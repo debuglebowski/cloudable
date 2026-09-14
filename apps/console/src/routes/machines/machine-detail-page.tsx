@@ -56,6 +56,7 @@ import { RestoreDialog } from "@/routes/archive/restore-dialog";
 import { RetentionStatus, formatBytes, formatDate } from "@/routes/archive/snapshot-format";
 
 import { ArchiveMachineDialog } from "./archive-machine-dialog";
+import { BrowseFilesDialog } from "./browse-files-dialog";
 import { ConnectTerminalDialog } from "./connect-terminal-dialog";
 import {
   ARCHIVED_MACHINE_STATES,
@@ -163,6 +164,7 @@ export function MachineDetailPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [reconcileOpen, setReconcileOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("properties");
@@ -246,6 +248,19 @@ export function MachineDetailPage() {
           {MACHINE_STATE_LABEL[machine.state]}
         </Badge>
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={machine.state !== "running"}
+            title={
+              machine.state !== "running"
+                ? "Only a running machine has a live tunnel daemon connection to attach to."
+                : undefined
+            }
+            onClick={() => setFilesOpen(true)}
+          >
+            Files
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -746,6 +761,7 @@ export function MachineDetailPage() {
         onOpenChange={setReconcileOpen}
       />
       <ConnectTerminalDialog machine={machine} open={connectOpen} onOpenChange={setConnectOpen} />
+      <BrowseFilesDialog machine={machine} open={filesOpen} onOpenChange={setFilesOpen} />
       <RestartMachineDialog machine={machine} open={restartOpen} onOpenChange={setRestartOpen} />
       <ArchiveMachineDialog machine={machine} open={archiveOpen} onOpenChange={setArchiveOpen} />
     </div>

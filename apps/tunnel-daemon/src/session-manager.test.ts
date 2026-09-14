@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as crypto from "node:crypto";
+import { spawnFilesSession } from "./files-session";
 import { spawnSession as realSpawnSession } from "./pty";
 import { type SessionManagerDeps, createSessionManager } from "./session-manager";
 
@@ -21,6 +22,7 @@ function mintToken(
     targetOsUser?: string;
     expiresAt?: string;
     signingKey?: crypto.KeyObject;
+    method?: "terminal" | "ssh" | "files";
   } = {},
 ) {
   const now = new Date();
@@ -28,7 +30,7 @@ function mintToken(
     idpIdentity: "kalle@normain.com",
     targetMachineId: overrides.targetMachineId ?? "machine-1",
     targetOsUser: overrides.targetOsUser ?? "ubuntu",
-    method: "terminal" as const,
+    method: overrides.method ?? ("terminal" as const),
     issuedAt: now.toISOString(),
     expiresAt: overrides.expiresAt ?? new Date(now.getTime() + 15 * 60 * 1000).toISOString(),
   };
@@ -47,6 +49,17 @@ function mintToken(
 const testSpawnSession: SessionManagerDeps["spawnSession"] = (options) =>
   realSpawnSession({ ...options, commandOverride: ["sh"] });
 
+/** Same idea as `testSpawnSession`: a harmless unprivileged stand-in for the real
+ * `su - <user> -c '<self> --fs-helper'`, so dispatch can be tested without root. `cat`
+ * echoes whatever is written to it, which is enough to prove the plumbing is connected
+ * without pulling a real helper process into these tests. */
+const testSpawnFilesSession: SessionManagerDeps["spawnFilesSession"] = (options) =>
+  spawnFilesSession({ ...options, commandOverride: ["cat"] });
+
+/** The two file-session callbacks are irrelevant to every PTY test below, but the
+ * interface requires them. Spread this rather than repeating two no-ops eleven times. */
+const noFsCallbacks = { onFsResult: () => {}, onFsChunk: () => {} } as const;
+
 function makeDeps(overrides: Partial<SessionManagerDeps> = {}): {
   deps: SessionManagerDeps;
   calls: string[];
@@ -63,6 +76,7 @@ function makeDeps(overrides: Partial<SessionManagerDeps> = {}): {
       calls.push("invalidate");
     },
     spawnSession: testSpawnSession,
+    spawnFilesSession: testSpawnFilesSession,
     ...overrides,
   };
   return { deps, calls };
@@ -99,7 +113,7 @@ describe("SessionManager", () => {
 
     const outcome = await manager.attach(
       { sessionId: "s1", sessionToken: mintToken(), cols: 80, rows: 24 },
-      { onData: () => {}, onExit: () => {} },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
     );
 
     expect(outcome).toEqual({ ok: true });
@@ -119,6 +133,7 @@ describe("SessionManager", () => {
           output += new TextDecoder().decode(bytes);
         },
         onExit: () => {},
+        ...noFsCallbacks,
       },
     );
 
@@ -140,6 +155,7 @@ describe("SessionManager", () => {
           output += new TextDecoder().decode(bytes);
         },
         onExit: () => {},
+        ...noFsCallbacks,
       },
     );
 
@@ -155,7 +171,7 @@ describe("SessionManager", () => {
 
     await manager.attach(
       { sessionId: "s1", sessionToken: mintToken(), cols: 80, rows: 24 },
-      { onData: () => {}, onExit: () => {} },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
     );
     manager.close("s1");
 
@@ -176,7 +192,7 @@ describe("SessionManager", () => {
 
     const outcome = await manager.attach(
       { sessionId: "s1", sessionToken: tamperedToken, cols: 80, rows: 24 },
-      { onData: () => {}, onExit: () => {} },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
     );
 
     expect(outcome).toEqual({ ok: false, reason: "invalid_signature" });
@@ -194,7 +210,7 @@ describe("SessionManager", () => {
         cols: 80,
         rows: 24,
       },
-      { onData: () => {}, onExit: () => {} },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
     );
 
     expect(outcome).toEqual({ ok: false, reason: "wrong_machine" });
@@ -212,7 +228,7 @@ describe("SessionManager", () => {
         cols: 80,
         rows: 24,
       },
-      { onData: () => {}, onExit: () => {} },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
     );
 
     expect(outcome).toEqual({ ok: false, reason: "expired" });
@@ -239,7 +255,7 @@ describe("SessionManager", () => {
 
     const outcome = await manager.attach(
       { sessionId: "s1", sessionToken: mintToken(), cols: 80, rows: 24 },
-      { onData: () => {}, onExit: () => {} },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
     );
 
     expect(outcome).toEqual({ ok: true });
@@ -254,7 +270,7 @@ describe("SessionManager", () => {
 
     const outcome = await manager.attach(
       { sessionId: "s1", sessionToken: mintToken(), cols: 80, rows: 24 },
-      { onData: () => {}, onExit: () => {} },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
     );
 
     expect(outcome).toEqual({ ok: false, reason: "invalid_signature" });
@@ -277,10 +293,86 @@ describe("SessionManager", () => {
 
     const outcome = await manager.attach(
       { sessionId: "s1", sessionToken: mintToken(), cols: 80, rows: 24 },
-      { onData: () => {}, onExit: () => {} },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
     );
 
     expect(outcome).toEqual({ ok: false, reason: "simulated spawn failure" });
     expect(manager.has("s1")).toBe(false);
+  });
+  // ---------------------------------------------------------------------------
+  // Session KIND comes from the signed token, never from the frame.
+  //
+  // This is the property the two elevation levels rest on. A `file_recovery` grant can
+  // mint a `method: "files"` token (control plane, `tunnel/access-authorization.ts`) but
+  // never a `"terminal"` one. If the daemon took the kind from the `attach` frame instead,
+  // anyone who could reach this socket with a files token would get a shell — and a shell
+  // can read injected secrets, which is exactly what the lower level exists to withhold.
+  // ---------------------------------------------------------------------------
+  describe("session kind is decided by the token claim, not the attach frame", () => {
+    test("a files-method token spawns the file helper and never a PTY", async () => {
+      const spawned: string[] = [];
+      const { deps } = makeDeps({
+        spawnSession: () => {
+          spawned.push("pty");
+          throw new Error("a files token must never reach spawnSession");
+        },
+        spawnFilesSession: (options) => {
+          spawned.push("files");
+          return spawnFilesSession({ ...options, commandOverride: ["cat"] });
+        },
+      });
+      manager = createSessionManager(deps);
+      cleanupSessionIds.push("s1");
+
+      const outcome = await manager.attach(
+        { sessionId: "s1", sessionToken: mintToken({ method: "files" }), cols: 80, rows: 24 },
+        { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
+      );
+
+      expect(outcome).toEqual({ ok: true });
+      expect(spawned).toEqual(["files"]);
+      expect(manager.has("s1")).toBe(true);
+    });
+
+    test("a terminal-method token spawns a PTY and never the file helper", async () => {
+      const spawned: string[] = [];
+      const { deps } = makeDeps({
+        spawnSession: (options) => {
+          spawned.push("pty");
+          return realSpawnSession({ ...options, commandOverride: ["sh"] });
+        },
+        spawnFilesSession: () => {
+          spawned.push("files");
+          throw new Error("a terminal token must never reach spawnFilesSession");
+        },
+      });
+      manager = createSessionManager(deps);
+      cleanupSessionIds.push("s1");
+
+      await manager.attach(
+        { sessionId: "s1", sessionToken: mintToken({ method: "terminal" }), cols: 80, rows: 24 },
+        { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
+      );
+
+      expect(spawned).toEqual(["pty"]);
+    });
+
+    test("REQUIRED FAILURE PATH: fsRequest on a terminal session does nothing", async () => {
+      const { deps } = makeDeps();
+      manager = createSessionManager(deps);
+      cleanupSessionIds.push("s1");
+
+      await manager.attach(
+        { sessionId: "s1", sessionToken: mintToken({ method: "terminal" }), cols: 80, rows: 24 },
+        { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
+      );
+
+      // A terminal session is in a different map, so a file operation aimed at it finds
+      // nothing to run against. This is the second line of defence behind the token check
+      // above: even a forged `fs_request` frame naming a live terminal session is inert.
+      const live = manager;
+      expect(() => live.fsRequest("s1", "r1", { op: "list", path: "/etc" })).not.toThrow();
+      expect(() => live.fsChunk("s1", "r1", { seq: 0, dataBase64: "", final: true })).not.toThrow();
+    });
   });
 });

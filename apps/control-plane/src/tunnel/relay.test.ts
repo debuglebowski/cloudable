@@ -318,7 +318,12 @@ describe("TunnelRelay (against local dev Postgres)", () => {
         }),
       );
 
-    const seedOpenSession = (row: { orgId: string; machineId: string; personId: string }) =>
+    const seedOpenSession = (row: {
+      orgId: string;
+      machineId: string;
+      personId: string;
+      method?: "terminal" | "ssh" | "files";
+    }) =>
       queryDb(
         Effect.gen(function* () {
           const db = yield* Db;
@@ -329,7 +334,7 @@ describe("TunnelRelay (against local dev Postgres)", () => {
                 orgId: row.orgId,
                 machineId: row.machineId,
                 personId: row.personId,
-                method: "terminal",
+                method: row.method ?? "terminal",
                 osUser: "ubuntu",
                 startedAt: new Date(),
               })
@@ -345,6 +350,7 @@ describe("TunnelRelay (against local dev Postgres)", () => {
       personId: string;
       machineId: string;
       expiresAt: Date;
+      level?: "file_recovery" | "shell";
     }) =>
       queryDb(
         Effect.gen(function* () {
@@ -354,7 +360,7 @@ describe("TunnelRelay (against local dev Postgres)", () => {
               orgId: row.orgId,
               personId: row.personId,
               machineId: row.machineId,
-              level: "shell",
+              level: row.level ?? "shell",
               reason: "test grant",
               approvalId: null,
               grantedAt: new Date(Date.now() - 60_000),
@@ -454,6 +460,77 @@ describe("TunnelRelay (against local dev Postgres)", () => {
 
       const unchanged = await fetchSession(session.id);
       expect(unchanged?.endedAt).toBeNull();
+    });
+
+    // The sweep asks its question per session METHOD. Before it did, it asked the
+    // terminal question about every open session, so a file session opened on a
+    // `file_recovery` grant — the only grant that can open one — was closed on the very
+    // next tick, seconds after minting, with `policy_terminated` and no visible cause.
+    test("leaves a files session open on a file_recovery elevation that a terminal session could not use", async () => {
+      const ctx = await seedOwnedMachineAndStranger();
+      const session = await seedOpenSession({
+        orgId: ctx.orgId,
+        machineId: ctx.machineId,
+        personId: ctx.strangerPersonId,
+        method: "files",
+      });
+      await seedElevation({
+        orgId: ctx.orgId,
+        personId: ctx.strangerPersonId,
+        machineId: ctx.machineId,
+        expiresAt: new Date(Date.now() + 3600_000),
+        level: "file_recovery",
+      });
+
+      await run(closeSessionsWithLapsedAuthorization());
+
+      const unchanged = await fetchSession(session.id);
+      expect(unchanged?.endedAt).toBeNull();
+    });
+
+    test("REQUIRED FAILURE PATH: closes a TERMINAL session held on only a file_recovery elevation", async () => {
+      const ctx = await seedOwnedMachineAndStranger();
+      const session = await seedOpenSession({
+        orgId: ctx.orgId,
+        machineId: ctx.machineId,
+        personId: ctx.strangerPersonId,
+        method: "terminal",
+      });
+      await seedElevation({
+        orgId: ctx.orgId,
+        personId: ctx.strangerPersonId,
+        machineId: ctx.machineId,
+        expiresAt: new Date(Date.now() + 3600_000),
+        level: "file_recovery",
+      });
+
+      await run(closeSessionsWithLapsedAuthorization());
+
+      const updated = await fetchSession(session.id);
+      expect(updated?.endedAt).not.toBeNull();
+      expect(updated?.terminationReason).toBe("policy_terminated");
+    });
+
+    test("REQUIRED FAILURE PATH: closes a files session once its file_recovery elevation expires", async () => {
+      const ctx = await seedOwnedMachineAndStranger();
+      const session = await seedOpenSession({
+        orgId: ctx.orgId,
+        machineId: ctx.machineId,
+        personId: ctx.strangerPersonId,
+        method: "files",
+      });
+      await seedElevation({
+        orgId: ctx.orgId,
+        personId: ctx.strangerPersonId,
+        machineId: ctx.machineId,
+        expiresAt: new Date(Date.now() - 1_000),
+        level: "file_recovery",
+      });
+
+      await run(closeSessionsWithLapsedAuthorization());
+
+      const updated = await fetchSession(session.id);
+      expect(updated?.endedAt).not.toBeNull();
     });
 
     test("REQUIRED FAILURE PATH: closes a non-owner's session that never had any elevation at all", async () => {

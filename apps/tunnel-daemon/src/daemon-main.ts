@@ -1,3 +1,12 @@
+// The daemon's real startup path, reached from `index.ts` when the binary is run
+// normally (no `--fs-helper`). Split out of `index.ts` so that importing the
+// entrypoint does not, by itself, attest and open a tunnel: the same binary
+// re-execs itself as the unprivileged file helper (`files-session.ts`), and that
+// process has no control-plane credentials at all — `su -` resets the environment,
+// so `CONTROL_PLANE_URL` and `MACHINE_TOKEN` are simply gone. Were this module's
+// top level still the entrypoint, every file session would spawn a child that
+// immediately tried to attest, failed on a missing env var, and exited.
+//
 // Attest, then hand off to the persistent outbound tunnel connection
 // (`connection.ts`) with a real per-session PTY multiplexer
 // (`session-manager.ts`) behind it — mirroring `apps/agent/src/index.ts` +

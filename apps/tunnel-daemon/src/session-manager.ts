@@ -1,3 +1,4 @@
+import type { FsOp } from "@cloudable/contracts";
 // ---------------------------------------------------------------------------
 // The daemon's per-session multiplexing core: one real PTY per
 // live session, keyed by `sessionId`. `attach` is where the plan's own
@@ -13,6 +14,11 @@
 // `session-token-key.ts` + `pty.ts` for actual use.
 // ---------------------------------------------------------------------------
 import { verifySessionToken } from "@cloudable/session-token";
+import {
+  type FilesSession,
+  type SpawnFilesSessionOptions,
+  spawnFilesSession as realSpawnFilesSession,
+} from "./files-session";
 import { type PtySession, type SpawnSessionOptions, spawnSession as realSpawnSession } from "./pty";
 import { clearCachedSessionTokenPublicKey, getSessionTokenPublicKey } from "./session-token-key";
 
@@ -42,6 +48,8 @@ export interface SessionManagerDeps {
    * can't fix. */
   invalidateSessionTokenPublicKey: () => void;
   spawnSession: (options: SpawnSessionOptions) => PtySession;
+  /** The `method: "files"` counterpart of `spawnSession` — see `files-session.ts`. */
+  spawnFilesSession: (options: SpawnFilesSessionOptions) => FilesSession;
 }
 
 /** Real deps: the actual cached HTTP fetch (`session-token-key.ts`) and the actual
@@ -60,6 +68,7 @@ export function createDefaultSessionManagerDeps(options: {
     },
     invalidateSessionTokenPublicKey: clearCachedSessionTokenPublicKey,
     spawnSession: realSpawnSession,
+    spawnFilesSession: realSpawnFilesSession,
   };
 }
 
@@ -74,10 +83,30 @@ export interface SessionManager {
     callbacks: {
       onData: (data: Uint8Array) => void;
       onExit: (info: { exitCode: number | null; signalCode: string | null }) => void;
+      /** Only ever called for a `method: "files"` session. */
+      onFsResult: (requestId: string, result: import("@cloudable/contracts").FsResult) => void;
+      /** Only ever called for a `method: "files"` session. */
+      onFsChunk: (
+        requestId: string,
+        chunk: { seq: number; dataBase64: string; final: boolean },
+      ) => void;
     },
   ) => Promise<AttachOutcome>;
   data: (sessionId: string, bytes: Uint8Array) => void;
   resize: (sessionId: string, cols: number, rows: number) => void;
+  /**
+   * Forwards one filesystem operation. A no-op for a session that is not a file
+   * session — which is what stops a terminal session from issuing file operations
+   * by sending an `fs_request` frame. Session KIND is fixed at attach by the signed
+   * token's `method` claim; no later frame can change or bypass it.
+   */
+  fsRequest: (sessionId: string, requestId: string, op: FsOp) => void;
+  /** One slice of an upload. Same no-op rule as `fsRequest`. */
+  fsChunk: (
+    sessionId: string,
+    requestId: string,
+    chunk: { seq: number; dataBase64: string; final: boolean },
+  ) => void;
   /** Ends one session immediately (policy-triggered close from the control plane, or the
    * browser leg disconnecting) — forcible termination, not a graceful shutdown request; see
    * `pty.ts`'s `kill()` doc comment for why that's the reliable mechanism here. The session
@@ -90,7 +119,13 @@ export interface SessionManager {
 }
 
 export function createSessionManager(deps: SessionManagerDeps): SessionManager {
+  // Two maps rather than one union-typed map, keyed by the same `sessionId`. A session is
+  // in exactly one of them, decided at attach by the token, and each map's operations are
+  // only reachable through its own lookup — so "can this session run a shell command" and
+  // "can this session read a file" are answered by which map the id is in, not by a
+  // runtime tag a caller could get wrong.
   const sessions = new Map<string, PtySession>();
+  const fileSessions = new Map<string, FilesSession>();
 
   const verifyOnce = async (sessionToken: string) => {
     const publicKeyDer = await deps.getSessionTokenPublicKeyBytes(deps.getBearerToken());
@@ -116,28 +151,50 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
       return { ok: false, reason: "wrong_machine" };
     }
 
-    // `spawnSession` throws synchronously for a `targetOsUser` that doesn't even look like a
-    // real username (`pty.ts`'s `InvalidOsUserError`) or, in principle, any other real spawn
+    // WHICH KIND OF SESSION THIS IS COMES FROM THE VERIFIED TOKEN, NEVER FROM THE FRAME.
+    //
+    // `input` is the `attach` frame, relayed from the browser through the control plane;
+    // `result.claims` is what the control plane actually signed. Branching on the claim is
+    // what makes the two elevation levels real: a token minted for `"files"` (which a
+    // `file_recovery` grant can obtain, see the control plane's
+    // `tunnel/access-authorization.ts`) cannot be made to spawn a PTY by a caller who
+    // rewrites the frame, because the frame is not consulted. Reading this from `input`
+    // would hand anyone who can reach this socket a shell on a file-recovery grant.
+    //
+    // Both spawns throw synchronously for a `targetOsUser` that doesn't look like a real
+    // username (`pty.ts`'s `InvalidOsUserError`) or, in principle, any other real spawn
     // failure — caught here rather than left to propagate as an unhandled rejection out of
     // `attach` (an `async` function whose caller, `connection.ts`'s inbound-frame dispatch,
     // invokes it as `void handleInboundFrame(...)` specifically because it does NOT await or
     // otherwise handle a rejection from it).
-    let pty: PtySession;
     try {
-      pty = deps.spawnSession({
-        targetOsUser: result.claims.targetOsUser,
-        cols: input.cols,
-        rows: input.rows,
-        onData: callbacks.onData,
-        onExit: (info) => {
-          sessions.delete(input.sessionId);
-          callbacks.onExit(info);
-        },
-      });
+      if (result.claims.method === "files") {
+        const files = deps.spawnFilesSession({
+          targetOsUser: result.claims.targetOsUser,
+          onResult: callbacks.onFsResult,
+          onChunk: callbacks.onFsChunk,
+          onExit: (info) => {
+            fileSessions.delete(input.sessionId);
+            callbacks.onExit(info);
+          },
+        });
+        fileSessions.set(input.sessionId, files);
+      } else {
+        const pty = deps.spawnSession({
+          targetOsUser: result.claims.targetOsUser,
+          cols: input.cols,
+          rows: input.rows,
+          onData: callbacks.onData,
+          onExit: (info) => {
+            sessions.delete(input.sessionId);
+            callbacks.onExit(info);
+          },
+        });
+        sessions.set(input.sessionId, pty);
+      }
     } catch (cause) {
       return { ok: false, reason: cause instanceof Error ? cause.message : "spawn_failed" };
     }
-    sessions.set(input.sessionId, pty);
 
     return { ok: true };
   };
@@ -150,14 +207,29 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     sessions.get(sessionId)?.resize(cols, rows);
   };
 
-  const close: SessionManager["close"] = (sessionId) => {
-    const pty = sessions.get(sessionId);
-    if (!pty) return;
-    pty.kill();
-    sessions.delete(sessionId);
+  const fsRequest: SessionManager["fsRequest"] = (sessionId, requestId, op) => {
+    fileSessions.get(sessionId)?.request(requestId, op);
   };
 
-  const has: SessionManager["has"] = (sessionId) => sessions.has(sessionId);
+  const fsChunk: SessionManager["fsChunk"] = (sessionId, requestId, chunk) => {
+    fileSessions.get(sessionId)?.chunk(requestId, chunk);
+  };
 
-  return { attach, data, resize, close, has };
+  const close: SessionManager["close"] = (sessionId) => {
+    const pty = sessions.get(sessionId);
+    if (pty) {
+      pty.kill();
+      sessions.delete(sessionId);
+      return;
+    }
+    const files = fileSessions.get(sessionId);
+    if (!files) return;
+    files.kill();
+    fileSessions.delete(sessionId);
+  };
+
+  const has: SessionManager["has"] = (sessionId) =>
+    sessions.has(sessionId) || fileSessions.has(sessionId);
+
+  return { attach, data, resize, fsRequest, fsChunk, close, has };
 }

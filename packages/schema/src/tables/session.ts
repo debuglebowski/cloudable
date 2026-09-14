@@ -1,12 +1,13 @@
 import { integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
-/** An interactive terminal or SSH session against a machine. */
+/** An interactive session against a machine: a terminal, an SSH connection, or a
+ * file-browsing session (`method: "files"`, see `docs/access.md`). */
 export const sessions = pgTable("sessions", {
   id: uuid("id").primaryKey().defaultRandom(),
   orgId: uuid("org_id").notNull(),
   machineId: uuid("machine_id").notNull(),
   personId: uuid("person_id").notNull(),
-  method: text("method", { enum: ["terminal", "ssh"] }).notNull(),
+  method: text("method", { enum: ["terminal", "ssh", "files"] }).notNull(),
   osUser: text("os_user").notNull(),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp("ended_at", { withTimezone: true }),

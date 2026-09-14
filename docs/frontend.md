@@ -257,6 +257,37 @@ export interface ControlStatusProps {
 }
 ```
 
+## Session pages (web terminal, files)
+
+Both live sessions are their own routes under `/access/sessions/$sessionId/...`, not tabs on
+the machine page. That is because a session is a real object with a lifetime — it holds a
+signed token, appears in the Access list, can be terminated, and is closed by the
+re-authorization sweep when the elevation behind it lapses. Inside a tab, that lifetime would
+be implicit and tied to whether someone happened to navigate away.
+
+| Route | Component | Entry points |
+| :--- | :--- | :--- |
+| `/access/sessions/$sessionId/terminal` | `components/terminal/terminal-session.tsx` | machine page "Connect" (fresh mint), Access page row (rejoin) |
+| `/access/sessions/$sessionId/files` | `components/files/file-browser.tsx` | machine page "Files" (fresh mint), Access page row (rejoin) |
+
+The machine page mints via `useMintSession({ targetMachineId, method })` and navigates.
+Neither button checks the access-method policy locally — the server's own `method_disabled`
+denial is the single authority, and a button predicting policy from a stale cached read would
+sometimes be wrong in the permissive direction.
+
+`components/session/transport.ts` holds what both legs share: `attachUrl`, the
+`ConnectionState` union, and the binary-safe base64 helpers. Those helpers exist specifically
+to avoid corrupting multi-byte content, so they live in one place rather than being copied per
+leg. `bytesToBase64` chunks its input — `String.fromCharCode(...bytes)` on a 64 KiB file slice
+exceeds the argument limit and throws, which the terminal never hit because keystrokes are tiny.
+
+**The file browser is deliberately plain.** `CLAUDE.md` forbids building code-server, and the
+way this stays on the right side of that line is by not drifting toward one: no syntax
+highlighting, no editor library, no project concept, no multi-file tabs, no cross-file search,
+nothing executable. One listing, one file open at a time, a monospace `Textarea`. The listing
+follows the standard table treatment (`min-h-0` wrapper, `containerClassName="h-full
+max-h-none"`) so it collapses to content rather than stretching.
+
 ## Routing conventions (for future feature units)
 
 Routing is code-based (`@tanstack/react-router`), registered centrally in

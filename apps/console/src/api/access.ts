@@ -1,3 +1,4 @@
+import type { SessionMethod } from "@cloudable/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -36,7 +37,7 @@ export interface ActiveSession {
   id: string;
   personName: string;
   machineName: string;
-  method: "terminal" | "ssh";
+  method: SessionMethod;
   osUser: string;
   startedAt: string;
 }
@@ -91,7 +92,7 @@ interface SessionSummaryWire {
   machineId: string;
   machineName: string;
   personId: string;
-  method: "terminal" | "ssh";
+  method: SessionMethod;
   osUser: string;
   startedAt: string;
 }
@@ -224,6 +225,14 @@ export function useTerminateSession() {
 
 export interface MintSessionInput {
   targetMachineId: string;
+  /**
+   * Which kind of session to open. This is the ONE field the client legitimately chooses
+   * here, and it is not an authority claim: the server re-derives everything that grants
+   * access from it (which policy flag must be on, which elevation levels satisfy the gate
+   * — see `tunnel/access-authorization.ts`), and asking for `"files"` can only ever get
+   * you less than asking for `"terminal"`.
+   */
+  method: Exclude<SessionMethod, "ssh">;
 }
 
 export interface MintedSession {
@@ -232,10 +241,10 @@ export interface MintedSession {
   expiresAt: string;
 }
 
-/** Real `POST /api/v1/access/sessions`, method fixed to `"terminal"` — this is the web
- * terminal's mint call specifically; the `"ssh"` method's session-accounting
- * mint has no console-side caller of its own, real SSH access goes through `cloudable
- * login`'s certificate flow instead, not this dialog. `orgId`/`personId`/`idpIdentity`
+/** Real `POST /api/v1/access/sessions`. The console mints `"terminal"` and `"files"`
+ * sessions; the `"ssh"` method's session-accounting mint has no console-side caller of
+ * its own — real SSH access goes through `cloudable login`'s certificate flow instead,
+ * which is why `method` here is the browser-reachable pair rather than the full union. `orgId`/`personId`/`idpIdentity`
  * are derived server-side from the caller's own session, never sent here — a wrong or
  * client-supplied identity on this specific call is a real access-control bug, not just a
  * missing convenience (see `http/routes/access.ts`'s header comment on `mintSession`).
@@ -246,7 +255,7 @@ export interface MintedSession {
 async function mintSessionRequest(input: MintSessionInput): Promise<MintedSession> {
   return apiPost<MintedSession>("/api/v1/access/sessions", {
     targetMachineId: input.targetMachineId,
-    method: "terminal",
+    method: input.method,
   });
 }
 
