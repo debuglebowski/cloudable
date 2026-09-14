@@ -145,11 +145,11 @@ function generateEd25519PublicKeyBase64(): string {
 const pgClient = postgres(config.databaseUrl);
 const db = drizzle(pgClient, { schema });
 
-// Fixed, not random — matches `apps/console/src/lib/current-org.ts`'s
+// Fixed, not random — matches `seed-functional.ts`'s
 // CURRENT_ORG_ID, so the console needs zero configuration to find this
 // org's data after a reseed.
 const DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
-// Matches `apps/console/src/lib/current-person.ts`'s CURRENT_PERSON_ID —
+// Matches `seed-functional.ts`'s PERSON_ID —
 // see that file's doc comment. Assigned to Jordan below.
 const CURRENT_PERSON_ID = "00000000-0000-0000-0000-000000000002";
 
@@ -197,7 +197,7 @@ async function main() {
     { email: "priya.natarajan@acme.com", role: "owner" as const },
     { email: "marcus.webb@acme.com", role: "member" as const },
     { email: "elena.ruiz@acme.com", role: "member" as const },
-    // Fixed id — matches `apps/console/src/lib/current-person.ts`'s
+    // Fixed id — matches `seed-functional.ts`'s
     // CURRENT_PERSON_ID, the same "no auth yet" stopgap CURRENT_ORG_ID
     // above stands in for. Jordan owns staging-07, the machine the demo
     // elevation below targets, so a reseed leaves Jordan with one real
@@ -393,7 +393,7 @@ async function main() {
   // Decided and synced to granted (rather than left pending) so the demo
   // also exercises the real owner-notification flow — Jordan (staging's
   // owner, and this build's fixed
-  // CURRENT_PERSON_ID — see apps/console/src/lib/current-person.ts) has one
+  // the seeded person id — see `seed-functional.ts`) has one
   // real unread notification after this reseed.
   if (!elevation.approvalId) throw new Error("expected the elevation to have an approvalId");
   await api(
