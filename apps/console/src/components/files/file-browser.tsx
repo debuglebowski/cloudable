@@ -1,15 +1,31 @@
 /**
  * The file interface for a `method: "files"` session.
  *
- * Deliberately plain. `CLAUDE.md` forbids building code-server, and the way this stays on
- * the right side of that line is by not drifting toward one: no syntax highlighting, no
- * project concept, no multi-file tabs, no cross-file search, nothing executable. One
- * listing, one file open at a time, a monospace textarea. It exists to recover and fix
- * files, which is what `elevations.level = "file_recovery"` has always meant.
+ * Two panes. On the left a navigator with three display modes; on the right the open file
+ * in one of two content modes. The modes exist because the two jobs this serves want
+ * different things:
  *
- * Every operation runs on the machine as the session's own OS user — see
- * `apps/tunnel-daemon/src/fs-helper.ts`. Nothing here is a privileged path, and a failure
- * arriving as `permission_denied` is a normal, expected outcome to render, not an error.
+ *   tree     navigating to a known path, keeping the surroundings visible
+ *   table    scanning a directory — size, mode, modified, sortable. This is the mode file
+ *            RECOVERY wants, and the one an auditor's questions are answered in
+ *   compact  hundreds of entries at a glance, the `ls` view
+ *
+ *   code     CodeMirror: line numbers, in-file search, syntax for JSON/YAML/shell/ini
+ *   plain    a monospace textarea, zero dependencies, always works
+ *
+ * Both choices persist per browser (`use-view-modes.ts`).
+ *
+ * ## What this is not
+ *
+ * `CLAUDE.md` forbids code-server. An earlier version of this file claimed that having no
+ * editor library was what kept it on the right side of that line; that was too broad a
+ * reading. The line is whether you can DEVELOP here — extensions, a language server, a
+ * debugger, a project concept, running code. Still deliberately absent: multi-file tabs,
+ * search across files, autocomplete, linting, anything executable.
+ *
+ * Every operation runs on the machine as the session's own OS user
+ * (`apps/tunnel-daemon/src/fs-helper.ts`). Nothing here is privileged, and a
+ * `permission_denied` is a normal outcome to render rather than an error.
  */
 import {
   FS_MAX_INLINE_BYTES,
@@ -17,43 +33,44 @@ import {
   type FsEntry,
   MACHINE_OS_USER,
 } from "@cloudable/contracts";
+import { useBlocker } from "@tanstack/react-router";
 import {
   ArrowUpFromLine,
+  Columns2,
   Download,
-  File as FileIcon,
+  FileCode,
+  FileText,
   Folder as FolderIcon,
   FolderPlus,
-  Link2,
+  List,
   Pencil,
   RotateCw,
+  Rows3,
   Save,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+import { type ContentMode, ContentPane } from "./content-pane";
+import { ConfirmDialog, TextPromptDialog } from "./file-dialogs";
+import { FileList } from "./file-list";
+import { FileTable } from "./file-table";
+import { FileTree } from "./file-tree";
+import { formatSize, joinPath, parentOf } from "./paths";
+import { SplitPane } from "./split-pane";
+import { useDirectoryCache } from "./use-directory-cache";
 import { type FsOutcome, useFileSession } from "./use-file-session";
+import { type NavigatorMode, useViewModes } from "./use-view-modes";
 
-/**
- * Where to start. The session user's home, derived from `MACHINE_OS_USER` rather than
- * spelled out, so it cannot drift from the user the control plane actually puts in the
- * token's `targetOsUser` claim. `/` would be a wall of system directories nobody opened
- * this to look at.
- */
+/** Where the tree is rooted and the table opens. Derived from the contract constant so it
+ * cannot drift from the OS user the control plane puts in the token's `targetOsUser`. */
 const DEFAULT_PATH = `/home/${MACHINE_OS_USER}`;
 
 export interface FileBrowserProps {
@@ -61,7 +78,6 @@ export interface FileBrowserProps {
   initialPath?: string;
 }
 
-/** One open file in the editor. `modifiedAt` is what the save's lost-update check pins to. */
 interface OpenFile {
   path: string;
   original: string;
@@ -86,16 +102,6 @@ const FAILURE_TEXT: Record<string, string> = {
 
 const describeFailure = (reason: string): string => FAILURE_TEXT[reason] ?? GENERIC_FAILURE;
 
-const formatSize = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-};
-
-const joinPath = (dir: string, name: string): string =>
-  dir === "/" ? `/${name}` : `${dir}/${name}`;
-
 const decodeText = (base64: string): string =>
   new TextDecoder().decode(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
 
@@ -109,54 +115,61 @@ const encodeText = (text: string): string => {
 export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrowserProps) {
   const session = useFileSession(sessionId);
   const { state, closeReason, run, upload } = session;
+  const { navigatorMode, setNavigatorMode, contentMode, setContentMode } = useViewModes();
+  const cache = useDirectoryCache(session, describeFailure);
 
-  const [path, setPath] = useState(initialPath);
-  const [entries, setEntries] = useState<ReadonlyArray<FsEntry> | null>(null);
-  const [parent, setParent] = useState<string | null>(null);
-  const [truncated, setTruncated] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
+  const [cwd, setCwd] = useState(initialPath);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set([initialPath]));
   const [open, setOpen] = useState<OpenFile | null>(null);
   const [busy, setBusy] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [renaming, setRenaming] = useState<FsEntry | null>(null);
+  const [pendingReplace, setPendingReplace] = useState<{ file: File; target: string } | null>(null);
+  const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
 
   const dirty = open !== null && open.draft !== open.original;
 
-  const list = useCallback(
-    async (target: string) => {
-      const { result } = await run({ op: "list", path: target });
-      if (!result.ok) {
-        setListError(describeFailure(result.reason));
-        setEntries([]);
-        return;
-      }
-      if (result.op !== "list") return;
-      setListError(null);
-      setEntries(result.entries);
-      setParent(result.parent);
-      setTruncated(result.truncated);
-      setPath(result.path);
+  // Unsaved work is real once there is an editor holding it, so leaving the route asks
+  // first. `confirm()` inside a navigate handler could not do this — the router would have
+  // already committed by the time a custom dialog resolved.
+  useBlocker({
+    shouldBlockFn: () => {
+      if (!dirty) return false;
+      return !window.confirm("You have unsaved changes. Leave anyway?");
     },
-    [run],
-  );
+    enableBeforeUnload: () => dirty,
+  });
 
   useEffect(() => {
     if (state !== "attached") return;
-    void list(initialPath);
-  }, [state, initialPath, list]);
+    void cache.load(initialPath);
+  }, [state, initialPath, cache.load]);
 
-  const navigate = useCallback(
-    (target: string) => {
-      if (dirty && !confirm("Discard unsaved changes?")) return;
-      setOpen(null);
-      setEntries(null);
-      void list(target);
+  /** Runs `action`, asking first when the open file has unsaved changes. */
+  const guardDirty = useCallback(
+    (action: () => void) => {
+      if (!dirty) {
+        action();
+        return;
+      }
+      setPendingDiscard(() => action);
     },
-    [dirty, list],
+    [dirty],
+  );
+
+  const openDirectory = useCallback(
+    (path: string) => {
+      setCwd(path);
+      void cache.load(path);
+    },
+    [cache.load],
   );
 
   const openFile = useCallback(
     async (full: string) => {
-      if (dirty && !confirm("Discard unsaved changes?")) return;
       setBusy(true);
       const { result } = await run({ op: "read", path: full });
       setBusy(false);
@@ -168,52 +181,55 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
       const text = decodeText(result.contentBase64);
       setOpen({ path: result.path, original: text, draft: text, modifiedAt: result.modifiedAt });
     },
-    [dirty, run],
+    [run],
   );
 
   /**
-   * A symlink can point at either a file or a directory, and nothing in the listing says
-   * which — `lstat` describes the link, not its target. So try to open it as a directory
-   * and fall back to reading it as a file.
-   *
-   * The fallback matters more than it looks: this tool is aimed squarely at `/etc` and
-   * `/var/log`, both full of symlinks. Treating every symlink as a directory made a
-   * symlinked file unopenable AND blanked the listing behind a `not_a_directory` error,
-   * with the breadcrumb still showing the old path.
+   * Open whatever this entry turns out to be. A symlink's `lstat` describes the link and
+   * not its target, so the only way to know is to try: list it, and fall back to reading it
+   * as a file when the machine says it is not a directory.
    */
   const activate = useCallback(
-    async (entry: FsEntry) => {
-      const full = joinPath(path, entry.name);
+    async (entry: FsEntry, fullPath: string) => {
       if (entry.type === "directory") {
-        navigate(full);
+        guardDirty(() => openDirectory(fullPath));
         return;
       }
       if (entry.type !== "symlink") {
-        void openFile(full);
+        guardDirty(() => void openFile(fullPath));
         return;
       }
-      if (dirty && !confirm("Discard unsaved changes?")) return;
       setBusy(true);
-      const { result } = await run({ op: "list", path: full });
+      const { result } = await run({ op: "list", path: fullPath });
       setBusy(false);
       if (result.ok && result.op === "list") {
-        setOpen(null);
-        setListError(null);
-        setEntries(result.entries);
-        setParent(result.parent);
-        setTruncated(result.truncated);
-        setPath(result.path);
+        guardDirty(() => openDirectory(result.path));
         return;
       }
       if (!result.ok && result.reason === "not_a_directory") {
-        void openFile(full);
+        guardDirty(() => void openFile(fullPath));
         return;
       }
       toast.error("Couldn't open that link", {
         description: result.ok ? GENERIC_FAILURE : describeFailure(result.reason),
       });
     },
-    [dirty, navigate, openFile, path, run],
+    [guardDirty, openDirectory, openFile, run],
+  );
+
+  const toggleExpanded = useCallback(
+    (path: string) => {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else {
+          next.add(path);
+          void cache.load(path);
+        }
+        return next;
+      });
+    },
+    [cache.load],
   );
 
   const save = useCallback(async () => {
@@ -223,8 +239,8 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
       op: "write",
       path: open.path,
       contentBase64: encodeText(open.draft),
-      // Pins the save to what was read. The helper refuses with `changed_on_disk` if
-      // anyone else touched the file meanwhile, rather than silently discarding their work.
+      // Pins the save to what was read, so a file changed underneath comes back as
+      // `changed_on_disk` rather than silently discarding the other person's work.
       expectedModifiedAt: open.modifiedAt,
     });
     setBusy(false);
@@ -235,12 +251,12 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
     if (result.op !== "write") return;
     setOpen({ ...open, original: open.draft, modifiedAt: result.modifiedAt });
     toast.success("Saved");
-    void list(path);
-  }, [open, run, list, path]);
+    const dir = parentOf(open.path);
+    if (dir) void cache.reload(dir);
+  }, [open, run, cache.reload]);
 
   const download = useCallback(
-    async (entry: FsEntry) => {
-      const full = joinPath(path, entry.name);
+    async (entry: FsEntry, fullPath: string) => {
       if (entry.sizeBytes > FS_MAX_TRANSFER_BYTES) {
         toast.error("Too large to download", {
           description: `The limit is ${formatSize(FS_MAX_TRANSFER_BYTES)}.`,
@@ -248,7 +264,7 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
         return;
       }
       setBusy(true);
-      const outcome: FsOutcome = await run({ op: "download", path: full });
+      const outcome: FsOutcome = await run({ op: "download", path: fullPath });
       setBusy(false);
       if (!outcome.result.ok || !outcome.bytes) {
         toast.error("Couldn't download", {
@@ -256,9 +272,8 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
         });
         return;
       }
-      // Attached to the document before clicking, and revoked on a later tick. A detached
-      // anchor does not start a download in Firefox, and revoking synchronously after
-      // `click()` can cancel the download before it begins.
+      // Attached before clicking and revoked on a later tick: a detached anchor does not
+      // start a download in Firefox, and revoking synchronously can cancel it.
       const url = URL.createObjectURL(new Blob([outcome.bytes as BlobPart]));
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -269,72 +284,74 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
       anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     },
-    [path, run],
+    [run],
+  );
+
+  const doUpload = useCallback(
+    async (file: File, replace: boolean) => {
+      const target = joinPath(cwd, file.name);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      setBusy(true);
+      const { result } = await upload(target, bytes, replace);
+      setBusy(false);
+      if (!result.ok && result.reason === "exists") {
+        setPendingReplace({ file, target });
+        return;
+      }
+      if (!result.ok) {
+        toast.error("Couldn't upload", { description: describeFailure(result.reason) });
+        return;
+      }
+      toast.success(`Uploaded ${file.name}`);
+      void cache.reload(cwd);
+    },
+    [cwd, upload, cache.reload],
   );
 
   const handleUpload = useCallback(
-    async (file: File) => {
+    (file: File) => {
       if (file.size > FS_MAX_TRANSFER_BYTES) {
         toast.error("Too large to upload", {
           description: `The limit is ${formatSize(FS_MAX_TRANSFER_BYTES)}.`,
         });
         return;
       }
-      const target = joinPath(path, file.name);
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      setBusy(true);
-      let { result } = await upload(target, bytes, false);
-      // There is no delete operation here, so an overwrite is the one thing in this
-      // interface that can't be undone. It never happens without being asked for.
-      if (!result.ok && result.reason === "exists") {
-        if (!confirm(`${file.name} already exists on the machine. Replace it?`)) {
-          setBusy(false);
-          return;
-        }
-        ({ result } = await upload(target, bytes, true));
-      }
-      setBusy(false);
-      if (!result.ok) {
-        toast.error("Couldn't upload", { description: describeFailure(result.reason) });
-        return;
-      }
-      toast.success(`Uploaded ${file.name}`);
-      void list(path);
+      void doUpload(file, false);
     },
-    [path, upload, list],
+    [doUpload],
   );
 
-  const makeDirectory = useCallback(async () => {
-    const name = prompt("New folder name");
-    if (!name) return;
-    setBusy(true);
-    const { result } = await run({ op: "mkdir", path: joinPath(path, name) });
-    setBusy(false);
-    if (!result.ok) {
-      toast.error("Couldn't create the folder", { description: describeFailure(result.reason) });
-      return;
-    }
-    void list(path);
-  }, [path, run, list]);
+  const createFolder = useCallback(
+    async (name: string) => {
+      setBusy(true);
+      const { result } = await run({ op: "mkdir", path: joinPath(cwd, name) });
+      setBusy(false);
+      if (!result.ok) {
+        toast.error("Couldn't create the folder", { description: describeFailure(result.reason) });
+        return;
+      }
+      void cache.reload(cwd);
+    },
+    [cwd, run, cache.reload],
+  );
 
-  const rename = useCallback(
-    async (entry: FsEntry) => {
-      const name = prompt(`Rename ${entry.name} to`, entry.name);
-      if (!name || name === entry.name) return;
+  const doRename = useCallback(
+    async (entry: FsEntry, name: string) => {
+      if (name === entry.name) return;
       setBusy(true);
       const { result } = await run({
         op: "rename",
-        from: joinPath(path, entry.name),
-        to: joinPath(path, name),
+        from: joinPath(cwd, entry.name),
+        to: joinPath(cwd, name),
       });
       setBusy(false);
       if (!result.ok) {
         toast.error("Couldn't rename", { description: describeFailure(result.reason) });
         return;
       }
-      void list(path);
+      void cache.reload(cwd);
     },
-    [path, run, list],
+    [cwd, run, cache.reload],
   );
 
   if (state === "connecting") {
@@ -356,22 +373,198 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
     );
   }
 
+  const dir = cache.directories.get(cwd);
+  const dirError = cache.errors.get(cwd);
+  const selectedName =
+    open && parentOf(open.path) === cwd ? open.path.slice(cwd === "/" ? 1 : cwd.length + 1) : null;
+
+  const rowActions = (entry: FsEntry) => {
+    const full = joinPath(cwd, entry.name);
+    const editable =
+      entry.type === "symlink" || (entry.type === "file" && entry.sizeBytes <= FS_MAX_INLINE_BYTES);
+    const downloadable = entry.type === "file" || entry.type === "symlink";
+    return (
+      <div className="flex justify-end gap-1">
+        {editable && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            title="Edit"
+            onClick={() => void activate(entry, full)}
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+        )}
+        {downloadable && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            title="Download"
+            onClick={() => void download(entry, full)}
+          >
+            <Download className="size-3.5" />
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRenaming(entry)}>
+          <span className="text-xs">Rename</span>
+        </Button>
+      </div>
+    );
+  };
+
+  const navigator = (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-2 py-1.5">
+        <Tabs value={navigatorMode} onValueChange={(v) => setNavigatorMode(v as NavigatorMode)}>
+          <TabsList className="h-7">
+            <ModeTab value="tree" label="Tree" icon={<List className="size-3.5" />} />
+            <ModeTab value="table" label="Table" icon={<Rows3 className="size-3.5" />} />
+            <ModeTab value="compact" label="Compact" icon={<Columns2 className="size-3.5" />} />
+          </TabsList>
+        </Tabs>
+        <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
+          {navigatorMode === "tree" ? initialPath : cwd}
+        </span>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        {navigatorMode === "tree" ? (
+          <FileTree
+            root={initialPath}
+            cache={cache}
+            expanded={expanded}
+            onToggle={toggleExpanded}
+            selectedPath={open?.path ?? null}
+            onSelect={(entry, full) => void activate(entry, full)}
+          />
+        ) : dirError ? (
+          <p className="p-6 text-center text-sm text-destructive">{dirError}</p>
+        ) : !dir ? (
+          <div className="space-y-2 p-4">
+            {["a", "b", "c", "d", "e"].map((key) => (
+              <Skeleton key={key} className="h-5 w-full" />
+            ))}
+          </div>
+        ) : dir.entries.length === 0 && dir.parent === null ? (
+          <EmptyState icon={FolderIcon} title="Empty" description="Nothing in this directory." />
+        ) : navigatorMode === "table" ? (
+          <FileTable
+            entries={dir.entries}
+            parent={dir.parent}
+            selectedName={selectedName}
+            formatSize={formatSize}
+            onActivate={(entry) => void activate(entry, joinPath(cwd, entry.name))}
+            onNavigateParent={() =>
+              dir.parent && guardDirty(() => openDirectory(dir.parent as string))
+            }
+            renderActions={rowActions}
+          />
+        ) : (
+          <FileList
+            entries={dir.entries}
+            parent={dir.parent}
+            selectedName={selectedName}
+            onActivate={(entry) => void activate(entry, joinPath(cwd, entry.name))}
+            onNavigateParent={() =>
+              dir.parent && guardDirty(() => openDirectory(dir.parent as string))
+            }
+          />
+        )}
+      </div>
+
+      {dir?.truncated && (
+        <p className="shrink-0 border-t border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
+          More entries than can be listed. Narrow it down from the terminal.
+        </p>
+      )}
+    </div>
+  );
+
+  const content = (
+    <div className="ml-0 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
+      {open ? (
+        <>
+          <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-2 py-1.5">
+            <span className="truncate font-mono text-[11px]" title={open.path}>
+              {open.path}
+            </span>
+            {dirty && <span className="shrink-0 text-[11px] text-muted-foreground">unsaved</span>}
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <Tabs value={contentMode} onValueChange={(v) => setContentMode(v as ContentMode)}>
+                <TabsList className="h-7">
+                  <ModeTab value="code" label="Code" icon={<FileCode className="size-3.5" />} />
+                  <ModeTab value="plain" label="Plain" icon={<FileText className="size-3.5" />} />
+                </TabsList>
+              </Tabs>
+              <Button size="sm" disabled={!dirty || busy} onClick={() => void save()}>
+                <Save className="size-3.5" /> Save
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => guardDirty(() => setOpen(null))}
+                title="Close file"
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <ContentPane
+              mode={contentMode}
+              path={open.path}
+              value={open.draft}
+              onChange={(draft) => setOpen((prev) => (prev ? { ...prev, draft } : prev))}
+              onSave={() => void save()}
+            />
+          </div>
+        </>
+      ) : (
+        <EmptyState
+          icon={FileCode}
+          title="No file open"
+          description="Pick a file on the left to view or edit it."
+        />
+      )}
+    </div>
+  );
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <Breadcrumbs path={path} onNavigate={navigate} />
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <div className="flex shrink-0 items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setCollapsed((v) => !v)}
+          title={collapsed ? "Show the file pane" : "Hide the file pane"}
+        >
+          <Columns2 className="size-3.5" />
+          {collapsed ? "Show files" : "Hide files"}
+        </Button>
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void list(path)} disabled={busy}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => void cache.reload(navigatorMode === "tree" ? initialPath : cwd)}
+          >
             <RotateCw className="size-3.5" /> Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void makeDirectory()} disabled={busy}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || navigatorMode === "tree"}
+            onClick={() => setNewFolderOpen(true)}
+          >
             <FolderPlus className="size-3.5" /> New folder
           </Button>
           <Button
             variant="outline"
             size="sm"
+            disabled={busy || navigatorMode === "tree"}
             onClick={() => uploadInputRef.current?.click()}
-            disabled={busy}
           >
             <ArrowUpFromLine className="size-3.5" /> Upload
           </Button>
@@ -382,228 +575,90 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
             onChange={(event) => {
               const file = event.target.files?.[0];
               event.target.value = "";
-              if (file) void handleUpload(file);
+              if (file) handleUpload(file);
             }}
           />
         </div>
       </div>
 
-      {/* min-h-0, no flex-1: shrinks to what's left under the header when content
-          overflows, but never grows past its own content — a short listing collapses
-          instead of stretching into empty space. Same treatment as every other table in
-          the console (see `machines-page.tsx`). */}
-      <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
-        {entries === null ? (
-          <div className="space-y-2 p-4">
-            {["a", "b", "c", "d", "e"].map((key) => (
-              <Skeleton key={key} className="h-6 w-full" />
-            ))}
-          </div>
-        ) : listError ? (
-          <p className="p-6 text-center text-sm text-destructive">{listError}</p>
-        ) : entries.length === 0 && parent === null ? (
-          // Only at `/`, where there is no ".." row to render and so nothing at all to show.
-          // A deeper empty directory still renders the table for its "go up" row.
-          <EmptyState icon={FolderIcon} title="Empty" description="Nothing in this directory." />
-        ) : (
-          <Table containerClassName="h-full max-h-none">
-            <TableHeader>
-              <TableRow>
-                <TableHead>
-                  <span className="flex items-center gap-1.5">
-                    <TableHeaderIcon icon={FileIcon} />
-                    Name
-                  </span>
-                </TableHead>
-                <TableHead className="w-28">Size</TableHead>
-                <TableHead className="w-28">Mode</TableHead>
-                <TableHead className="w-44">Modified</TableHead>
-                <TableHead className="w-40 text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {parent !== null && (
-                <TableRow className="cursor-pointer" onClick={() => navigate(parent)}>
-                  <TableCell className="font-mono text-xs">..</TableCell>
-                  <TableCell colSpan={4} />
-                </TableRow>
-              )}
-              {entries.map((entry) => (
-                <EntryRow
-                  key={entry.name}
-                  entry={entry}
-                  busy={busy}
-                  onActivate={() => void activate(entry)}
-                  onDownload={() => void download(entry)}
-                  onRename={() => void rename(entry)}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </div>
+      <SplitPane
+        storageKey="cloudable-files-pane-width"
+        left={navigator}
+        right={content}
+        leftCollapsed={collapsed}
+      />
 
-      {truncated && (
-        <p className="shrink-0 text-xs text-muted-foreground">
-          This directory has more entries than can be listed here. Narrow it down from the terminal.
-        </p>
-      )}
-
-      {open && (
-        <FileEditor
-          file={open}
-          dirty={dirty}
-          busy={busy}
-          onChange={(draft) => setOpen({ ...open, draft })}
-          onSave={() => void save()}
-          onClose={() => {
-            if (dirty && !confirm("Discard unsaved changes?")) return;
-            setOpen(null);
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function Breadcrumbs({
-  path,
-  onNavigate,
-}: {
-  path: string;
-  onNavigate: (target: string) => void;
-}) {
-  const segments = path.split("/").filter(Boolean);
-  return (
-    <nav className="flex flex-wrap items-center gap-1 font-mono text-xs text-muted-foreground">
-      <button
-        type="button"
-        className="hover:text-foreground hover:underline"
-        onClick={() => onNavigate("/")}
-      >
-        /
-      </button>
-      {segments.map((segment, index) => {
-        const target = `/${segments.slice(0, index + 1).join("/")}`;
-        const last = index === segments.length - 1;
-        return (
-          <span key={target} className="flex items-center gap-1">
-            <button
-              type="button"
-              className={last ? "text-foreground" : "hover:text-foreground hover:underline"}
-              onClick={() => onNavigate(target)}
-            >
-              {segment}
-            </button>
-            {!last && <span aria-hidden="true">/</span>}
-          </span>
-        );
-      })}
-    </nav>
-  );
-}
-
-function EntryRow({
-  entry,
-  busy,
-  onActivate,
-  onDownload,
-  onRename,
-}: {
-  entry: FsEntry;
-  busy: boolean;
-  onActivate: () => void;
-  onDownload: () => void;
-  onRename: () => void;
-}) {
-  // A symlink is shown as itself so what is on disk stays legible, but it gets the same
-  // actions a file does — `activate` resolves what it actually points at, and its
-  // `sizeBytes` is the link's own, not the target's, so it can't be size-gated here.
-  const editable =
-    entry.type === "symlink" || (entry.type === "file" && entry.sizeBytes <= FS_MAX_INLINE_BYTES);
-  const downloadable = entry.type === "file" || entry.type === "symlink";
-
-  const Icon =
-    entry.type === "directory" ? FolderIcon : entry.type === "symlink" ? Link2 : FileIcon;
-
-  return (
-    <TableRow>
-      <TableCell>
-        <button
-          type="button"
-          className="flex items-center gap-2 text-left font-mono text-xs hover:underline"
-          onClick={onActivate}
-        >
-          <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span>{entry.name}</span>
-          {entry.symlinkTarget && (
-            <span className="text-muted-foreground">→ {entry.symlinkTarget}</span>
-          )}
-        </button>
-      </TableCell>
-      <TableCell className="font-mono text-xs text-muted-foreground">
-        {entry.type === "directory" ? "—" : formatSize(entry.sizeBytes)}
-      </TableCell>
-      <TableCell className="font-mono text-xs text-muted-foreground">{entry.mode}</TableCell>
-      <TableCell className="text-xs text-muted-foreground">
-        {new Date(entry.modifiedAt).toLocaleString()}
-      </TableCell>
-      <TableCell className="text-right">
-        <div className="flex justify-end gap-1">
-          {editable && (
-            <Button variant="ghost" size="sm" onClick={onActivate} disabled={busy} title="Edit">
-              <Pencil className="size-3.5" />
-            </Button>
-          )}
-          {downloadable && (
-            <Button variant="ghost" size="sm" onClick={onDownload} disabled={busy} title="Download">
-              <Download className="size-3.5" />
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={onRename} disabled={busy} title="Rename">
-            <span className="text-xs">Rename</span>
-          </Button>
-        </div>
-      </TableCell>
-    </TableRow>
-  );
-}
-
-function FileEditor({
-  file,
-  dirty,
-  busy,
-  onChange,
-  onSave,
-  onClose,
-}: {
-  file: OpenFile;
-  dirty: boolean;
-  busy: boolean;
-  onChange: (draft: string) => void;
-  onSave: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="flex min-h-0 shrink-0 flex-col gap-2 rounded-2xl border border-muted-foreground/20 bg-card p-4 shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
-      <div className="flex items-center gap-2">
-        <span className="truncate font-mono text-xs">{file.path}</span>
-        {dirty && <span className="text-xs text-muted-foreground">unsaved</span>}
-        <div className="ml-auto flex gap-2">
-          <Button size="sm" onClick={onSave} disabled={!dirty || busy}>
-            <Save className="size-3.5" /> Save
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="size-3.5" />
-          </Button>
-        </div>
-      </div>
-      <Textarea
-        value={file.draft}
-        onChange={(event) => onChange(event.target.value)}
-        spellCheck={false}
-        className="min-h-64 font-mono text-xs"
+      <TextPromptDialog
+        open={newFolderOpen}
+        onOpenChange={setNewFolderOpen}
+        title="New folder"
+        description={`Created in ${cwd} on the machine.`}
+        label="Folder name"
+        confirmLabel="Create"
+        onConfirm={(name) => void createFolder(name)}
+      />
+      <TextPromptDialog
+        open={renaming !== null}
+        onOpenChange={(next) => !next && setRenaming(null)}
+        title={renaming ? `Rename ${renaming.name}` : "Rename"}
+        label="New name"
+        initialValue={renaming?.name ?? ""}
+        confirmLabel="Rename"
+        onConfirm={(name) => {
+          if (renaming) void doRename(renaming, name);
+          setRenaming(null);
+        }}
+      />
+      <ConfirmDialog
+        open={pendingReplace !== null}
+        onOpenChange={(next) => !next && setPendingReplace(null)}
+        title="Replace the existing file?"
+        description={
+          pendingReplace
+            ? `${pendingReplace.file.name} already exists on the machine. There is no undo — this interface has no delete, and the current contents will be gone.`
+            : ""
+        }
+        confirmLabel="Replace"
+        destructive
+        onConfirm={() => {
+          if (pendingReplace) void doUpload(pendingReplace.file, true);
+          setPendingReplace(null);
+        }}
+      />
+      <ConfirmDialog
+        open={pendingDiscard !== null}
+        onOpenChange={(next) => !next && setPendingDiscard(null)}
+        title="Discard unsaved changes?"
+        description={`Your edits to ${open?.path ?? "this file"} have not been written to the machine.`}
+        confirmLabel="Discard"
+        destructive
+        onConfirm={() => {
+          pendingDiscard?.();
+          setPendingDiscard(null);
+        }}
       />
     </div>
+  );
+}
+
+function ModeTab({
+  value,
+  label,
+  icon,
+}: {
+  value: string;
+  label: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <TabsTrigger value={value} className="px-2 py-1">
+          {icon}
+          <span className="sr-only">{label}</span>
+        </TabsTrigger>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }

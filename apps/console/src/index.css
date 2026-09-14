@@ -65,6 +65,27 @@
   --drift-soft: 40 71% 93%;
   --stale: 216 4% 53%;
   --stale-soft: 60 7% 93%;
+
+  /*
+   * Editor syntax tokens (`components/files/code-editor.tsx`).
+   *
+   * Defined here as tokens rather than taken from a CodeMirror theme package, for the
+   * same reason every other colour in this app is: the editor has to sit inside a Card
+   * and read as part of the console, not as a widget with its own palette. Keeping them
+   * as CSS variables also means the editor follows the `.dark` class with no JavaScript
+   * and no re-creating the EditorView on a theme change.
+   *
+   * Deliberately a small set. This is a config editor, not an IDE — six roles cover
+   * JSON, YAML, shell and ini, which is what people actually edit on a machine.
+   */
+  --code-keyword: 265 45% 45%;
+  --code-string: 164 63% 29%;
+  --code-number: 26 70% 40%;
+  --code-comment: 0 0% 52%;
+  --code-property: 216 47% 40%;
+  --code-invalid: 0 56% 41%;
+  --code-selection: 216 47% 33% / 0.16;
+  --code-active-line: 0 0% 0% / 0.035;
 }
 
 /*
@@ -126,6 +147,17 @@
 
   --popover: 0 0% 96%;
   --popover-foreground: 220 12% 9%;
+
+  /* Syntax roles, same structural meaning as the light values — lifted and desaturated
+   * enough to sit on the dark card without vibrating. */
+  --code-keyword: 265 60% 75%;
+  --code-string: 162 50% 62%;
+  --code-number: 26 75% 68%;
+  --code-comment: 215 10% 50%;
+  --code-property: 213 70% 72%;
+  --code-invalid: 0 65% 65%;
+  --code-selection: 213 70% 62% / 0.22;
+  --code-active-line: 0 0% 100% / 0.04;
 }
 
 /*
