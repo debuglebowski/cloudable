@@ -79,9 +79,24 @@ variable "min_replicas" {
 }
 
 variable "max_replicas" {
-  description = "Maximum Container App replica count."
+  description = <<-EOT
+    Maximum Container App replica count.
+
+    Defaults to 1, and raising it breaks the web terminal and `cloudable
+    connect`. The tunnel registry is an in-process Map (see
+    `apps/control-plane/src/tunnel/registry.ts`, which says so): a machine's
+    tunnel daemon holds one outbound websocket to one replica, while an
+    attach request load-balances across all of them. Land on a different
+    replica than the daemon did and the attach finds no daemon and times
+    out. With 3 replicas that is most attempts, intermittently, which reads
+    as "the machine is flaky" rather than as a routing bug.
+
+    Raise this only once the registry is shared across instances (pub/sub,
+    or Postgres LISTEN/NOTIFY). Until then this ceiling is load-bearing, not
+    a capacity choice.
+  EOT
   type        = number
-  default     = 3
+  default     = 1
 }
 
 variable "postgres_sku_name" {

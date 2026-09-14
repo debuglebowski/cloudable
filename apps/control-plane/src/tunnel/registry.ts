@@ -16,6 +16,14 @@
 // browser connecting to instance A to reach a daemon connected to instance
 // B. Out of scope for this build's single-instance deployment model — see
 // the approved web-terminal plan's "Open risks" section.
+//
+// That constraint is now enforced by the deployment rather than trusted:
+// `infra/terraform/control-plane`'s `max_replicas` defaults to 1 and says
+// why. It did not used to, and a real deployment scaled to 3 — which
+// presents as a machine that accepts one connection in three and times out
+// the rest, because the attach has to land on the same replica the daemon
+// happened to connect to. Anyone lifting that ceiling has to solve this
+// file first.
 // ---------------------------------------------------------------------------
 import type { TunnelFrame } from "@cloudable/contracts";
 import { Deferred, Effect, Ref } from "effect";
