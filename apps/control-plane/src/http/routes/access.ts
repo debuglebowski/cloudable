@@ -17,14 +17,19 @@
 // `POST /api/v1/cli-auth/code` and handed to the CLI over a local redirect,
 // carrying `{ personId, orgId }` the handler verifies instead of trusting.
 //
-// `listCertificates`/`revokeCertificate`/`endSession`/`listSessions` still
-// take `orgId`/`personId` explicitly rather than via
-// `CurrentUserAuthentication` — they just haven't needed migrating yet
-// (`endSession`/`listSessions` don't gate on `personId` at all, and both
-// scripts in this build share one fixed `orgId`, so that value is never
-// actually wrong).
+// `listCertificates`/`revokeCertificate`/`endSession`/`listSessions` no
+// longer take `orgId` on the wire either — they are
+// `CurrentUserAuthentication`-gated like `mintSession`, and read the org
+// from the caller's own credential. The claim this comment used to make,
+// that a client-supplied `orgId` was "never actually wrong" because every
+// caller shared one fixed id, stopped being true the moment a real
+// deployment existed: the console was still sending seed-demo.ts's org id
+// and so listed certificates and sessions belonging to nobody, while the
+// same queries from the CLI (which asks `/api/v1/me`) returned the real
+// rows. An org id that the caller supplies is one the caller can get wrong
+// — or choose.
 //
-// `mintSession` IS `CurrentUserAuthentication`-gated (below): unlike the
+// `mintSession` was `CurrentUserAuthentication`-gated first: unlike the
 // above, an attacker-supplied `personId` there is a real access-control
 // bypass — `isAuthorizedForInteractiveAccess` (`../tunnel/access-
 // authorization.ts`) decides "may this caller open a shell on this
@@ -86,11 +91,9 @@ const CertificateSummary = Schema.Struct({
   revokedReason: Schema.NullOr(Schema.String),
 });
 
-const ListCertificatesUrlParams = Schema.Struct({ orgId: Schema.String });
 const ListCertificatesResponse = Schema.Struct({ certificates: Schema.Array(CertificateSummary) });
 
 const RevokeCertificateRequest = Schema.Struct({
-  orgId: Schema.String,
   certificateId: Schema.String,
   reason: Schema.String,
 });
@@ -112,9 +115,8 @@ const MintSessionTokenResponse = Schema.Struct({
   expiresAt: Schema.String,
 });
 
-const EndSessionRequest = Schema.Struct({ orgId: Schema.String, sessionId: Schema.String });
+const EndSessionRequest = Schema.Struct({ sessionId: Schema.String });
 
-const ListSessionsUrlParams = Schema.Struct({ orgId: Schema.String });
 const SessionSummary = Schema.Struct({
   id: Schema.String,
   machineId: Schema.String,
@@ -150,12 +152,12 @@ export const AccessGroup = HttpApiGroup.make("access")
   )
   .add(
     HttpApiEndpoint.get("listCertificates", "/api/v1/access/certificates")
-      .setUrlParams(ListCertificatesUrlParams)
       .addSuccess(ListCertificatesResponse)
       .addError(NotFoundError, { status: 404 })
       .addError(DeniedError, { status: 403 })
       .addError(BadRequestError, { status: 400 })
-      .addError(InternalError, { status: 500 }),
+      .addError(InternalError, { status: 500 })
+      .middleware(CurrentUserAuthentication),
   )
   .add(
     HttpApiEndpoint.post("revokeCertificate", "/api/v1/access/certificates/revoke")
@@ -164,7 +166,8 @@ export const AccessGroup = HttpApiGroup.make("access")
       .addError(NotFoundError, { status: 404 })
       .addError(DeniedError, { status: 403 })
       .addError(BadRequestError, { status: 400 })
-      .addError(InternalError, { status: 500 }),
+      .addError(InternalError, { status: 500 })
+      .middleware(CurrentUserAuthentication),
   )
   .add(
     HttpApiEndpoint.post("mintSession", "/api/v1/access/sessions")
@@ -183,13 +186,14 @@ export const AccessGroup = HttpApiGroup.make("access")
       .addError(NotFoundError, { status: 404 })
       .addError(DeniedError, { status: 403 })
       .addError(BadRequestError, { status: 400 })
-      .addError(InternalError, { status: 500 }),
+      .addError(InternalError, { status: 500 })
+      .middleware(CurrentUserAuthentication),
   )
   .add(
     HttpApiEndpoint.get("listSessions", "/api/v1/access/sessions")
-      .setUrlParams(ListSessionsUrlParams)
       .addSuccess(ListSessionsResponse)
-      .addError(InternalError, { status: 500 }),
+      .addError(InternalError, { status: 500 })
+      .middleware(CurrentUserAuthentication),
   )
   .add(
     HttpApiEndpoint.get("sessionTokenPublicKey", "/api/v1/access/session-token-public-key")

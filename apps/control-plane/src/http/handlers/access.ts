@@ -76,10 +76,11 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
         };
       }).pipe(Effect.catchTag("SshCaError", (e) => Effect.fail(asAccessError(e)))),
     )
-    .handle("listCertificates", ({ urlParams }) =>
+    .handle("listCertificates", () =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const sshCa = yield* SshCaService;
-        const rows = yield* sshCa.listCertificates(urlParams.orgId);
+        const rows = yield* sshCa.listCertificates(currentUser.orgId);
         return {
           certificates: rows.map((row) => ({
             id: row.id,
@@ -96,9 +97,10 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
     )
     .handle("revokeCertificate", ({ payload }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const sshCa = yield* SshCaService;
         yield* sshCa.revokeCertificate({
-          orgId: payload.orgId,
+          orgId: currentUser.orgId,
           certificateId: payload.certificateId,
           reason: payload.reason,
         });
@@ -125,13 +127,16 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
     )
     .handle("endSession", ({ payload }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const tunnel = yield* TunnelServer;
-        yield* tunnel.endSession({ orgId: payload.orgId, sessionId: payload.sessionId });
+        yield* tunnel.endSession({ orgId: currentUser.orgId, sessionId: payload.sessionId });
         return { ok: true as const };
       }).pipe(Effect.catchTag("TunnelError", (e) => Effect.fail(asAccessError(e)))),
     )
-    .handle("listSessions", ({ urlParams }) =>
-      listActiveSessionsByOrg(urlParams.orgId).pipe(
+    .handle("listSessions", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) =>
+        listActiveSessionsByOrg(currentUser.orgId),
+      ).pipe(
         Effect.map((rows) => ({
           sessions: rows.map((row) => ({
             id: row.id,
