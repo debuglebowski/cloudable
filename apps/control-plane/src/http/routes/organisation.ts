@@ -3,11 +3,23 @@ import { Schema } from "effect";
 import { PackagePinConflictError } from "../../domain/machine/errors";
 import { OrgPackagesError } from "../../domain/organisation/packages";
 import { OrgSettingsError } from "../../domain/organisation/settings";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 // Real backend for the Organisation page. An aggregate
 // read/write over settings that already live in, and are governed by,
 // several other domains — see domain/organisation/settings.ts's header
 // comment for why this doesn't duplicate their storage.
+//
+// Every endpoint here is `CurrentUserAuthentication`-gated, and neither
+// `orgId` nor `actor` is on the wire any more. Both used to be, with no
+// middleware on the group at all: `GET /api/v1/organisation` answered any
+// caller who knew an org id, and `PATCH` let that same caller set
+// `approvalModes` (break_glass to "none"), the logging tier and the
+// retention window — then name whoever they liked as the `actor` on the
+// resulting, permanent `organisation.updated` event. The org id is not a
+// secret either; it is in the body of every response, this one included.
+// The actor is now the authenticated caller, so the audit record says who
+// actually made the change.
 
 const ApprovalActionType = Schema.Literal(
   "snapshot_restore",
@@ -33,21 +45,12 @@ const OrgSettingsResource = Schema.Struct({
   retentionLocation: RetentionLocation,
 });
 
-const GetOrgSettingsUrlParams = Schema.Struct({ orgId: Schema.String });
-
-const ConfigActor = Schema.Struct({
-  type: Schema.Literal("person", "system"),
-  id: Schema.String,
-});
-
 const UpdateOrgSettingsPayload = Schema.Struct({
-  orgId: Schema.String,
   name: Schema.optional(Schema.String),
   approvalModes: Schema.optional(Schema.partial(ApprovalModes)),
   loggingTier: Schema.optional(LoggingTier),
   retentionDefaultDays: Schema.optional(Schema.Number),
   retentionLocation: Schema.optional(RetentionLocation),
-  actor: ConfigActor,
 });
 
 // Org-scope package manifest entries. Sibling of `PATCH /api/v1/machines/:id/packages`
@@ -65,15 +68,11 @@ const OrgPackageEntryResource = Schema.Struct({
   pinned: Schema.Boolean,
 });
 
-const ListOrgPackagesUrlParams = Schema.Struct({ orgId: Schema.String });
-
 const ListOrgPackagesResponse = Schema.Struct({ items: Schema.Array(OrgPackageEntryResource) });
 
 const UpdateOrgPackagesPayload = Schema.Struct({
-  orgId: Schema.String,
   upserts: Schema.optional(Schema.Array(PackageManifestEntry)),
   removals: Schema.optional(Schema.Array(Schema.String.pipe(Schema.minLength(1)))),
-  actor: ConfigActor,
 });
 
 const UpdateOrgPackagesResponse = Schema.Struct({ items: Schema.Array(OrgPackageEntryResource) });
@@ -81,26 +80,28 @@ const UpdateOrgPackagesResponse = Schema.Struct({ items: Schema.Array(OrgPackage
 export const OrganisationGroup = HttpApiGroup.make("organisation")
   .add(
     HttpApiEndpoint.get("get", "/api/v1/organisation")
-      .setUrlParams(GetOrgSettingsUrlParams)
       .addSuccess(OrgSettingsResource)
-      .addError(OrgSettingsError, { status: 404 }),
+      .addError(OrgSettingsError, { status: 404 })
+      .middleware(CurrentUserAuthentication),
   )
   .add(
     HttpApiEndpoint.patch("update", "/api/v1/organisation")
       .setPayload(UpdateOrgSettingsPayload)
       .addSuccess(OrgSettingsResource)
-      .addError(OrgSettingsError, { status: 400 }),
+      .addError(OrgSettingsError, { status: 400 })
+      .middleware(CurrentUserAuthentication),
   )
   .add(
     HttpApiEndpoint.get("listPackages", "/api/v1/organisation/packages")
-      .setUrlParams(ListOrgPackagesUrlParams)
       .addSuccess(ListOrgPackagesResponse)
-      .addError(OrgPackagesError, { status: 404 }),
+      .addError(OrgPackagesError, { status: 404 })
+      .middleware(CurrentUserAuthentication),
   )
   .add(
     HttpApiEndpoint.patch("updatePackages", "/api/v1/organisation/packages")
       .setPayload(UpdateOrgPackagesPayload)
       .addSuccess(UpdateOrgPackagesResponse)
       .addError(PackagePinConflictError, { status: 422 })
-      .addError(OrgPackagesError, { status: 404 }),
+      .addError(OrgPackagesError, { status: 404 })
+      .middleware(CurrentUserAuthentication),
   );

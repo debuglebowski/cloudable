@@ -3,7 +3,6 @@ import { toast } from "sonner";
 
 import { auditKeys } from "@/api/audit";
 import { apiGet, apiPatch } from "@/lib/api-client";
-import { currentOrgId } from "@/lib/current-user";
 
 /**
  * Compliance control map — wired to the real `apps/control-plane/src/http/
@@ -51,10 +50,7 @@ export const complianceKeys = {
 export function useControlMap() {
   return useQuery({
     queryKey: complianceKeys.controlMap(),
-    queryFn: async () =>
-      apiGet<{ controls: ControlMapEntry[] }>(
-        `/api/v1/compliance/control-map?orgId=${await currentOrgId()}`,
-      ),
+    queryFn: () => apiGet<{ controls: ControlMapEntry[] }>("/api/v1/compliance/control-map"),
   });
 }
 
@@ -67,10 +63,10 @@ export interface SetControlOverrideInput {
 export function useSetControlOverride() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ controlId, status }: SetControlOverrideInput) =>
+    mutationFn: ({ controlId, status }: SetControlOverrideInput) =>
       apiPatch<{ controls: ControlMapEntry[] }>(
         `/api/v1/compliance/control-map/${controlId}/override`,
-        { orgId: await currentOrgId(), status },
+        { status },
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: complianceKeys.all });

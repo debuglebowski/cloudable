@@ -1,4 +1,4 @@
-import { authenticatedApiRequest, query } from "./http-client";
+import { authenticatedApiRequest } from "./http-client";
 import { requireSession } from "./session";
 
 export interface PersonWire {
@@ -62,6 +62,5 @@ export async function currentActor(): Promise<{ type: "person"; id: string }> {
 }
 
 export async function fetchOrg(): Promise<OrgWire> {
-  const { orgId } = await currentIdentity();
-  return authenticatedApiRequest<OrgWire>(`/api/v1/organisation${query({ orgId })}`);
+  return authenticatedApiRequest<OrgWire>("/api/v1/organisation");
 }

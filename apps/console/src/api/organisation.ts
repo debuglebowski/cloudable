@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { apiGet, apiPatch } from "@/lib/api-client";
-import { currentActor, currentOrgId } from "@/lib/current-user";
 
 /**
  * Organisation settings — wired to the real `apps/control-plane/src/http/
@@ -95,7 +94,7 @@ interface OrgPackagesResponse {
 export function useOrgSettings() {
   return useQuery({
     queryKey: organisationKeys.settings(),
-    queryFn: async () => apiGet<OrgSettings>(`/api/v1/organisation?orgId=${await currentOrgId()}`),
+    queryFn: () => apiGet<OrgSettings>("/api/v1/organisation"),
   });
 }
 
@@ -106,12 +105,8 @@ export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id" | "loggingTi
 export function useUpdateOrgSettings() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: UpdateOrgSettingsInput) =>
-      apiPatch<OrgSettings>("/api/v1/organisation", {
-        orgId: await currentOrgId(),
-        ...input,
-        actor: await currentActor(),
-      }),
+    mutationFn: (input: UpdateOrgSettingsInput) =>
+      apiPatch<OrgSettings>("/api/v1/organisation", input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: organisationKeys.all });
       toast.success("Organisation settings updated");
@@ -132,22 +127,16 @@ export function useUpdateOrgSettings() {
 export function useOrgPackages() {
   return useQuery({
     queryKey: organisationKeys.packages(),
-    queryFn: async () =>
-      apiGet<OrgPackagesResponse>(
-        `/api/v1/organisation/packages?orgId=${await currentOrgId()}`,
-      ).then((res) => res.items),
+    queryFn: () =>
+      apiGet<OrgPackagesResponse>("/api/v1/organisation/packages").then((res) => res.items),
   });
 }
 
 function useUpdateOrgPackages() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { upserts?: OrgPackageEdit[]; removals?: string[] }) =>
-      apiPatch<OrgPackagesResponse>("/api/v1/organisation/packages", {
-        orgId: await currentOrgId(),
-        actor: await currentActor(),
-        ...input,
-      }),
+    mutationFn: (input: { upserts?: OrgPackageEdit[]; removals?: string[] }) =>
+      apiPatch<OrgPackagesResponse>("/api/v1/organisation/packages", input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: organisationKeys.packages() });
     },

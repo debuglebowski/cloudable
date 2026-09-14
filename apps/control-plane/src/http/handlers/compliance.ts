@@ -17,6 +17,7 @@ import {
 import { ageInDays, medianAgeInDays } from "../../compliance/finding-store";
 import { DbLive } from "../../db/layer";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 /** DB/infra failure loading or writing overrides is never a meaningful outcome for an
  * HTTP caller — same convention as `OrgSettingsError`'s infra branch in
@@ -26,24 +27,26 @@ const rethrowStoreErrorAsDefect = (e: ControlOverrideStoreError) => Effect.die(e
 
 const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =>
   handlers
-    .handle("controlMap", ({ urlParams }) =>
+    .handle("controlMap", () =>
       Effect.gen(function* () {
-        const overrides = yield* loadControlOverrides(urlParams.orgId);
+        const currentUser = yield* CurrentUserTag;
+        const overrides = yield* loadControlOverrides(currentUser.orgId);
         return { controls: applyControlOverrides(computeControlMap(), overrides) };
       }).pipe(Effect.catchTag("ControlOverrideStoreError", rethrowStoreErrorAsDefect)),
     )
     .handle("setControlOverride", ({ path, payload }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         // Loaded BEFORE the write, then merged with the just-applied change in memory
         // below, rather than re-querying after — a transient failure on a second read
         // would otherwise report this write as failed even though it had already
         // committed, leaving the console's dialog open and the user unsure whether
         // their change stuck (it did).
-        const overridesBeforeWrite = yield* loadControlOverrides(payload.orgId);
+        const overridesBeforeWrite = yield* loadControlOverrides(currentUser.orgId);
         if (payload.status === null) {
-          yield* clearControlOverride(payload.orgId, path.controlId);
+          yield* clearControlOverride(currentUser.orgId, path.controlId);
         } else {
-          yield* setControlOverride(payload.orgId, path.controlId, payload.status);
+          yield* setControlOverride(currentUser.orgId, path.controlId, payload.status);
         }
         const otherOverrides = overridesBeforeWrite.filter((o) => o.controlId !== path.controlId);
         const overrides =
@@ -53,12 +56,13 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
         return { controls: applyControlOverrides(computeControlMap(), overrides) };
       }).pipe(Effect.catchTag("ControlOverrideStoreError", rethrowStoreErrorAsDefect)),
     )
-    .handle("findings", ({ urlParams }) =>
+    .handle("findings", () =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
         const now = new Date();
-        const evaluations = yield* evaluateAllChecks(urlParams.orgId);
+        const evaluations = yield* evaluateAllChecks(currentUser.orgId);
         return {
-          orgId: urlParams.orgId,
+          orgId: currentUser.orgId,
           generatedAt: now.toISOString(),
           checks: evaluations.map((evaluation) => {
             // Collected alongside the findings map below (rather than a
@@ -89,12 +93,18 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
         };
       }),
     )
-    .handle("findingsExport", ({ urlParams }) =>
-      collectOpenFindingsByControl(urlParams.orgId).pipe(Effect.map(findingsByControlCsv)),
+    .handle("findingsExport", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) =>
+        collectOpenFindingsByControl(currentUser.orgId),
+      ).pipe(Effect.map(findingsByControlCsv)),
     )
-    .handle("assetInventoryCsv", ({ urlParams }) => assetInventoryCsv(urlParams.orgId))
-    .handle("findingsCsv", ({ urlParams }) =>
-      collectOpenFindingsByControl(urlParams.orgId).pipe(Effect.map(openFindingsCsv)),
+    .handle("assetInventoryCsv", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) => assetInventoryCsv(currentUser.orgId)),
+    )
+    .handle("findingsCsv", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) =>
+        collectOpenFindingsByControl(currentUser.orgId),
+      ).pipe(Effect.map(openFindingsCsv)),
     ),
 );
 

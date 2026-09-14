@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiGet, apiPost } from "@/lib/api-client";
-import { currentUser } from "@/lib/current-user";
 
 /**
  * Console-side data layer for owner notifications ("owner
@@ -29,10 +28,7 @@ export const notificationKeys = {
 };
 
 export async function fetchNotifications(): Promise<OwnerNotification[]> {
-  const me = await currentUser();
-  const res = await apiGet<{ items: OwnerNotification[] }>(
-    `/api/v1/notifications?orgId=${me.orgId}&personId=${me.id}`,
-  );
+  const res = await apiGet<{ items: OwnerNotification[] }>("/api/v1/notifications");
   return res.items;
 }
 
@@ -59,13 +55,7 @@ export function useUnreadNotificationsCount(): number | undefined {
 export function useMarkNotificationsReadMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      const me = await currentUser();
-      return apiPost<{ updated: number }>("/api/v1/notifications/read", {
-        orgId: me.orgId,
-        personId: me.id,
-      });
-    },
+    mutationFn: () => apiPost<{ updated: number }>("/api/v1/notifications/read"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     },
