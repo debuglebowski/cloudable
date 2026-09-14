@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import type { BadgeProps } from "@/components/ui/badge";
-import { BASE_URL, apiGet } from "@/lib/api-client";
+import { apiGet, apiGetText } from "@/lib/api-client";
 
 /**
  * Audit domain: timeline (raw event feed) and evidence export (events →
@@ -11,12 +12,54 @@ import { BASE_URL, apiGet } from "@/lib/api-client";
  * worked; this file was never updated after they merged.
  */
 
-export const AUDIT_EXPORT_URLS = {
-  assetInventoryCsv: `${BASE_URL}/api/v1/compliance/exports/asset-inventory.csv`,
-  // Real path is exports/findings.csv, not open-findings.csv — the mock's
-  // guessed name never got corrected against the real endpoint unit 10 shipped.
-  openFindingsCsv: `${BASE_URL}/api/v1/compliance/exports/findings.csv`,
+/** The two evidence exports, by the path each actually lives at. (`findings.csv`, not
+ * `open-findings.csv` — the mock's guessed name was never corrected against the real
+ * endpoint.) Fetched with credentials rather than linked to; see `apiGetText`. */
+export const AUDIT_EXPORTS = {
+  assetInventory: {
+    path: "/api/v1/compliance/exports/asset-inventory.csv",
+    filename: "asset-inventory.csv",
+    label: "Asset inventory",
+  },
+  openFindings: {
+    path: "/api/v1/compliance/exports/findings.csv",
+    filename: "open-findings.csv",
+    label: "Open findings",
+  },
 } as const;
+
+export type AuditExport = (typeof AUDIT_EXPORTS)[keyof typeof AUDIT_EXPORTS];
+
+/** Hands the fetched CSV to the browser as a download. The object URL is revoked
+ * immediately after the synthetic click — the download is already committed by then,
+ * and leaving it un-revoked pins the whole file in memory for the life of the tab. */
+function saveTextAsFile(text: string, filename: string, contentType: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: contentType }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Downloads one evidence export. A failure here is worth saying out loud — the
+ * previous `<a download>` version failed by handing the user a file containing an
+ * error body, or nothing at all, with no indication either had happened. */
+export function useDownloadExport() {
+  return useMutation({
+    mutationFn: async (target: AuditExport) => {
+      const csv = await apiGetText(target.path);
+      saveTextAsFile(csv, target.filename, "text/csv;charset=utf-8");
+    },
+    onError: (error, target) => {
+      toast.error(`Couldn't download the ${target.label.toLowerCase()} export`, {
+        description: error.message,
+      });
+    },
+  });
+}
 
 /** Domain-first query key tuples. */
 export const auditKeys = {

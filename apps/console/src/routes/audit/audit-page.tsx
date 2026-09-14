@@ -2,12 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Clock, FileText, History, Server, User, Zap } from "lucide-react";
 
 import {
-  AUDIT_EXPORT_URLS,
+  AUDIT_EXPORTS,
   type ControlCheckEvidence,
   SEVERITY_VARIANT,
   daysOpen,
   useAuditTimeline,
   useControlEvidence,
+  useDownloadExport,
 } from "@/api/audit";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ActorCell } from "@/components/actor-cell";
@@ -250,6 +251,7 @@ function CheckRow({ check }: { check: ControlCheckEvidence }) {
 
 function EvidenceExportView() {
   const { data: groups, isLoading } = useControlEvidence();
+  const downloadExport = useDownloadExport();
 
   return (
     <div className="flex flex-col gap-4">
@@ -258,24 +260,28 @@ function EvidenceExportView() {
           Grouped by control, not by time. Cloud-specific detail lives in the raw event layer; this
           is the normalised projection an auditor reads.
         </p>
+        {/* Buttons, not `<a download>` links: these endpoints are session-gated, and a
+          cross-origin anchor is not a credentialed request (see `apiGetText`). Disabled
+          together while either is in flight — both hit the same export machinery, and a
+          second click before the first returns just queues a duplicate fetch. */}
         <div className="flex shrink-0 gap-2">
-          <Button asChild variant="outline" size="sm">
-            <a
-              href={AUDIT_EXPORT_URLS.assetInventoryCsv}
-              download
-              title="Backend export endpoint pending (compliance unit) — may 404 today"
-            >
-              Asset inventory CSV
-            </a>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={downloadExport.isPending}
+            onClick={() => downloadExport.mutate(AUDIT_EXPORTS.assetInventory)}
+          >
+            Asset inventory CSV
           </Button>
-          <Button asChild variant="outline" size="sm">
-            <a
-              href={AUDIT_EXPORT_URLS.openFindingsCsv}
-              download
-              title="Backend export endpoint pending (compliance unit) — may 404 today"
-            >
-              Open findings CSV
-            </a>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={downloadExport.isPending}
+            onClick={() => downloadExport.mutate(AUDIT_EXPORTS.openFindings)}
+          >
+            Open findings CSV
           </Button>
         </div>
       </div>

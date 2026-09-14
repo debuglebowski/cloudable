@@ -1,4 +1,7 @@
-/** Exported so feature units building non-fetch links (e.g. CSV export hrefs) can reuse it. */
+/** Exported for the few callers that build a URL rather than call through this module:
+ * `lib/auth-client.ts` (BetterAuth's own REST surface) and `components/session/transport.ts`
+ * (the web terminal's websocket, which swaps the scheme). The CSV exports used to be here
+ * too, as `<a download>` hrefs; they are credentialed fetches now — see `apiGetText`. */
 export const BASE_URL: string = import.meta.env.VITE_API_URL ?? "http://localhost:4780";
 
 /**
@@ -106,6 +109,37 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 /** Feature units' src/api/<domain>.ts files build on top of these. */
 export function apiGet<T>(path: string): Promise<T> {
   return request<T>(path, { method: "GET" });
+}
+
+/**
+ * A GET whose response is `text/csv`, not JSON — the compliance exports
+ * (`api/audit.ts`). Shares `request`'s credential handling and `ApiError`
+ * body parsing, and differs only in reading the body as text.
+ *
+ * These used to be plain `<a href download>` links straight at the control
+ * plane. That worked on neither count: the endpoints took an `orgId` the
+ * links never passed, so both 404'd, and now that they are session-gated a
+ * cross-origin anchor is not a credentialed request at all. Production
+ * serves console and API from one origin so a link would happen to carry
+ * the cookie there; local dev does not, and "works in prod, 401s on your
+ * laptop" is a bad way to find that out.
+ */
+export async function apiGetText(path: string): Promise<string> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: "GET",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res
+      .clone()
+      .json()
+      .catch(() => undefined);
+    if (res.status === 401 && isExpiredSession(body)) {
+      onUnauthorized?.();
+    }
+    throw new ApiError(res.status, path, "GET", body);
+  }
+  return res.text();
 }
 
 export function apiPost<T>(path: string, body?: unknown): Promise<T> {
