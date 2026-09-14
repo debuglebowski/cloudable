@@ -11,7 +11,12 @@
  * `apps/tunnel-daemon/src/fs-helper.ts`. Nothing here is a privileged path, and a failure
  * arriving as `permission_denied` is a normal, expected outcome to render, not an error.
  */
-import { FS_MAX_INLINE_BYTES, FS_MAX_TRANSFER_BYTES, type FsEntry } from "@cloudable/contracts";
+import {
+  FS_MAX_INLINE_BYTES,
+  FS_MAX_TRANSFER_BYTES,
+  type FsEntry,
+  MACHINE_OS_USER,
+} from "@cloudable/contracts";
 import {
   ArrowUpFromLine,
   Download,
@@ -43,10 +48,16 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { type FsOutcome, useFileSession } from "./use-file-session";
 
+/**
+ * Where to start. The session user's home, derived from `MACHINE_OS_USER` rather than
+ * spelled out, so it cannot drift from the user the control plane actually puts in the
+ * token's `targetOsUser` claim. `/` would be a wall of system directories nobody opened
+ * this to look at.
+ */
+const DEFAULT_PATH = `/home/${MACHINE_OS_USER}`;
+
 export interface FileBrowserProps {
   sessionId: string;
-  /** Where to start. The session user's home is the useful default; `/` is a wall of
-   * system directories nobody opened this to look at. */
   initialPath?: string;
 }
 
@@ -95,7 +106,7 @@ const encodeText = (text: string): string => {
   return btoa(binary);
 };
 
-export function FileBrowser({ sessionId, initialPath = "/home/cloudable" }: FileBrowserProps) {
+export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrowserProps) {
   const session = useFileSession(sessionId);
   const { state, closeReason, run, upload } = session;
 
