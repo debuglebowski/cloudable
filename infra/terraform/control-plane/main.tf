@@ -566,6 +566,50 @@ resource "azurerm_subnet_network_security_group_association" "machines" {
   network_security_group_id = azurerm_network_security_group.machines[0].id
 }
 
+# CPU monitoring for every machine, scoped to the resource group rather than
+# to individual VMs.
+#
+# The control plane mints machine VMs at runtime, so per-VM alert rules would
+# have to be created by the provisioner — which means a window between VM
+# create and alert create where a machine is unmonitored, plus one more thing
+# to reconcile and drift. An RG-scoped multi-resource alert has neither: a VM
+# provisioned after this applies is covered the moment it exists, and nothing
+# about it is per-machine state.
+#
+# This is deliberately not configurable per machine. "Are all machines
+# monitored?" has to answer yes for every machine, or it stops being evidence.
+#
+# A multi-resource alert needs target_resource_type + target_resource_location,
+# which is only sound because self-hosted mode has exactly one usable region —
+# the fixed machines subnet (see azureMachinesLocation in the control plane's
+# config.ts). If machines ever span regions, this becomes one rule per region.
+resource "azurerm_monitor_metric_alert" "machine_cpu" {
+  count = var.enable_self_managed_machines && var.alert_action_group_id != null ? 1 : 0
+
+  name                     = "${var.name_prefix}-machine-cpu-alert"
+  resource_group_name      = local.machines_resource_group_name
+  scopes                   = [local.machines_resource_group_id]
+  target_resource_type     = "Microsoft.Compute/virtualMachines"
+  target_resource_location = local.machines_resource_group_location
+  description              = "Average CPU on a Cloudable machine exceeded 90% over the last hour"
+  severity                 = 2
+  frequency                = "PT15M"
+  window_size              = "PT1H"
+  tags                     = var.tags
+
+  criteria {
+    metric_namespace = "Microsoft.Compute/virtualMachines"
+    metric_name      = "Percentage CPU"
+    aggregation      = "Average"
+    operator         = "GreaterThan"
+    threshold        = 90
+  }
+
+  action {
+    action_group_id = var.alert_action_group_id
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Flow logs (opt-in, var.enable_flow_logs) — VNet Flow Logs, not the legacy
 # NSG Flow Logs (which retire 2027-09-30 and no longer accept new setups).
