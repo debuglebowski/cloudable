@@ -13,6 +13,7 @@ import { MachineService } from "../../domain/machine/MachineService";
 import { SignerTag } from "../../services/Signer";
 import { AgentSessionToken } from "../../services/attestation/AgentSessionToken";
 import { fetchSessionForAttach } from "../../tunnel/queries";
+import { TunnelRelay } from "../../tunnel/relay";
 import { TunnelRegistry, type TunnelSocket } from "../../tunnel/registry";
 import { SESSION_TOKEN_KEY_ID } from "../../tunnel/session-token";
 import { Api } from "../api";
@@ -202,10 +203,45 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
   Effect.gen(function* () {
     const authenticate = yield* CurrentUserAuthentication;
     const registry = yield* TunnelRegistry;
+    // `TunnelRelay`, not `TunnelServer` — every way out of this route below has to both
+    // record the end (DB row + `access.session_ended`) and tear down the live connection,
+    // in that order, which is exactly what `relay.endSession` is (see `tunnel/relay.ts`).
+    const relay = yield* TunnelRelay;
     // Captured here, at layer-construction time — the router's own per-request ambient
     // context (`HttpRouter.Provided`) doesn't include `Db`, same reasoning
     // `CurrentUserAuthenticationLive` documents for capturing it the same way.
     const db = yield* Db;
+
+    /**
+     * A session is over the moment either leg drops. `closeRelay` sends the daemon a
+     * `close` frame, which is a `pty.kill()` (`apps/tunnel-daemon/src/session-manager.ts`),
+     * and `attach` always spawns a *fresh* PTY — so nothing survives a disconnect to be
+     * rejoined, whatever the `sessions` row says.
+     *
+     * Until this, only an explicit `POST /api/v1/access/sessions/end` ever set `endedAt`.
+     * `cloudable connect` sends that on Ctrl-] and on no other path, so every session that
+     * ended any other way — the socket dropping, Ctrl-C, the terminal closing, an attach
+     * that never completed — left its row open forever. `listActiveSessionsByOrg` filters
+     * on `endedAt IS NULL`, so the Access tab counted all of them as live: ten of them on
+     * one machine, the oldest two days old, none of them attached to a running shell.
+     *
+     * A `TunnelError` here is expected rather than exceptional — Ctrl-] ends the session
+     * over HTTP and the socket close then races in behind it, finding the row already
+     * closed. There is nobody left on this path to report it to, so it is logged and
+     * dropped.
+     */
+    const endSessionOnDisconnect = (
+      sessionId: string,
+      orgId: string,
+      reason: string,
+    ): Effect.Effect<void> =>
+      relay.endSession({ sessionId, orgId, reason }).pipe(
+        Effect.catchTag("TunnelError", (error) =>
+          Effect.logDebug(
+            `tunnel: session ${sessionId} not ended on ${reason} (${error.reason}) — already closed`,
+          ),
+        ),
+      );
 
     yield* router.get(
       "/api/v1/access/sessions/:sessionId/attach",
@@ -248,7 +284,9 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
         }
         if (!sessionRow.sessionToken) {
           // Shouldn't happen — `mintSession` always persists one now (see TunnelServer) —
-          // but a null here means there's genuinely nothing to replay to the daemon.
+          // but a null here means there's genuinely nothing to replay to the daemon, so the
+          // session is unusable and shouldn't be left open (same reasoning as the 503 below).
+          yield* endSessionOnDisconnect(sessionId, sessionRow.orgId, "no_session_token");
           return HttpServerResponse.unsafeJson({ reason: "no_session_token" }, { status: 500 });
         }
 
@@ -256,6 +294,11 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
         if (!daemon) {
           // 503 BEFORE upgrading — cleaner than upgrade-then-immediately-disconnect, same
           // reasoning as verifying the daemon's own bearer token before its upgrade.
+          //
+          // Ended, not just refused: this session can never be served — the caller mints a
+          // new one on its next attempt — and a row left open here is one the Access tab
+          // would show as an active shell on a machine whose daemon isn't even connected.
+          yield* endSessionOnDisconnect(sessionId, sessionRow.orgId, "daemon_not_connected");
           return HttpServerResponse.unsafeJson({ reason: "daemon_not_connected" }, { status: 503 });
         }
 
@@ -296,9 +339,10 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
 
         if (!outcome.ok) {
           yield* Effect.logInfo(`tunnel: session ${sessionId} attach failed: ${outcome.reason}`);
-          yield* browserSocket.send({ kind: "close", sessionId, reason: outcome.reason });
-          yield* browserSocket.close();
-          yield* registry.deregisterRelay(sessionId);
+          // `endSessionOnDisconnect` -> `closeRelay` does the send-close-deregister this
+          // used to do inline, and records the end as well: an attach that timed out or was
+          // rejected leaves no shell behind, so the row should not stay open either.
+          yield* endSessionOnDisconnect(sessionId, sessionRow.orgId, outcome.reason);
           return HttpServerResponse.empty();
         }
 
@@ -351,14 +395,17 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
             }),
           )
           .pipe(
-            // The browser leg disconnecting (tab closed, network drop) ends the session for
-            // real — nothing is left to read the daemon's output, so the daemon-side PTY
-            // shouldn't keep running either. `closeRelay` tells both legs and cleans up the
-            // registry; sending to an already-closed browser socket is a harmless no-op (its
-            // `send`/`close` swallow write errors, same as the daemon-connect route's).
+            // The browser leg disconnecting (tab closed, network drop, Ctrl-C on the CLI)
+            // ends the session for real — nothing is left to read the daemon's output, so
+            // the daemon-side PTY shouldn't keep running either. `endSessionOnDisconnect`
+            // records that and then tells both legs; sending to an already-closed browser
+            // socket is a harmless no-op (its `send`/`close` swallow write errors, same as
+            // the daemon-connect route's).
             Effect.ensuring(
               Effect.logInfo(`tunnel: browser left session ${sessionId}`).pipe(
-                Effect.zipRight(registry.closeRelay(sessionId, "connection_lost")),
+                Effect.zipRight(
+                  endSessionOnDisconnect(sessionId, sessionRow.orgId, "connection_lost"),
+                ),
               ),
             ),
             Effect.catchAll(() => Effect.void),
