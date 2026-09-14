@@ -108,8 +108,11 @@ export class TunnelRelay extends Effect.Service<TunnelRelay>()("TunnelRelay", {
  * machine-level event closed it. A break-glass grant that "expires on its own"
  * is not much of a boundary if the session it authorized keeps running afterward regardless.
  *
- * Same cadence/shape as the sibling expiry sweeps in `server.ts`'s `ExpirySweepLoopLive`
- * (`expireOverdueApprovals`/`expireOverdueSnapshots`/`expireOverdueElevations`), but this one
+ * Runs on the same pass as its sibling sweeps
+ * (`expireOverdueApprovals`/`expireOverdueSnapshots`/`expireOverdueElevations`) — see
+ * `expiry/daemon.ts`, which is what actually calls all four. This comment used to name an
+ * `ExpirySweepLoopLive` in `server.ts` that did not exist, and none of the four had a
+ * caller at all. But this one
  * re-checks a *relationship* between two rows (still authorized?), not a single row's own
  * `expiresAt` — so it can't be one bulk `UPDATE` like its siblings. Each disqualified session
  * is closed individually through `TunnelRelay.endSession`, the exact same DB-write-then-
