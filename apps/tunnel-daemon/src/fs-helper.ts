@@ -159,6 +159,38 @@ export interface HelperIo {
 }
 
 /**
+ * Shape-checks one operation before it is acted on.
+ *
+ * `op` reaches this process as whatever JSON the browser put in an `fs_request` frame. The
+ * control plane relays that structurally rather than re-validating `FsOp` field by field
+ * (a second copy of the union there would drift from `packages/contracts`), so this is the
+ * validation boundary and the TypeScript type is a claim, not a guarantee.
+ *
+ * Two concrete failures this prevents, both reachable by anyone who can open a files
+ * session — which is every machine owner:
+ *
+ *  - A non-numeric `sizeBytes` on an upload. `Math.min("abc", cap)` is `NaN`, every
+ *    `written + len > NaN` comparison is false, and the transfer cap silently disappears:
+ *    an unbounded write that can fill the machine's disk.
+ *  - An unrecognised `op`. The switch below would fall through and return `undefined`,
+ *    nothing would be sent, and the browser's request would hang unanswered forever.
+ */
+function invalidOp(op: FsOp): boolean {
+  const known = ["list", "read", "write", "mkdir", "rename", "download", "upload"];
+  if (!op || typeof op !== "object" || !known.includes(op.op)) return true;
+  if (op.op === "upload") {
+    return !Number.isFinite(op.sizeBytes) || op.sizeBytes < 0 || typeof op.replace !== "boolean";
+  }
+  if (op.op === "write") {
+    return (
+      typeof op.contentBase64 !== "string" ||
+      (op.expectedModifiedAt !== null && typeof op.expectedModifiedAt !== "string")
+    );
+  }
+  return false;
+}
+
+/**
  * Executes one operation.
  *
  * Returns the terminal result, or `null` when the operation is only STARTING and its
@@ -177,6 +209,8 @@ export async function runOperation(
   io: HelperIo,
   uploads: Map<string, PendingUpload>,
 ): Promise<FsResult | null> {
+  if (invalidOp(op)) return { ok: false, reason: "invalid_path" };
+
   switch (op.op) {
     case "list": {
       const path = normalisePath(op.path);
@@ -330,6 +364,10 @@ export async function runOperation(
       uploads.set(id, { handle, path, nextSeq: 0, written: 0, declaredSize: op.sizeBytes });
       return null;
     }
+    default:
+      // Unreachable given `invalidOp` above, which is the point: an unknown op must
+      // produce an answer rather than leaving the caller's request unsettled.
+      return { ok: false, reason: "invalid_path" };
   }
 }
 
