@@ -358,6 +358,21 @@ This removes the class rather than validating around it, and it costs no capabil
 is the Azure admin user and holds passwordless sudo, so root remains one `sudo` away — as a
 logged action inside a session, rather than the session itself.
 
+### One replica, and why that is a constraint rather than a size
+
+`tunnel/registry.ts` holds live connections in an in-process `Map`. A machine's tunnel daemon
+opens one outbound websocket to whichever control-plane instance answers; an attach request
+load-balances independently. If the two land on different instances, the attach finds no daemon
+for that machine and times out after 15s, and the CLI reports that the daemon may not be
+connected — which is true of *that instance*, and false of the machine.
+
+This is not theoretical. A real deployment ran with `max_replicas = 3`, and connecting worked
+roughly one attempt in three, interleaved with `connection_lost` and attach timeouts. It reads
+exactly like a flaky machine, which is the wrong place to go looking.
+
+`max_replicas` therefore defaults to 1, and the variable says why. Lifting it requires sharing the
+registry across instances first — pub/sub, or Postgres `LISTEN`/`NOTIFY` — not just more capacity.
+
 ### TLS terminates at the control plane, by construction
 
 *"Browser TLS terminates at the control plane by construction — end-to-end
