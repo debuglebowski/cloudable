@@ -281,12 +281,41 @@ to avoid corrupting multi-byte content, so they live in one place rather than be
 leg. `bytesToBase64` chunks its input — `String.fromCharCode(...bytes)` on a 64 KiB file slice
 exceeds the argument limit and throws, which the terminal never hit because keystrokes are tiny.
 
-**The file browser is deliberately plain.** `CLAUDE.md` forbids building code-server, and the
-way this stays on the right side of that line is by not drifting toward one: no syntax
-highlighting, no editor library, no project concept, no multi-file tabs, no cross-file search,
-nothing executable. One listing, one file open at a time, a monospace `Textarea`. The listing
-follows the standard table treatment (`min-h-0` wrapper, `containerClassName="h-full
-max-h-none"`) so it collapses to content rather than stretching.
+### The file browser's two panes and five modes
+
+`components/files/` is a navigator on the left and the open file on the right, split by a
+draggable divider (`split-pane.tsx`, hand-rolled — the console has no other split layout, so
+a dependency would be carried for one screen). Both panes' modes persist per browser in
+`localStorage` (`use-view-modes.ts`), and the divider width with them.
+
+| Pane | Mode | For |
+| :--- | :--- | :--- |
+| Navigator | `tree` | Navigating to a known path with the surroundings visible. First recursive component in the app; expansion is lazy, one `list` round trip per node. |
+| | `table` | Scanning a directory: name, size, mode, modified, sortable. This is the mode file RECOVERY wants and the one an auditor's questions are answered in. |
+| | `compact` | Names only, flowed into columns — the `ls` view for a directory with hundreds of entries. |
+| Content | `code` | CodeMirror 6: line numbers, in-file search, syntax for JSON/YAML/shell/nginx/ini. |
+| | `plain` | A monospace `Textarea`. Zero dependencies, and the honest fallback when the editor chunk fails or a file reads better raw. |
+
+All three navigator modes read one shared directory cache (`use-directory-cache.ts`), so
+switching modes never refetches, and a directory expanded in the tree is already loaded when
+the table opens it.
+
+**On the code-server rule.** `CLAUDE.md` forbids building code-server, and an earlier version
+of this component claimed that having no editor library was what kept it on the right side of
+that line. That reading was too broad: the line is whether you can DEVELOP here — extensions,
+a language server, a debugger, a project concept, running code, forwarding ports. Line numbers
+and colour are not that; `nano` and `vim` both highlight. What stays out, deliberately:
+multi-file tabs, search across files, autocomplete, linting, anything executable.
+
+**CodeMirror is behind `React.lazy`** — the app's first dynamic import, and the reason the
+console's single bundle does not grow by ~120 KB gzipped for every page that never opens a
+file. `code-editor.tsx` takes its colours from `--code-*` tokens in `index.css` rather than a
+CodeMirror theme package, so the `.dark` class switches the editor with no JavaScript and
+without tearing down the `EditorView`.
+
+**The dialogs are real dialogs.** This component was briefly the only place in the console
+using native `confirm()` and `prompt()`; `file-dialogs.tsx` replaces them, and `useBlocker`
+guards route changes with unsaved edits.
 
 ## Routing conventions (for future feature units)
 

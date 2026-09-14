@@ -60,7 +60,7 @@ const REASON = "backfill_never_closed";
 
 const program = Effect.gen(function* () {
   if (!Number.isFinite(olderThanHours) || olderThanHours < 0) {
-    yield* Effect.logError(`--older-than must be a non-negative number of hours`);
+    yield* Effect.logError("--older-than must be a non-negative number of hours");
     return 1;
   }
 
