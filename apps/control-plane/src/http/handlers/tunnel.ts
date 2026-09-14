@@ -13,8 +13,8 @@ import { MachineService } from "../../domain/machine/MachineService";
 import { SignerTag } from "../../services/Signer";
 import { AgentSessionToken } from "../../services/attestation/AgentSessionToken";
 import { fetchSessionForAttach } from "../../tunnel/queries";
-import { TunnelRelay } from "../../tunnel/relay";
 import { TunnelRegistry, type TunnelSocket } from "../../tunnel/registry";
+import { TunnelRelay } from "../../tunnel/relay";
 import { SESSION_TOKEN_KEY_ID } from "../../tunnel/session-token";
 import { Api } from "../api";
 import { CurrentUserAuthentication } from "../middleware/auth";
@@ -159,7 +159,12 @@ export const TunnelConnectRouteLive = HttpApiBuilder.Router.use((router) =>
                   ok: false,
                   reason: parsed.reason,
                 });
-              } else if (parsed.kind === "data" || parsed.kind === "close") {
+              } else if (
+                parsed.kind === "data" ||
+                parsed.kind === "close" ||
+                parsed.kind === "fs_response" ||
+                parsed.kind === "fs_chunk"
+              ) {
                 // The actual relay traffic — forward to whichever browser socket is
                 // carrying this session, if one is still attached. A missing browser
                 // socket (attach never completed, or the browser already left) means
@@ -227,21 +232,29 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
      *
      * A `TunnelError` here is expected rather than exceptional — Ctrl-] ends the session
      * over HTTP and the socket close then races in behind it, finding the row already
-     * closed. There is nobody left on this path to report it to, so it is logged and
-     * dropped.
+     * closed. There is nobody left on this path to report it to, so it is logged.
+     *
+     * The transport is torn down either way. `TunnelRelay.endSession` writes the row first
+     * and only then calls `closeRelay`, which is the right order for a caller that can
+     * report failure — but on a disconnect there is no such caller, and a failed write
+     * (`persist_failed`, say) would otherwise leave a live relay and a running PTY behind
+     * with nobody attached. Recording the end and ending it are separate obligations here;
+     * losing the first must not cost the second.
      */
     const endSessionOnDisconnect = (
       sessionId: string,
       orgId: string,
       reason: string,
     ): Effect.Effect<void> =>
-      relay.endSession({ sessionId, orgId, reason }).pipe(
-        Effect.catchTag("TunnelError", (error) =>
-          Effect.logDebug(
-            `tunnel: session ${sessionId} not ended on ${reason} (${error.reason}) — already closed`,
+      relay
+        .endSession({ sessionId, orgId, reason })
+        .pipe(
+          Effect.catchTag("TunnelError", (error) =>
+            Effect.logDebug(
+              `tunnel: session ${sessionId} not ended on ${reason} (${error.reason}) — closing relay anyway`,
+            ).pipe(Effect.zipRight(registry.closeRelay(sessionId, reason))),
           ),
-        ),
-      );
+        );
 
     yield* router.get(
       "/api/v1/access/sessions/:sessionId/attach",
@@ -390,6 +403,28 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
                     cols: frameCols,
                     rows: frameRows,
                   });
+                }
+              } else if (kind === "fs_request" || kind === "fs_chunk") {
+                // File-session traffic. Forwarded structurally rather than field-by-field
+                // like `data`/`resize` above: `FsOp` is a wide union and re-validating its
+                // shape here would mean a second copy of it in the control plane, drifting
+                // from `packages/contracts` the first time an op gains a field. The daemon
+                // validates what it acts on, and nothing here is trusted — `sessionId` is
+                // still forced to this route's own path param, so a frame cannot reach
+                // another person's session no matter what it claims.
+                //
+                // This does NOT let a terminal session issue file operations: the daemon
+                // resolves `sessionId` to a live files helper, and a PTY session has none,
+                // so the frame is dropped there. Session KIND is decided by the signed
+                // token at attach, never by a frame.
+                const requestId = (parsed as { requestId?: unknown }).requestId;
+                if (typeof requestId === "string") {
+                  yield* daemon.send({
+                    ...(parsed as Record<string, unknown>),
+                    kind,
+                    sessionId,
+                    requestId,
+                  } as TunnelFrame);
                 }
               }
             }),
