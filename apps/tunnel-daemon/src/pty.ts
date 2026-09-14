@@ -112,10 +112,16 @@ export function spawnSession(options: SpawnSessionOptions): PtySession {
   const command = options.commandOverride ?? ["su", "-", options.targetOsUser];
   const proc = Bun.spawn([...command], { terminal });
 
-  proc.exited.then((exitCode) => {
-    options.onExit({ exitCode, signalCode: proc.signalCode ?? null });
-    terminal.close();
-  });
+  // Same reason `files-session.ts` catches on its own fire-and-forget promises: an unhandled
+  // rejection is fatal in Bun, and this process carries every session on the machine.
+  void proc.exited
+    .then((exitCode) => {
+      options.onExit({ exitCode, signalCode: proc.signalCode ?? null });
+      terminal.close();
+    })
+    .catch((error) => {
+      console.error(`pty session: exit handler failed: ${String(error)}`);
+    });
 
   return {
     write(data) {

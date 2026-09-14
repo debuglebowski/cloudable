@@ -193,7 +193,20 @@ function runOneConnection(
     };
 
     ws.onmessage = (event) => {
-      void handleInboundFrame(deps.sessionManager, send, event.data as string | Uint8Array);
+      // NOTHING ARRIVING ON THIS SOCKET MAY KILL THE DAEMON.
+      //
+      // `handleInboundFrame` is async and nobody awaits it, so any rejection it produces is
+      // an unhandled rejection — which Bun treats as fatal. The daemon exits, systemd
+      // restarts it five seconds later, and the control plane closes every session on this
+      // machine because its daemon connection dropped. That is the blast radius of one bad
+      // frame, so the individual handlers fail closed on their own AND this catches whatever
+      // still gets through. A frame that cannot be handled is logged and dropped; the
+      // connection, and every session on it, survives.
+      void handleInboundFrame(deps.sessionManager, send, event.data as string | Uint8Array).catch(
+        (error) => {
+          console.error(`inbound frame handler failed: ${String(error)}`);
+        },
+      );
     };
     ws.onerror = () => finish("error");
     ws.onclose = () => finish("closed");

@@ -164,6 +164,35 @@ describe("connection: inbound frame handling (via a fake WebSocket)", () => {
     });
   });
 
+  // REGRESSION: a rejection from a frame handler used to be an unhandled rejection, which
+  // Bun treats as fatal — the daemon exited, systemd restarted it five seconds later, and
+  // the control plane closed every session on the machine because its daemon had dropped.
+  // One unhandleable frame must cost that frame, nothing else.
+  test("a rejecting frame handler does not take the connection down with it", async () => {
+    const { manager, calls } = fakeSessionManager({
+      attach: async () => {
+        throw new Error("could not reach the control plane");
+      },
+    });
+    const socket = await startLoopAndGetSocket(manager);
+
+    socket.receive({ kind: "attach", sessionId: "s1", sessionToken: "tok", cols: 80, rows: 24 });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Same socket, still live, still dispatching.
+    expect(socket.closed).toBe(false);
+    socket.receive({
+      kind: "data",
+      sessionId: "s2",
+      dataBase64: Buffer.from("x").toString("base64"),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls).toContain("data:s2");
+    expect(sockets).toHaveLength(1);
+  });
+
   test("session-manager's onData callback is forwarded as a real `data` frame", async () => {
     let capturedOnData: ((bytes: Uint8Array) => void) | undefined;
     const { manager } = fakeSessionManager({

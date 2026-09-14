@@ -17,7 +17,7 @@
 // compiled binary attested once and then did nothing else, never opening
 // the reverse tunnel this daemon is meant to open, so no session could ever attach
 // to a machine running it.
-import { AttestationRejectedError, attest, currentBearerToken } from "./attestation";
+import { AttestationRejectedError, attest, clearCachedSession } from "./attestation";
 import { config } from "./config";
 import { runConnectionLoop, tunnelConnectUrl } from "./connection";
 import { createDefaultSessionManagerDeps, createSessionManager } from "./session-manager";
@@ -31,13 +31,19 @@ attest()
     const sessionManager = createSessionManager(
       createDefaultSessionManagerDeps({
         machineId: session.machineId,
-        // `currentBearerToken()` tracks whatever `attest()`'s own cache currently holds —
-        // `runConnectionLoop` re-attests on every reconnect (see its own doc comment), so
-        // reading the live cache here (rather than closing over this one initial `session`)
-        // keeps the session-token-key fetch authenticated with a token that's still valid
-        // long after this first attest. Falls back to the initial token only in the
-        // impossible-in-practice window before that first cache write has happened.
-        getBearerToken: () => currentBearerToken() ?? session.bearerToken,
+        // `attest()`, not `currentBearerToken()`. Both read the same cache, but `attest()`
+        // refills it when the session is within a minute of expiry, and `currentBearerToken()`
+        // hands back whatever is there — expired or not.
+        //
+        // That difference was a real outage, repeatedly: the bearer lives 15 minutes and was
+        // only ever refreshed when the tunnel RECONNECTED, so any connection that stayed up
+        // longer than that was carrying a dead token. The first attach after the hour-long
+        // public-key cache went cold then fetched the key with it, got a 401, and the
+        // rejection took the whole daemon down — every session on the machine, not just that
+        // attach. A reconnect is not a refresh schedule; the credential has to be acquired
+        // where it is used.
+        getBearerToken: async () => (await attest()).bearerToken,
+        invalidateBearerToken: clearCachedSession,
       }),
     );
 

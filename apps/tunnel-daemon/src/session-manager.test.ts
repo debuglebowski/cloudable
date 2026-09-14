@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as crypto from "node:crypto";
 import { spawnFilesSession } from "./files-session";
+import { ApiError } from "./http-client";
 import { spawnSession as realSpawnSession } from "./pty";
-import { type SessionManagerDeps, createSessionManager } from "./session-manager";
+import {
+  type SessionManagerDeps,
+  createDefaultSessionManagerDeps,
+  createSessionManager,
+} from "./session-manager";
+import { clearCachedSessionTokenPublicKey } from "./session-token-key";
 
 // Real P-256 keypair, exactly like `packages/session-token`'s own test file — this
 // exercises the real `@cloudable/session-token` verify logic, not a stub of it.
@@ -67,7 +73,6 @@ function makeDeps(overrides: Partial<SessionManagerDeps> = {}): {
   const calls: string[] = [];
   const deps: SessionManagerDeps = {
     machineId: "machine-1",
-    getBearerToken: () => "fake-bearer",
     getSessionTokenPublicKeyBytes: async () => {
       calls.push("fetchKey");
       return publicKeyDer;
@@ -278,6 +283,49 @@ describe("SessionManager", () => {
     expect(manager.has("s1")).toBe(false);
   });
 
+  // REGRESSION: this is the crash that ended every session on a machine "from time to time".
+  // The key fetch carries the daemon's own bearer, which lived 15 minutes and was only
+  // refreshed on reconnect, so any attach on a longer-lived connection fetched with an
+  // expired token and got a 401. The rejection escaped `attach` into `connection.ts`'s
+  // un-awaited call, Bun killed the process, systemd restarted it five seconds later, and
+  // the control plane closed every session on the machine because its daemon had dropped.
+  test("a rejecting key fetch is a refused attach, not a rejection out of attach", async () => {
+    const { deps } = makeDeps({
+      getSessionTokenPublicKeyBytes: async () => {
+        throw new ApiError(401, { reason: "expired" });
+      },
+    });
+    manager = createSessionManager(deps);
+
+    const outcome = await manager.attach(
+      { sessionId: "s1", sessionToken: mintToken(), cols: 80, rows: 24 },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
+    );
+
+    expect(outcome).toEqual({ ok: false, reason: "verify_failed" });
+    expect(manager.has("s1")).toBe(false);
+  });
+
+  test("an invalid_signature retry whose fetch rejects is also a refused attach", async () => {
+    let fetchCount = 0;
+    const { deps } = makeDeps({
+      getSessionTokenPublicKeyBytes: async () => {
+        fetchCount += 1;
+        if (fetchCount === 1) return wrongPublicKeyDer;
+        throw new Error("control plane unreachable");
+      },
+    });
+    manager = createSessionManager(deps);
+
+    const outcome = await manager.attach(
+      { sessionId: "s1", sessionToken: mintToken(), cols: 80, rows: 24 },
+      { onData: () => {}, onExit: () => {}, ...noFsCallbacks },
+    );
+
+    expect(outcome).toEqual({ ok: false, reason: "verify_failed" });
+    expect(fetchCount).toBe(2);
+  });
+
   // REQUIRED FAILURE PATH: a `spawnSession` throw (e.g. pty.ts's real `InvalidOsUserError`
   // for a malicious-shaped `targetOsUser`, or any other real spawn failure) must become a
   // graceful `{ok: false}` outcome, not an unhandled rejection — `attach` is called as
@@ -411,5 +459,98 @@ describe("SessionManager", () => {
       expect(() => live.fsRequest("s1", "r1", { op: "list", path: "/etc" })).not.toThrow();
       expect(() => live.fsChunk("s1", "r1", { seq: 0, dataBase64: "", final: true })).not.toThrow();
     });
+  });
+});
+
+/**
+ * The real deps factory, which is where the daemon's own credential handling lives. Stubs
+ * `fetch` the same way `session-token-key.test.ts` does — `config.ts` is lazy, so setting
+ * `CONTROL_PLANE_URL` per-test leaks into nothing.
+ */
+describe("createDefaultSessionManagerDeps: the bearer for the key fetch", () => {
+  const originalFetch = globalThis.fetch;
+  const originalControlPlaneUrl = process.env.CONTROL_PLANE_URL;
+
+  beforeEach(() => {
+    process.env.CONTROL_PLANE_URL = "http://localhost:0";
+    clearCachedSessionTokenPublicKey();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    process.env.CONTROL_PLANE_URL = originalControlPlaneUrl;
+    clearCachedSessionTokenPublicKey();
+  });
+
+  test("acquires a token per fetch, so a long-lived connection never fetches with a stale one", async () => {
+    const bearers: string[] = [];
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      bearers.push(String((init?.headers as Record<string, string>).authorization));
+      return new Response(JSON.stringify({ keyId: "session-token", publicKeyDerBase64: "AAAA" }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+
+    let minted = 0;
+    const deps = createDefaultSessionManagerDeps({
+      machineId: "machine-1",
+      getBearerToken: async () => `bearer-${++minted}`,
+      invalidateBearerToken: () => {},
+    });
+
+    await deps.getSessionTokenPublicKeyBytes();
+    clearCachedSessionTokenPublicKey();
+    await deps.getSessionTokenPublicKeyBytes();
+
+    // Two fetches, two separately-acquired tokens — not one captured at startup and reused
+    // for the life of the process.
+    expect(bearers).toEqual(["Bearer bearer-1", "Bearer bearer-2"]);
+  });
+
+  test("a 401 drops the cached attestation and retries once with a fresh token", async () => {
+    const bearers: string[] = [];
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      const authorization = String((init?.headers as Record<string, string>).authorization);
+      bearers.push(authorization);
+      if (authorization === "Bearer stale") {
+        return new Response(JSON.stringify({ reason: "expired" }), { status: 401 });
+      }
+      return new Response(JSON.stringify({ keyId: "session-token", publicKeyDerBase64: "AAAA" }), {
+        status: 200,
+      });
+    }) as unknown as typeof fetch;
+
+    const queue = ["stale", "fresh"];
+    let invalidated = 0;
+    const deps = createDefaultSessionManagerDeps({
+      machineId: "machine-1",
+      getBearerToken: async () => queue.shift() ?? "fresh",
+      invalidateBearerToken: () => {
+        invalidated += 1;
+      },
+    });
+
+    const bytes = await deps.getSessionTokenPublicKeyBytes();
+
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(invalidated).toBe(1);
+    expect(bearers).toEqual(["Bearer stale", "Bearer fresh"]);
+  });
+
+  test("a non-401 failure propagates rather than burning a re-attest on it", async () => {
+    globalThis.fetch = (async () =>
+      new Response("nope", { status: 503 })) as unknown as typeof fetch;
+
+    let invalidated = 0;
+    const deps = createDefaultSessionManagerDeps({
+      machineId: "machine-1",
+      getBearerToken: async () => "bearer-1",
+      invalidateBearerToken: () => {
+        invalidated += 1;
+      },
+    });
+
+    await expect(deps.getSessionTokenPublicKeyBytes()).rejects.toMatchObject({ status: 503 });
+    expect(invalidated).toBe(0);
   });
 });
