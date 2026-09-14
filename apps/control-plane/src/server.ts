@@ -10,6 +10,7 @@ import { bootstrapDefaultAdmin } from "./bootstrap-default-admin";
 import { config } from "./config";
 import { DbLive } from "./db/layer";
 import { EvidenceLive } from "./evidence/handler";
+import { startExpirySweepDaemon } from "./expiry/daemon";
 import { Api } from "./http/api";
 import { AccessLive } from "./http/handlers/access";
 import { AgentProtocolLive } from "./http/handlers/agent-protocol";
@@ -128,6 +129,12 @@ const TunnelRoutesLive = Layer.mergeAll(TunnelConnectRouteLive, AccessAttachRout
 // background from here on.
 const ReconcileDaemonLive = Layer.effectDiscard(Effect.forkDaemon(startReconcileDaemon));
 
+// The other background fiber, on the same `forkDaemon` reasoning as reconcile above:
+// `expiry/daemon.ts` runs the four expiry sweeps that, until it existed, nothing in
+// this codebase ever called. Its `Db`/`EventBus`/`TunnelRelay` all come from `AppLive`
+// below, the same graph reconcile shares.
+const ExpirySweepDaemonLive = Layer.effectDiscard(Effect.forkDaemon(startExpirySweepDaemon));
+
 // A handler that dies (`Effect.die` — every infra failure the HTTP layer treats as
 // "not an outcome the caller can act on": ProvisioningError, ArchiveDbError,
 // TunnelError, ...) gets a bare, bodyless 500 from `HttpApp.toHandled`, which then
@@ -181,6 +188,7 @@ const ServerLive = HttpApiBuilder.serve((httpApp) =>
   Layer.provide(BinariesRouteLive),
   Layer.provide(ConsoleStaticRouteLive),
   Layer.provide(ReconcileDaemonLive),
+  Layer.provide(ExpirySweepDaemonLive),
   Layer.provide(AppLive),
   // idleTimeout (seconds, Bun's own default is 10) needs real headroom: the Azure
   // sizes sync (`catalog.ts`'s `syncSizes` -> `CloudCatalogService.syncAzureSizes`)
