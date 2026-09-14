@@ -7,9 +7,10 @@
  * to make the console UI look populated for screenshots/demos, not to back
  * anything with a real running process.
  *
- * Creates only the org + one owner person, using the exact same fixed ids
- * `apps/console/src/lib/current-org.ts`/`current-person.ts` assume — so the
- * console needs zero reconfiguration, same convention as `seed-demo.ts`.
+ * Creates only the org + one owner person, at the fixed ids this file and
+ * `seed-demo.ts` share. The console no longer assumes them — it reads its org and
+ * person from `/api/v1/me` — so these are just this script's own stable ids now,
+ * kept so the two seeds stay mutually exclusive (same org id).
  * Mutually exclusive with that script's dataset (same org id): run one or
  * the other, `--reset` between switches.
  *
@@ -34,7 +35,7 @@ import { config } from "../src/config";
 const API_BASE = process.env.SEED_API_BASE ?? `http://localhost:${config.port}`;
 const RESET = process.argv.includes("--reset") || process.env.SEED_RESET === "1";
 
-// Same fixed ids `apps/console/src/lib/current-org.ts`/`current-person.ts` assume —
+// Fixed ids, shared with `seed-demo.ts` so the two datasets collide deliberately —
 // mirrors `seed-demo.ts`'s own convention so the console needs zero reconfiguration.
 const ORG_ID = "00000000-0000-0000-0000-000000000001";
 const PERSON_ID = "00000000-0000-0000-0000-000000000002";
