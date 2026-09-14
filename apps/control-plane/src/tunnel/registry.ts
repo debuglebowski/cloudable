@@ -161,6 +161,19 @@ export class TunnelRegistry extends Effect.Service<TunnelRegistry>()("TunnelRegi
      */
     const closeRelay = (sessionId: string, reason: string): Effect.Effect<void> =>
       Effect.gen(function* () {
+        // Before the early return, and unconditionally: `resolveHandshake` was the only
+        // thing that ever removed a pending handshake, and it only runs when the daemon
+        // actually answers. An attach that timed out left its `Deferred` in the map for
+        // the life of the process — one more every time, never collected. This is the
+        // "session is over" path, so it is where that entry stops existing, answered or
+        // not.
+        yield* Ref.update(pendingHandshakes, (map) => {
+          if (!map.has(sessionId)) return map;
+          const next = new Map(map);
+          next.delete(sessionId);
+          return next;
+        });
+
         const entry = yield* Ref.get(relays).pipe(Effect.map((map) => map.get(sessionId)));
         if (!entry) return;
 
