@@ -19,9 +19,19 @@ on:
       - "apps/control-plane/Dockerfile"
       - "apps/control-plane/**"
       - "apps/console/**"
+      # The image also compiles and serves the agent and tunnel-daemon binaries — the
+      # Dockerfile runs both `build`/`build:arm64` and copies the four results into
+      # /app/binaries, which is what `GET /_internal/binaries/:target` hands a booting
+      # machine. Without these two paths, a daemon fix pushed to main published nothing: the
+      # image kept serving the old binary, every machine provisioned afterwards still curl'd
+      # the broken one, and the workflow's own silence looked exactly like success.
+      - "apps/agent/**"
+      - "apps/tunnel-daemon/**"
       - "packages/schema/**"
       - "packages/events/**"
       - "packages/contracts/**"
+      # `@cloudable/session-token` is what the daemon verifies every attach with.
+      - "packages/session-token/**"
       - "bun.lock"
   workflow_dispatch: {}
 
