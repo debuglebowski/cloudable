@@ -5,6 +5,7 @@ import { settingValues } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
+import { packageSettingKey } from "../domain/machine/manifest";
 import { cleanupOrgRows, connectTestDb } from "../test-support/db";
 import { LOGGING_TIER_KEY, type LoggingTier } from "./settings";
 import { filterByLoggingTier } from "./tier-filter";
@@ -242,6 +243,31 @@ describe("filterByLoggingTier", () => {
     await seedTier("machine", machineId, 1);
 
     const result = await run([settingChangedEvent(orgId, machineId, "region")]);
+
+    expect(result).toHaveLength(0);
+  });
+
+  test("a package manifest edit survives tier 1, the way the org-scope one already did", async () => {
+    const orgId = freshOrgId();
+    const machineId = freshMachineId();
+    await seedTier("org", orgId, 1);
+    await seedTier("machine", machineId, 1);
+
+    // The same user action at org scope rides on `org.setting_changed`, which
+    // is tier 1 and always kept. Without this carve-out a tier-1 org would
+    // keep every org-level package change and silently discard every
+    // per-machine one, leaving holes in the machine's own manifest history.
+    const result = await run([settingChangedEvent(orgId, machineId, packageSettingKey("docker"))]);
+
+    expect(result).toHaveLength(1);
+  });
+
+  test("the package exemption is prefix-scoped — a setting merely named like one is still filtered", async () => {
+    const orgId = freshOrgId();
+    const machineId = freshMachineId();
+    await seedTier("machine", machineId, 1);
+
+    const result = await run([settingChangedEvent(orgId, machineId, "packages_enabled")]);
 
     expect(result).toHaveLength(0);
   });

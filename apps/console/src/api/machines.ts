@@ -1,3 +1,4 @@
+import type { AuditActorType } from "@/api/audit";
 import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
 import type { ApiErrorBody } from "@cloudable/contracts";
 
@@ -54,6 +55,11 @@ export interface ManifestEntry {
   source: SettingLevel;
   /** Org-level pin: cannot be overridden below. */
   pinned: boolean;
+  /**
+   * This machine declares the package must not be here, overriding the org.
+   * Different from the package simply not being listed, which means "inherit".
+   */
+  excluded: boolean;
   /** Count of machines that override this entry below the level shown here. No real endpoint
    * aggregates this yet (see `getMachineManifest` below) — always undefined against real data. */
   overriddenBelow?: number;
@@ -97,6 +103,8 @@ export const machinesKeys = {
   details: () => [...machinesKeys.all, "detail"] as const,
   detail: (machineId: string) => [...machinesKeys.details(), machineId] as const,
   manifest: (machineId: string) => [...machinesKeys.all, "manifest", machineId] as const,
+  manifestHistory: (machineId: string) =>
+    [...machinesKeys.all, "manifest-history", machineId] as const,
   drift: (machineId: string) => [...machinesKeys.all, "drift", machineId] as const,
 };
 
@@ -141,6 +149,7 @@ interface ResolvedManifestEntryWire {
   packageName: string;
   versionPin: string | null;
   pinned: boolean;
+  excluded: boolean;
   source: SettingLevel;
   resolvedFromScopeId: string;
 }
@@ -155,6 +164,7 @@ function toManifestEntry(wire: ResolvedManifestEntryWire): ManifestEntry {
     version: wire.versionPin,
     source: wire.source,
     pinned: wire.pinned,
+    excluded: wire.excluded,
   };
 }
 
@@ -198,11 +208,87 @@ export async function getMachineDrift(_machineId: string): Promise<DriftInfo> {
   return { status: "unknown" };
 }
 
+export interface MachinePackageEdit {
+  packageName: string;
+  /** Omit to keep the machine row's current pin rather than clearing it. */
+  versionPin?: string | null;
+  excluded?: boolean;
+}
+
 /**
- * `PATCH /machines/:id/packages` — writes a machine-scoped override. Real
- * server-side enforcement of "pinned entries cannot be overridden below"
- * (returns a 422 with `code: "pinned_entry_conflict"`), same
- * validation-error-at-edit-time behavior the mock used to simulate by hand.
+ * `PATCH /machines/:id/packages` — every machine-scope manifest write goes
+ * through here: declaring a package this machine alone needs, changing the
+ * version of one inherited from the org, excluding an org package, and
+ * dropping a machine row so the org's entry applies again.
+ *
+ * `pinned` is deliberately never sent. A pin means "cannot be overridden
+ * below", and nothing sits below a machine, so it is an org control; the
+ * server still rejects a machine edit that collides with an org pin (422,
+ * `pinned_entry_conflict`), which is what `ManifestOverrideError` carries.
+ */
+export async function updateMachinePackages(
+  machineId: string,
+  edits: { upserts?: MachinePackageEdit[]; removals?: string[] },
+): Promise<ManifestEntry[]> {
+  try {
+    const res = await apiPatch<{ manifest: ResolvedManifestEntryWire[] }>(
+      `/api/v1/machines/${machineId}/packages`,
+      edits,
+    );
+    return res.manifest.map(toManifestEntry);
+  } catch (err) {
+    if (err instanceof ApiError && err.body) {
+      throw new ManifestOverrideError(err.body as ApiErrorBody);
+    }
+    throw err;
+  }
+}
+
+/**
+ * One side of a recorded manifest change. `null` means the package had no
+ * entry at that point, so an add reads as `null -> value`.
+ */
+export interface ManifestHistoryState {
+  versionPin: string | null;
+  pinned: boolean;
+  excluded: boolean;
+}
+
+export interface ManifestHistoryEntry {
+  id: string;
+  occurredAt: string;
+  recordedAt: string;
+  actorType: AuditActorType;
+  actorId: string;
+  correlationId: string;
+  /** Which scope the edit was made at. Org edits change what this machine resolves too. */
+  scope: SettingLevel;
+  packageName: string;
+  previous: ManifestHistoryState | null;
+  current: ManifestHistoryState | null;
+}
+
+/**
+ * `GET /machines/:id/manifest-history` — every package manifest change that
+ * affects this machine, newest first, its own and the org's.
+ *
+ * Unlike the Activity tab, which filters the org's latest 100 events
+ * client-side, this is a server-side query scoped to one machine, so a
+ * manifest change can never fall off the page because the org was busy.
+ */
+export async function getMachineManifestHistory(
+  machineId: string,
+): Promise<ManifestHistoryEntry[]> {
+  const res = await apiGet<{ items: ManifestHistoryEntry[]; nextCursor: string | null }>(
+    `/api/v1/machines/${machineId}/manifest-history`,
+  );
+  return res.items;
+}
+
+/**
+ * Kept as a thin wrapper over `updateMachinePackages` for the version-override
+ * form, which wants the single updated entry back rather than the whole
+ * manifest.
  */
 export async function overrideManifestEntry(
   machineId: string,

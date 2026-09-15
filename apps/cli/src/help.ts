@@ -140,14 +140,20 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
           },
           {
             name: "set",
-            summary: "Declare, pin or drop packages for one machine",
+            summary: "Declare, pin, exclude or drop packages for one machine",
             args: "<machine>",
             options: [
               { flag: "--add <pkg>[@<ver>]", description: "Declare a package (repeatable)" },
               { flag: "--pin <pkg>[@<ver>]", description: "Declare it pinned (repeatable)" },
               { flag: "--remove <pkg>", description: "Drop this machine's entry (repeatable)" },
+              { flag: "--exclude <pkg>", description: "Keep an org package off this machine" },
+              { flag: "--include <pkg>", description: "Undo an exclusion (repeatable)" },
             ],
-            notes: ["Edits desired state only. Run `cloudable machines reconcile` to apply it."],
+            notes: [
+              "Edits desired state only.",
+              '--remove falls back to the org entry; --exclude overrides it with "not here".',
+              "Every edit is recorded. See it under the machine's manifest history.",
+            ],
           },
         ],
       },

@@ -99,6 +99,7 @@ describe("org-scope package manifest write path", () => {
         packageName: "docker",
         versionPin: "24",
         pinned: false,
+        excluded: false,
         source: "org",
         resolvedFromScopeId: org.id,
       },
@@ -147,6 +148,116 @@ describe("org-scope package manifest write path", () => {
         and(eq(machinePackages.scopeType, "machine"), eq(machinePackages.scopeId, machine.id)),
       );
     expect(machineRows).toEqual([]);
+  });
+
+  test("a pinned org-scope entry also rejects a machine trying to exclude it", async () => {
+    const org = await seedOrg();
+    const machine = await seedMachine(org.id);
+
+    await run(
+      updateOrgPackages({
+        orgId: org.id,
+        upserts: [{ packageName: "docker", versionPin: "24", pinned: true }],
+        actor: { actorType: "system", actorId: "test" },
+      }),
+    );
+
+    // Excluding is an override like changing a version is, so the pin has to
+    // stop it too. A machine that could opt out of a pinned package would make
+    // the pin decorative.
+    const error = await runFail(
+      Effect.gen(function* () {
+        const service = yield* MachineService;
+        return yield* service.updatePackages({
+          machineId: machine.id,
+          orgId: org.id,
+          upserts: [{ packageName: "docker", excluded: true }],
+        });
+      }),
+    );
+
+    expect(error).toBeInstanceOf(PackagePinConflictError);
+
+    const machineRows = await db
+      .select()
+      .from(machinePackages)
+      .where(
+        and(eq(machinePackages.scopeType, "machine"), eq(machinePackages.scopeId, machine.id)),
+      );
+    expect(machineRows).toEqual([]);
+  });
+
+  test("an unpinned org package can be excluded on one machine without touching the org's own entry", async () => {
+    const org = await seedOrg();
+    const machine = await seedMachine(org.id);
+    const other = await seedMachine(org.id);
+
+    await run(
+      updateOrgPackages({
+        orgId: org.id,
+        upserts: [{ packageName: "docker", versionPin: "24", pinned: false }],
+        actor: { actorType: "system", actorId: "test" },
+      }),
+    );
+
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* MachineService;
+        return yield* service.updatePackages({
+          machineId: machine.id,
+          orgId: org.id,
+          upserts: [{ packageName: "docker", excluded: true }],
+        });
+      }),
+    );
+
+    expect(result.manifest).toEqual([
+      {
+        packageName: "docker",
+        // The machine row carries no version of its own — it exists only to
+        // say "not here". Lifting the exclusion deletes the row rather than
+        // leaving this null behind to shadow the org's "24" (asserted below).
+        versionPin: null,
+        pinned: false,
+        excluded: true,
+        source: "machine",
+        resolvedFromScopeId: machine.id,
+      },
+    ]);
+
+    const lifted = await run(
+      Effect.gen(function* () {
+        const service = yield* MachineService;
+        return yield* service.updatePackages({
+          machineId: machine.id,
+          orgId: org.id,
+          upserts: [{ packageName: "docker", excluded: false }],
+        });
+      }),
+    );
+
+    // Back to inheriting, version pin and all — not an empty machine-level
+    // override declaring "any version" forever.
+    expect(lifted.manifest).toEqual([
+      {
+        packageName: "docker",
+        versionPin: "24",
+        pinned: false,
+        excluded: false,
+        source: "org",
+        resolvedFromScopeId: org.id,
+      },
+    ]);
+
+    // Every other machine still resolves the org's entry untouched.
+    const otherDetail = await run(
+      Effect.gen(function* () {
+        const service = yield* MachineService;
+        return yield* service.getById(other.id, org.id);
+      }),
+    );
+    expect(otherDetail.manifest[0]?.excluded).toBe(false);
+    expect(otherDetail.manifest[0]?.source).toBe("org");
   });
 
   test("upserting then removing an org package is reflected by listOrgPackages", async () => {

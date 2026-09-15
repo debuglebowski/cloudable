@@ -26,6 +26,7 @@ const resolvedManifestEntrySchema = Schema.Struct({
   packageName: Schema.String,
   versionPin: Schema.NullOr(Schema.String),
   pinned: Schema.Boolean,
+  excluded: Schema.Boolean,
   source: manifestScopeSchema,
   resolvedFromScopeId: Schema.String,
 });
@@ -137,6 +138,10 @@ const packageManifestEntrySchema = Schema.Struct({
   packageName: Schema.String.pipe(Schema.minLength(1)),
   versionPin: Schema.optional(Schema.NullOr(Schema.String)),
   pinned: Schema.optional(Schema.Boolean),
+  // `true` writes "not on this machine", overriding the org's entry. An
+  // omitted field keeps the machine row's current value, so this never
+  // silently resets a pin (see `MachineService.updatePackages`).
+  excluded: Schema.optional(Schema.Boolean),
 });
 
 const updateMachinePackagesPayloadSchema = Schema.Struct({
@@ -146,6 +151,40 @@ const updateMachinePackagesPayloadSchema = Schema.Struct({
 
 const updateMachinePackagesResponseSchema = Schema.Struct({
   manifest: Schema.Array(resolvedManifestEntrySchema),
+});
+
+const manifestHistoryStateSchema = Schema.Struct({
+  versionPin: Schema.NullOr(Schema.String),
+  pinned: Schema.Boolean,
+  excluded: Schema.Boolean,
+});
+
+/**
+ * One recorded manifest change. `previous`/`current` are `null` when the
+ * package had no entry on that side, so an add reads as `null -> value` and a
+ * removal as `value -> null`.
+ */
+const manifestHistoryEntrySchema = Schema.Struct({
+  id: Schema.String,
+  occurredAt: Schema.String,
+  recordedAt: Schema.String,
+  actorType: Schema.Literal("person", "system", "agent", "idp"),
+  actorId: Schema.String,
+  correlationId: Schema.String,
+  scope: Schema.Literal("org", "machine"),
+  packageName: Schema.String,
+  previous: Schema.NullOr(manifestHistoryStateSchema),
+  current: Schema.NullOr(manifestHistoryStateSchema),
+});
+
+const manifestHistoryUrlParamsSchema = Schema.Struct({
+  limit: Schema.optional(Schema.NumberFromString),
+  cursor: Schema.optional(Schema.String),
+});
+
+const manifestHistoryResponseSchema = Schema.Struct({
+  items: Schema.Array(manifestHistoryEntrySchema),
+  nextCursor: Schema.NullOr(Schema.String),
 });
 
 /**
@@ -179,6 +218,15 @@ export const MachinesGroup = HttpApiGroup.make("machines")
       .addSuccess(updateMachinePackagesResponseSchema)
       .addError(MachineNotFoundError, { status: 404 })
       .addError(PackagePinConflictError, { status: 422 }),
+  )
+  .add(
+    // Read-only projection over the append-only event log: every package
+    // manifest change that affects this machine, its own and the org's.
+    HttpApiEndpoint.get("manifestHistory", "/:id/manifest-history")
+      .setPath(machineIdPathSchema)
+      .setUrlParams(manifestHistoryUrlParamsSchema)
+      .addSuccess(manifestHistoryResponseSchema)
+      .addError(MachineNotFoundError, { status: 404 }),
   )
   .prefix("/api/v1/machines")
   .middleware(CurrentUserAuthentication);

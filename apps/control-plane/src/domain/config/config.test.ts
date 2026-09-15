@@ -759,17 +759,22 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
 
       expect(eventA?.type).toBe("machine.setting_changed");
       expect(eventB?.type).toBe("machine.setting_changed");
-      // Same fields, same key/current value. `overridesLevel` differs by
-      // one pre-existing convention (MachineService reports "none" when no
-      // prior resolved value exists anywhere in the chain; applySettingChange
-      // defaults to "org") — not something this unit changes.
+      // Same fields. `overridesLevel` differs by one pre-existing convention
+      // (MachineService reports "none" when no prior resolved value exists
+      // anywhere in the chain; applySettingChange defaults to "org").
       expect(Object.keys(eventA?.payload as object).sort()).toEqual(
         Object.keys(eventB?.payload as object).sort(),
       );
+      // The manifest path namespaces its key `package:<name>`, matching the
+      // org-scope write path. That prefix is what `logging/tier-filter.ts`
+      // recognises to never drop a manifest edit, and what the manifest-history
+      // query selects on — a bare key could not be told apart from a real
+      // setting like `logging_tier`. A generic setting change (eventB) keeps
+      // its own key untouched.
       expect(eventA?.payload).toEqual({
-        key: "docker",
+        key: "package:docker",
         previous: null,
-        current: { versionPin: "24", pinned: false },
+        current: { versionPin: "24", pinned: false, excluded: false },
         overridesLevel: "none",
       });
       expect(eventB?.payload).toEqual({

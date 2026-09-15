@@ -2,6 +2,7 @@ import { machines } from "@cloudable/schema";
 import { Effect } from "effect";
 import { Db } from "../db/layer";
 import { MachineService } from "../domain/machine/MachineService";
+import { declaredPackages } from "../domain/machine/manifest";
 import type { MachineStatus } from "../services/ProvisioningService";
 import type { ReconcileInput } from "./loop";
 
@@ -71,7 +72,10 @@ export const listReconcilableMachines: Effect.Effect<
               provider: detail.provider,
               region: detail.region,
               sizeSku: detail.sizeSku,
-              packages: detail.manifest.map((entry) => entry.packageName),
+              // Excluded entries are resolved but not declared: they must never
+              // reach the provider as something to install, and they must read
+              // as undeclared if the machine reports them (`declaredPackages`).
+              packages: declaredPackages(detail.manifest).map((entry) => entry.packageName),
               lifecycle: ARCHIVED_DB_STATES.has(detail.state) ? "archived" : "live",
             },
             lastKnown: toLastKnownStatus(detail),

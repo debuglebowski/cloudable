@@ -6,7 +6,7 @@ import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import { PackagePinConflictError } from "../machine/errors";
-import { type MachinePackageRow, findPinConflicts } from "../machine/manifest";
+import { type MachinePackageRow, findPinConflicts, packageSettingKey } from "../machine/manifest";
 
 /**
  * Org-scope write path for the package manifest. `domain/machine/MachineService
@@ -58,8 +58,14 @@ export interface UpdateOrgPackagesInput {
  * collide with one of the org's other settings (logging tier, retention,
  * approval mode) — same convention as `ApprovalService.settingKeyFor`'s
  * `approval_mode:<actionType>`.
+ *
+ * The definition moved to `domain/machine/manifest.ts` once the machine-scope
+ * write path adopted the same convention; both paths must agree on it, since
+ * `logging/tier-filter.ts` and the manifest-history query both recognise a
+ * package edit by this prefix alone. Re-exported here for this module's
+ * existing callers.
  */
-export const orgPackageSettingKey = (packageName: string): string => `package:${packageName}`;
+export const orgPackageSettingKey = packageSettingKey;
 
 const toEntry = (
   row: Pick<MachinePackageRow, "packageName" | "versionPin" | "pinned">,

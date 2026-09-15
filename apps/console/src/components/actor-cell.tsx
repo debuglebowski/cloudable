@@ -13,7 +13,9 @@ export function ActorCell({
   entry,
   people,
 }: {
-  entry: AuditTimelineEntry;
+  // Narrowed to the two fields this actually reads, so any row carrying an
+  // actor can use it — the audit timeline, and the machine's manifest history.
+  entry: Pick<AuditTimelineEntry, "actorType" | "actorId">;
   people: DirectoryPerson[] | undefined;
 }) {
   if (entry.actorType === "system") {

@@ -1,8 +1,34 @@
 import type { DomainEvent } from "@cloudable/events";
 import type { events } from "@cloudable/schema";
+import { packageNameFromSettingKey } from "../domain/machine/manifest";
 
 /** The shape a raw `db.select().from(events)` row comes back as. */
 export type RawEventRow = typeof events.$inferSelect;
+
+/**
+ * One side of a package manifest change, rendered for a reader rather than a
+ * parser. `null` means the package had no entry on that side.
+ *
+ * The values matter here in a way they do not for most settings: "docker was
+ * changed" tells an auditor nothing, while "docker: any -> pinned 24" is the
+ * whole answer. Both write paths compute previous/current already, so this
+ * only has to print them.
+ */
+const describePackageState = (state: unknown): string => {
+  if (state === null || state === undefined) return "not declared";
+  const value = state as { versionPin?: unknown; pinned?: unknown; excluded?: unknown };
+  if (value.excluded === true) return "excluded";
+  const version = typeof value.versionPin === "string" ? value.versionPin : "any version";
+  return value.pinned === true ? `${version}, pinned` : version;
+};
+
+const packageChangeSummary = (
+  packageName: string,
+  previous: unknown,
+  current: unknown,
+  scope: string,
+): string =>
+  `Package "${packageName}" at ${scope} scope: ${describePackageState(previous)} -> ${describePackageState(current)}.`;
 
 export interface EvidenceActor {
   type: RawEventRow["actorType"];
@@ -105,8 +131,18 @@ function summarize(row: RawEventRow): string {
   switch (event.type) {
     case "org.created":
       return `Org "${event.payload.name}" was created.`;
-    case "org.setting_changed":
+    case "org.setting_changed": {
+      const packageName = packageNameFromSettingKey(event.payload.key);
+      if (packageName !== null) {
+        return packageChangeSummary(
+          packageName,
+          event.payload.previous,
+          event.payload.current,
+          event.payload.level,
+        );
+      }
       return `Setting "${event.payload.key}" changed from ${JSON.stringify(event.payload.previous)} to ${JSON.stringify(event.payload.current)} at ${event.payload.level} level.`;
+    }
     case "org.integration_connected":
       return `A ${event.payload.kind} integration ("${event.payload.identifier}") was connected.`;
     case "org.integration_removed":
@@ -139,8 +175,18 @@ function summarize(row: RawEventRow): string {
       return `Machine was stopped (${event.payload.initiator}).`;
     case "machine.reimaged":
       return `Machine image was replaced: ${event.payload.previousImage} -> ${event.payload.currentImage}.`;
-    case "machine.setting_changed":
+    case "machine.setting_changed": {
+      const packageName = packageNameFromSettingKey(event.payload.key);
+      if (packageName !== null) {
+        return packageChangeSummary(
+          packageName,
+          event.payload.previous,
+          event.payload.current,
+          "machine",
+        );
+      }
       return `Machine setting "${event.payload.key}" was changed, overriding the ${event.payload.overridesLevel} default.`;
+    }
     case "machine.offboarded":
       return `Machine was offboarded from ${event.payload.previousOwnerId} under approval ${event.payload.approvalId}.`;
     case "machine.archived":

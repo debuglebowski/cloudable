@@ -16,18 +16,28 @@ export interface MachinePackageRow {
   packageName: string;
   versionPin: string | null;
   pinned: boolean;
+  /** Machine scope only — see the column comment in `machine-package.ts`. */
+  excluded: boolean;
   source: ManifestScope;
 }
 
 export interface PackageManifestValue {
   versionPin: string | null;
   pinned: boolean;
+  excluded: boolean;
 }
 
 export interface ResolvedManifestEntry {
   packageName: string;
   versionPin: string | null;
   pinned: boolean;
+  /**
+   * The winning row says this package must not be on the machine. Resolved
+   * entries keep it (rather than being dropped here) so the console can
+   * render an excluded row and offer to restore it; callers that want the
+   * effective install set go through `declaredPackages`.
+   */
+  excluded: boolean;
   /** Which scope level's row won resolution — feeds `LineageGutter`/`SettingRow` (docs/frontend.md). */
   source: ManifestScope;
   resolvedFromScopeId: string;
@@ -52,7 +62,7 @@ export function resolveManifest(
     scopeType: row.scopeType,
     scopeId: row.scopeId,
     key: row.packageName,
-    value: { versionPin: row.versionPin, pinned: row.pinned },
+    value: { versionPin: row.versionPin, pinned: row.pinned, excluded: row.excluded },
     source: row.source,
   }));
 
@@ -64,12 +74,49 @@ export function resolveManifest(
       packageName,
       versionPin: winner.value.versionPin,
       pinned: winner.value.pinned,
+      excluded: winner.value.excluded,
       source: winner.source,
       resolvedFromScopeId: winner.resolvedFromScopeId,
     });
   }
   return resolved.sort((a, b) => a.packageName.localeCompare(b.packageName));
 }
+
+/**
+ * The effective install set: the resolved entries minus the excluded ones.
+ *
+ * `resolveManifest` deliberately keeps excluded entries so the console can
+ * show them, so every caller that means "what should be on this machine"
+ * — the reconcile loop's desired state, allowlist detection — goes through
+ * here instead of reading the resolved list directly. An excluded package
+ * is therefore *not* declared: if it turns up installed, it reads as
+ * undeclared software, which is the whole point of excluding it.
+ */
+export function declaredPackages(
+  manifest: ReadonlyArray<ResolvedManifestEntry>,
+): ResolvedManifestEntry[] {
+  return manifest.filter((entry) => !entry.excluded);
+}
+
+/**
+ * Namespace for a package entry inside the generic `key` field of
+ * `org.setting_changed` / `machine.setting_changed`, so a manifest edit can
+ * never collide with a real setting key (`logging_tier`, `persistent_paths`)
+ * and so consumers can recognise one by its key alone. Both write paths use
+ * this: `MachineService.updatePackages` and
+ * `domain/organisation/packages.ts`, which re-exports it for its own callers.
+ *
+ * `logging/tier-filter.ts` keys its never-drop carve-out off this prefix, and
+ * the manifest-history query selects on it.
+ */
+export const PACKAGE_SETTING_KEY_PREFIX = "package:";
+
+export const packageSettingKey = (packageName: string): string =>
+  `${PACKAGE_SETTING_KEY_PREFIX}${packageName}`;
+
+/** Inverse of `packageSettingKey` — `null` when the key is not a package key. */
+export const packageNameFromSettingKey = (key: string): string | null =>
+  key.startsWith(PACKAGE_SETTING_KEY_PREFIX) ? key.slice(PACKAGE_SETTING_KEY_PREFIX.length) : null;
 
 export interface PinConflict {
   packageName: string;
@@ -129,10 +176,12 @@ export function findPinConflicts(
  * knowledge of, and no license to trigger, removal.
  */
 export function computeUndeclaredPackages(
-  manifest: ReadonlyArray<Pick<ResolvedManifestEntry, "packageName">>,
+  manifest: ReadonlyArray<Pick<ResolvedManifestEntry, "packageName" | "excluded">>,
   reported: ReadonlyArray<string>,
 ): string[] {
-  const declared = new Set(manifest.map((entry) => entry.packageName));
+  const declared = new Set(
+    manifest.filter((entry) => !entry.excluded).map((entry) => entry.packageName),
+  );
   const seen = new Set<string>();
   const undeclared: string[] = [];
   for (const packageName of reported) {

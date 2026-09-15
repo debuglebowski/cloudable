@@ -85,6 +85,13 @@
       "when": 1789108483355,
       "tag": "0011_high_invaders",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789506322525,
+      "tag": "0012_typical_sersi",
+      "breakpoints": true
     }
   ]
 }

@@ -167,3 +167,77 @@ describe("evidence projection", () => {
 // in their default case, so an event type added to `@cloudable/events`
 // without a matching case in either fails `bun run typecheck` in this
 // package, not a runtime test here.
+
+describe("package manifest summaries", () => {
+  test("a machine-scope package edit names the package and both values", () => {
+    const row = baseRow({
+      type: "machine.setting_changed",
+      machineId: "machine-1",
+      payload: {
+        key: "package:docker",
+        previous: { versionPin: null, pinned: false, excluded: false },
+        current: { versionPin: "24", pinned: false, excluded: false },
+        overridesLevel: "org",
+      },
+    });
+
+    // The values are the whole answer for an auditor: "docker was changed"
+    // says nothing, "any version -> 24" says what happened.
+    expect(projectEvent(row).summary).toBe('Package "docker" at machine scope: any version -> 24.');
+  });
+
+  test("an exclusion reads as an exclusion, not as a missing version", () => {
+    const row = baseRow({
+      type: "machine.setting_changed",
+      machineId: "machine-1",
+      payload: {
+        key: "package:docker",
+        previous: { versionPin: "24", pinned: false, excluded: false },
+        current: { versionPin: "24", pinned: false, excluded: true },
+        overridesLevel: "org",
+      },
+    });
+
+    expect(projectEvent(row).summary).toBe('Package "docker" at machine scope: 24 -> excluded.');
+  });
+
+  test("adding and removing read as the two ends of nothing", () => {
+    const added = baseRow({
+      type: "org.setting_changed",
+      payload: {
+        key: "package:ripgrep",
+        previous: null,
+        current: { packageName: "ripgrep", versionPin: null, pinned: true },
+        level: "org",
+      },
+    });
+    const removed = baseRow({
+      type: "org.setting_changed",
+      payload: {
+        key: "package:ripgrep",
+        previous: { packageName: "ripgrep", versionPin: null, pinned: true },
+        current: null,
+        level: "org",
+      },
+    });
+
+    expect(projectEvent(added).summary).toBe(
+      'Package "ripgrep" at org scope: not declared -> any version, pinned.',
+    );
+    expect(projectEvent(removed).summary).toBe(
+      'Package "ripgrep" at org scope: any version, pinned -> not declared.',
+    );
+  });
+
+  test("a setting that is not a package keeps its own summary", () => {
+    const row = baseRow({
+      type: "machine.setting_changed",
+      machineId: "machine-1",
+      payload: { key: "logging_tier", previous: 2, current: 1, overridesLevel: "org" },
+    });
+
+    expect(projectEvent(row).summary).toBe(
+      'Machine setting "logging_tier" was changed, overriding the org default.',
+    );
+  });
+});

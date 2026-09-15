@@ -32,7 +32,7 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `machine.started` | 1 | A machine was started. |
 | `machine.stopped` | 1 | A machine was stopped by a user, policy, or offboarding. |
 | `machine.reimaged` | 1 | A machine's image was replaced with a different image. |
-| `machine.setting_changed` | 2 | A machine-level setting was changed, overriding a template or org default. |
+| `machine.setting_changed` | 2 | A machine-level setting was changed, overriding a template or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did. |
 | `machine.offboarded` | 1 | A machine was offboarded from its previous owner under approval. |
 | `machine.archived` | 1 | A machine was archived with a final snapshot and retention window. |
 | `machine.state_reported` | 2 | The agent reported observed machine state that changed since the last report. |
@@ -74,11 +74,6 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `snapshot.legal_hold_cleared` | 1 | A legal hold on a snapshot was cleared. |
 
 ## Cloud
-
-`cloud.credential_federated`/`cloud.credential_rejected` are currently dormant — the
-customer-federated (BYOC) code that emitted them was removed (`docs/cloud-auth.md`). They stay
-declared here per the catalogue's additive-only invariant (#11 in `CLAUDE.md`); nothing emits
-them in the shipped self-host path.
 
 | Type | Tier | Description |
 | :--- | :--- | :--- |

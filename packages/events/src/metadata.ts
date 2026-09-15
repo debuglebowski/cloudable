@@ -85,7 +85,8 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2 | 3; desc
     },
     "machine.setting_changed": {
       tier: 2,
-      description: "A machine-level setting was changed, overriding a template or org default.",
+      description:
+        "A machine-level setting was changed, overriding a template or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did.",
     },
     "machine.offboarded": {
       tier: 1,

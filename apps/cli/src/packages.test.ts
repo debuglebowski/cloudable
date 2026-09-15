@@ -35,3 +35,17 @@ test("--add, --pin and --remove become one edit", () => {
   ]);
   expect(removals).toEqual(["vim"]);
 });
+
+test("--exclude and --include are upserts, not removals", () => {
+  const args = parseArgs(["--exclude", "docker", "--include", "nodejs"], {
+    repeatable: ["add", "pin", "remove", "exclude", "include"],
+  });
+  const { upserts, removals } = packageEdits(args);
+  // Neither carries a version or pin: an omitted field keeps whatever the
+  // machine's own row already had, so excluding never wipes a pin.
+  expect(upserts).toEqual([
+    { packageName: "docker", excluded: true },
+    { packageName: "nodejs", excluded: false },
+  ]);
+  expect(removals).toEqual([]);
+});

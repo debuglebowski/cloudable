@@ -3,6 +3,7 @@ import { EVENT_METADATA } from "@cloudable/events";
 import type * as schema from "@cloudable/schema";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
+import { PACKAGE_SETTING_KEY_PREFIX } from "../domain/machine/manifest";
 import {
   DEFAULT_LOGGING_TIER,
   LOGGING_TIER_KEY,
@@ -13,6 +14,24 @@ import {
 } from "./settings";
 
 type DbHandle = PostgresJsDatabase<typeof schema>;
+
+/**
+ * Second never-drop carve-out, alongside the logging-tier setting itself.
+ *
+ * A package manifest edit at machine scope rides on `machine.setting_changed`
+ * (tier 2), while the same edit at org scope rides on `org.setting_changed`
+ * (tier 1). Without this, an org on tier 1 would keep a permanent record of
+ * every org-level package change and silently discard every per-machine one,
+ * leaving the manifest history on a machine's own page with holes in it that
+ * nothing in the product explains. Both halves of "what was this machine
+ * declared to run, and who changed it" have to survive together or the
+ * record is not evidence.
+ *
+ * Recognised by the `package:` key prefix, which both write paths share
+ * (`domain/machine/manifest.ts`'s `packageSettingKey`).
+ */
+const isPackageManifestKey = (key: unknown): boolean =>
+  typeof key === "string" && key.startsWith(PACKAGE_SETTING_KEY_PREFIX);
 
 /**
  * Filters a batch of events against each event's *effective* configured
@@ -61,7 +80,8 @@ export const filterByLoggingTier = (
   Effect.gen(function* () {
     const isNeverDropped = (event: DomainEvent) =>
       EVENT_METADATA[event.type].tier === 1 ||
-      (event.type === "machine.setting_changed" && event.payload.key === LOGGING_TIER_KEY);
+      (event.type === "machine.setting_changed" &&
+        (event.payload.key === LOGGING_TIER_KEY || isPackageManifestKey(event.payload.key)));
 
     const gated = batch.filter((event) => !isNeverDropped(event));
     if (gated.length === 0) return batch;

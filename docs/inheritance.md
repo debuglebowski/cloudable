@@ -103,10 +103,38 @@ live in `machinePackages`, one per `(scopeType, scopeId, packageName)` (enforced
 writes against.
 
 The HTTP-editable surface for this unit is `PATCH /api/v1/machines/:id/packages`
-(`apps/control-plane/src/http/routes/machines.ts`), which only ever writes `machine`-scoped rows —
-editing an org's own manifest defaults is a different unit's concern (whatever owns the
-organisation-settings surface), though the schema, `resolveManifest()`, and the pin check below are
-already scope-generic and need no changes when that lands.
+(`apps/control-plane/src/http/routes/machines.ts`), which only ever writes `machine`-scoped rows.
+The org's own defaults are edited through `PATCH /api/v1/organisation/packages`
+(`domain/organisation/packages.ts`); the schema, `resolveManifest()`, and the pin check below are
+scope-generic and shared by both.
+
+## Removing, and excluding
+
+These are different edits and resolve differently:
+
+- **Removing** (`removals`) deletes this machine's own row. If the org declares the package, the
+  machine goes straight back to inheriting it. Removal means "stop overriding", not "get rid of it".
+- **Excluding** (`excluded: true` on an upsert) writes a machine row saying the package must not be
+  here, which beats the org's entry. There is no way to express this by removing a row, since the
+  absence of a row already means "inherit".
+
+An excluded entry still resolves — the console renders it and offers to lift it — but it is not
+*declared*. `declaredPackages()` (`domain/machine/manifest.ts`) is the effective install set, and
+every caller that means "what should be on this machine" goes through it: the reconcile loop's
+desired state (`reconcile/list-machines.ts`), what the provider is asked to create
+(`MachineService.create`), and allowlist detection. So a package that is excluded and installed
+anyway reads as undeclared software and surfaces as drift, which is the point of excluding it.
+
+Lifting an exclusion that is all the machine row ever said deletes the row rather than rewriting it
+as `excluded: false`. Excluding a package the machine had no row for writes one with no version of
+its own (the upsert fallback reads the machine's own row, never the chain — see below), so flipping
+that row back would leave a machine-level entry declaring "any version, unpinned", quietly shadowing
+the org's pin from then on. Undoing an exclusion has to put the machine back where it started, which
+is inheriting.
+
+Excluding is an override like any other, so an org pin blocks it: `findPinConflicts()` sees the
+edited package name and rejects the whole edit with the same 422 below. A machine that could opt out
+of a pinned package would make the pin decorative.
 
 ## Pinning
 
@@ -159,8 +187,23 @@ only computes the set.
 `MachineService` emits `machine.created` on creation and one `machine.setting_changed` event per
 edited package name on a successful `updatePackages` call (all sharing one `correlationId` per
 request) — see `apps/control-plane/src/domain/machine/events.ts`. Each `machine.setting_changed`
-payload's `previous`/`current` are the resolved value (`{ versionPin, pinned }` or `null` if the
-package isn't in the manifest on that side) computed via `resolveManifest()` *before* and *after*
-the write, and `overridesLevel` is the `source` of the *previous* resolved value (or `"none"` if the
-package had no prior resolved value at all) — i.e. which level's effective value this edit just
-superseded.
+payload's `previous`/`current` are the resolved value (`{ versionPin, pinned, excluded }` or `null`
+if the package isn't in the manifest on that side) computed via `resolveManifest()` *before* and
+*after* the write, and `overridesLevel` is the `source` of the *previous* resolved value (or
+`"none"` if the package had no prior resolved value at all) — i.e. which level's effective value
+this edit just superseded.
+
+Both write paths namespace the event's `key` as `package:<name>` (`packageSettingKey()`), the org
+path via `orgPackageSettingKey`, which now re-exports it. The prefix is load-bearing in two places:
+
+- `logging/tier-filter.ts` never drops a `machine.setting_changed` carrying one. Without that, an
+  org on logging tier 1 would keep every org-level package change (`org.setting_changed` is tier 1)
+  and silently discard every per-machine one (tier 2), leaving the manifest history on a machine's
+  own page with holes in it that nothing in the product explains.
+- `GET /api/v1/machines/:id/manifest-history` (`domain/machine/manifest-history.ts`) selects on it.
+  That endpoint is a read-only projection over the event log: every package change affecting one
+  machine, newest first, its own rows and the org's. Org rows are included because an org edit
+  changes what the machine resolves to, and `org.setting_changed` carries `machineId: null`, so it
+  could not reach a machine-filtered view any other way. Edits recorded before the machine path
+  adopted the prefix are keyed by a bare package name and do not appear there; they are still in the
+  raw event stream on the Audit page.

@@ -26,9 +26,12 @@ import {
 import {
   type MachinePackageRow,
   type ResolvedManifestEntry,
+  declaredPackages,
   findPinConflicts,
+  packageSettingKey,
   resolveManifest,
 } from "./manifest";
+import { queryManifestHistory } from "./manifest-history";
 import {
   type AccessMethodsEnabled,
   type PersistentPaths,
@@ -96,6 +99,8 @@ export interface PackageManifestEdit {
   packageName: string;
   versionPin?: string | null | undefined;
   pinned?: boolean | undefined;
+  /** `true` declares "this package must not be on this machine", overriding the org. */
+  excluded?: boolean | undefined;
 }
 
 export interface UpdateMachinePackagesInput {
@@ -138,6 +143,7 @@ const toManifestRow = (row: MachinePackageTableRow): MachinePackageRow => ({
   packageName: row.packageName,
   versionPin: row.versionPin,
   pinned: row.pinned,
+  excluded: row.excluded,
   source: row.source,
 });
 
@@ -415,11 +421,13 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         // what a provisioning backend (e.g. the local Docker adapter)
         // actually installs.
         const manifestRows = yield* fetchManifestRows(machine);
-        const packages = resolveManifest(manifestRows.map(toManifestRow), {
-          orgId: machine.orgId,
-          templateId: machine.templateId,
-          machineId: machine.id,
-        }).map((entry) => entry.packageName);
+        const packages = declaredPackages(
+          resolveManifest(manifestRows.map(toManifestRow), {
+            orgId: machine.orgId,
+            templateId: machine.templateId,
+            machineId: machine.id,
+          }),
+        ).map((entry) => entry.packageName);
 
         // `"provisioning"` is a real, expected outcome here, not an error — the Azure
         // adapter's create() deliberately returns it (see ProvisioningService.azure.ts):
@@ -644,15 +652,53 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             .filter((row) => row.scopeType === "machine" && row.scopeId === machine.id)
             .map((row) => [row.packageName, row]),
         );
-        const resolvedUpserts = upserts.map((upsert) => {
+        /**
+         * Lifting an exclusion that is all the machine row ever said deletes
+         * the row instead of rewriting it as `excluded: false`.
+         *
+         * Excluding a package the machine had no row for writes one with no
+         * version of its own, because the fallback above deliberately reads
+         * the machine's own row and not the chain. Flipping that row back to
+         * `excluded: false` would leave a machine-level entry declaring "any
+         * version, unpinned" — which is an override, and would quietly shadow
+         * the org's pin from then on. Undoing an exclusion has to put the
+         * machine back where it started, which is inheriting.
+         *
+         * Narrow on purpose: it only fires when the caller is lifting an
+         * exclusion (`excluded: false`) on a row that is currently excluded
+         * and says nothing else. Declaring a package with no version pin is
+         * the same field values but no prior excluded row, so it still writes.
+         */
+        const liftsExclusionOnly = (upsert: PackageManifestEdit): boolean => {
           const previous = existingMachineRowByName.get(upsert.packageName);
-          return {
-            packageName: upsert.packageName,
-            versionPin:
-              upsert.versionPin !== undefined ? upsert.versionPin : (previous?.versionPin ?? null),
-            pinned: upsert.pinned !== undefined ? upsert.pinned : (previous?.pinned ?? false),
-          };
-        });
+          return (
+            previous?.excluded === true &&
+            upsert.excluded === false &&
+            upsert.versionPin === undefined &&
+            upsert.pinned === undefined &&
+            previous.versionPin === null &&
+            previous.pinned === false
+          );
+        };
+
+        const exclusionLifts = upserts.filter(liftsExclusionOnly).map((u) => u.packageName);
+        const rowDeletions = [...new Set([...removals, ...exclusionLifts])];
+
+        const resolvedUpserts = upserts
+          .filter((upsert) => !liftsExclusionOnly(upsert))
+          .map((upsert) => {
+            const previous = existingMachineRowByName.get(upsert.packageName);
+            return {
+              packageName: upsert.packageName,
+              versionPin:
+                upsert.versionPin !== undefined
+                  ? upsert.versionPin
+                  : (previous?.versionPin ?? null),
+              pinned: upsert.pinned !== undefined ? upsert.pinned : (previous?.pinned ?? false),
+              excluded:
+                upsert.excluded !== undefined ? upsert.excluded : (previous?.excluded ?? false),
+            };
+          });
 
         yield* Effect.tryPromise({
           try: async () => {
@@ -665,6 +711,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   packageName: upsert.packageName,
                   versionPin: upsert.versionPin,
                   pinned: upsert.pinned,
+                  excluded: upsert.excluded,
                   source: "machine",
                 })
                 .onConflictDoUpdate({
@@ -676,12 +723,13 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   set: {
                     versionPin: upsert.versionPin,
                     pinned: upsert.pinned,
+                    excluded: upsert.excluded,
                     source: "machine",
                     updatedAt: new Date(),
                   },
                 });
             }
-            for (const packageName of removals) {
+            for (const packageName of rowDeletions) {
               await db
                 .delete(machinePackages)
                 .where(
@@ -712,11 +760,25 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             correlationId,
             actorType,
             actorId,
-            key: packageName,
+            // Namespaced (`package:<name>`), matching the org-scope write path.
+            // `logging/tier-filter.ts` recognises a manifest edit by this prefix
+            // and never drops it, so per-machine history survives on a tier-1
+            // org the same way org-level history already did.
+            key: packageSettingKey(packageName),
             previous: previous
-              ? { versionPin: previous.versionPin, pinned: previous.pinned }
+              ? {
+                  versionPin: previous.versionPin,
+                  pinned: previous.pinned,
+                  excluded: previous.excluded,
+                }
               : null,
-            current: current ? { versionPin: current.versionPin, pinned: current.pinned } : null,
+            current: current
+              ? {
+                  versionPin: current.versionPin,
+                  pinned: current.pinned,
+                  excluded: current.excluded,
+                }
+              : null,
             overridesLevel: previous?.source ?? "none",
           });
         });
@@ -728,7 +790,19 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         return { manifest: newManifest };
       });
 
-    return { create, list, getById, updatePackages } as const;
+    /**
+     * Read-only view over the event log, exposed here rather than called
+     * straight from the HTTP handler so the handler keeps needing only
+     * `MachineService` — this service already holds the `db` handle.
+     */
+    const manifestHistory = (input: {
+      machineId: string;
+      orgId: string;
+      limit?: number | undefined;
+      cursor?: string | undefined;
+    }) => queryManifestHistory(db, input);
+
+    return { create, list, getById, updatePackages, manifestHistory } as const;
   }),
   dependencies: [EventBus.Default],
 }) {}

@@ -37,6 +37,13 @@ export const machinePackages = pgTable(
     // a validation error at edit time — see `domain/machine/manifest.ts`'s
     // `findPinConflicts` — never a silent no-op at reconcile.
     pinned: boolean("pinned").notNull().default(false),
+    // Machine scope only: this package must NOT be present on this machine,
+    // overriding whatever the org declared. Distinct from having no row at
+    // all — no row means "inherit", this means "not here". An excluded entry
+    // is not part of the declared install set (`declaredPackages` in
+    // `domain/machine/manifest.ts`), so a package that is excluded and
+    // installed anyway reads as undeclared software and surfaces as drift.
+    excluded: boolean("excluded").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

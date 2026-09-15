@@ -61,5 +61,19 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
           })
           .pipe(Effect.catchTag("MachineServiceError", Effect.die));
       }),
+    )
+    .handle("manifestHistory", ({ path, urlParams }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        const machineService = yield* MachineService;
+        return yield* machineService
+          .manifestHistory({
+            orgId: currentUser.orgId,
+            machineId: path.id,
+            limit: urlParams.limit,
+            cursor: urlParams.cursor,
+          })
+          .pipe(Effect.catchTag("ManifestHistoryError", Effect.die));
+      }),
     ),
 );

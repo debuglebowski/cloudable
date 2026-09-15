@@ -9,7 +9,7 @@
 import type {
   MachineDetail,
   MachineSummary,
-  PackageManifestEntry,
+  PackageManifestEdit,
   ReconcileTriggerResponse,
   ResolvedPackageManifestEntry,
   UpdateMachinePackagesResponse,
@@ -97,11 +97,12 @@ function printManifest(manifest: ReadonlyArray<ResolvedPackageManifestEntry>): v
   }
   console.log("\npackages:");
   printTable(
-    ["package", "version", "pinned", "from"],
+    ["package", "version", "pinned", "excluded", "from"],
     manifest.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
       entry.pinned ? "yes" : "no",
+      entry.excluded ? "yes" : "no",
       entry.source,
     ]),
   );
@@ -254,8 +255,11 @@ export async function runMachinesReconcileCommand(argv: ReadonlyArray<string>): 
     printJson(result);
     return;
   }
+  // Says what the call did, not what it hoped would follow. The version bump
+  // is real; nothing reads it yet (the agent poll endpoint still serves a
+  // constant ETag), so promising an apply on the next poll was not true.
   console.log(
-    `Desired state for ${result.machineId} is now version ${result.desiredStateVersion}. The agent applies it on its next poll (~30s) — not instantly.`,
+    `Desired state for ${result.machineId} is now version ${result.desiredStateVersion}.`,
   );
 }
 
@@ -286,7 +290,7 @@ export async function runMachinesArchiveCommand(argv: ReadonlyArray<string>): Pr
 // ---------------------------------------------------------------------------
 
 /** `curl` or `curl@8.5.0` — the pin travels with the name, as it does in the manifest. */
-export function parsePackageArg(value: string, pinned: boolean): PackageManifestEntry {
+export function parsePackageArg(value: string, pinned: boolean): PackageManifestEdit {
   const at = value.lastIndexOf("@");
   const packageName = at > 0 ? value.slice(0, at) : value;
   const versionPin = at > 0 ? value.slice(at + 1) : undefined;
@@ -296,13 +300,22 @@ export function parsePackageArg(value: string, pinned: boolean): PackageManifest
   return { packageName, versionPin: versionPin ?? null, pinned };
 }
 
+/**
+ * `--remove` and `--exclude` are different edits, not synonyms. `--remove`
+ * deletes this machine's own row so the org's entry applies again;
+ * `--exclude` writes a row saying the package must not be here at all, which
+ * beats the org. `--include` undoes an exclusion without touching the pin or
+ * version the row already carries.
+ */
 export function packageEdits(args: Args): {
-  upserts: PackageManifestEntry[];
+  upserts: PackageManifestEdit[];
   removals: string[];
 } {
   const upserts = [
     ...(args.all.add ?? []).map((value) => parsePackageArg(value, false)),
     ...(args.all.pin ?? []).map((value) => parsePackageArg(value, true)),
+    ...(args.all.exclude ?? []).map((packageName) => ({ packageName, excluded: true })),
+    ...(args.all.include ?? []).map((packageName) => ({ packageName, excluded: false })),
   ];
   return { upserts, removals: [...(args.all.remove ?? [])] };
 }
@@ -322,11 +335,12 @@ export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>
     return;
   }
   printTable(
-    ["package", "version", "pinned", "from"],
+    ["package", "version", "pinned", "excluded", "from"],
     machine.manifest.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
       entry.pinned ? "yes" : "no",
+      entry.excluded ? "yes" : "no",
       entry.source,
     ]),
   );
@@ -334,9 +348,12 @@ export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>
 
 export async function runMachinesPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>]",
+    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--exclude <pkg>] [--include <pkg>]",
   );
-  const args = parseArgs(argv, readSpec({ repeatable: ["add", "pin", "remove"] }));
+  const args = parseArgs(
+    argv,
+    readSpec({ repeatable: ["add", "pin", "remove", "exclude", "include"] }),
+  );
   const id = await machineId(required(args, 0, "a machine", usage));
   const { upserts, removals } = packageEdits(args);
   if (upserts.length === 0 && removals.length === 0) {
@@ -354,6 +371,10 @@ export async function runMachinesPackagesSetCommand(argv: ReadonlyArray<string>)
     printJson(result);
     return;
   }
-  console.log("Manifest updated. Apply it with `cloudable machines reconcile`.");
+  // Deliberately does not tell you to run `machines reconcile`: reconcile only
+  // ever removes undeclared software, it never installs, and nothing reads the
+  // `desiredStateVersion` that a reconcile trigger bumps. Saying otherwise
+  // promised an apply step that does not exist.
+  console.log("Desired state updated.");
   printManifest(result.manifest);
 }

@@ -80,6 +80,13 @@ export interface PackageManifestEntry {
   packageName: string;
   versionPin: string | null;
   pinned: boolean;
+  /**
+   * Machine scope only: this package must not be on this machine, overriding
+   * the org. Different from having no entry, which means "inherit". An
+   * excluded entry is not part of the declared install set, so a machine that
+   * reports it installed drifts.
+   */
+  excluded: boolean;
 }
 
 export interface ResolvedPackageManifestEntry extends PackageManifestEntry {
@@ -135,13 +142,30 @@ export interface MachineDetail extends MachineSummary {
 }
 
 /**
+ * One edit to one entry. Every field but the name is optional, and an omitted
+ * field keeps whatever the machine's own existing row had rather than
+ * resetting it — so excluding a package does not silently drop its version
+ * pin, and re-pinning does not silently un-exclude it.
+ */
+export interface PackageManifestEdit {
+  packageName: string;
+  versionPin?: string | null;
+  pinned?: boolean;
+  excluded?: boolean;
+}
+
+/**
  * Edits are always applied at the `machine` scope (this endpoint edits one
  * machine's manifest). `upserts` add or replace a machine-level entry by
  * `packageName`; `removals` drop a machine-level override, falling back to
  * whatever the org/template chain resolves to. See `docs/inheritance.md`.
+ *
+ * Removal and exclusion are different things: removing drops this machine's
+ * own row so the org's entry applies again, while excluding writes a row that
+ * says the package must not be here at all.
  */
 export interface UpdateMachinePackagesRequest {
-  upserts?: PackageManifestEntry[];
+  upserts?: PackageManifestEdit[];
   removals?: string[];
 }
 

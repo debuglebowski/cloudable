@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import {
   Clock,
@@ -13,35 +13,27 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import { type ArchivedSnapshot, useMachineSnapshots } from "@/api/archive";
 import { SEVERITY_VARIANT, daysOpen, useAuditTimeline, useComplianceChecks } from "@/api/audit";
 import {
   type DriftStatus,
-  type ManifestEntry,
-  ManifestOverrideError,
   getMachine,
   getMachineDrift,
-  getMachineManifest,
   isMachineStale,
   machinesKeys,
-  overrideManifestEntry,
 } from "@/api/machines";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ActorCell } from "@/components/actor-cell";
 import { ControlStatus } from "@/components/control-status";
 import { Freshness } from "@/components/freshness";
-import { LineageGutter } from "@/components/lineage-gutter";
 import { OsIcon } from "@/components/os-icon";
 import { PageLoader } from "@/components/page-loader";
-import { SettingRow } from "@/components/setting-row";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -58,6 +50,7 @@ import { RetentionStatus, formatBytes, formatDate } from "@/routes/archive/snaps
 import { ArchiveMachineDialog } from "./archive-machine-dialog";
 import { BrowseFilesDialog } from "./browse-files-dialog";
 import { ConnectTerminalDialog } from "./connect-terminal-dialog";
+import { MachineManifestTab } from "./machine-manifest-tab";
 import {
   ARCHIVED_MACHINE_STATES,
   MACHINE_STATE_BADGE_VARIANT,
@@ -124,22 +117,17 @@ type DetailTab = "properties" | "manifest" | "drift" | "compliance" | "snapshots
 const COMPLIANCE_SKELETON_KEYS = ["skel-1", "skel-2", "skel-3", "skel-4", "skel-5", "skel-6"];
 
 /**
- * Detail is a sub-route (`/machines/$machineId`), not an expandable row: the manifest and
- * drift panels each carry their own query (and, for the manifest, an override form with
- * validation errors), which reads better behind a real URL/back button than packed into a
- * table row.
+ * Detail is a sub-route (`/machines/$machineId`), not an expandable row: the tabs below carry
+ * their own queries and editing surfaces — the Manifest tab alone has a package editor and its
+ * own change history (`./machine-manifest-tab.tsx`) — which reads better behind a real URL and
+ * back button than packed into a table row.
  */
 export function MachineDetailPage() {
   const { machineId } = useParams({ from: "/machines/$machineId" });
-  const queryClient = useQueryClient();
 
   const machineQuery = useQuery({
     queryKey: machinesKeys.detail(machineId),
     queryFn: () => getMachine(machineId),
-  });
-  const manifestQuery = useQuery({
-    queryKey: machinesKeys.manifest(machineId),
-    queryFn: () => getMachineManifest(machineId),
   });
   const driftQuery = useQuery({
     queryKey: machinesKeys.drift(machineId),
@@ -158,9 +146,6 @@ export function MachineDetailPage() {
   const timelineQuery = useAuditTimeline();
   const snapshotsQuery = useMachineSnapshots(machineId);
 
-  const [editingPackage, setEditingPackage] = useState<string | null>(null);
-  const [draftVersion, setDraftVersion] = useState("");
-  const [overrideErrors, setOverrideErrors] = useState<Record<string, string>>({});
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [reconcileOpen, setReconcileOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -168,39 +153,6 @@ export function MachineDetailPage() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("properties");
-
-  const overrideMutation = useMutation({
-    mutationFn: (vars: { packageName: string; nextVersion: string | null }) =>
-      overrideManifestEntry(machineId, vars.packageName, vars.nextVersion),
-    onSuccess: (_entry, vars) => {
-      setOverrideErrors((prev) => {
-        const next = { ...prev };
-        delete next[vars.packageName];
-        return next;
-      });
-      setEditingPackage(null);
-      void queryClient.invalidateQueries({ queryKey: machinesKeys.manifest(machineId) });
-      toast.success(`"${vars.packageName}" overridden`);
-    },
-    onError: (err, vars) => {
-      const message =
-        err instanceof ManifestOverrideError ? err.body.error.message : "Override failed.";
-      setOverrideErrors((prev) => ({ ...prev, [vars.packageName]: message }));
-    },
-  });
-
-  function startOverride(entry: ManifestEntry) {
-    setEditingPackage(entry.package);
-    setDraftVersion(entry.version ?? "");
-  }
-
-  function submitOverride(entry: ManifestEntry) {
-    const trimmed = draftVersion.trim();
-    overrideMutation.mutate({
-      packageName: entry.package,
-      nextVersion: trimmed === "" ? null : trimmed,
-    });
-  }
 
   if (machineQuery.isPending) {
     return <PageLoader label="Loading machine" />;
@@ -395,75 +347,7 @@ export function MachineDetailPage() {
         </TabsContent>
 
         <TabsContent value="manifest">
-          <Card>
-            <CardContent className="flex flex-col gap-2 pt-4">
-              {manifestQuery.isPending && (
-                <div className="flex flex-col gap-3">
-                  {Array.from({ length: 3 }, (_, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
-                    <div key={i} className="flex items-center justify-between gap-3">
-                      <Skeleton className="h-4 w-40" />
-                      <Skeleton className="h-4 w-16" />
-                    </div>
-                  ))}
-                </div>
-              )}
-              {manifestQuery.isError && (
-                <p className="text-sm text-destructive">Failed to load package manifest.</p>
-              )}
-              {manifestQuery.data?.length === 0 && (
-                <p className="text-sm text-muted-foreground">No packages declared.</p>
-              )}
-              {manifestQuery.data?.map((entry) => (
-                <div key={entry.package} className="border-b border-border/60 py-2 last:border-b-0">
-                  <SettingRow
-                    label={entry.package}
-                    value={entry.version ?? "any"}
-                    source={entry.source}
-                    onOverride={() => startOverride(entry)}
-                  />
-                  <div className="flex items-center gap-2 pb-2">
-                    {entry.pinned && <Badge variant="outline">pinned</Badge>}
-                    {entry.overriddenBelow !== undefined ? (
-                      <LineageGutter
-                        source={entry.source}
-                        viewing="machine"
-                        overriddenBelow={entry.overriddenBelow}
-                      />
-                    ) : (
-                      <LineageGutter source={entry.source} viewing="machine" />
-                    )}
-                  </div>
-                  {editingPackage === entry.package && (
-                    <div className="flex flex-col gap-1.5 pb-1">
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={draftVersion}
-                          onChange={(event) => setDraftVersion(event.target.value)}
-                          placeholder="version (blank = any)"
-                          aria-label={`New version for ${entry.package}`}
-                          className="max-w-48"
-                        />
-                        <Button
-                          size="sm"
-                          onClick={() => submitOverride(entry)}
-                          disabled={overrideMutation.isPending}
-                        >
-                          Save override
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEditingPackage(null)}>
-                          Cancel
-                        </Button>
-                      </div>
-                      {overrideErrors[entry.package] && (
-                        <p className="text-xs text-destructive">{overrideErrors[entry.package]}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <MachineManifestTab machineId={machineId} />
         </TabsContent>
 
         <TabsContent value="drift">
