@@ -258,82 +258,14 @@ sudo systemd-run --unit=cloudable-home-migrate --collect \
   --property=Type=oneshot --property=TimeoutStartSec=0 \
   --property=StandardOutput=append:/var/log/cloudable-home-migrate.log \
   --property=StandardError=append:/var/log/cloudable-home-migrate.log \
-  /bin/bash /var/tmp/cloudable-home-migrate.sh
+  /bin/bash /var/tmp/migrate-home.sh
 ```
 
 The session dies partway through. Reconnect after the reboot and read the log.
 
-`/var/tmp/cloudable-home-migrate.sh`:
-
-```bash
-#!/bin/bash
-set -euo pipefail
-OS_USER=cloudable
-OLD_MOUNT=/mnt/cloudable-data
-OSDISK_HOME=/home.pre-cloudable
-echo "=== cloudable /home migration $(date -Is) ==="
-
-# Preflight. Every assertion is an explicit if/exit: `! cmd` would NOT trip set -e —
-# bash exempts !-inverted commands — so a preflight written that way asserts nothing.
-if mountpoint -q /home; then echo "/home is already a mount point" >&2; exit 1; fi
-if ! mountpoint -q "$OLD_MOUNT"; then echo "$OLD_MOUNT not mounted" >&2; exit 1; fi
-if ! getent passwd "$OS_USER" >/dev/null; then echo "no $OS_USER account" >&2; exit 1; fi
-DEVICE=$(findmnt -n -o SOURCE --target "$OLD_MOUNT")
-STRAY=$(find "$OLD_MOUNT" -mindepth 1 -maxdepth 1 -not -name lost+found | wc -l)
-if [ "$STRAY" != 0 ]; then echo "$OLD_MOUNT is not empty - refusing" >&2; exit 1; fi
-NEED=$(du -sk /home | cut -f1)
-FREE=$(df -Pk "$OLD_MOUNT" | awk 'NR==2 {print $4}')
-if [ "$FREE" -lt $((NEED * 12 / 10)) ]; then echo "need ${NEED}k have ${FREE}k" >&2; exit 1; fi
-
-# rsync is not guaranteed on a minimal image and there is no way to check from
-# outside the machine, so both passes fall back to cp. The difference matters only in
-# pass 2: cp cannot delete, so a file removed during the live window reappears. A
-# harmless superset, and the alternative is a migration that aborts halfway.
-copy_home() {
-  if command -v rsync >/dev/null; then
-    rsync -aHAX --numeric-ids --exclude=/lost+found "$@" /home/ "$OLD_MOUNT"/
-  else
-    cp -a /home/. "$OLD_MOUNT"/
-  fi
-}
-
-# Pass 1: the long copy, while the person keeps working.
-copy_home
-
-# Quiesce. Only the tunnel daemon: the agent runs as root from /opt, never touches
-# /home, and leaving it up keeps the machine visible to the control plane throughout.
-systemctl stop cloudable-tunnel-daemon
-pkill -u "$OS_USER" || true
-sleep 5
-pkill -KILL -u "$OS_USER" || true
-
-# Pass 2: catch writes from the live window.
-copy_home --delete
-sync
-
-# Swap to exactly the end state the new cloud-init produces.
-umount "$OLD_MOUNT"
-rmdir "$OLD_MOUNT"
-grep -v "^[^#].*[[:space:]]$OLD_MOUNT[[:space:]]" /etc/fstab > /etc/fstab.new || true
-if [ -s /etc/fstab.new ]; then mv /etc/fstab.new /etc/fstab; fi
-mv /home "$OSDISK_HOME"
-mkdir -m 755 /home
-DISK_UUID=$(blkid -s UUID -o value "$DEVICE")
-echo "UUID=$DISK_UUID /home ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2" >> /etc/fstab
-mount /home
-echo "seeded_at=$(date -Is)" > /home/.cloudable-home-volume
-chmod 600 /home/.cloudable-home-volume
-
-# Verify BEFORE rebooting, while the OS-disk copy is still intact and recoverable.
-if [ "$(findmnt -n -o SOURCE --target /home)" != "$DEVICE" ]; then echo "/home not on $DEVICE" >&2; exit 1; fi
-if [ "$(stat -c %u "/home/$OS_USER")" != "$(id -u "$OS_USER")" ]; then echo "wrong uid" >&2; exit 1; fi
-if ! diff -r -q --no-dereference "$OSDISK_HOME/$OS_USER" "/home/$OS_USER"; then
-  echo "content differs - NOT rebooting, /home still recoverable from $OSDISK_HOME" >&2
-  exit 1
-fi
-echo "verified: /home on $DEVICE, content identical"
-systemctl reboot
-```
+The script is `scripts/migrate-home-to-data-disk.sh` in this repo, not pasted here —
+it was inline once and that is exactly how a runbook drifts from the thing it describes.
+Its own header carries the run instructions.
 
 The reboot is strongly recommended rather than strictly required. It is the only thing
 that proves the fstab entry and the daemon's `RequiresMountsFor=/home` ordering actually
