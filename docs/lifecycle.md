@@ -255,7 +255,7 @@ puts it in a transient unit outside the session cgroup — that is the whole tri
 
 ```bash
 sudo systemd-run --unit=cloudable-home-migrate --collect \
-  --property=Type=oneshot --property=TimeoutStartSec=0 \
+  --property=Type=oneshot --property=TimeoutStartSec=infinity \
   --property=StandardOutput=append:/var/log/cloudable-home-migrate.log \
   --property=StandardError=append:/var/log/cloudable-home-migrate.log \
   /bin/bash /var/tmp/migrate-home.sh

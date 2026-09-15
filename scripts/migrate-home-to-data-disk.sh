@@ -16,8 +16,11 @@
 #   cat > /var/tmp/migrate-home.sh <<'"'"'MIGRATE'"'"'
 #   ...paste this file...
 #   MIGRATE
+# TimeoutStartSec=infinity, not 0: systemd reads 0 as zero seconds and kills the unit
+# the instant it starts. Observed doing exactly that on 2026-09-15.
+#
 #   sudo systemd-run --unit=cloudable-home-migrate --collect \
-#     --property=Type=oneshot --property=TimeoutStartSec=0 \
+#     --property=Type=oneshot --property=TimeoutStartSec=infinity \
 #     --property=StandardOutput=append:/var/log/cloudable-home-migrate.log \
 #     --property=StandardError=append:/var/log/cloudable-home-migrate.log \
 #     /bin/bash /var/tmp/migrate-home.sh
