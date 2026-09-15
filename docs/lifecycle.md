@@ -285,8 +285,20 @@ NEED=$(du -sk /home | cut -f1)
 FREE=$(df -Pk "$OLD_MOUNT" | awk 'NR==2 {print $4}')
 if [ "$FREE" -lt $((NEED * 12 / 10)) ]; then echo "need ${NEED}k have ${FREE}k" >&2; exit 1; fi
 
+# rsync is not guaranteed on a minimal image and there is no way to check from
+# outside the machine, so both passes fall back to cp. The difference matters only in
+# pass 2: cp cannot delete, so a file removed during the live window reappears. A
+# harmless superset, and the alternative is a migration that aborts halfway.
+copy_home() {
+  if command -v rsync >/dev/null; then
+    rsync -aHAX --numeric-ids --exclude=/lost+found "$@" /home/ "$OLD_MOUNT"/
+  else
+    cp -a /home/. "$OLD_MOUNT"/
+  fi
+}
+
 # Pass 1: the long copy, while the person keeps working.
-rsync -aHAX --numeric-ids --exclude=/lost+found /home/ "$OLD_MOUNT"/
+copy_home
 
 # Quiesce. Only the tunnel daemon: the agent runs as root from /opt, never touches
 # /home, and leaving it up keeps the machine visible to the control plane throughout.
@@ -296,7 +308,7 @@ sleep 5
 pkill -KILL -u "$OS_USER" || true
 
 # Pass 2: catch writes from the live window.
-rsync -aHAX --numeric-ids --delete --exclude=/lost+found /home/ "$OLD_MOUNT"/
+copy_home --delete
 sync
 
 # Swap to exactly the end state the new cloud-init produces.
