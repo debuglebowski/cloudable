@@ -5,6 +5,7 @@ import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import { ProvisioningServiceTag } from "../../services/ProvisioningService";
+import type { ProvisioningError, SnapshotScope } from "../../services/ProvisioningService";
 import type { ArchiveDbError, MachineNotFoundError } from "../archive/errors";
 import { createSnapshot } from "../archive/snapshot";
 import { computeNextEligibleAt } from "./backoff";
@@ -52,7 +53,9 @@ const UPGRADE_ACTOR_ID = "control-plane:upgrade";
  * narrowing on `Schema.TaggedError` classes, which doesn't reliably narrow
  * a union through TS's control-flow analysis in this codebase's setup.
  */
-const describeSnapshotFailure = (error: ArchiveDbError | MachineNotFoundError): string => {
+const describeSnapshotFailure = (
+  error: ArchiveDbError | MachineNotFoundError | ProvisioningError,
+): string => {
   const withReason = error as Partial<ArchiveDbError>;
   if (typeof withReason.reason === "string") return withReason.reason;
   const withMachineId = error as Partial<MachineNotFoundError>;
@@ -213,6 +216,7 @@ const recordAttempt = (
 export const upgradeMachine = (
   machineId: string,
   targetImage: string,
+  scope: SnapshotScope = "full",
 ): Effect.Effect<UpgradeResult, UpgradeError, Db | EventBus | ProvisioningServiceTag> =>
   Effect.gen(function* () {
     const db = yield* Db;
@@ -254,7 +258,17 @@ export const upgradeMachine = (
     const correlationId = ulid();
 
     // --- 1. snapshot -----------------------------------------------------
-    const snapshotOutcome = yield* Effect.either(createSnapshot(machineId, "upgrade"));
+    // `quiesce: false` — the machine has to stay up until `reimage` replaces it, so this
+    // copy is crash-consistent rather than quiesced. `scope` decides whether the OS disk
+    // is copied alongside the persistent one; "full" is the default because it is what
+    // makes an upgrade undoable, and it is the caller's call, not this function's.
+    //
+    // A provider failure here now ABORTS the upgrade rather than sailing past it. That
+    // is the point of the whole change: a pre-upgrade snapshot that did not happen must
+    // never be followed by a reimage that deletes the OS disk.
+    const snapshotOutcome = yield* Effect.either(
+      createSnapshot(machineId, "upgrade", undefined, undefined, { scope, quiesce: false }),
+    );
     if (snapshotOutcome._tag === "Left") {
       const attempt = yield* recordAttempt({
         orgId,
@@ -370,10 +384,15 @@ export const upgradeMachine = (
     const outcome: UpgradeOutcome =
       restoreOutcome._tag === "Right" ? "rolled_back" : "rollback_failed";
     const restoredSnapshotId = restoreOutcome._tag === "Right" ? snapshot.id : null;
+    // "not_implemented" is the expected branch today, not an anomaly: there is no
+    // restore operation on any ProvisioningService, so every failed apply lands here.
+    // Spell that out rather than emitting a bare reason code into a permanent record.
     const detail =
       restoreOutcome._tag === "Right"
         ? failureReason
-        : `${failureReason}; rollback also failed: ${restoreOutcome.left.reason}`;
+        : restoreOutcome.left.reason === "not_implemented"
+          ? `${failureReason}; NOT rolled back - automatic rollback is not built yet, so the machine is on ${targetImage} and needs manual attention`
+          : `${failureReason}; rollback also failed: ${restoreOutcome.left.reason}`;
 
     const attempt = yield* recordAttempt({
       orgId,

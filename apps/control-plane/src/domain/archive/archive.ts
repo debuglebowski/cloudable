@@ -73,6 +73,26 @@ export const archiveMachine = (machineId: string, approvalId?: string) =>
       );
     }
 
+    const correlationId = ulid();
+
+    // SNAPSHOT FIRST, THEN TEAR DOWN. This used to run the other way around: the
+    // adapter's own `archive()` deallocated, copied the disks inline, discarded the
+    // results, and deleted everything — and only then was a row written, stamped with a
+    // hardcoded size and naming nothing. `createSnapshot` now does the copying through
+    // the provisioning port and records the ids it gets back.
+    //
+    // The ordering is the safe one either way round it fails: a snapshot followed by a
+    // failed teardown leaves a copy and a live machine, which reconcile can finish. The
+    // reverse leaves a deleted machine and no copy, which nothing can undo.
+    //
+    // `quiesce: true` because an archived machine can be stopped first — that is what
+    // makes this copy clean rather than crash-consistent. Scope is always "full" here:
+    // the machine is going away, so there is no later chance to capture the OS disk.
+    const snapshot = yield* createSnapshot(machineId, "archive", correlationId, machine, {
+      scope: "full",
+      quiesce: true,
+    });
+
     // A machine whose backing infra is already gone (container manually removed,
     // or `create()` never actually finished — e.g. still stuck in "provisioning")
     // has nothing left to tear down: the archive's goal state at the infra layer
@@ -96,9 +116,6 @@ export const archiveMachine = (machineId: string, approvalId?: string) =>
           .where(eq(machines.id, machineId)),
       "update_machine_archived",
     );
-
-    const correlationId = ulid();
-    const snapshot = yield* createSnapshot(machineId, "archive", correlationId, machine);
     const actor = yield* resolveArchiveActor(approvalId, machine);
 
     yield* publishOrDie(

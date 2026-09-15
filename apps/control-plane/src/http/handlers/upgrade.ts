@@ -56,7 +56,7 @@ export const UpgradeLive = HttpApiBuilder.group(Api, "upgrade", (handlers) =>
             Effect.fail(new UpgradeError({ reason: "db_error", cause })),
         }),
       );
-      return yield* upgradeMachine(path.machineId, payload.targetImage);
+      return yield* upgradeMachine(path.machineId, payload.targetImage, payload.snapshotScope);
     }).pipe(
       Effect.map((result) => ({
         ...result,

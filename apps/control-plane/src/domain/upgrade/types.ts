@@ -18,14 +18,21 @@ export class UpgradeError extends Data.TaggedError("UpgradeError")<{
  * - "success" — snapshot, apply, and verify all succeeded. `machines.image`
  *   was updated and `machine.reimaged` was emitted.
  * - "rolled_back" — apply and/or verify failed; the pre-upgrade snapshot was
- *   restored. `machines.image` is unchanged.
+ *   restored. `machines.image` is unchanged. **Currently unreachable**: no
+ *   `ProvisioningService` has a restore operation, so `domain/upgrade/snapshot-port.ts`
+ *   fails rather than fabricating a restore, and every failed apply lands on
+ *   "rollback_failed" instead. Kept in the union because it becomes reachable the
+ *   moment a real restore exists, and it is already a wire value
+ *   (`http/routes/upgrade.ts`) that consumers handle.
  * - "aborted" — the pre-upgrade snapshot itself could not be taken. Apply
  *   and verify were never attempted, so nothing on the machine changed and
  *   there is nothing to roll back.
- * - "rollback_failed" — apply and/or verify failed AND the rollback restore
- *   itself also failed. The worst case: the machine's real state is now
- *   unknown relative to `machines.image` (which is left unchanged). Needs
- *   manual attention — this is what the drift link is for.
+ * - "rollback_failed" — apply and/or verify failed and the machine was NOT put back.
+ *   The machine's real state is now unknown relative to `machines.image` (which is
+ *   left unchanged, and on this path is therefore NOT where the machine actually is —
+ *   the reimage already happened and the old OS disk is gone). Needs manual
+ *   attention; this is what the drift link is for. Until a real restore exists this
+ *   is the outcome of every failed apply, not a rare worst case.
  */
 export type UpgradeOutcome = "success" | "rolled_back" | "aborted" | "rollback_failed";
 
@@ -39,7 +46,8 @@ export interface UpgradeResult {
   targetImage: string;
   /** The pre-upgrade snapshot taken for this attempt, or `null` for "aborted" (never taken). */
   snapshotId: string | null;
-  /** Set only when outcome is "rolled_back" — the snapshot actually restored. */
+  /** Set only when outcome is "rolled_back" — the snapshot actually restored. Never set
+   * today: see the "rolled_back" note above. */
   restoredSnapshotId?: string;
   /** When this machine becomes eligible for another upgrade attempt — see `apps/control-plane/src/domain/upgrade/backoff.ts`. */
   nextEligibleAt: Date;

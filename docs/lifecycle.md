@@ -61,12 +61,20 @@ against the org → machine chain (there is no template layer in v1), key
 createdAt + retentionDays`. The clock is fixed at snapshot creation — changing the org's
 policy afterward does not retroactively move an existing snapshot's `expiresAt`.
 
-A full expiry-sweep cron is **not** built in this unit. What *is* built is the query a
-scheduler (or unit 9's "retention is honoured" compliance check) needs:
-`computeExpirySweepCandidates(now?)` returns every snapshot where `expiresAt < now`,
-`expiredAt IS NULL`, and `legalHold = false`. Actually hard-deleting the underlying
-volume data and setting `expiredAt` is future work for whichever unit builds the
-scheduler; this unit only guarantees the candidate query is correct and legal-hold-aware.
+The sweep **is** built: `expiry/daemon.ts` runs `expireOverdueSnapshots` on a 60s
+leader-elected loop, over the candidates `computeExpirySweepCandidates(now?)` returns
+(every snapshot where `expiresAt < now`, `expiredAt IS NULL`, `legalHold = false`).
+
+What it does **not** do is hard-delete anything in Azure. It sets `expiredAt` and
+publishes `snapshot.expired`, and that is all. So a snapshot past its retention window
+reads as expired in the console and in evidence while the managed-disk snapshot is still
+sitting in the subscription. Check #5 ("retention is honoured",
+`compliance/checks/retention-honoured.ts`) treats `snapshot.expired` as proof that
+"hard-deletion happened on schedule" — it is not, and the check goes green over a
+deletion that never happened. Closing that needs a provisioning-side delete and a
+recorded provider id per snapshot to aim it at; neither exists yet. Known gap, and a
+real one — this paragraph previously claimed the whole sweep was unbuilt, which was
+also false.
 
 ## Legal hold
 
@@ -86,11 +94,45 @@ resumes as if the hold had paused it, not reset it.
 
 ## Snapshot contents
 
-Every snapshot captures **volume data AND the machine's desired state/configuration**
-(`containsData: true, containsConfig: true` — both always true for a snapshot created by
-this unit; the columns exist as booleans rather than being hardcoded so a future
-snapshot type — e.g. a config-only manual snapshot — has somewhere to record that).
+A snapshot is a real copy of real disks. `createSnapshot` calls
+`ProvisioningService.snapshot()` and records what comes back — the provider's own id for
+each copy, and the real total size. It did not always: it used to insert a row and stop
+there, stamping every row with a hardcoded 32 GiB, which is why the console showed the
+same "34.4 GB" against every snapshot in the system and why six rows in production stand
+against two actual Azure objects.
+
+**`scope` — what was captured:**
+
+| Scope | Disks | Use |
+|---|---|---|
+| `full` | OS disk + persistent disk | The machine can be put back exactly as it was. Always used for archive: the machine is going away, so there is no later chance. |
+| `shallow` | persistent disk only | Smaller and faster. `/home` is on the persistent disk, so this is a complete copy of the part that cannot be rebuilt, not a lesser copy of the same thing. |
+
+Do not confuse this with `snapshot.restored`'s `mode` (`data` / `config` / `full`), which
+is what a RESTORE writes back. They share the word "full". A `shallow` snapshot can never
+serve a `full`-mode restore, because there is no OS disk in it.
+
+`capturedDisks` holds one entry per copied disk (`kind`, `externalId`, `sizeBytes`). An
+empty array means the provider copied nothing — a machine whose infrastructure was already
+gone, or the docker adapter, which has no disks to copy. Such a row can neither be
+restored from nor deleted at expiry, and `containsData` is false to say so. Every row
+written before this change has an empty array.
+
+`containsConfig` stays true regardless of scope: the machine's desired state lives in this
+database, not on either disk.
+
+**`quiesce` — whether the machine was stopped first.** Archive stops the machine and gets
+a clean copy. An upgrade cannot — the machine has to stay up until `reimage` replaces
+it — so a pre-upgrade snapshot is crash-consistent, the same guarantee as pulling the
+power cord. It is a parameter at the call site rather than a decision buried in the
+adapter, because it is what someone needs to know when a restore comes back unclean.
+
 Region is inherited from the machine's own region, never independently chosen.
+
+**Ordering: snapshot first, then tear down.** `archiveMachine` copies the disks before
+`ProvisioningService.archive()` deletes anything. It used to run the other way round. Both
+orderings can fail, and this one fails safely: a copy plus a live machine is something
+reconcile can finish, while a deleted machine and no copy is not recoverable by anything.
 
 Cloudable never stores customer secrets: secret bindings are
 injected at runtime and never written to disk — so a snapshot's "config" never includes
@@ -178,6 +220,122 @@ calls `restoreSnapshot()` again on a grant — that requires either a webhook/ca
 `ApprovalService` or a poller, neither of which exists yet. This is an explicit,
 documented gap for a future unit to close, not a silent limitation.
 
+## Where a machine's files live — and the one-off migration
+
+`/home` is a mount of the machine's **data disk**, not a directory on the OS disk.
+This matters because `reimage` (OS upgrade) deletes the VM and its OS disk and
+re-attaches the same data disk. Anything on the OS disk is gone at every upgrade,
+by design — "persistent paths survive; the OS does not" (`docs/spec.md` §97).
+
+It did not always work that way. Until this landed, the data disk was formatted,
+mounted at `/mnt/cloudable-data`, and read by nothing in the entire repo, while
+`/home/cloudable` — created by Azure from `osProfile.adminUsername` — sat on the OS
+disk. So an upgrade destroyed the person's work and carefully preserved an empty
+volume. Production hit this on 2026-09-14 (`machine.reimaged`, machine `54e3cdde`).
+
+The boot-time half is `homeVolumeSection()` in `services/ProvisioningService.azure.ts`,
+which is exported precisely so this runbook quotes one source of truth. Read it before
+running any of the below.
+
+### Machines provisioned before this change
+
+**Do not `reimage` such a machine until it has been migrated.** The fix takes effect
+on a disk that does not exist yet, so shipping it does not rescue existing data — the
+upgrade still deletes the OS disk, and the new boot script then mounts an empty data
+disk over `/home`. Migrate first, upgrade after.
+
+This is break-glass remediation of a defect, not a new pattern: invariant 10 ("desired
+state is edited; live machines are not") still stands. Warn the person first — their
+session is killed partway through.
+
+Reach the machine with `cloudable connect <machine>`, which lands a `cloudable` shell
+with passwordless sudo. The migration must stop `cloudable-tunnel-daemon`, which is the
+very session running it, so it cannot live in that session's process tree. `systemd-run`
+puts it in a transient unit outside the session cgroup — that is the whole trick:
+
+```bash
+sudo systemd-run --unit=cloudable-home-migrate --collect \
+  --property=Type=oneshot --property=TimeoutStartSec=0 \
+  --property=StandardOutput=append:/var/log/cloudable-home-migrate.log \
+  --property=StandardError=append:/var/log/cloudable-home-migrate.log \
+  /bin/bash /var/tmp/cloudable-home-migrate.sh
+```
+
+The session dies partway through. Reconnect after the reboot and read the log.
+
+`/var/tmp/cloudable-home-migrate.sh`:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+OS_USER=cloudable
+OLD_MOUNT=/mnt/cloudable-data
+OSDISK_HOME=/home.pre-cloudable
+echo "=== cloudable /home migration $(date -Is) ==="
+
+# Preflight. Every assertion is an explicit if/exit: `! cmd` would NOT trip set -e —
+# bash exempts !-inverted commands — so a preflight written that way asserts nothing.
+if mountpoint -q /home; then echo "/home is already a mount point" >&2; exit 1; fi
+if ! mountpoint -q "$OLD_MOUNT"; then echo "$OLD_MOUNT not mounted" >&2; exit 1; fi
+if ! getent passwd "$OS_USER" >/dev/null; then echo "no $OS_USER account" >&2; exit 1; fi
+DEVICE=$(findmnt -n -o SOURCE --target "$OLD_MOUNT")
+STRAY=$(find "$OLD_MOUNT" -mindepth 1 -maxdepth 1 -not -name lost+found | wc -l)
+if [ "$STRAY" != 0 ]; then echo "$OLD_MOUNT is not empty - refusing" >&2; exit 1; fi
+NEED=$(du -sk /home | cut -f1)
+FREE=$(df -Pk "$OLD_MOUNT" | awk 'NR==2 {print $4}')
+if [ "$FREE" -lt $((NEED * 12 / 10)) ]; then echo "need ${NEED}k have ${FREE}k" >&2; exit 1; fi
+
+# Pass 1: the long copy, while the person keeps working.
+rsync -aHAX --numeric-ids --exclude=/lost+found /home/ "$OLD_MOUNT"/
+
+# Quiesce. Only the tunnel daemon: the agent runs as root from /opt, never touches
+# /home, and leaving it up keeps the machine visible to the control plane throughout.
+systemctl stop cloudable-tunnel-daemon
+pkill -u "$OS_USER" || true
+sleep 5
+pkill -KILL -u "$OS_USER" || true
+
+# Pass 2: catch writes from the live window.
+rsync -aHAX --numeric-ids --delete --exclude=/lost+found /home/ "$OLD_MOUNT"/
+sync
+
+# Swap to exactly the end state the new cloud-init produces.
+umount "$OLD_MOUNT"
+rmdir "$OLD_MOUNT"
+grep -v "^[^#].*[[:space:]]$OLD_MOUNT[[:space:]]" /etc/fstab > /etc/fstab.new || true
+if [ -s /etc/fstab.new ]; then mv /etc/fstab.new /etc/fstab; fi
+mv /home "$OSDISK_HOME"
+mkdir -m 755 /home
+DISK_UUID=$(blkid -s UUID -o value "$DEVICE")
+echo "UUID=$DISK_UUID /home ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2" >> /etc/fstab
+mount /home
+echo "seeded_at=$(date -Is)" > /home/.cloudable-home-volume
+chmod 600 /home/.cloudable-home-volume
+
+# Verify BEFORE rebooting, while the OS-disk copy is still intact and recoverable.
+if [ "$(findmnt -n -o SOURCE --target /home)" != "$DEVICE" ]; then echo "/home not on $DEVICE" >&2; exit 1; fi
+if [ "$(stat -c %u "/home/$OS_USER")" != "$(id -u "$OS_USER")" ]; then echo "wrong uid" >&2; exit 1; fi
+if ! diff -r -q --no-dereference "$OSDISK_HOME/$OS_USER" "/home/$OS_USER"; then
+  echo "content differs - NOT rebooting, /home still recoverable from $OSDISK_HOME" >&2
+  exit 1
+fi
+echo "verified: /home on $DEVICE, content identical"
+systemctl reboot
+```
+
+The reboot is strongly recommended rather than strictly required. It is the only thing
+that proves the fstab entry and the daemon's `RequiresMountsFor=/home` ordering actually
+work, and you want to learn that while `/home.pre-cloudable` is still sitting on the OS
+disk rather than at the next unplanned reboot. The daemon is already down, so the
+incremental downtime is one boot.
+
+**Leave `/home.pre-cloudable` alone** until the person confirms their files are intact,
+then remove it by hand. It is free (a rename, not a copy) and it is the only backup.
+It is destroyed by the next reimage regardless.
+
+**One lossy edge, tell the person in advance:** `pkill -u cloudable` kills a detached
+tmux or editor, so unsaved in-memory state is lost. Files on disk are captured by pass 2.
+
 ## Actor attribution
 
 `createSnapshot` and `restoreSnapshot`'s own events (`snapshot.created`) are attributed
@@ -197,17 +355,27 @@ Azure for the hold period. Billing itself is not in v1 — a rough sizing
 estimate at creation is fine, but it must not be called billing. `estimateSnapshotCost()`
 (`domain/archive/pricing.ts`) is a **pure, synchronous** function:
 `sizeBytes * pricePerGbPerDay * daysRemaining`, using a placeholder Azure managed-disk
-snapshot price (`$0.05`/GB-month, LRS pay-as-you-go — not pulled from a live price list;
-no real Azure account exists in this build). It returns `0` once a snapshot has already
+snapshot price (`$0.05`/GB-month, LRS pay-as-you-go — not pulled from a live price list,
+and not from the subscription's own rates). It returns `0` once a snapshot has already
 reached its expiry (no remaining hold period to project).
+
+("no real Azure account exists in this build" stood here, and in two code comments, long
+after the azure adapter was running machines in production. Snapshots it created are
+sitting in `RG-CLOUDABLE-MANAGED` now. Check a claim like that before relying on it.)
 
 The HTTP response (`GET /api/v1/archive/snapshots/:id/cost-estimate`) always carries a
 `disclaimer` field alongside the figure. Nothing in this unit calls this feature
 "billing" anywhere — in code, comments, docs, or the API shape.
 
-`sizeBytes` itself is a placeholder (`PLACEHOLDER_SNAPSHOT_SIZE_BYTES`, ~32 GiB) set at
-snapshot creation, since no `ProvisioningService` implementation in this build reports
-real Azure disk usage.
+`sizeBytes` is the real total the provider reported, summed across `capturedDisks`. The
+`PLACEHOLDER_SNAPSHOT_SIZE_BYTES` constant this paragraph used to describe is gone.
+
+The price constant is still a placeholder, and its own comment used to call it the
+*incremental* snapshot price. It is not: `snapshotOf` never sets `incremental: true`, so
+these are full snapshots. Full ones bill on the disk's USED data rather than its
+provisioned size, which is why a 30 GiB OS disk costs cents. Switching to incremental
+would save nothing here anyway — each disk is copied once and then deleted, so there is
+never a previous snapshot in the lineage to be a delta against.
 
 ## Cross-unit dependency
 

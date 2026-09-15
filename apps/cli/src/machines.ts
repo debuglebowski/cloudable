@@ -215,14 +215,19 @@ export async function runMachinesRestartCommand(argv: ReadonlyArray<string>): Pr
 }
 
 export async function runMachinesUpgradeCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = usageFor("machines upgrade <machine> --image <image>");
-  const args = parseArgs(argv, readSpec({ values: ["image"] }));
+  const usage = usageFor("machines upgrade <machine> --image <image> [--snapshot <scope>]");
+  const args = parseArgs(argv, readSpec({ values: ["image", "snapshot"] }));
   const id = await machineId(required(args, 0, "a machine", usage));
   const targetImage = requiredFlag(args, "image", usage);
+  // Defaults to "full" server-side. Sent only when asked for, so the default lives in
+  // one place rather than being restated by every client.
+  const snapshotScope = args.flags.snapshot
+    ? oneOf(args.flags.snapshot, ["full", "shallow"] as const, "snapshot")
+    : undefined;
 
   const result = await authenticatedApiRequest<UpgradeResponse>(
     `/api/v1/machines/${id}/upgrade`,
-    postJson({ targetImage }),
+    postJson(snapshotScope ? { targetImage, snapshotScope } : { targetImage }),
   );
   if (args.booleans.has("json")) {
     printJson(result);
@@ -233,7 +238,12 @@ export async function runMachinesUpgradeCommand(argv: ReadonlyArray<string>): Pr
     success: `Upgraded to ${result.currentImage}.`,
     rolled_back: `Upgrade failed and was rolled back to ${result.currentImage}.`,
     aborted: "Upgrade never started.",
-    rollback_failed: `Upgrade failed AND the rollback failed. The machine is on ${result.currentImage}.`,
+    // Deliberately does NOT name an image. `currentImage` is set to the PREVIOUS image
+    // on every non-success outcome, which is a true statement for "aborted" and would
+    // be one after a real rollback — but here the reimage already happened and the old
+    // OS disk is gone, so the machine is not on that image and claiming otherwise sends
+    // someone looking in the wrong place.
+    rollback_failed: "Upgrade failed and was NOT rolled back. The machine needs manual attention.",
   };
   console.log(outcome[result.outcome]);
   if (result.failureReason) console.log(`Reason: ${result.failureReason}`);

@@ -70,12 +70,33 @@ describe("archiveMachine — threads externalResourceId to the provisioning port
     return machine;
   }
 
+  // Records BOTH port calls an archive now makes. `createSnapshot` copies the disks
+  // through `snapshot()` before `archive()` tears anything down, and the same
+  // "never re-derive a name, pass the id we stored" rule applies to both — a snapshot
+  // aimed at a guessed name copies nothing and reports success.
   function spyProvisioning() {
-    const calls: Array<{ machineId: string; provider: string; externalId: string | null }> = [];
+    const calls: Array<{
+      op: "snapshot" | "archive";
+      machineId: string;
+      provider: string;
+      externalId: string | null;
+    }> = [];
     const provisioning: ProvisioningService = {
+      snapshot: (desc) => {
+        calls.push({
+          op: "snapshot",
+          machineId: desc.machineId,
+          provider: desc.provider,
+          externalId: desc.externalId,
+        });
+        return Effect.succeed({
+          disks: [{ kind: "data" as const, externalId: "snap-1", sizeBytes: 123 }],
+          sizeBytes: 123,
+        });
+      },
       create: () => Effect.die("not used in this test"),
       archive: (machineId, provider, externalId) => {
-        calls.push({ machineId, provider, externalId });
+        calls.push({ op: "archive", machineId, provider, externalId });
         return Effect.succeed({ machineId, state: "archived", externalId });
       },
       reconcile: () => Effect.die("not used in this test"),
@@ -97,8 +118,17 @@ describe("archiveMachine — threads externalResourceId to the provisioning port
 
     await Effect.runPromise(Effect.provide(archiveMachine(machine.id), testLayer));
 
+    // Snapshot first, then teardown — the order matters more than either call: a
+    // teardown that runs first destroys the disks the snapshot was meant to copy.
     expect(calls).toEqual([
       {
+        op: "snapshot",
+        machineId: machine.id,
+        provider: "azure",
+        externalId: "/subscriptions/x/.../virtualMachines/cldm-m1-abc123",
+      },
+      {
+        op: "archive",
         machineId: machine.id,
         provider: "azure",
         externalId: "/subscriptions/x/.../virtualMachines/cldm-m1-abc123",
@@ -118,6 +148,9 @@ describe("archiveMachine — threads externalResourceId to the provisioning port
 
     await Effect.runPromise(Effect.provide(archiveMachine(machine.id), testLayer));
 
-    expect(calls).toEqual([{ machineId: machine.id, provider: "azure", externalId: null }]);
+    expect(calls).toEqual([
+      { op: "snapshot", machineId: machine.id, provider: "azure", externalId: null },
+      { op: "archive", machineId: machine.id, provider: "azure", externalId: null },
+    ]);
   });
 });

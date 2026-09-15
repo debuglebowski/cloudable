@@ -123,19 +123,24 @@ describe("UpgradeService", () => {
     expect(result.nextEligibleAt.getTime()).toBeGreaterThan(Date.now());
   });
 
-  test("failure: verification failure rolls back — image is unchanged, no machine.reimaged, drift link present", async () => {
+  test("failure: verification failure is NOT rolled back — image unchanged, no machine.reimaged, drift link present", async () => {
     const { machine, runtime } = await setUpMachine();
 
     const result = await runtime.runPromise(
       upgradeMachine(machine.id, FAKE_VERIFICATION_FAILURE_IMAGE),
     );
 
-    expect(result.outcome).toBe("rolled_back");
+    // This asserted "rolled_back" until the rollback stub stopped fabricating success.
+    // Nothing restores anything — no ProvisioningService has a restore operation — so
+    // "rollback_failed" (real state unknown, needs manual attention, here is the drift
+    // link) is the only truthful outcome, and `restoredSnapshotId` must be absent
+    // rather than pointing at a snapshot that was never put back.
+    expect(result.outcome).toBe("rollback_failed");
+    expect(result.restoredSnapshotId).toBeUndefined();
+    expect(result.failureReason).toContain("NOT rolled back");
     expect(result.previousImage).toBe("ubuntu-22.04");
     expect(result.currentImage).toBe("ubuntu-22.04");
-    expect(result.restoredSnapshotId).toBe(result.snapshotId ?? undefined);
     expect(result.driftUrl).toBe(`/machines/${machine.id}#drift`);
-    expect(result.failureReason).toBeDefined();
 
     const [updated] = await testDb.db
       .select()

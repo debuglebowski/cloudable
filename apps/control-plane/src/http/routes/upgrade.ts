@@ -10,6 +10,14 @@ import { CurrentUserAuthentication } from "../middleware/auth";
  */
 export const UpgradeRequestPayload = Schema.Struct({
   targetImage: Schema.String,
+  /**
+   * Which disks the pre-upgrade snapshot captures. "full" copies the OS disk as well as
+   * the persistent one, so the machine could be put back exactly as it was; "shallow"
+   * copies only the persistent disk, which is smaller and faster and is where /home
+   * lives. Optional, defaulting to "full" — the safer of the two, and the one that makes
+   * the word "snapshot" in this endpoint's own description mean something.
+   */
+  snapshotScope: Schema.optional(Schema.Literal("full", "shallow")),
 });
 
 export const UpgradeResponse = Schema.Struct({

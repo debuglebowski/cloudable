@@ -171,6 +171,130 @@ describe("cloudInitFor", () => {
       `curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-tunnel-daemon-linux-$ARCH"`,
     );
   });
+
+  // ---------------------------------------------------------------------------
+  // The data-disk section. Before these, nothing in this file asserted anything
+  // about it at all — not the mount point, not the fstab line, not the `lun`
+  // parameter, which was untested end to end.
+  //
+  // What this level of test CANNOT catch, stated plainly so nobody mistakes a green
+  // run for a working machine: these are substring assertions on a base64-decoded
+  // string. They prove the TEXT, never the BEHAVIOUR. They cannot tell you whether
+  // the mount succeeds, whether cloud-init really runs scripts-user after
+  // users-groups on the image you boot, whether systemd really orders home.mount
+  // before the tunnel daemon, or anything whatsoever about the reimage path — the
+  // second run of this script against an already-populated disk, which is where the
+  // real risk lives. Only booting a real VM and reimaging it covers those.
+  // ---------------------------------------------------------------------------
+
+  test("REGRESSION: /home is on the data disk, and the write-only mount point is gone", () => {
+    // The bug this whole section exists for: /home/cloudable lived on the OS disk,
+    // which `reimage` deletes, while the data disk was formatted, mounted at
+    // /mnt/cloudable-data, and read by nothing in the entire repo. An upgrade
+    // destroyed the person's work and preserved an empty volume. Production hit it
+    // on 2026-09-14. If /mnt/cloudable-data ever comes back as a mount point, this
+    // fails.
+    const script = decode();
+    expect(script).not.toContain("/mnt/cloudable-data");
+    expect(script).toContain(" /home ext4 ");
+    expect(script).toContain("mount /home");
+  });
+
+  test("the generated script is valid bash", () => {
+    // The only assertion here that catches a real defect rather than a substring.
+    // It also catches template-literal accidents: this script lives inside a TS
+    // backtick literal, so a stray ${...} or a backslash that should have been
+    // escaped usually produces something syntactically broken.
+    const result = Bun.spawnSync(["bash", "-n"], { stdin: Buffer.from(decode()) });
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
+  });
+
+  test("the data disk LUN reaches the device path", () => {
+    // `dataDiskLun` was a parameter no test ever exercised.
+    const script = Buffer.from(cloudInitFor(desc, 3), "base64").toString("utf-8");
+    expect(script).toContain("/dev/disk/azure/scsi1/lun3");
+  });
+
+  test("fstab mounts by UUID, never by the /dev/sdX readlink resolves to", () => {
+    // The previous version wrote `$DEVICE` — the output of `readlink -f`, i.e.
+    // /dev/sdc. Azure SCSI letters are not stable across reboots, so that entry
+    // could mount nothing or mount the wrong disk, and `nofail` made it silent.
+    const script = decode();
+    expect(script).toContain("blkid -s UUID -o value");
+    expect(script).toContain('echo "UUID=$DISK_UUID /home ext4 defaults,nofail');
+    expect(script).not.toMatch(/echo "\$DEVICE [^\n]*fstab/);
+  });
+
+  test("the mount stays nofail, and the ordering is enforced unit-side instead", () => {
+    // Locking in a decision that looks wrong at a glance. Dropping `nofail` to close
+    // the boot race would take local-fs.target into emergency mode when the disk is
+    // genuinely missing — and there is no way back into one of these machines: no
+    // inbound access by design (invariant 7), and the serial console wants an admin
+    // password throwawayAdminPassword() deliberately discards. So nofail stays and
+    // RequiresMountsFor on the daemon does the ordering.
+    const script = decode();
+    expect(script).toContain("nofail");
+    expect(script).toContain("x-systemd.device-timeout=30s");
+  });
+
+  test("only the tunnel daemon waits for /home, deliberately not the agent", () => {
+    // Asymmetric on purpose. Every session the daemon opens is `su - cloudable`, so
+    // starting before /home is mounted hands the person the wrong home. The agent
+    // runs as root from /opt and never touches /home; making it wait would mean a
+    // missing disk also makes the machine invisible to the control plane and
+    // un-remediable by reimage. Encoded here so nobody "fixes the inconsistency".
+    const script = decode();
+    const unitBlocks = script.split(/(?=\[Unit\])/).filter((block) => block.includes("[Unit]"));
+    const daemon = unitBlocks.find((b) => b.includes("ExecStart=/opt/cloudable/tunnel-daemon"));
+    const agent = unitBlocks.find((b) => b.includes("ExecStart=/opt/cloudable/agent"));
+    expect(daemon).toContain("RequiresMountsFor=/home");
+    expect(agent).not.toContain("RequiresMountsFor");
+  });
+
+  test("the disk is set up before the units that depend on it are started", () => {
+    // Catches a future edit that hoists the unit setup above the disk section, which
+    // would silently restore the original race with no other visible symptom.
+    const script = decode();
+    expect(script.indexOf("mount /home")).toBeLessThan(
+      script.indexOf("systemctl enable --now cloudable-tunnel-daemon"),
+    );
+    expect(script.indexOf("/etc/fstab")).toBeLessThan(script.indexOf("systemctl daemon-reload"));
+  });
+
+  test("mkfs is guarded, runs at most once, and nothing recursively deletes /home", () => {
+    // mkfs is the one destructive command in the script. It must stay behind the
+    // blkid guard: a disk that already holds a home always has a signature, so a
+    // reimage can never reach it. And a boot script must never carry an rm -rf
+    // anywhere near /home — the OS-disk home is renamed aside, never deleted,
+    // because it is the only copy of whatever was there.
+    const script = decode();
+    expect(script.match(/mkfs\.ext4/g)).toHaveLength(1);
+    expect(script).toContain('if ! blkid "$DEVICE"');
+    expect(script).not.toMatch(/^\s*rm -rf[^\n]*\/home/m);
+    expect(script).toContain('mv /home "$OSDISK_HOME"');
+  });
+
+  test("the uid remedy is scoped, never a blanket chown of the whole home", () => {
+    // A reimaged VM creates the account from scratch and can land on a different
+    // uid. The remedy moves the ACCOUNT to the files (usermod, O(1)) and only falls
+    // back to a chown scoped with --from, so files deliberately owned by root or a
+    // service inside the home survive. An unconditional chown -R on every boot would
+    // be O(files) on a 64 GiB volume in front of the daemon that serves sessions,
+    // would clear setuid bits, and would destroy ownership nothing can reconstruct.
+    const script = decode();
+    expect(script).toContain('usermod -u "$WANT_UID"');
+    expect(script).toContain("chown -R --from=");
+    expect(script).not.toMatch(/^\s*chown -R (?!--from)[^\n]*\/home/m);
+  });
+
+  test("the seeded marker is written only after sync", () => {
+    // Crash safety: a copy interrupted half way must leave no marker, so the next
+    // boot seeds again rather than mounting a half-populated home and declaring
+    // victory.
+    const script = decode();
+    expect(script.indexOf("sync")).toBeLessThan(script.indexOf('> "/home/$MARKER"'));
+  });
 });
 
 describe("throwawayAdminPassword", () => {

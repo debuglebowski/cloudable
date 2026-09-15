@@ -9,19 +9,19 @@
 
 export const AZURE_SNAPSHOT_PRICING = {
   /**
-   * Placeholder Azure managed-disk *incremental* snapshot price (LRS, pay-as-you-go,
-   * no reserved capacity), USD per GB per month. NOT pulled from a live Azure price
-   * list or the customer's own subscription — no real Azure account exists in this
-   * build (see `docs/cloud-auth.md`). Good enough for a plausible order-of-magnitude
-   * figure; swap for the Azure Retail Prices API when a real subscription exists.
+   * Placeholder Azure managed-disk snapshot price (LRS, pay-as-you-go, no reserved
+   * capacity), USD per GB per month. NOT pulled from a live Azure price list or the
+   * subscription's own rates — swap for the Azure Retail Prices API.
+   *
+   * Said "incremental" until this was checked against what the adapter actually
+   * creates: `snapshotOf` does not set `incremental: true`, so these are full
+   * snapshots. Full ones bill on the disk's USED data rather than its provisioned
+   * size, which is why a 30 GiB OS disk costs cents rather than dollars. Incremental
+   * would buy nothing here anyway — each disk is copied once and then deleted, so
+   * there is never a previous snapshot in the lineage to be a delta against.
    */
   pricePerGbMonthUsd: 0.05,
 } as const;
-
-/** Placeholder snapshot size used until this build reports real Azure disk usage —
- * no `ProvisioningService` implementation in this build surfaces snapshot size (see
- * `createSnapshot`). ~32 GiB, a plausible default machine disk size. */
-export const PLACEHOLDER_SNAPSHOT_SIZE_BYTES = 32 * 1024 * 1024 * 1024;
 
 const BYTES_PER_GB = 1_000_000_000;
 const DAYS_PER_MONTH = 30;

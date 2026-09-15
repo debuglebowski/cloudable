@@ -161,8 +161,67 @@ export interface MachineStatus {
  * querying Azure for the VM tagged `cloudable-machine-id` — see
  * `ProvisioningService.azure.ts`'s `resolveVmNames`.
  */
+/** Which disks a snapshot captures — mirrors `snapshots.scope` in `packages/schema`.
+ *
+ * Deliberately NOT the same vocabulary as `snapshot.restored`'s `mode`
+ * ("data" | "config" | "full"), which is what a RESTORE writes back. This is what the
+ * snapshot CAPTURED. They share the word "full" and mean different things: a "shallow"
+ * snapshot can never serve a "full"-mode restore, because there is no OS disk in it. */
+export type SnapshotScope = "full" | "shallow";
+
+export interface SnapshotDescriptor {
+  machineId: string;
+  provider: Provider;
+  externalId: string | null;
+  scope: SnapshotScope;
+  /**
+   * Stop the machine before copying its disks.
+   *
+   * An archive can afford this and gets a clean, quiesced copy for it. An upgrade
+   * cannot — the machine has to stay up until `reimage` replaces it — so its
+   * pre-upgrade snapshot is crash-consistent: the same guarantee as pulling the power
+   * cord. ext4 journals, so it recovers, but it is not equivalent to a quiesced copy.
+   * Explicit at the call site rather than buried in an adapter, because it is the kind
+   * of difference someone needs to know about when a restore comes out unclean.
+   */
+  quiesce: boolean;
+}
+
+/** One disk the provider actually copied. */
+export interface CapturedDisk {
+  kind: "os" | "data";
+  /**
+   * The provider's own id for the copy. Load-bearing, not decoration: without it
+   * nothing can restore from this snapshot or delete it when retention expires. A
+   * snapshot recorded with no captured disks is a record of a backup that does not
+   * exist — which is exactly what every snapshot row in this system was before this
+   * method existed.
+   */
+  externalId: string;
+  sizeBytes: number;
+}
+
+export interface SnapshotResult {
+  disks: ReadonlyArray<CapturedDisk>;
+  /** Real total across `disks`, read back from the provider. Never a placeholder. */
+  sizeBytes: number;
+}
+
 export interface ProvisioningService {
   create(desc: MachineDescriptor): Effect.Effect<MachineStatus, ProvisioningError>;
+  /**
+   * Copy the machine's disks and report what was copied.
+   *
+   * Added because `createSnapshot` wrote a database row and nothing else: it never
+   * called this port — `domain/archive/snapshot.ts` did not even import it — and
+   * stamped every row with the same hardcoded 32 GiB. Six "restorable" snapshots
+   * existed in production against two real Azure objects.
+   *
+   * Returning the ids is the whole point. A snapshot the control plane cannot name at
+   * the provider can never be restored from and can never be deleted when its
+   * retention expires.
+   */
+  snapshot(desc: SnapshotDescriptor): Effect.Effect<SnapshotResult, ProvisioningError>;
   archive(
     machineId: string,
     provider: Provider,

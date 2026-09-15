@@ -23,12 +23,15 @@ import { MACHINE_OS_USER } from "@cloudable/contracts";
 import { Effect, Layer } from "effect";
 import { config } from "../config";
 import {
+  type CapturedDisk,
   type MachineDescriptor,
   type MachineStatus,
   ProvisioningError,
   type ProvisioningService,
   ProvisioningServiceTag,
   type ReimageDescriptor,
+  type SnapshotDescriptor,
+  type SnapshotResult,
 } from "./ProvisioningService";
 
 const DATA_DISK_SIZE_GB = 64;
@@ -211,6 +214,179 @@ const resolveVmNames = (
     );
   });
 
+/**
+ * `/home` lives on the data disk, not the OS disk.
+ *
+ * `reimage` (this file) deletes the VM and its OS DISK and re-attaches the same data
+ * disk. Until this section existed, the person's work lived in `/home/cloudable` on the
+ * OS disk while the data disk was formatted, mounted at `/mnt/cloudable-data`, and
+ * written to by nothing at all — one reference, repo-wide. So an upgrade destroyed the
+ * work and carefully preserved an empty volume. Observed in production: the
+ * `machine.reimaged` of 2026-09-14 took a machine's home with it.
+ *
+ * This runs at cloud-init's `scripts-user` (final stage), strictly after `users-groups`
+ * (init stage) — so `cloudable` and `/home/cloudable` already exist, created by Azure
+ * from `osProfile.adminUsername`, on the OS disk. That home is what moves onto the disk
+ * that survives. The ordering is ASSERTED rather than assumed: a missing account aborts,
+ * because every ownership decision below would otherwise be made against a guess.
+ *
+ * The three paths this has to be right on:
+ *
+ *   first boot — no filesystem, or one with no marker: seed from the OS-disk home, then
+ *                mount at `/home`.
+ *   reboot     — this does NOT run. `scripts-user` is per-instance, not per-boot;
+ *                `/etc/fstab` is the only thing that mounts `/home`.
+ *   reimage    — fresh OS disk, so Azure creates a brand-new skel `/home/cloudable`
+ *                again. The disk wins; the skel home is moved aside, never merged.
+ *
+ * Exported separately from `cloudInitFor` so the tests can assert against it directly,
+ * and so the one-off migration runbook for machines provisioned before this landed
+ * (`docs/lifecycle.md`) quotes one source of truth instead of drifting from it.
+ */
+export function homeVolumeSection(dataDiskLun: number): string {
+  return `OS_USER=${MACHINE_OS_USER}
+DISK_LINK=/dev/disk/azure/scsi1/lun${dataDiskLun}
+STAGE=/run/cloudable-disk
+MARKER=.cloudable-home-volume
+OSDISK_HOME=/home.pre-cloudable
+
+setup_home_volume() {
+  if ! getent passwd "$OS_USER" >/dev/null; then
+    echo "cloudable: OS user $OS_USER does not exist yet - refusing to touch /home" >&2
+    exit 1
+  fi
+
+  # Azure's udev rule is what makes this path stable; /dev/sdX letters are not.
+  # readlink -f prints a non-existent path and still exits 0, so the block test is the
+  # real check. Written as an if, not "[ -b ... ] && break": under set -e a trailing
+  # false AND-list is the last command of the loop body and would abort the script.
+  WAITED=0
+  while [ "$WAITED" -lt 60 ]; do
+    if [ -b "$DISK_LINK" ]; then break; fi
+    sleep 2
+    WAITED=$((WAITED + 2))
+  done
+  if [ ! -b "$DISK_LINK" ]; then
+    echo "cloudable: data disk $DISK_LINK never appeared" >&2
+    exit 1
+  fi
+  DEVICE=$(readlink -f "$DISK_LINK")
+
+  # The only destructive command here, and it runs only when the device carries no
+  # filesystem signature at all. A disk holding a home always has one, so a reimage can
+  # never reach it. -m 1 because ext4 otherwise reserves 5% - over 3 GiB of a 64 GiB
+  # volume - for root, which is pointless on a one-person data volume.
+  if ! blkid "$DEVICE" >/dev/null 2>&1; then
+    mkfs.ext4 -F -m 1 -L cloudable-home "$DEVICE"
+  fi
+
+  mkdir -p "$STAGE"
+  mount "$DEVICE" "$STAGE"
+  if [ -e "$STAGE/$MARKER" ]; then SEEDED=yes; else SEEDED=no; fi
+
+  # A reimaged VM creates the account from scratch. It normally lands on uid 1000 again,
+  # but nothing guarantees it, and a shifted uid means the person cannot read their own
+  # files. That is a security property here, not a convenience: the file browser
+  # (tunnel-daemon/src/fs-helper.ts) has no path allowlist by design and relies entirely
+  # on the OS deciding against the uid it dropped to.
+  #
+  # Move the ACCOUNT to the files, not the files to the account: usermod is O(1) and
+  # preserves every non-cloudable ownership inside the home - root-owned files from the
+  # person's own sudo, a container's data directory - that a blanket chown -R flattens
+  # irrecoverably. usermod re-chowns the account's home itself, which is exactly why
+  # this runs while /home/cloudable is still the small skel home on the OS disk, before
+  # the real one is mounted.
+  if [ "$SEEDED" = yes ] && [ -d "$STAGE/$OS_USER" ]; then
+    WANT_UID=$(stat -c %u "$STAGE/$OS_USER")
+    WANT_GID=$(stat -c %g "$STAGE/$OS_USER")
+    # >= 1000 only: if the home on the disk somehow ended up root-owned, moving the
+    # account onto uid 0 would be catastrophic. The scoped chown below covers that case.
+    if [ "$WANT_UID" -ge 1000 ] && [ "$WANT_UID" != "$(id -u "$OS_USER")" ]; then
+      usermod -u "$WANT_UID" "$OS_USER" || echo "cloudable: uid $WANT_UID taken, re-owning instead" >&2
+    fi
+    if [ "$WANT_GID" -ge 1000 ] && [ "$WANT_GID" != "$(id -g "$OS_USER")" ]; then
+      groupmod -g "$WANT_GID" "$OS_USER" || echo "cloudable: gid $WANT_GID taken, re-owning instead" >&2
+    fi
+  fi
+  umount "$STAGE"
+  rmdir "$STAGE"
+
+  # Renamed, not deleted: it is the only copy of whatever was there, and a rename within
+  # one filesystem is atomic and free. No rm -rf near /home in a boot script.
+  # Renamed, not merely mounted over: if the disk ever fails to mount, a /home still
+  # holding a plausible skel home is the exact trap this change exists to remove - the
+  # person sees a home, believes it, works in it, loses it. An empty /home is an obvious
+  # fault; a fresh-looking one is an invisible one.
+  if [ -e "$OSDISK_HOME" ]; then OSDISK_HOME=$OSDISK_HOME.$(date +%s); fi
+  mv /home "$OSDISK_HOME"
+  mkdir -m 755 /home
+
+  # By UUID, not the /dev/sdX that readlink resolves to - which is what the previous
+  # version of this section wrote into fstab. Azure SCSI letters are not stable across
+  # reboots, so that line could mount nothing, or the wrong disk, and nofail made it
+  # silent.
+  #
+  # nofail is KEPT, and is not sufficient on its own: systemd-fstab-generator reads it
+  # as "do not order this mount before local-fs.target", so boot proceeds without
+  # waiting and the tunnel daemon could su into an unmounted /home.
+  # RequiresMountsFor=/home on that unit is what closes the race. nofail stays because
+  # a required mount that fails takes local-fs.target with it into emergency mode, and
+  # there is no way back into one of these machines: no inbound access by design
+  # (invariant 7), and the serial console wants an admin password that
+  # throwawayAdminPassword() deliberately discards.
+  #
+  # Rewritten rather than appended: scripts-user re-runs whenever the instance id
+  # changes, not only on a new machine, and the migration runbook writes this same line.
+  DISK_UUID=$(blkid -s UUID -o value "$DEVICE")
+  if grep -qs "^[^#].*[[:space:]]/home[[:space:]]" /etc/fstab; then
+    grep -v "^[^#].*[[:space:]]/home[[:space:]]" /etc/fstab > /etc/fstab.new || true
+    if [ -s /etc/fstab.new ]; then mv /etc/fstab.new /etc/fstab; else rm -f /etc/fstab.new; fi
+  fi
+  echo "UUID=$DISK_UUID /home ext4 defaults,nofail,x-systemd.device-timeout=30s 0 2" >> /etc/fstab
+
+  # "mount /home", not "mount $DEVICE /home", deliberately: it resolves through the line
+  # just written, so a bad fstab entry fails here and now on a machine with nothing to
+  # lose, instead of at the next reboot on a machine with a year of work on it. Under
+  # set -euo pipefail that abort happens before a single systemd unit is installed, so
+  # the machine never comes up half-configured.
+  mount /home
+
+  if [ "$SEEDED" = no ]; then
+    cp -a "$OSDISK_HOME/." /home/
+    # Marker last, after sync: a copy interrupted half way leaves no marker, so the next
+    # boot seeds again instead of mounting a half-populated home and declaring victory.
+    sync
+    echo "seeded_at=$(date -Is)" > "/home/$MARKER"
+    chmod 600 "/home/$MARKER"
+  fi
+
+  # Last resort, and the reason the >= 1000 guards above can afford to be timid. Scoped
+  # with --from, so only files that belonged to the OLD account are touched and anything
+  # deliberately owned by root or a service inside the home survives. An unconditional
+  # chown -R on every boot is not acceptable here: O(files) on a 64 GiB volume in front
+  # of the daemon that serves sessions, it clears setuid bits, and it destroys ownership
+  # information nothing can reconstruct.
+  HOME_DIR=/home/$OS_USER
+  if [ ! -d "$HOME_DIR" ]; then
+    mkdir -m 700 "$HOME_DIR"
+    chown "$OS_USER:$OS_USER" "$HOME_DIR"
+  fi
+  OWNER_UID=$(stat -c %u "$HOME_DIR")
+  OWNER_GID=$(stat -c %g "$HOME_DIR")
+  if [ "$OWNER_UID" != "$(id -u "$OS_USER")" ] || [ "$OWNER_GID" != "$(id -g "$OS_USER")" ]; then
+    chown -R --from="$OWNER_UID:$OWNER_GID" "$OS_USER:$OS_USER" "$HOME_DIR"
+  fi
+}
+
+# Skip the whole thing if a previous run already did it: cloud-init re-runs scripts-user
+# whenever the instance id changes, not only on a new machine.
+if mountpoint -q /home; then
+  echo "cloudable: /home is already a mount point, leaving it alone"
+else
+  setup_home_volume
+fi`;
+}
+
 /** Every binary this cloud-init installs is public (same posture as the
  * now-public GHCR control-plane image) — no token to inject. Unlike the
  * join-token adapters (docker/fake), the agent gets its own attestation
@@ -221,14 +397,7 @@ export function cloudInitFor(desc: MachineDescriptor, dataDiskLun: number): stri
   const script = `#!/bin/bash
 set -euo pipefail
 
-DEVICE=$(readlink -f /dev/disk/azure/scsi1/lun${dataDiskLun})
-MOUNT_POINT=/mnt/cloudable-data
-if ! blkid "$DEVICE" >/dev/null 2>&1; then
-  mkfs.ext4 -F "$DEVICE"
-fi
-mkdir -p "$MOUNT_POINT"
-mount "$DEVICE" "$MOUNT_POINT"
-echo "$DEVICE $MOUNT_POINT ext4 defaults,nofail 0 2" >> /etc/fstab
+${homeVolumeSection(dataDiskLun)}
 
 mkdir -p /opt/cloudable
 ARCH=$(uname -m)
@@ -262,6 +431,17 @@ Description=Cloudable tunnel daemon
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
+# Every session this daemon opens is "su - cloudable" (pty.ts) or
+# "su - cloudable -c ... --fs-helper" (files-session.ts), both of which land in
+# /home/cloudable. Starting before the data disk is mounted there hands the person a
+# shell in a home that is not theirs and that the next upgrade deletes - the exact
+# failure this change exists to prevent. RequiresMountsFor pulls in home.mount and
+# orders this unit after it, which is precisely the ordering nofail in /etc/fstab does
+# not provide.
+# Deliberately NOT on cloudable-agent.service: if the disk is genuinely missing the
+# agent must still come up and report, or a broken /home would also make the machine
+# invisible to the control plane and un-remediable by reimage.
+RequiresMountsFor=/home
 
 [Service]
 ExecStart=/opt/cloudable/tunnel-daemon
@@ -274,6 +454,8 @@ Environment=ATTESTATION_METHOD=managed_identity
 WantedBy=multi-user.target
 UNIT
 
+# After the fstab write above, so the generator has produced home.mount by the time the
+# tunnel daemon's RequiresMountsFor=/home is resolved.
 systemctl daemon-reload
 systemctl enable --now cloudable-agent
 systemctl enable --now cloudable-tunnel-daemon
@@ -498,17 +680,28 @@ const rollbackPartialCreate = (
  * Point-in-time copy of one disk, named after it. A snapshot's location must match its
  * source disk's, so it is read off the disk rather than assumed to match the machine's
  * own region.
+ *
+ * Returns the id and real size Azure reports back. This used to discard the result
+ * (`Effect<unknown>`), which is how the control plane ended up recording snapshots it
+ * could not name: the copy existed, nothing wrote down where.
  */
 const snapshotOf = (
   clients: ArmClients,
   rg: string,
+  kind: CapturedDisk["kind"],
   disk: { name?: string; id?: string; location?: string },
-): Effect.Effect<unknown, ProvisioningError> =>
+): Effect.Effect<CapturedDisk, ProvisioningError> =>
   runArm(() =>
     clients.compute.snapshots.beginCreateOrUpdateAndWait(rg, `${disk.name}-snap`, {
       location: disk.location ?? "",
       creationData: { createOption: "Copy", sourceResourceId: disk.id as string },
     }),
+  ).pipe(
+    Effect.map((snapshot) => ({
+      kind,
+      externalId: snapshot.id ?? "",
+      sizeBytes: snapshot.diskSizeBytes ?? 0,
+    })),
   );
 
 const service: ProvisioningService = {
@@ -614,6 +807,49 @@ const service: ProvisioningService = {
       ),
     ),
 
+  snapshot: (desc: SnapshotDescriptor) =>
+    Effect.gen(function* () {
+      const clients = yield* getClients();
+      const rg = config.azureMachinesResourceGroup;
+      const { names } = yield* resolveVmNames(clients, rg, desc.machineId, desc.externalId);
+
+      // Archive can stop the machine first and gets a quiesced copy for it. An upgrade
+      // cannot — the machine must stay up until `reimage` replaces it — so its
+      // pre-upgrade copy is crash-consistent. Tolerated-already-gone because a machine
+      // whose VM has vanished is still worth snapshotting the surviving disks of.
+      if (desc.quiesce) {
+        yield* tolerateAlreadyGone(
+          runArm(() => clients.compute.virtualMachines.beginDeallocateAndWait(rg, names.vm)),
+        );
+      }
+
+      const disks: CapturedDisk[] = [];
+
+      // "shallow" skips the OS disk deliberately: /home lives on the data disk
+      // (`homeVolumeSection`), and the OS is rebuilt from its image. It is the cheap
+      // copy of the part that cannot be recreated.
+      if (desc.scope === "full") {
+        const osDisk = yield* tolerateAlreadyGone(
+          runArm(() => clients.compute.disks.get(rg, names.osDisk)),
+        );
+        if (osDisk) disks.push(yield* snapshotOf(clients, rg, "os", osDisk));
+      }
+
+      const dataDisk = yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.disks.get(rg, names.dataDisk)),
+      );
+      if (dataDisk) disks.push(yield* snapshotOf(clients, rg, "data", dataDisk));
+
+      // An empty result is returned, not raised. A machine whose disks are already gone
+      // genuinely has nothing to copy, and the caller records that honestly as a
+      // snapshot row with no captured disks rather than inventing one. A disk that
+      // exists but cannot be copied is a real ProvisioningError and propagates.
+      return {
+        disks,
+        sizeBytes: disks.reduce((total, disk) => total + disk.sizeBytes, 0),
+      } satisfies SnapshotResult;
+    }),
+
   archive: (machineId: string, _provider, externalId) =>
     Effect.gen(function* () {
       const clients = yield* getClients();
@@ -624,26 +860,13 @@ const service: ProvisioningService = {
         runArm(() => clients.compute.virtualMachines.beginDeallocateAndWait(rg, names.vm)),
       );
 
-      // BOTH disks are snapshotted, not just the OS disk. The console's own archive
-      // dialog tells the person clicking it that "its data can still be restored from
-      // Archive until the retention window expires" — with only the OS disk copied and
-      // the data disk deleted outright, that sentence was false, and the machine's
-      // actual data was destroyed by the operation that promised to keep it.
+      // Snapshotting used to happen right here, inline, with its results discarded.
+      // It now belongs to `snapshot()` below, which `createSnapshot` calls BEFORE this
+      // teardown and whose ids actually get written down. Archiving is teardown only.
       //
-      // Restoring from these is still unbuilt (docs/lifecycle.md), but a snapshot that
-      // exists can be restored from later, while data deleted today cannot.
-      //
-      // A disk that is already gone is nothing to snapshot, not a reason to abandon the
-      // rest of the teardown.
-      const osDisk = yield* tolerateAlreadyGone(
-        runArm(() => clients.compute.disks.get(rg, names.osDisk)),
-      );
-      if (osDisk) yield* snapshotOf(clients, rg, osDisk);
-
-      const dataDisk = yield* tolerateAlreadyGone(
-        runArm(() => clients.compute.disks.get(rg, names.dataDisk)),
-      );
-      if (dataDisk) yield* snapshotOf(clients, rg, dataDisk);
+      // Ordering note for anyone moving this: the snapshot must come first. If teardown
+      // failed after a successful snapshot you are left with a copy and a live machine,
+      // which is recoverable; the reverse is not.
 
       // Teardown. Each delete tolerates only its OWN target being gone, and the
       // sequence always runs to the end: these five resources are independent, and

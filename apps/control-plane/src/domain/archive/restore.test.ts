@@ -8,6 +8,8 @@ import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { ApprovalService, settingKeyFor } from "../../services/ApprovalService";
 import { EventBus } from "../../services/EventBus";
+import type { ProvisioningServiceTag } from "../../services/ProvisioningService";
+import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { restoreSnapshot } from "./restore";
 import { createSnapshot } from "./snapshot";
 
@@ -27,7 +29,7 @@ import { createSnapshot } from "./snapshot";
 describe("restoreSnapshot — approval escalation floor (requires Postgres)", () => {
   let sql: ReturnType<typeof postgres>;
   let db: PostgresJsDatabase<typeof schema>;
-  let TestLayer: Layer.Layer<Db | EventBus | ApprovalService>;
+  let TestLayer: Layer.Layer<Db | EventBus | ApprovalService | ProvisioningServiceTag>;
 
   beforeAll(() => {
     sql = postgres(config.databaseUrl);
@@ -37,6 +39,11 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
       dbLayer,
       Layer.provide(EventBus.Default, dbLayer),
       Layer.provide(ApprovalService.Default, dbLayer),
+      // `createSnapshot` takes a real snapshot through this port now. These machines are
+      // seeded straight into Postgres and never into the fake adapter's own map, so it
+      // answers "not_found" — the one reason createSnapshot tolerates — and the rows land
+      // with no captured disks, which is the truth for a machine with no infrastructure.
+      FakeProvisioningServiceLive,
     );
   });
 
@@ -44,8 +51,9 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     await sql.end();
   });
 
-  const run = <A, E>(effect: Effect.Effect<A, E, Db | EventBus | ApprovalService>) =>
-    Effect.runPromise(Effect.provide(effect, TestLayer));
+  const run = <A, E>(
+    effect: Effect.Effect<A, E, Db | EventBus | ApprovalService | ProvisioningServiceTag>,
+  ) => Effect.runPromise(Effect.provide(effect, TestLayer));
 
   async function seedOrg() {
     const [org] = await db

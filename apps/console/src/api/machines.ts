@@ -337,11 +337,20 @@ export interface UpgradeResult {
  * outcome is not itself a thrown error — it's a legitimate, informative
  * result the caller renders (see `UpgradeMachineDialog`).
  */
+/** Which disks the pre-upgrade snapshot captures. "full" copies the OS disk as well as
+ * the persistent one; "shallow" copies only the persistent disk, which is where /home
+ * lives and the only part an image rebuild cannot recreate. */
+export type SnapshotScope = "full" | "shallow";
+
 export async function triggerUpgrade(
   machineId: string,
   targetImage: string,
+  snapshotScope: SnapshotScope = "full",
 ): Promise<UpgradeResult> {
-  return apiPost<UpgradeResult>(`/api/v1/machines/${machineId}/upgrade`, { targetImage });
+  return apiPost<UpgradeResult>(`/api/v1/machines/${machineId}/upgrade`, {
+    targetImage,
+    snapshotScope,
+  });
 }
 
 export interface ReconcileResult {

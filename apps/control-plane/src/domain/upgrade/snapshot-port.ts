@@ -29,7 +29,7 @@ import { Db } from "../../db/layer";
  */
 
 export class SnapshotError extends Data.TaggedError("SnapshotError")<{
-  reason: "machine_not_found" | "snapshot_not_found" | "db_error";
+  reason: "machine_not_found" | "snapshot_not_found" | "db_error" | "not_implemented";
   cause?: unknown;
 }> {}
 
@@ -76,15 +76,29 @@ export const restoreSnapshot = (
       );
     }
 
-    // STUB: a real restore reattaches the snapshotted volume/config to
-    // `options.targetMachineId` via `ProvisioningService` and emits
-    // `snapshot.restored` (see `packages/events/src/domains/snapshot.ts`).
-    // That mechanism belongs to unit 15; `UpgradeService` only needs this
-    // result shape to complete its own rollback bookkeeping today.
-    return {
-      snapshotId,
-      targetMachineId: options.targetMachineId,
-      mode,
-      restoredAt: new Date(),
-    };
+    // Nothing here reattaches anything. A real restore would hand the snapshotted
+    // volume back to `options.targetMachineId` via `ProvisioningService` and emit
+    // `snapshot.restored`; no `ProvisioningService` in this build has a restore
+    // operation at all, and unit 15's own `restoreSnapshot` documents the same gap.
+    //
+    // This used to `return` a fabricated success — a row was selected, and a result
+    // object claiming `restoredAt: new Date()` was handed back. `UpgradeService` read
+    // that as `outcome: "rolled_back"`, so a failed upgrade reported to the console,
+    // the CLI and the permanent `upgrade_attempts` record that the machine had been
+    // put back, while the machine sat on the new image with its OS disk already
+    // deleted. Failing is the honest answer until a restore exists: it routes the
+    // attempt to `rollback_failed`, whose whole purpose is "real state unknown, needs
+    // manual attention, here is the drift link".
+    //
+    // The `mode` and `options` arguments stay in the signature deliberately — the
+    // shape a real rollback needs is already settled (see the header comment), and the
+    // caller should not be rewritten twice.
+    void mode;
+    void options;
+    return yield* Effect.fail(
+      new SnapshotError({
+        reason: "not_implemented",
+        cause: `no automatic rollback exists yet; snapshot ${snapshotId} was not restored`,
+      }),
+    );
   });

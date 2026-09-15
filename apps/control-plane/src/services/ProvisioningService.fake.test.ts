@@ -36,6 +36,82 @@ describe("ProvisioningService.fake", () => {
     await Effect.runPromise(Effect.provide(program, FakeProvisioningServiceLive));
   });
 
+  // ---------------------------------------------------------------------------
+  // The snapshot port. It exists because `createSnapshot` used to write a database
+  // row and nothing else — no provider call, one hardcoded 32 GiB on every row, and
+  // no id to aim a restore or an expiry deletion at. These lock the two properties
+  // that matter at the port level; whether Azure honours them is the azure adapter's
+  // problem and is not testable here.
+  // ---------------------------------------------------------------------------
+
+  test("scope decides which disks are captured, and every capture is named", async () => {
+    const program = Effect.gen(function* () {
+      const provisioning = yield* ProvisioningServiceTag;
+      yield* provisioning.create({
+        machineId: "m-snap",
+        orgId: "org-1",
+        provider: "fake",
+        region: "eastus",
+        sizeSku: "Standard_B2s",
+      });
+
+      const full = yield* provisioning.snapshot({
+        machineId: "m-snap",
+        provider: "fake",
+        externalId: null,
+        scope: "full",
+        quiesce: true,
+      });
+      expect(full.disks.map((disk) => disk.kind)).toEqual(["os", "data"]);
+
+      // "shallow" omits the OS disk deliberately: /home is on the data disk, and the
+      // OS is rebuilt from its image. It is a complete copy of the only part that
+      // cannot be recreated, not a lesser copy of the same thing.
+      const shallow = yield* provisioning.snapshot({
+        machineId: "m-snap",
+        provider: "fake",
+        externalId: null,
+        scope: "shallow",
+        quiesce: false,
+      });
+      expect(shallow.disks.map((disk) => disk.kind)).toEqual(["data"]);
+      expect(shallow.sizeBytes).toBeLessThan(full.sizeBytes);
+
+      // An id per disk is the whole point of the port. Without one, a snapshot can
+      // never be restored from and never deleted when its retention expires — which
+      // is exactly the state all six production snapshot rows are in.
+      for (const disk of [...full.disks, ...shallow.disks]) {
+        expect(disk.externalId).not.toBe("");
+        expect(disk.sizeBytes).toBeGreaterThan(0);
+      }
+      expect(full.sizeBytes).toBe(full.disks.reduce((sum, disk) => sum + disk.sizeBytes, 0));
+    });
+
+    await Effect.runPromise(Effect.provide(program, makeFakeProvisioningServiceLive()));
+  });
+
+  test("snapshot fails with not_found for an unknown machine", async () => {
+    // createSnapshot treats this one reason as "nothing to copy" and records a row
+    // with no captured disks, rather than letting a machine whose infrastructure is
+    // already gone block its own archive.
+    const program = Effect.gen(function* () {
+      const provisioning = yield* ProvisioningServiceTag;
+      const result = yield* Effect.either(
+        provisioning.snapshot({
+          machineId: "missing",
+          provider: "fake",
+          externalId: null,
+          scope: "full",
+          quiesce: false,
+        }),
+      );
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") expect(result.left.reason).toBe("not_found");
+    });
+
+    await Effect.runPromise(Effect.provide(program, makeFakeProvisioningServiceLive()));
+  });
+
   test("archive and reconcile fail with not_found for an unknown machine", async () => {
     const program = Effect.gen(function* () {
       const provisioning = yield* ProvisioningServiceTag;

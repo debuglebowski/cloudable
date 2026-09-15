@@ -148,6 +148,7 @@ describe("reconcileMachine", () => {
     function spyProvisioning() {
       const calls: Array<{ method: string; machineId: string; externalId: string | null }> = [];
       const provisioning: ProvisioningService = {
+        snapshot: () => Effect.die("not used in this test"),
         create: () => Effect.die("not used in this test"),
         archive: (machineId, _provider, externalId) => {
           calls.push({ method: "archive", machineId, externalId });

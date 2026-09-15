@@ -443,4 +443,10 @@ export const makeDockerProvisioningServiceLive = (options: {
           reportedPackages: packages,
         } satisfies MachineStatus;
       }),
+    // A container has no disks to copy. An empty capture is the honest answer, and the
+    // caller records it as such: a snapshot row that names nothing, which is precisely
+    // what it is. `docker commit` would produce an image, not a point-in-time copy of a
+    // volume, and pretending otherwise would put the local adapter straight back into
+    // the business of reporting backups that do not exist.
+    snapshot: () => Effect.succeed({ disks: [], sizeBytes: 0 }),
   } satisfies ProvisioningService);

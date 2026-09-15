@@ -1,11 +1,13 @@
 import { Effect, Layer, Ref } from "effect";
 import {
+  type CapturedDisk,
   type MachineDescriptor,
   type MachineStatus,
   ProvisioningError,
   type ProvisioningService,
   ProvisioningServiceTag,
   type ReimageDescriptor,
+  type SnapshotResult,
 } from "./ProvisioningService";
 
 interface FakeMachineEntry {
@@ -120,6 +122,35 @@ export const makeFakeProvisioningServiceLive = (
           return running.status;
         });
 
+      // Reports a plausible capture rather than an empty one, so a test can tell the
+      // difference between "the snapshot port was called" and "nothing happened". The
+      // sizes are arbitrary but DIFFER per disk and per machine, deliberately: the bug
+      // this port exists to fix was every snapshot in the system reporting one hardcoded
+      // size, and a fake returning a constant would reproduce it in every test.
+      const snapshot: ProvisioningService["snapshot"] = (desc) =>
+        Effect.gen(function* () {
+          const existing = yield* require(desc.machineId);
+          const seed = desc.machineId.length * 1_000_000;
+          const disks: CapturedDisk[] = [];
+          // "shallow" omits the OS disk, the same way the azure adapter does.
+          if (desc.scope === "full") {
+            disks.push({
+              kind: "os",
+              externalId: `fake-snap-os-${existing.status.machineId}`,
+              sizeBytes: 30 * 1024 * 1024 * 1024 + seed,
+            });
+          }
+          disks.push({
+            kind: "data",
+            externalId: `fake-snap-data-${existing.status.machineId}`,
+            sizeBytes: 64 * 1024 * 1024 * 1024 + seed,
+          });
+          return {
+            disks,
+            sizeBytes: disks.reduce((total, disk) => total + disk.sizeBytes, 0),
+          } satisfies SnapshotResult;
+        });
+
       const archive: ProvisioningService["archive"] = (machineId: string, _provider) =>
         Effect.gen(function* () {
           const existing = yield* require(machineId);
@@ -180,7 +211,14 @@ export const makeFakeProvisioningServiceLive = (
           return restarted.status;
         });
 
-      return { create, archive, reconcile, reimage, restart } satisfies ProvisioningService;
+      return {
+        create,
+        snapshot,
+        archive,
+        reconcile,
+        reimage,
+        restart,
+      } satisfies ProvisioningService;
     }),
   );
 

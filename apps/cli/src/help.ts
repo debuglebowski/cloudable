@@ -108,10 +108,19 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       { name: "restart", summary: "Reboot a running machine", args: "<machine>" },
       {
         name: "upgrade",
-        summary: "Move a machine to a new image, with rollback",
+        summary: "Move a machine to a new image",
         args: "<machine>",
-        options: [{ flag: "--image <image>", description: "Image to upgrade to (required)" }],
-        notes: ["Snapshots first, then applies, then verifies. A failed verify rolls back."],
+        options: [
+          { flag: "--image <image>", description: "Image to upgrade to (required)" },
+          {
+            flag: "--snapshot <scope>",
+            description: "full (both disks, default) or shallow (your files only)",
+          },
+        ],
+        notes: [
+          "Snapshots first, then applies, then verifies.",
+          "There is no automatic rollback yet: a failed verify leaves the machine on the new image, flagged for manual attention.",
+        ],
       },
       {
         name: "reconcile",

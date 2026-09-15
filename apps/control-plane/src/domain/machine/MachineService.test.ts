@@ -482,6 +482,7 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
     await seedCatalogEntry("sku", "Standard_D2s_v5", { architecture: "x64" });
 
     const provisioningStillInProgress: ProvisioningService = {
+      snapshot: () => Effect.die("not used in this test"),
       create: (desc) =>
         Effect.succeed({
           machineId: desc.machineId,
