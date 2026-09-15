@@ -295,6 +295,12 @@ endpoints refuse to change it.
 Same shape as the machines region: deployment config is authoritative, and the console
 stops offering a choice that isn't real.
 
+Already have an application at your IdP? Pass its metadata URL and you are done. On
+Entra with nothing set up yet, [`../entra-sso`](../entra-sso) creates the enterprise
+application for you and outputs exactly this URL. It is a separate module, applied
+separately, because it writes to your directory rather than your subscription — see its
+README for why that boundary is worth keeping.
+
 Three things follow from it, all of them the point rather than side effects:
 
 **The provider id becomes fixed.** `@better-auth/sso` routes its assertion consumer
