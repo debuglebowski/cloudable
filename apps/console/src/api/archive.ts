@@ -48,6 +48,7 @@ export interface ArchivedSnapshot {
   sizeBytes: number;
   usedBytes: number | null;
   scope: "full" | "shallow";
+  capturedDiskCount: number;
   createdAt: string;
   retentionDays: number;
   expiresAt: string;
@@ -71,6 +72,7 @@ interface SnapshotViewWire {
   sizeBytes: number | null;
   usedBytes: number | null;
   scope: "full" | "shallow";
+  capturedDiskCount: number;
   containsData: boolean;
   containsConfig: boolean;
   legalHold: boolean;
@@ -97,6 +99,7 @@ export async function fetchArchivedSnapshots(): Promise<ArchivedSnapshot[]> {
     sizeBytes: s.sizeBytes ?? 0,
     usedBytes: s.usedBytes ?? null,
     scope: s.scope,
+    capturedDiskCount: s.capturedDiskCount ?? 0,
     createdAt: s.createdAt,
     retentionDays: s.retentionDays,
     expiresAt: s.expiresAt,

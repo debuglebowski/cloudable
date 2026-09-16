@@ -89,10 +89,17 @@ export function formatBytes(bytes: number): string {
 export function formatSnapshotSize(snapshot: {
   sizeBytes: number;
   usedBytes: number | null;
+  capturedDiskCount: number;
 }): string {
-  return snapshot.usedBytes !== null
-    ? formatBytes(snapshot.usedBytes)
-    : `${formatBytes(snapshot.sizeBytes)} max`;
+  // Measured by the machine itself: the real answer, and what the provider bills.
+  if (snapshot.usedBytes !== null) return formatBytes(snapshot.usedBytes);
+  // Nothing was copied, so `sizeBytes` is the hardcoded 32 GiB placeholder every
+  // pre-real snapshot carries -- not a disk, not a ceiling, not a measurement of
+  // anything. Showing it as "34.4 GB max" just relabels the number this change set
+  // out to stop showing.
+  if (snapshot.capturedDiskCount === 0) return "not recorded";
+  // Real disks, unmeasured contents. Provisioned size is a true upper bound.
+  return `${formatBytes(snapshot.sizeBytes)} max`;
 }
 
 export function daysUntil(iso: string): number {

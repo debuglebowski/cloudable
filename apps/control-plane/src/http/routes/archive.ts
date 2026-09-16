@@ -77,6 +77,15 @@ const SnapshotViewSuccess = Schema.Struct({
   usedBytes: Schema.NullOr(Schema.Number),
   /** "full" captured both disks, "shallow" the persistent volume only. */
   scope: Schema.Literal("full", "shallow"),
+  /**
+   * How many disks the provider actually copied for this snapshot.
+   *
+   * Zero means it copied nothing and the row names no cloud object — every snapshot
+   * written before snapshots were real is in that state, and `sizeBytes` on those rows
+   * is a hardcoded 32 GiB placeholder rather than any disk's size. A consumer must not
+   * present that number as a size or a ceiling; it is not a measurement of anything.
+   */
+  capturedDiskCount: Schema.Number,
   containsData: Schema.Boolean,
   containsConfig: Schema.Boolean,
   legalHold: Schema.Boolean,

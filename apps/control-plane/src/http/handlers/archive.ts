@@ -29,6 +29,7 @@ const toSnapshotView = (snapshot: SnapshotRow) => ({
   sizeBytes: snapshot.sizeBytes,
   usedBytes: snapshot.usedBytes,
   scope: snapshot.scope,
+  capturedDiskCount: Array.isArray(snapshot.capturedDisks) ? snapshot.capturedDisks.length : 0,
   containsData: snapshot.containsData,
   containsConfig: snapshot.containsConfig,
   legalHold: snapshot.legalHold,

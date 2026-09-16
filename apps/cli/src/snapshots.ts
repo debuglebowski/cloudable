@@ -21,6 +21,7 @@ interface SnapshotView {
   sizeBytes: number | null;
   usedBytes: number | null;
   scope: "full" | "shallow";
+  capturedDiskCount: number;
   containsData: boolean;
   containsConfig: boolean;
   legalHold: boolean;
@@ -64,8 +65,19 @@ function humanBytes(bytes: number): string {
  * machine in a fleet with identical disks — so it is a ceiling and is labelled as one
  * rather than presented as a size.
  */
-function sizeOf(snapshot: { sizeBytes: number | null; usedBytes: number | null }): string {
+function sizeOf(snapshot: {
+  sizeBytes: number | null;
+  usedBytes: number | null;
+  capturedDiskCount: number;
+}): string {
+  // Measured by the machine: the real answer, and what the provider bills.
   if (snapshot.usedBytes !== null) return humanBytes(snapshot.usedBytes);
+  // Nothing was copied, so `sizeBytes` is the old hardcoded placeholder, not a disk.
+  // Printing it as a ceiling would dress an invented number up as a measured one --
+  // which is the exact bug this column was changed to stop telling.
+  if (snapshot.capturedDiskCount === 0) return "not recorded";
+  // Real disks were copied but nobody measured their contents. The provisioned size
+  // is a true upper bound, so say so as one.
   if (snapshot.sizeBytes !== null) return `${humanBytes(snapshot.sizeBytes)} max`;
   return dash(null);
 }
