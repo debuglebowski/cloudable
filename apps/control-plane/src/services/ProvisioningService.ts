@@ -175,6 +175,19 @@ export interface SnapshotDescriptor {
   externalId: string | null;
   scope: SnapshotScope;
   /**
+   * The id of the snapshot row this capture belongs to, minted by the caller before the
+   * provider is called so the provider can put it in the resource name.
+   *
+   * Without it the azure adapter named every snapshot `<disk>-snap`, which is the same
+   * name every time for a given machine — so a machine's second snapshot silently
+   * overwrote its first via beginCreateOrUpdate. Observed on 2026-09-15: an upgrade
+   * snapshot and an archive snapshot twenty minutes apart left two rows in the database
+   * pointing at one pair of Azure resources. The deterministic name was survivable only
+   * while nothing recorded ids; now that `CapturedDisk.externalId` is written down, the
+   * name does not need to be derivable and must instead be unique.
+   */
+  snapshotId: string;
+  /**
    * Stop the machine before copying its disks.
    *
    * An archive can afford this and gets a clean, quiesced copy for it. An upgrade

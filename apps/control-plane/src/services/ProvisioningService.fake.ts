@@ -136,13 +136,13 @@ export const makeFakeProvisioningServiceLive = (
           if (desc.scope === "full") {
             disks.push({
               kind: "os",
-              externalId: `fake-snap-os-${existing.status.machineId}`,
+              externalId: `fake-snap-os-${existing.status.machineId}-${desc.snapshotId}`,
               sizeBytes: 30 * 1024 * 1024 * 1024 + seed,
             });
           }
           disks.push({
             kind: "data",
-            externalId: `fake-snap-data-${existing.status.machineId}`,
+            externalId: `fake-snap-data-${existing.status.machineId}-${desc.snapshotId}`,
             sizeBytes: 64 * 1024 * 1024 * 1024 + seed,
           });
           return {

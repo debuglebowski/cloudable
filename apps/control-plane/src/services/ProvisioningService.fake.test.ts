@@ -60,6 +60,7 @@ describe("ProvisioningService.fake", () => {
         provider: "fake",
         externalId: null,
         scope: "full",
+        snapshotId: "11111111-1111-4111-8111-111111111111",
         quiesce: true,
       });
       expect(full.disks.map((disk) => disk.kind)).toEqual(["os", "data"]);
@@ -72,6 +73,7 @@ describe("ProvisioningService.fake", () => {
         provider: "fake",
         externalId: null,
         scope: "shallow",
+        snapshotId: "22222222-2222-4222-8222-222222222222",
         quiesce: false,
       });
       expect(shallow.disks.map((disk) => disk.kind)).toEqual(["data"]);
@@ -85,6 +87,16 @@ describe("ProvisioningService.fake", () => {
         expect(disk.sizeBytes).toBeGreaterThan(0);
       }
       expect(full.sizeBytes).toBe(full.disks.reduce((sum, disk) => sum + disk.sizeBytes, 0));
+
+      // REGRESSION: the azure adapter named every snapshot `<disk>-snap`, the same name
+      // for a given disk every time, so a machine's second snapshot overwrote its first
+      // through beginCreateOrUpdate. An upgrade and an archive twenty minutes apart left
+      // two database rows pointing at one pair of Azure resources. The id belongs in the
+      // provider's name, and two captures of the same disk must never collide.
+      const osIds = [...full.disks, ...shallow.disks]
+        .filter((disk) => disk.kind === "data")
+        .map((disk) => disk.externalId);
+      expect(new Set(osIds).size).toBe(osIds.length);
     });
 
     await Effect.runPromise(Effect.provide(program, makeFakeProvisioningServiceLive()));
@@ -102,6 +114,7 @@ describe("ProvisioningService.fake", () => {
           provider: "fake",
           externalId: null,
           scope: "full",
+          snapshotId: "33333333-3333-4333-8333-333333333333",
           quiesce: false,
         }),
       );

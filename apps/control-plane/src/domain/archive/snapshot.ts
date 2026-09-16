@@ -90,12 +90,18 @@ export const createSnapshot = (
     // gone genuinely has nothing to copy, and that must not block archiving the record.
     // It is recorded as what it is — a snapshot naming no disks — rather than papered
     // over with a plausible-looking size.
+    // Minted here, not left to the column default, so the provider can put it in the
+    // resource name it creates. A provider name derived only from the disk is the same
+    // name every time, and the second snapshot of a machine overwrites the first.
+    const snapshotId = crypto.randomUUID();
+
     const captured = yield* provisioning
       .snapshot({
         machineId,
         provider: machine.provider,
         externalId: machine.externalResourceId,
         scope,
+        snapshotId,
         quiesce: options?.quiesce ?? false,
       })
       .pipe(
@@ -114,6 +120,7 @@ export const createSnapshot = (
         db
           .insert(snapshots)
           .values({
+            id: snapshotId,
             orgId: machine.orgId,
             machineId,
             trigger,

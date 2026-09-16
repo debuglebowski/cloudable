@@ -689,13 +689,23 @@ const snapshotOf = (
   clients: ArmClients,
   rg: string,
   kind: CapturedDisk["kind"],
+  snapshotId: string,
   disk: { name?: string; id?: string; location?: string },
 ): Effect.Effect<CapturedDisk, ProvisioningError> =>
   runArm(() =>
-    clients.compute.snapshots.beginCreateOrUpdateAndWait(rg, `${disk.name}-snap`, {
-      location: disk.location ?? "",
-      creationData: { createOption: "Copy", sourceResourceId: disk.id as string },
-    }),
+    // The row id's first 8 hex characters, not the bare `<disk>-snap` this used to be:
+    // that name is identical for every snapshot of a given disk, so the second one
+    // overwrote the first through beginCreateOrUpdate. Eight hex characters keep the
+    // name inside Azure's 80-character limit for even the longest machine name while
+    // making a collision within one machine's snapshots not a practical concern.
+    clients.compute.snapshots.beginCreateOrUpdateAndWait(
+      rg,
+      `${disk.name}-snap-${snapshotId.replaceAll("-", "").slice(0, 8)}`,
+      {
+        location: disk.location ?? "",
+        creationData: { createOption: "Copy", sourceResourceId: disk.id as string },
+      },
+    ),
   ).pipe(
     Effect.map((snapshot) => ({
       kind,
@@ -832,13 +842,13 @@ const service: ProvisioningService = {
         const osDisk = yield* tolerateAlreadyGone(
           runArm(() => clients.compute.disks.get(rg, names.osDisk)),
         );
-        if (osDisk) disks.push(yield* snapshotOf(clients, rg, "os", osDisk));
+        if (osDisk) disks.push(yield* snapshotOf(clients, rg, "os", desc.snapshotId, osDisk));
       }
 
       const dataDisk = yield* tolerateAlreadyGone(
         runArm(() => clients.compute.disks.get(rg, names.dataDisk)),
       );
-      if (dataDisk) disks.push(yield* snapshotOf(clients, rg, "data", dataDisk));
+      if (dataDisk) disks.push(yield* snapshotOf(clients, rg, "data", desc.snapshotId, dataDisk));
 
       // An empty result is returned, not raised. A machine whose disks are already gone
       // genuinely has nothing to copy, and the caller records that honestly as a
