@@ -149,9 +149,8 @@ export const releaseInspection = (
   sessionId: string,
 ): Effect.Effect<void, never, ProvisioningServiceTag> =>
   Effect.gen(function* () {
-    const found = [...entries.entries()].find(([, entry]) => entry.sessionIds.has(sessionId));
-    if (!found) return;
-    const [diskExternalId, entry] = found;
+    const entry = [...entries.values()].find((candidate) => candidate.sessionIds.has(sessionId));
+    if (!entry) return;
 
     entry.sessionIds.delete(sessionId);
     // Someone else is still reading. Revoking now would take the disk out from under
