@@ -40,9 +40,24 @@ interface Entry {
   grant: SnapshotReadGrant;
   filesystem: SnapshotFilesystem;
   provider: "azure" | "docker" | "fake";
-  diskExternalId: string;
+  /** Every session currently reading through this grant. The grant is released when the
+   * last one goes, never before. */
+  sessionIds: Set<string>;
 }
 
+/**
+ * Keyed by DISK, not by session, and that is the whole point.
+ *
+ * `revokeAccess` revokes access to the SNAPSHOT — not to one SAS handed out from it. So a
+ * grant-per-session registry had every close tear down a capability other sessions might
+ * still be using. Two people browsing the same snapshot broke each other, and one closing
+ * their tab killed the other's live session. Even alone it failed: closing a session and
+ * immediately opening another raced the revoke against the new grant, which is exactly
+ * what `cloudable snapshots ls` does twice in a row, and it failed every other time.
+ *
+ * Sharing one grant per disk and releasing it when the last reader leaves fixes all three,
+ * and costs one fewer provider round trip per session as well.
+ */
 const entries = new Map<string, Entry>();
 
 const readerFor = async (readUrl: string) => {
@@ -68,12 +83,9 @@ export const ensureInspectionFilesystem = (input: {
   disk: CapturedDisk;
 }): Effect.Effect<SnapshotFilesystem, ProvisioningError, ProvisioningServiceTag> =>
   Effect.gen(function* () {
-    const existing = entries.get(input.sessionId);
-    if (
-      existing &&
-      existing.diskExternalId === input.disk.externalId &&
-      existing.grant.expiresAt.getTime() - Date.now() > GRANT_REFRESH_MARGIN_MS
-    ) {
+    const existing = entries.get(input.disk.externalId);
+    if (existing && existing.grant.expiresAt.getTime() - Date.now() > GRANT_REFRESH_MARGIN_MS) {
+      existing.sessionIds.add(input.sessionId);
       return existing.filesystem;
     }
 
@@ -93,11 +105,13 @@ export const ensureInspectionFilesystem = (input: {
       catch: (cause) => new ProvisioningError({ reason: "provider_error", cause }),
     });
 
-    entries.set(input.sessionId, {
+    // Re-granting keeps whoever was already reading: they are about to be moved onto the
+    // fresh grant, and dropping them here would revoke the old one out from under them.
+    entries.set(input.disk.externalId, {
       grant,
       filesystem,
       provider: input.provider,
-      diskExternalId: input.disk.externalId,
+      sessionIds: new Set([...(existing?.sessionIds ?? []), input.sessionId]),
     });
     return filesystem;
   });
@@ -113,16 +127,22 @@ export const releaseInspection = (
   sessionId: string,
 ): Effect.Effect<void, never, ProvisioningServiceTag> =>
   Effect.gen(function* () {
-    const entry = entries.get(sessionId);
-    if (!entry) return;
-    entries.delete(sessionId);
+    const found = [...entries.entries()].find(([, entry]) => entry.sessionIds.has(sessionId));
+    if (!found) return;
+    const [diskExternalId, entry] = found;
 
+    entry.sessionIds.delete(sessionId);
+    // Someone else is still reading. Revoking now would take the disk out from under
+    // them mid-listing — see this file's header.
+    if (entry.sessionIds.size > 0) return;
+
+    entries.delete(diskExternalId);
     const provisioning = yield* ProvisioningServiceTag;
     yield* provisioning
-      .revokeSnapshotRead({ provider: entry.provider, diskExternalId: entry.diskExternalId })
+      .revokeSnapshotRead({ provider: entry.provider, diskExternalId })
       .pipe(Effect.catchAll(() => Effect.void));
   });
 
-/** Session ids currently holding a grant — the expiry daemon's input for finding
- * handles whose session has since ended. */
-export const heldInspectionSessionIds = (): string[] => [...entries.keys()];
+/** Session ids currently reading through a grant, across every disk. */
+export const heldInspectionSessionIds = (): string[] =>
+  [...entries.values()].flatMap((entry) => [...entry.sessionIds]);

@@ -205,6 +205,70 @@ describe.skipIf(!dbReachable)("snapshot inspection — end to end (requires Post
     expect((error as { _tag: string })._tag).toBe("InspectionSessionNotFoundError");
   });
 
+  test("two sessions on the same snapshot do not break each other", async () => {
+    // The grant is per DISK, not per session, because `revokeAccess` revokes the whole
+    // snapshot rather than one SAS. With a grant per session, one person closing their
+    // tab tore the disk out from under everyone else reading it — and opening a session
+    // right after closing one raced the revoke against the new grant, which is what the
+    // CLI does twice in a row and why it failed every other time.
+    const { org, owner, snapshot } = await seedOwnedSnapshot();
+
+    const first = await run(
+      openInspection({ snapshotId: snapshot.id, orgId: org.id, personId: owner.id }),
+    );
+    const second = await run(
+      openInspection({ snapshotId: snapshot.id, orgId: org.id, personId: owner.id }),
+    );
+
+    const scopeFor = (sessionId: string) => ({ sessionId, orgId: org.id, personId: owner.id });
+    await run(inspectionFilesystem(scopeFor(first.sessionId)));
+    await run(inspectionFilesystem(scopeFor(second.sessionId)));
+
+    // Close the first. The second must keep working.
+    await run(
+      closeInspection({
+        sessionId: first.sessionId,
+        orgId: org.id,
+        actor: { actorType: "person", actorId: owner.id },
+        reason: "person_ended",
+      }),
+    );
+
+    const stillReadable = await run(inspectionFilesystem(scopeFor(second.sessionId)));
+    const listing = await stillReadable.list(second.rootPath);
+    if (!listing.ok || listing.op !== "list") throw new Error("second session lost its disk");
+    expect(listing.entries.map((e) => e.name)).toContain("notes.txt");
+  });
+
+  test("opening again right after closing still works", async () => {
+    // The sequential form of the same race: `snapshots ls` opens, reads, closes, and the
+    // next invocation opens again immediately.
+    const { org, owner, snapshot } = await seedOwnedSnapshot();
+
+    for (let i = 0; i < 3; i++) {
+      const opened = await run(
+        openInspection({ snapshotId: snapshot.id, orgId: org.id, personId: owner.id }),
+      );
+      const fs = await run(
+        inspectionFilesystem({
+          sessionId: opened.sessionId,
+          orgId: org.id,
+          personId: owner.id,
+        }),
+      );
+      const listing = await fs.list(opened.rootPath);
+      expect(listing.ok).toBe(true);
+      await run(
+        closeInspection({
+          sessionId: opened.sessionId,
+          orgId: org.id,
+          actor: { actorType: "person", actorId: owner.id },
+          reason: "person_ended",
+        }),
+      );
+    }
+  });
+
   test("standing is re-checked on every operation, not just at open", async () => {
     // The property that makes a revoked elevation stop reads immediately rather than
     // within a minute, when the re-authorization sweep next runs.

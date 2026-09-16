@@ -473,6 +473,19 @@ Holes and uninitialised extents read as zeroes. The second is a data-leak guard 
 a nicety: those blocks are allocated and never written, so their contents belong to
 whatever used them last.
 
+### One grant per disk, not per session
+
+`revokeAccess` revokes access to the SNAPSHOT, not to a single SAS handed out from it. A
+grant per session therefore had every close tear down a capability other sessions were
+still using: two people browsing the same snapshot broke each other, one closing a tab
+killed the other's live session, and even alone, closing a session and opening another
+immediately raced the revoke against the new grant — which is exactly what
+`cloudable snapshots ls` does twice in a row, and it failed every other invocation.
+
+`inspection-registry.ts` is therefore keyed by `CapturedDisk.externalId` and holds the set
+of sessions reading through it. The grant is released when the last one leaves, never
+before. That also costs one fewer provider round trip per session.
+
 ### The grant is never stored
 
 Reading needs a provider read grant — on Azure, a SAS URL from `snapshots.grantAccess`,
