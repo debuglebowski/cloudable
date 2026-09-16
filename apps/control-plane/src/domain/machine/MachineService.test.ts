@@ -489,6 +489,10 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
           state: "provisioning",
           externalId: "azure-vm-in-progress",
         }),
+      // Not exercised here — inspection has its own tests. `die` rather than a stub
+      // result so an unexpected call fails loudly instead of passing silently.
+      grantSnapshotRead: () => Effect.die("grantSnapshotRead not stubbed in this test"),
+      revokeSnapshotRead: () => Effect.die("revokeSnapshotRead not stubbed in this test"),
       archive: () => Effect.die("not used in this test"),
       reconcile: () => Effect.die("not used in this test"),
       reimage: () => Effect.die("not used in this test"),

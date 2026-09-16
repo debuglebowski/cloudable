@@ -14,6 +14,7 @@ import { machines, sessions } from "@cloudable/schema";
 import { eq, isNull } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../db/layer";
+import { isAuthorizedToInspectSnapshot } from "../domain/archive/inspect-authorization";
 import { isAuthorizedForInteractiveAccess } from "./access-authorization";
 import { TunnelRegistry } from "./registry";
 import { type EndSessionInput, TunnelError, TunnelServer } from "./server";
@@ -160,12 +161,26 @@ export const closeSessionsWithLapsedAuthorization = (): Effect.Effect<
       // close every file session held on a `file_recovery` grant on the very next tick —
       // the session would mint successfully and then die seconds later, for no visible
       // reason, and only for the non-owner case that elevation exists to serve.
-      const authorized = yield* isAuthorizedForInteractiveAccess(db, {
-        personId: row.personId,
-        machineId: row.machineId,
-        ownerPersonId: row.ownerPersonId,
-        method: row.method,
-      }).pipe(Effect.mapError((cause) => new TunnelError({ reason: "persist_failed", cause })));
+      // Snapshot inspection is governed by its own gate, which reaches the opposite
+      // conclusion about a machine with no owner — see
+      // `domain/archive/inspect-authorization.ts`. Asking the interactive question about
+      // an inspection session would re-open, once a minute, exactly the hole that gate
+      // exists to close: every offboarded machine has a null owner, and the interactive
+      // gate answers `true` for one.
+      const authorized = yield* (
+        row.method === "snapshot_files"
+          ? isAuthorizedToInspectSnapshot(db, {
+              personId: row.personId,
+              machineId: row.machineId,
+              ownerPersonId: row.ownerPersonId,
+            })
+          : isAuthorizedForInteractiveAccess(db, {
+              personId: row.personId,
+              machineId: row.machineId,
+              ownerPersonId: row.ownerPersonId,
+              method: row.method,
+            })
+      ).pipe(Effect.mapError((cause) => new TunnelError({ reason: "persist_failed", cause })));
 
       if (!authorized) {
         yield* relay.endSession({

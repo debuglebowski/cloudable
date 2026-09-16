@@ -1,8 +1,8 @@
+import type { SessionRowMethod } from "@cloudable/contracts";
 import { machines, sessions } from "@cloudable/schema";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { Db } from "../db/layer";
-import type { SessionMethod } from "./session-token";
 
 export class SessionQueryError extends Data.TaggedError("SessionQueryError")<{
   reason: string;
@@ -57,7 +57,9 @@ export interface ActiveSessionRow {
   machineId: string;
   machineName: string;
   personId: string;
-  method: SessionMethod;
+  /** `SessionRowMethod`, not `SessionMethod`: the Access page lists every open session,
+   * and a snapshot inspection is one even though no tunnel daemon ever sees it. */
+  method: SessionRowMethod;
   osUser: string;
   startedAt: Date;
   endedAt: Date | null;

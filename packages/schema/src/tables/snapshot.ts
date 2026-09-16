@@ -10,6 +10,21 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
+/**
+ * One disk the provider actually copied, as recorded in `snapshots.capturedDisks`.
+ *
+ * Declared here rather than in the control plane's `ProvisioningService` because this is
+ * the shape that is PERSISTED — the port imports it from here so the writer and the
+ * column can never describe different things. `externalId` is the provider's own id for
+ * the copy (a full ARM resource id on Azure), and it is the only handle anything has for
+ * reading, restoring or deleting that copy later.
+ */
+export interface CapturedDisk {
+  kind: "os" | "data";
+  externalId: string;
+  sizeBytes: number;
+}
+
 /** A point-in-time snapshot of a machine, taken on archive, upgrade, or manual request. */
 export const snapshots = pgTable("snapshots", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -49,7 +64,10 @@ export const snapshots = pgTable("snapshots", {
   // Empty on every row written before snapshots became real. Such a row points at
   // nothing in the cloud: it can neither be restored from nor deleted at expiry, because
   // there is nothing to aim either operation at. Six of them exist in production.
-  capturedDisks: jsonb("captured_disks").notNull().default(sql`'[]'::jsonb`),
+  capturedDisks: jsonb("captured_disks")
+    .$type<CapturedDisk[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
   containsData: boolean("contains_data").notNull().default(true),
   containsConfig: boolean("contains_config").notNull().default(true),
   legalHold: boolean("legal_hold").notNull().default(false),

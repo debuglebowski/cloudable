@@ -39,6 +39,8 @@ export const SwitchableProvisioningServiceLive: Layer.Layer<ProvisioningServiceT
     return {
       create: (desc) => implFor(desc.provider).create(desc),
       snapshot: (desc) => implFor(desc.provider).snapshot(desc),
+      grantSnapshotRead: (input) => implFor(input.provider).grantSnapshotRead(input),
+      revokeSnapshotRead: (input) => implFor(input.provider).revokeSnapshotRead(input),
       archive: (machineId, provider, externalId) =>
         implFor(provider).archive(machineId, provider, externalId),
       reconcile: (machineId, provider, externalId) =>

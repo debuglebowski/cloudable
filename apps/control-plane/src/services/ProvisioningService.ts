@@ -1,4 +1,7 @@
+import type { CapturedDisk } from "@cloudable/schema";
 import { Context, Data, type Effect } from "effect";
+
+export type { CapturedDisk };
 
 /**
  * Azure SDK failures arrive as `RestError`-shaped causes, where `statusCode` and `code`
@@ -200,24 +203,24 @@ export interface SnapshotDescriptor {
   quiesce: boolean;
 }
 
-/** One disk the provider actually copied. */
-export interface CapturedDisk {
-  kind: "os" | "data";
-  /**
-   * The provider's own id for the copy. Load-bearing, not decoration: without it
-   * nothing can restore from this snapshot or delete it when retention expires. A
-   * snapshot recorded with no captured disks is a record of a backup that does not
-   * exist — which is exactly what every snapshot row in this system was before this
-   * method existed.
-   */
-  externalId: string;
-  sizeBytes: number;
-}
+// `CapturedDisk` is re-exported from `@cloudable/schema` at the top of this file rather
+// than declared here. It used to be declared in both places, structurally identical and
+// free to drift; the column is the thing that has to be right, so the column's package
+// owns the shape. `externalId` is load-bearing, not decoration: without it nothing can
+// read, restore from, or delete this copy when retention expires.
 
 export interface SnapshotResult {
   disks: ReadonlyArray<CapturedDisk>;
   /** Real total across `disks`, read back from the provider. Never a placeholder. */
   sizeBytes: number;
+}
+
+export interface SnapshotReadGrant {
+  /** Supports HTTP `Range` requests over the raw disk image, byte 0 = disk byte 0. */
+  readUrl: string;
+  /** When the provider stops honouring `readUrl`, regardless of session state. A session
+   * outliving its grant re-grants rather than reading through a dead URL. */
+  expiresAt: Date;
 }
 
 export interface ProvisioningService {
@@ -235,6 +238,30 @@ export interface ProvisioningService {
    * retention expires.
    */
   snapshot(desc: SnapshotDescriptor): Effect.Effect<SnapshotResult, ProvisioningError>;
+  /**
+   * Open a time-limited, READ-ONLY window onto one captured disk, for inspecting a
+   * snapshot's filesystem without restoring it (`domain/archive/inspect.ts`).
+   *
+   * Returns a URL supporting HTTP range requests over the raw disk image. That is the
+   * whole contract: the caller reads bytes at offsets and parses the filesystem itself,
+   * so nothing provider-specific leaks past this boundary.
+   *
+   * The URL is a CREDENTIAL. It is never persisted — invariant 1 — and callers hold it
+   * in memory for the life of one inspection session, then call `revokeSnapshotRead`.
+   * Pair every grant with a revoke; an un-revoked grant stays usable at the provider
+   * until its own duration elapses, whatever the control plane believes.
+   */
+  grantSnapshotRead(input: {
+    provider: Provider;
+    diskExternalId: string;
+    durationSeconds: number;
+  }): Effect.Effect<SnapshotReadGrant, ProvisioningError>;
+  /** Ends the access `grantSnapshotRead` opened. Idempotent: revoking a disk with no live
+   * grant is a no-op at the provider, not an error, so a double-close never fails. */
+  revokeSnapshotRead(input: {
+    provider: Provider;
+    diskExternalId: string;
+  }): Effect.Effect<void, ProvisioningError>;
   archive(
     machineId: string,
     provider: Provider,

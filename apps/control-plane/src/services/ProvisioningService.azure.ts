@@ -31,6 +31,7 @@ import {
   ProvisioningServiceTag,
   type ReimageDescriptor,
   type SnapshotDescriptor,
+  type SnapshotReadGrant,
   type SnapshotResult,
 } from "./ProvisioningService";
 
@@ -132,6 +133,16 @@ function namesForBase(base: string) {
  * name)` again. */
 export function parseVmNameFromResourceId(id: string): string | null {
   const match = /\/virtualMachines\/([^/]+)$/i.exec(id);
+  return match ? (match[1] ?? null) : null;
+}
+
+/** The same recovery for a snapshot: `CapturedDisk.externalId` is a full ARM resource id
+ * (`.../providers/Microsoft.Compute/snapshots/<name>`), but the SDK's snapshot operations
+ * are addressed by resource-group + NAME. Parsed rather than re-derived, for the reason
+ * `snapshotOf` records: the name embeds a slice of the snapshot row's id and is not
+ * reconstructible from the machine alone. */
+export function parseSnapshotNameFromResourceId(id: string): string | null {
+  const match = /\/snapshots\/([^/]+)$/i.exec(id);
   return match ? (match[1] ?? null) : null;
 }
 
@@ -858,6 +869,66 @@ const service: ProvisioningService = {
         disks,
         sizeBytes: disks.reduce((total, disk) => total + disk.sizeBytes, 0),
       } satisfies SnapshotResult;
+    }),
+
+  grantSnapshotRead: ({ diskExternalId, durationSeconds }) =>
+    Effect.gen(function* () {
+      const clients = yield* getClients();
+      const name = parseSnapshotNameFromResourceId(diskExternalId);
+      if (!name) {
+        return yield* Effect.fail(
+          new ProvisioningError({
+            reason: "not_found",
+            cause: `not an Azure snapshot resource id: ${diskExternalId}`,
+          }),
+        );
+      }
+
+      // `grantAccess` is authorized by `Microsoft.Compute/snapshots/beginGetAccess/action`,
+      // which is a DIFFERENT permission from the `disks/beginGetAccess` the archive path
+      // already has. Both live on `azurerm_role_definition.machine_operator` in
+      // `infra/terraform/control-plane/main.tf`; a missing one surfaces here as a plain
+      // authorization failure and nowhere in the Activity Log.
+      const access = yield* runArm(() =>
+        clients.compute.snapshots.beginGrantAccessAndWait(config.azureMachinesResourceGroup, name, {
+          access: "Read",
+          durationInSeconds: durationSeconds,
+        }),
+      );
+
+      if (!access.accessSAS) {
+        return yield* Effect.fail(
+          new ProvisioningError({
+            reason: "provider_error",
+            cause: `grantAccess returned no SAS for snapshot ${name}`,
+          }),
+        );
+      }
+
+      return {
+        readUrl: access.accessSAS,
+        expiresAt: new Date(Date.now() + durationSeconds * 1000),
+      } satisfies SnapshotReadGrant;
+    }),
+
+  revokeSnapshotRead: ({ diskExternalId }) =>
+    Effect.gen(function* () {
+      const clients = yield* getClients();
+      const name = parseSnapshotNameFromResourceId(diskExternalId);
+      // Nothing to revoke on a malformed id, and a close path must not fail over one.
+      if (!name) return;
+
+      // `tolerateAlreadyGone`: revoking a snapshot that has since been deleted, or that
+      // never had a live grant, is the state we wanted. A close path that can fail leaves
+      // the grant open, which is the opposite of what it is for.
+      yield* tolerateAlreadyGone(
+        runArm(() =>
+          clients.compute.snapshots.beginRevokeAccessAndWait(
+            config.azureMachinesResourceGroup,
+            name,
+          ),
+        ),
+      );
     }),
 
   archive: (machineId: string, _provider, externalId) =>

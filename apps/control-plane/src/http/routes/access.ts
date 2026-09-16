@@ -122,7 +122,11 @@ const SessionSummary = Schema.Struct({
   machineId: Schema.String,
   machineName: Schema.String,
   personId: Schema.String,
-  method: Schema.Literal("terminal", "ssh", "files"),
+  // Wider than `MintSessionTokenRequest.method` above, on purpose. A snapshot inspection
+  // is a real open session and belongs on the Access page so it can be seen and
+  // terminated — but it is minted by the archive routes, never here, and no token is
+  // signed for it. Listing it is not the same as being able to ask for one.
+  method: Schema.Literal("terminal", "ssh", "files", "snapshot_files"),
   osUser: Schema.String,
   startedAt: Schema.String,
 });

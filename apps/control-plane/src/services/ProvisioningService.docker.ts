@@ -449,4 +449,16 @@ export const makeDockerProvisioningServiceLive = (options: {
     // volume, and pretending otherwise would put the local adapter straight back into
     // the business of reporting backups that do not exist.
     snapshot: () => Effect.succeed({ disks: [], sizeBytes: 0 }),
+    // Follows from `snapshot` above: this adapter never records a captured disk, so there
+    // is never an id to grant read access against. `not_found` is the same answer the
+    // domain already gets when a machine's infrastructure is gone, and the console
+    // renders it as "nothing was captured" rather than as a failure.
+    grantSnapshotRead: ({ diskExternalId }) =>
+      Effect.fail(
+        new ProvisioningError({
+          reason: "not_found",
+          cause: `docker machines capture no disks; nothing to read for ${diskExternalId}`,
+        }),
+      ),
+    revokeSnapshotRead: () => Effect.void,
   } satisfies ProvisioningService);

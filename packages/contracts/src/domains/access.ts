@@ -79,8 +79,27 @@ export interface RevokeCertificateRequest {
  * Mirrored by `@cloudable/session-token`'s own `SessionMethod` (the daemon can't depend on
  * this package) and by the `method` payload field on `access.session_*` in
  * `@cloudable/events`. All three must be widened together.
+ *
+ * See `SessionRowMethod` below for the wider set a `sessions` ROW can hold.
  */
 export type SessionMethod = "terminal" | "ssh" | "files";
+
+/**
+ * Every value `sessions.method` can hold — `SessionMethod` plus `"snapshot_files"`, the
+ * read-only inspection of an archived machine's snapshot (`docs/lifecycle.md`).
+ *
+ * A SEPARATE type, and the separation is the point. `SessionMethod` is what a signed
+ * session token may claim and therefore what a tunnel daemon may be asked to spawn.
+ * Snapshot inspection has no daemon and no token: the control plane reads the disk
+ * itself. Widening `SessionMethod` to cover it would put a method the daemon must never
+ * see into the very type that says which methods it may.
+ *
+ * So: anything about the transport takes `SessionMethod`; anything reading a `sessions`
+ * row takes this. Code that must handle a row generically — the re-authorization sweep,
+ * the Access page — branches on `"snapshot_files"` first and narrows to `SessionMethod`
+ * after, which the compiler enforces.
+ */
+export type SessionRowMethod = SessionMethod | "snapshot_files";
 
 export interface MintSessionTokenRequest {
   targetMachineId: string;

@@ -162,7 +162,7 @@ export const createSnapshot = (
             sizeBytes: captured.sizeBytes,
             usedBytes: measuredUsedBytes(machine.volumeUsage, scope) ?? null,
             scope,
-            capturedDisks: captured.disks,
+            capturedDisks: [...captured.disks],
             // False when the provider copied nothing, so the console stops labelling an
             // empty record "data+config". `containsConfig` stays true regardless: the
             // machine's desired state lives in this database, not on either disk.

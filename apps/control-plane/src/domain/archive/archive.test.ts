@@ -95,6 +95,10 @@ describe("archiveMachine — threads externalResourceId to the provisioning port
         });
       },
       create: () => Effect.die("not used in this test"),
+      // Not exercised here — inspection has its own tests. `die` rather than a stub
+      // result so an unexpected call fails loudly instead of passing silently.
+      grantSnapshotRead: () => Effect.die("grantSnapshotRead not stubbed in this test"),
+      revokeSnapshotRead: () => Effect.die("revokeSnapshotRead not stubbed in this test"),
       archive: (machineId, provider, externalId) => {
         calls.push({ op: "archive", machineId, provider, externalId });
         return Effect.succeed({ machineId, state: "archived", externalId });

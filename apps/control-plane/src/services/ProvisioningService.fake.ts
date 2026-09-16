@@ -7,6 +7,7 @@ import {
   type ProvisioningService,
   ProvisioningServiceTag,
   type ReimageDescriptor,
+  type SnapshotReadGrant,
   type SnapshotResult,
 } from "./ProvisioningService";
 
@@ -26,6 +27,16 @@ export interface FakeProvisioningOptions {
    * (invariants #4, #5); it only ever reports what reconcile() would find.
    */
   simulatedExtraPackages?: ReadonlyMap<string, ReadonlyArray<string>>;
+  /**
+   * Absolute paths to real disk images, keyed by `CapturedDisk.externalId`, returned by
+   * `grantSnapshotRead` as `file://` URLs.
+   *
+   * This is what lets snapshot inspection be tested end to end — HTTP route, access gate,
+   * session lifecycle, ext4 reader — against a genuine filesystem image with no cloud
+   * account. A fake that returned invented directory listings would test the plumbing
+   * against itself and prove nothing about whether the reader can read a real ext4.
+   */
+  snapshotImages?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -151,6 +162,33 @@ export const makeFakeProvisioningServiceLive = (
           } satisfies SnapshotResult;
         });
 
+      const grantSnapshotRead: ProvisioningService["grantSnapshotRead"] = ({
+        diskExternalId,
+        durationSeconds,
+      }) =>
+        Effect.gen(function* () {
+          const path = options.snapshotImages?.get(diskExternalId);
+          if (!path) {
+            // Deliberately `not_found` rather than a stub URL: a test that forgot to
+            // register an image should fail where the image is missing, not later with an
+            // unreadable superblock.
+            return yield* Effect.fail(
+              new ProvisioningError({
+                reason: "not_found",
+                cause: `no fake snapshot image registered for ${diskExternalId}`,
+              }),
+            );
+          }
+          return {
+            readUrl: `file://${path}`,
+            expiresAt: new Date(Date.now() + durationSeconds * 1000),
+          } satisfies SnapshotReadGrant;
+        });
+
+      // Nothing to release for a local file. Still a real no-op rather than a failure:
+      // every close path calls this, including for disks that were never granted.
+      const revokeSnapshotRead: ProvisioningService["revokeSnapshotRead"] = () => Effect.void;
+
       const archive: ProvisioningService["archive"] = (machineId: string, _provider) =>
         Effect.gen(function* () {
           const existing = yield* require(machineId);
@@ -214,6 +252,8 @@ export const makeFakeProvisioningServiceLive = (
       return {
         create,
         snapshot,
+        grantSnapshotRead,
+        revokeSnapshotRead,
         archive,
         reconcile,
         reimage,
