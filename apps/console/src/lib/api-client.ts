@@ -142,6 +142,23 @@ export async function apiGetText(path: string): Promise<string> {
   return res.text();
 }
 
+/** Same credentialed shape as `apiGetText`, for an endpoint whose body IS the file —
+ * a snapshot download. Kept out of `request<T>` because that parses JSON. */
+export async function apiGetBytes(path: string): Promise<Uint8Array> {
+  const res = await fetch(`${BASE_URL}${path}`, { method: "GET", credentials: "include" });
+  if (!res.ok) {
+    const body = await res
+      .clone()
+      .json()
+      .catch(() => undefined);
+    if (res.status === 401 && isExpiredSession(body)) {
+      onUnauthorized?.();
+    }
+    throw new ApiError(res.status, path, "GET", body);
+  }
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 export function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, {
     method: "POST",

@@ -7,7 +7,7 @@
 // stops the retention clock from expiring the data.
 // ---------------------------------------------------------------------------
 import { oneOf, parseArgs, positiveInt, readSpec, required, requiredFlag } from "./args";
-import { authenticatedApiRequest, postJson, query } from "./http-client";
+import { authenticatedApiBytes, authenticatedApiRequest, postJson, query } from "./http-client";
 import { dash, printEmpty, printFields, printJson, printTable, shortTime } from "./output";
 import { usageFor } from "./program";
 import { machineId } from "./resolve";
@@ -407,6 +407,25 @@ export async function runSnapshotsLsCommand(argv: ReadonlyArray<string>): Promis
     if (result.truncated) {
       console.log("\nMore. This directory has more entries than are shown.");
     }
+  });
+}
+
+export async function runSnapshotsGetFileCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor("snapshots get-file <snapshotId> <path> [--out <file>]");
+  const args = parseArgs(argv, readSpec({ values: ["out"] }));
+  const snapshotId = required(args, 0, "a snapshot id", usage);
+  const path = required(args, 1, "a path", usage);
+
+  await withInspection(snapshotId, async (session) => {
+    // `cat` refuses a binary or anything over 1 MiB, because it prints. This is the one
+    // that recovers the file — the archive, the database dump, the thing someone actually
+    // needed back.
+    const bytes = await authenticatedApiBytes(
+      `/api/v1/archive/inspections/${session.sessionId}/download${query({ path })}`,
+    );
+    const out = args.flags.out ?? path.split("/").pop() ?? "download";
+    await Bun.write(out, bytes);
+    console.log(`${humanBytes(bytes.byteLength)} written to ${out}`);
   });
 }
 

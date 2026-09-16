@@ -235,7 +235,17 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         name: "cat",
         summary: "Print a file from inside a snapshot",
         args: "<snapshotId> <path>",
-        notes: ["Writes raw bytes to stdout, so it pipes."],
+        notes: [
+          "Writes raw bytes to stdout, so it pipes. Refuses a binary file or one over 1 MiB — use `get-file` for those.",
+        ],
+      },
+      {
+        name: "get-file",
+        summary: "Recover a file out of a snapshot",
+        args: "<snapshotId> <path>",
+        options: [
+          { flag: "--out <file>", description: "Where to write it (default: the file's own name)" },
+        ],
       },
       {
         name: "restore",

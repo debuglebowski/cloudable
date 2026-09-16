@@ -142,3 +142,11 @@ export class SnapshotDiskNotReadableError extends Schema.TaggedError<SnapshotDis
   "SnapshotDiskNotReadableError",
   { snapshotId: Schema.String, reason: Schema.String },
 ) {}
+
+/** A download could not be served: the path is missing, is a directory, or is larger than
+ * `FS_MAX_TRANSFER_BYTES`. Carries the same fixed reason vocabulary `FsResult` uses, since
+ * a raw-bytes response has nowhere to put an `ok: false` body. */
+export class InspectionFileUnreadableError extends Schema.TaggedError<InspectionFileUnreadableError>()(
+  "InspectionFileUnreadableError",
+  { path: Schema.String, reason: Schema.String },
+) {}

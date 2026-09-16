@@ -1,5 +1,5 @@
 import type { ConnectionState } from "@/components/session/transport";
-import { ApiError, apiGet, apiPost } from "@/lib/api-client";
+import { ApiError, apiGet, apiGetBytes, apiPost } from "@/lib/api-client";
 // ---------------------------------------------------------------------------
 // The snapshot half of the file browser's transport.
 //
@@ -14,7 +14,7 @@ import { ApiError, apiGet, apiPost } from "@/lib/api-client";
 // `{ ok: false }` shape a live machine would use for a refused write, and the
 // browser renders it the way it renders any other failure.
 // ---------------------------------------------------------------------------
-import type { FsOp, FsResult } from "@cloudable/contracts";
+import type { FsFailureReason, FsOp, FsResult } from "@cloudable/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FileSession, FsOutcome } from "./use-file-session";
 
@@ -23,8 +23,34 @@ import type { FileSession, FsOutcome } from "./use-file-session";
  * these controls in `readOnly` mode anyway, and this is the backstop. */
 const READ_ONLY: FsResult = { ok: false, reason: "io_error" };
 
+const FS_FAILURE_REASONS: ReadonlyArray<FsFailureReason> = [
+  "not_found",
+  "permission_denied",
+  "not_a_directory",
+  "is_a_directory",
+  "too_large",
+  "is_binary",
+  "exists",
+  "changed_on_disk",
+  "invalid_path",
+  "io_error",
+];
+
+/** A server that grew a new reason must not become a crash here — an unrecognised one
+ * falls through to `io_error`, which the browser already renders. */
+const isFsFailureReason = (value: string): value is FsFailureReason =>
+  (FS_FAILURE_REASONS as ReadonlyArray<string>).includes(value);
+
 const failureFor = (error: unknown): FsResult => {
   if (error instanceof ApiError) {
+    // A download failure carries the same fixed reason vocabulary in its body, because a
+    // raw-bytes response has nowhere to put an `ok: false`. Lifting it back out is what
+    // keeps `too_large` rendering as "that file is too large" rather than as a generic
+    // failure the browser cannot explain.
+    const body = error.body as { reason?: unknown } | undefined;
+    if (body && typeof body.reason === "string" && isFsFailureReason(body.reason)) {
+      return { ok: false, reason: body.reason };
+    }
     // 403 is a lapsed elevation or a policy change since the session opened — the gate
     // runs on every operation, not just at open, so this is a live answer.
     if (error.status === 403) return { ok: false, reason: "permission_denied" };
@@ -47,14 +73,29 @@ export function useSnapshotInspection(sessionId: string): FileSession {
 
   const run = useCallback(
     async (op: FsOp): Promise<FsOutcome> => {
-      if (op.op !== "list" && op.op !== "read") {
+      if (op.op !== "list" && op.op !== "read" && op.op !== "download") {
         return { result: READ_ONLY };
       }
       try {
         const query = `?path=${encodeURIComponent(op.path)}`;
-        const result = await apiGet<FsResult>(
-          `/api/v1/archive/inspections/${sessionId}/${op.op}${query}`,
-        );
+        const url = `/api/v1/archive/inspections/${sessionId}/${op.op}${query}`;
+
+        if (op.op === "download") {
+          // The body is the file, so a failure arrives as a status code rather than as
+          // `ok: false` — there is nowhere in a stream of bytes to put one.
+          const bytes = await apiGetBytes(url);
+          return {
+            result: {
+              ok: true,
+              op: "download",
+              path: op.path,
+              sizeBytes: bytes.byteLength,
+            },
+            bytes,
+          };
+        }
+
+        const result = await apiGet<FsResult>(url);
         return { result };
       } catch (error) {
         if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {

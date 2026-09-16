@@ -130,6 +130,15 @@ export function query(params: Record<string, string | number | undefined>): stri
   return rendered === "" ? "" : `?${rendered}`;
 }
 
+/** For an endpoint whose body IS the file — a snapshot download. `apiRequest` parses
+ * JSON, so this is its raw sibling, with the same auth header and the same error mapping. */
+export async function authenticatedApiBytes(path: string): Promise<Uint8Array> {
+  const session = requireSession();
+  const res = await send(path, { headers: { authorization: `Bearer ${session.token}` } });
+  if (!res.ok) throw new ApiError(res.status, await bodyOf(res));
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 export function postJson(body: unknown): RequestInit {
   return { method: "POST", body: JSON.stringify(body) };
 }

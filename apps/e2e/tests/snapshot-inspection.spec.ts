@@ -161,6 +161,26 @@ test("nothing can be changed from a snapshot", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
 });
 
+test("a file too large to read inline can still be downloaded", async ({ page }) => {
+  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH on the control plane");
+
+  // The point of the whole feature: recovering the file someone actually needs back. That
+  // file is as likely to be a 40 MiB archive as a text note, and `read` refuses anything
+  // over 1 MiB or containing a NUL because it feeds an editor. Without download, neither
+  // could be recovered at all.
+  await openMenuFor(page, NAMES.owned);
+  await page.getByRole("menuitem", { name: "Browse files" }).click();
+  await expect(page).toHaveURL(/\/archive\/inspections\//);
+
+  await page.getByRole("tab", { name: "Table" }).click();
+  const row = page.getByRole("row").filter({ hasText: "big.bin" });
+  const download = page.waitForEvent("download");
+  await row.getByRole("button", { name: "Download" }).click();
+
+  const file = await download;
+  expect(file.suggestedFilename()).toBe("big.bin");
+});
+
 test("an offboarded machine's snapshot is refused, with what to do about it", async ({ page }) => {
   // The case the gate exists for: offboarding cleared the owner, and the live-access gate
   // would read that null owner as "allow anyone in the org".

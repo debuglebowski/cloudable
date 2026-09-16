@@ -1,7 +1,8 @@
-import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "@effect/platform";
 import { Schema } from "effect";
 import {
   FullRestoreNotAcknowledgedError,
+  InspectionFileUnreadableError,
   InspectionSessionNotFoundError,
   InvalidLegalHoldReasonError,
   InvalidRestoreApprovalError,
@@ -127,6 +128,19 @@ const SessionIdPath = Schema.Struct({ sessionId: Schema.String });
 /** `path` is a URL param rather than a body, because these are GETs — a directory
  * listing is a read and should behave like one (cacheable, re-runnable, safe). */
 const InspectionPathParams = Schema.Struct({ path: Schema.String });
+
+/**
+ * Raw bytes, not a base64 field on a JSON body.
+ *
+ * `read` is capped at 1 MiB and refuses anything with a NUL byte, because it feeds an
+ * editor. Recovery does not stop at text under a megabyte — the file someone actually
+ * needs back is as likely to be a 40 MiB archive — so download is the operation that makes
+ * this feature answer its own use case, and base64 through JSON would inflate it by a
+ * third for nothing.
+ */
+const FileBytes = Schema.Uint8ArrayFromSelf.pipe(
+  HttpApiSchema.withEncoding({ kind: "Uint8Array", contentType: "application/octet-stream" }),
+);
 
 const OpenInspectionSuccess = Schema.Struct({
   sessionId: Schema.String,
@@ -293,5 +307,22 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .addError(SnapshotEmptyError, { status: 409 })
       .addError(SnapshotDiskNotReadableError, { status: 409 })
       .addError(SnapshotInspectionDeniedError, { status: 403 }),
+  )
+  .add(
+    // Unlike `list`/`read`, a filesystem failure here cannot ride back as `ok: false` in
+    // the body — the body is the file. So they map to status codes: 404 for a missing
+    // path, 409 for one too large to transfer or not a regular file.
+    HttpApiEndpoint.get("inspectionDownload", "/api/v1/archive/inspections/:sessionId/download")
+      .setPath(SessionIdPath)
+      .setUrlParams(InspectionPathParams)
+      .addSuccess(FileBytes)
+      .addError(InspectionSessionNotFoundError, { status: 404 })
+      .addError(SnapshotNotFoundError, { status: 404 })
+      .addError(MachineNotFoundError, { status: 404 })
+      .addError(SnapshotExpiredError, { status: 409 })
+      .addError(SnapshotEmptyError, { status: 409 })
+      .addError(SnapshotDiskNotReadableError, { status: 409 })
+      .addError(SnapshotInspectionDeniedError, { status: 403 })
+      .addError(InspectionFileUnreadableError, { status: 409 }),
   )
   .middleware(CurrentUserAuthentication);

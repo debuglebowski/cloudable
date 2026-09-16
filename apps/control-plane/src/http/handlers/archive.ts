@@ -2,6 +2,7 @@ import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import {
   COST_ESTIMATE_DISCLAIMER,
+  InspectionFileUnreadableError,
   type SnapshotRow,
   archiveMachine,
   clearLegalHold,
@@ -219,6 +220,29 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
         // A provider failure is ours, not the caller's: the grant could not be taken or
         // the image could not be opened. Died on rather than wired as a reason code,
         // same as every other infrastructure failure in this group.
+        Effect.catchTag("ProvisioningError", (e) => Effect.die(e)),
+      ),
+    )
+    .handle("inspectionDownload", ({ path, urlParams }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        const filesystem = yield* inspectionFilesystem({
+          sessionId: path.sessionId,
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+        });
+        const { result, bytes } = yield* Effect.promise(() => filesystem.download(urlParams.path));
+        if (!result.ok || !bytes) {
+          return yield* Effect.fail(
+            new InspectionFileUnreadableError({
+              path: urlParams.path,
+              reason: result.ok ? "io_error" : result.reason,
+            }),
+          );
+        }
+        return bytes;
+      }).pipe(
+        Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
         Effect.catchTag("ProvisioningError", (e) => Effect.die(e)),
       ),
     )

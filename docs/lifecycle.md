@@ -365,6 +365,24 @@ is shown because it is useful evidence about the live machine, not because it is
 This is why the gate is the whole of the security story rather than one layer of several,
 and why it is the part with the tests.
 
+### Reading versus recovering
+
+`read` feeds an editor, so it is capped at 1 MiB and refuses anything with a NUL byte in
+the first 8000 — the same two rules a live files session follows, for the same reason: the
+content round-trips through a JavaScript string and a binary file would come back subtly
+different from what went in.
+
+`download` is the one that answers the use case. The file someone actually needs back is as
+likely to be a 40 MiB archive or a database dump as a text note, and if reading inline were
+the only route neither could be recovered at all. It returns raw bytes rather than base64
+in a JSON body — up to `FS_MAX_TRANSFER_BYTES` (50 MiB), the same ceiling a live session
+has.
+
+One consequence: a download failure cannot ride back as `ok: false`, because the body is
+the file. Those map to status codes (`404` missing, `409` too large or not a regular file)
+carrying the same fixed reason vocabulary, which the console and CLI lift back out so
+"too large" still reads as "too large".
+
 ### What is readable, and what is not
 
 Only the **persistent disk** — the volume mounted at `/home`. It is `mkfs.ext4` on a raw
@@ -419,9 +437,6 @@ other. Turning it off terminates the inspections already open, like the other tw
 ### Not built
 
 - **The OS disk**, as above.
-- **Download.** The reader implements it and the wire does not expose it; `read` is capped
-  at 1 MiB inline, so a larger file is visible in a listing and not yet retrievable. The
-  next unit to want it needs a streaming response, not more parser.
 - **Per-path audit.** Deliberate, see above.
 - **Local development** needs `FAKE_SNAPSHOT_IMAGE_PATH` pointed at a real ext4 image
   (`apps/control-plane/src/snapshot-fs/__fixtures__/home.img.gz`, gunzipped). Docker
@@ -492,6 +507,7 @@ two-argument contract described in the feature-unit brief.
 | `POST` | `/api/v1/archive/inspections/:sessionId/end` | Ends one. Succeeds on an already-ended session — several paths end one and any may be second. |
 | `GET` | `/api/v1/archive/inspections/:sessionId/list?path=` | Directory listing. Re-authorizes first. |
 | `GET` | `/api/v1/archive/inspections/:sessionId/read?path=` | File contents, base64, capped at 1 MiB. Re-authorizes first. |
+| `GET` | `/api/v1/archive/inspections/:sessionId/download?path=` | Raw bytes, up to 50 MiB. Re-authorizes first. |
 
 All six are declared in `http/routes/archive.ts` (`ArchiveGroup`, registered in
 `http/api.ts`) and implemented in `http/handlers/archive.ts` (`ArchiveLive`, registered in
