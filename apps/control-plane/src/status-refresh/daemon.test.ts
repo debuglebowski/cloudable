@@ -3,9 +3,9 @@ import net from "node:net";
 import postgres from "postgres";
 
 // Real Postgres, not a fake — this tests the actual leader-election mechanism
-// `startReconcileDaemon` relies on (`pg_advisory_lock`/`unlock`), not a
+// `startStatusRefreshDaemon` relies on (`pg_advisory_lock`/`unlock`), not a
 // reimplementation of it. A dedicated, test-only key (never `daemon.ts`'s real
-// `RECONCILE_LEADER_LOCK_KEY`, which isn't exported) so this can never collide
+// `STATUS_REFRESH_LEADER_LOCK_KEY`, which isn't exported) so this can never collide
 // with a real daemon that happens to be running against the same dev database.
 const databaseUrl =
   process.env.DATABASE_URL ?? "postgres://cloudable:cloudable@localhost:5442/cloudable";

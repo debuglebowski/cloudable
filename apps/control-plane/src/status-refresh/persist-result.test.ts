@@ -2,13 +2,13 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import net from "node:net";
 import type * as schema from "@cloudable/schema";
 import { events, machines, orgs } from "@cloudable/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
 import { Db } from "../db/layer";
 import { EventBus } from "../services/EventBus";
 import { connectAndMigrate } from "../test-support/db";
-import { persistReconcileResult } from "./persist-result";
+import { persistRefreshResult } from "./persist-result";
 
 // Real Postgres, not a fake — same convention as this app's other DB-backed
 // suites. The whole point of this function is a hand-written SQL `CASE`
@@ -41,7 +41,7 @@ const { hostname, port } = new URL(databaseUrl);
 const postgresReachable = await isReachable(hostname, Number(port) || 5432, 2000);
 
 describe.skipIf(!postgresReachable)(
-  "persistReconcileResult (requires Postgres at DATABASE_URL)",
+  "persistRefreshResult (requires Postgres at DATABASE_URL)",
   () => {
     let close: () => Promise<void>;
     let db: PostgresJsDatabase<typeof schema>;
@@ -104,10 +104,10 @@ describe.skipIf(!postgresReachable)(
       const machine = await seedMachine(org.id, { state: "provisioning" });
 
       await run(
-        persistReconcileResult({
+        persistRefreshResult({
           machineId: machine.id,
           action: {
-            kind: "in_sync",
+            kind: "observed",
             status: { machineId: machine.id, state: "running", externalId: "ext-1" },
           },
         }),
@@ -119,95 +119,19 @@ describe.skipIf(!postgresReachable)(
       expect(row?.externalResourceId).toBe("ext-1");
     });
 
-    test("drifted result: writes state and publishes machine.drift_detected", async () => {
-      const org = await seedOrg();
-      const machine = await seedMachine(org.id, { state: "running" });
-
-      await run(
-        persistReconcileResult({
-          machineId: machine.id,
-          action: {
-            kind: "drifted",
-            status: { machineId: machine.id, state: "running", externalId: "ext-2" },
-            undeclaredPackages: ["nginx"],
-          },
-        }),
-      );
-
-      const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
-      expect(row?.state).toBe("running");
-
-      const rows = await db
-        .select()
-        .from(events)
-        .where(and(eq(events.machineId, machine.id), eq(events.type, "machine.drift_detected")));
-      expect(rows).toHaveLength(1);
-      expect(rows[0]?.payload).toEqual({ undeclaredPackages: ["nginx"], undeclaredPorts: [] });
-    });
-
-    // The regression this guards: ProvisioningService.azure.ts's reconcile() reports
-    // "error" for any non-"running" power state, including the narrow window right
-    // after creation before Azure's hypervisor reports PowerState/running -- without
-    // this grace period, a reconcile pass landing in that window would falsely mark an
-    // actually-fine machine as errored.
-    test("grace period: a freshly-created machine reporting 'error' stays 'provisioning'", async () => {
-      const org = await seedOrg();
-      const machine = await seedMachine(org.id, { state: "provisioning", createdAt: new Date() });
-
-      await run(
-        persistReconcileResult({
-          machineId: machine.id,
-          action: {
-            kind: "in_sync",
-            status: { machineId: machine.id, state: "error", externalId: "ext-3" },
-          },
-        }),
-      );
-
-      const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
-      expect(row?.state).toBe("provisioning");
-      expect(row?.lastError).toBeNull();
-      // externalResourceId still recorded even while the state write is suppressed --
-      // there's no reason to also withhold a fact we do have.
-      expect(row?.externalResourceId).toBe("ext-3");
-    });
-
-    test("grace period expired: an old 'provisioning' machine reporting 'error' is written for real", async () => {
-      const org = await seedOrg();
-      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-      const machine = await seedMachine(org.id, {
-        state: "provisioning",
-        createdAt: tenMinutesAgo,
-      });
-
-      await run(
-        persistReconcileResult({
-          machineId: machine.id,
-          action: {
-            kind: "in_sync",
-            status: { machineId: machine.id, state: "error", externalId: "ext-4" },
-          },
-        }),
-      );
-
-      const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
-      expect(row?.state).toBe("error");
-      expect(row?.lastError).not.toBeNull();
-    });
-
     test("already_archived result: only externalResourceId is touched, state is left alone", async () => {
       const org = await seedOrg();
       const machine = await seedMachine(org.id, { state: "running" });
       // Simulate the row already being archived at the DB level (a value
       // MachineStatus's own narrower "archived" state can't distinguish) --
-      // persistReconcileResult must not clobber it with a generic value.
+      // persistRefreshResult must not clobber it with a generic value.
       await db
         .update(machines)
         .set({ state: "archived_restorable" })
         .where(eq(machines.id, machine.id));
 
       await run(
-        persistReconcileResult({
+        persistRefreshResult({
           machineId: machine.id,
           action: {
             kind: "already_archived",

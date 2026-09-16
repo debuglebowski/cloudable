@@ -2,15 +2,9 @@ import { HttpApiBuilder } from "@effect/platform";
 import { Effect, type Schema } from "effect";
 import { ulid } from "ulid";
 import { applySettingChange } from "../../domain/config/apply-setting-change";
-import { triggerReconcile } from "../../domain/config/trigger-reconcile";
 import { Api } from "../api";
 import { type CurrentUser, CurrentUserTag } from "../middleware/auth";
-import type {
-  ImportConfigPayload,
-  PatchSettingPayload,
-  ReconcileTriggerParams,
-  ReconcileTriggerPayload,
-} from "../routes/config";
+import type { ImportConfigPayload, PatchSettingPayload } from "../routes/config";
 
 // Handler bodies are exported as plain functions, independent of
 // `HttpApiBuilder.group`'s wiring, so tests can call `handlePatchSetting`
@@ -48,12 +42,6 @@ export const handlePatchSetting = (
       },
     }),
   );
-
-export const handleTriggerReconcile = (
-  path: Schema.Schema.Type<typeof ReconcileTriggerParams>,
-  payload: Schema.Schema.Type<typeof ReconcileTriggerPayload>,
-  currentUser: CurrentUser,
-) => triggerReconcile({ orgId: currentUser.orgId, machineId: path.id, confirm: payload.confirm });
 
 export const handleImportConfig = (
   payload: Schema.Schema.Type<typeof ImportConfigPayload>,
@@ -101,12 +89,6 @@ export const ConfigLive = HttpApiBuilder.group(Api, "config", (handlers) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
         return yield* handlePatchSetting(payload, currentUser);
-      }),
-    )
-    .handle("triggerReconcile", ({ path, payload }) =>
-      Effect.gen(function* () {
-        const currentUser = yield* CurrentUserTag;
-        return yield* handleTriggerReconcile(path, payload, currentUser);
       }),
     )
     .handle("importConfig", ({ payload }) =>

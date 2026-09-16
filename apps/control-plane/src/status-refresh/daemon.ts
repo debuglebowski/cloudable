@@ -4,9 +4,9 @@ import type { Db } from "../db/layer";
 import type { MachineService } from "../domain/machine/MachineService";
 import type { EventBus } from "../services/EventBus";
 import type { ProvisioningServiceTag } from "../services/ProvisioningService";
-import { listReconcilableMachines } from "./list-machines";
-import { runReconcileLoop } from "./loop";
-import { persistReconcileResult } from "./persist-result";
+import { listRefreshableMachines } from "./list-machines";
+import { runStatusRefreshLoop } from "./loop";
+import { persistRefreshResult } from "./persist-result";
 
 /** Distinct from every other lock key already in use in this codebase (each on its
  * own dedicated `max:1` connection, since `pg_advisory_lock`/`unlock` are scoped to
@@ -16,27 +16,27 @@ import { persistReconcileResult } from "./persist-result";
  * `test-support/db.ts`'s `MIGRATION_ADVISORY_LOCK_KEY = 847_291_003`. Those three
  * acquire briefly and release; this one is held for the life of the process — the
  * standard advisory-lock leader-election pattern: whichever replica's
- * `pg_advisory_lock()` call resolves first becomes the sole active reconciler, and
+ * `pg_advisory_lock()` call resolves first becomes the sole active refresher, and
  * if it dies or its connection drops, Postgres releases the lock automatically and
  * the next replica's blocked call takes over. */
-const RECONCILE_LEADER_LOCK_KEY = 522_038_916;
+const STATUS_REFRESH_LEADER_LOCK_KEY = 522_038_916;
 
 /** No prior art for this cadence — `docs/agents.md` only documents the *agent's*
  * own ~30s local poll, a cheaper, different operation than this loop's per-machine
  * live Azure ARM calls. Frequent enough that a machine whose agent never checks in
  * gets a real status within a couple of minutes, not hours; not so frequent that a
  * growing fleet hammers Azure's ARM API. One constant, easy to retune. */
-const RECONCILE_INTERVAL = Duration.minutes(2);
+const REFRESH_INTERVAL = Duration.minutes(2);
 
 /** How often the leader checks its own lock connection is still alive, by running a
  * trivial query on it. `pg_advisory_lock` has no push notification for "you lost the
  * lock" — the only way to know the connection (and therefore the lock) is gone is to
  * actively use it. 30s bounds how long two replicas could theoretically both believe
- * they're the leader after a silent connection drop; `reconcileMachine`'s one
+ * they're the leader after a silent connection drop; `refreshMachineStatus`'s one
  * genuinely dangerous branch (calling `create()` again for a `null`/`"missing"`
- * `lastKnown`) is structurally unreachable via `listReconcilableMachines` (it never
+ * `lastKnown`) is structurally unreachable via `listRefreshableMachines` (it never
  * produces either), so the real cost of that narrow window is bounded to redundant,
- * idempotent reconcile work, not double-provisioning. */
+ * idempotent observation, not double-provisioning. */
 const KEEPALIVE_INTERVAL = Duration.seconds(30);
 
 /** How long to wait before retrying after losing (or failing to acquire) leadership,
@@ -44,22 +44,22 @@ const KEEPALIVE_INTERVAL = Duration.seconds(30);
 const RETRY_BACKOFF = Duration.seconds(10);
 
 /**
- * The wiring `reconcile/loop.ts`'s own doc comment left undone: "callers decide how
+ * The wiring `./loop.ts`'s own doc comment left undone: "callers decide how
  * to run this — e.g. `Effect.forkDaemon` it during server startup." Nothing ever
  * did. This is that caller.
  *
  * Loops forever: acquire the leader lock (blocks until held), then run
- * `runReconcileLoop` against the real `listReconcilableMachines`/`persistReconcileResult`
+ * `runStatusRefreshLoop` against the real `listRefreshableMachines`/`persistRefreshResult`
  * pair, raced against a periodic keepalive on the lock connection so a silently
  * dropped connection is noticed and acted on (see `KEEPALIVE_INTERVAL`) instead of
  * leaving this replica believing it's still the leader indefinitely. If the race
  * ever resolves — the keepalive fails, or `listMachines` itself fails hard enough to
- * end `runReconcileLoop` — the lock connection is closed, a warning is logged, and
+ * end `runStatusRefreshLoop` — the lock connection is closed, a warning is logged, and
  * the whole cycle retries after `RETRY_BACKOFF`. This Effect's own type never
  * resolves under normal operation (`Effect.Effect<never, ...>`) and must never let a
  * failure propagate out and crash the daemon fiber for good.
  */
-export const startReconcileDaemon: Effect.Effect<
+export const startStatusRefreshDaemon: Effect.Effect<
   never,
   never,
   Db | ProvisioningServiceTag | MachineService | EventBus
@@ -71,16 +71,16 @@ export const startReconcileDaemon: Effect.Effect<
     // acquisition fails with "Password returned by client is empty" — which
     // reads like a lock problem and is actually an auth one. That silently
     // killed reconciliation in a real deployment; the daemon logs a warning
-    // and retries forever, so nothing crashes and nothing reconciles.
+    // and retries forever, so nothing crashes and nothing is observed.
     const lockSql = openPostgres({ max: 1 });
     const acquired = yield* Effect.tryPromise({
-      try: () => lockSql`select pg_advisory_lock(${RECONCILE_LEADER_LOCK_KEY})`,
+      try: () => lockSql`select pg_advisory_lock(${STATUS_REFRESH_LEADER_LOCK_KEY})`,
       catch: (cause) => cause,
     }).pipe(
       Effect.as(true),
       Effect.catchAll((cause) =>
         Effect.logWarning(
-          `reconcile daemon: failed to acquire leader lock, retrying: ${String(cause)}`,
+          `status-refresh daemon: failed to acquire leader lock, retrying: ${String(cause)}`,
         ).pipe(Effect.as(false)),
       ),
     );
@@ -93,7 +93,7 @@ export const startReconcileDaemon: Effect.Effect<
       continue;
     }
 
-    yield* Effect.logInfo("reconcile daemon: acquired leader lock, starting reconcile passes");
+    yield* Effect.logInfo("status-refresh daemon: acquired leader lock, starting status passes");
 
     const keepAlive: Effect.Effect<never, unknown> = Effect.gen(function* () {
       while (true) {
@@ -102,32 +102,32 @@ export const startReconcileDaemon: Effect.Effect<
       }
     });
 
-    // `onResult`/`onError` on `ReconcileLoopConfig` are deliberately hardcoded to
+    // `onResult`/`onError` on `StatusRefreshLoopConfig` are deliberately hardcoded to
     // `Effect.Effect<void>` (no generic R) even though `listMachines` threads its own
-    // context through — `persistReconcileResult` needs `Db | EventBus`, so the
+    // context through — `persistRefreshResult` needs `Db | EventBus`, so the
     // ambient context this whole daemon Effect already carries is captured once here
     // and re-provided into it explicitly, rather than widening `loop.ts`'s own,
     // already-tested type (`onResult`'s asymmetry vs `listMachines` is that file's
     // existing design, not something to work around by editing it).
     const persistenceContext = yield* Effect.context<Db | EventBus>();
 
-    const reconcile = runReconcileLoop({
-      listMachines: listReconcilableMachines,
-      interval: RECONCILE_INTERVAL,
-      onResult: (result) => Effect.provide(persistReconcileResult(result), persistenceContext),
+    const refresh = runStatusRefreshLoop({
+      listMachines: listRefreshableMachines,
+      interval: REFRESH_INTERVAL,
+      onResult: (result) => Effect.provide(persistRefreshResult(result), persistenceContext),
       // `${error}` alone prints the tag and nothing else; `.message` is where each
       // error type puts the reason and, for `ProvisioningError`, whatever Azure or
       // Docker actually said.
       onError: (machineId, error) =>
         Effect.logWarning(
-          `reconcile: machine ${machineId} failed this pass: ${error._tag}: ${error.message}`,
+          `status-refresh: machine ${machineId} failed this pass: ${error._tag}: ${error.message}`,
         ),
     });
 
-    yield* Effect.race(reconcile, keepAlive).pipe(
+    yield* Effect.race(refresh, keepAlive).pipe(
       Effect.catchAll((cause) =>
         Effect.logWarning(
-          `reconcile daemon: lost leadership or reconcile loop ended: ${String(cause)}`,
+          `status-refresh daemon: lost leadership or the loop ended: ${String(cause)}`,
         ),
       ),
     );

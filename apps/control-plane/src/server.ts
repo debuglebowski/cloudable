@@ -40,12 +40,12 @@ import { BinariesRouteLive } from "./http/routes/binaries";
 import { ConsoleStaticRouteLive } from "./http/routes/console";
 import { buildAppLive } from "./layers";
 import { migrateOnBoot } from "./migrate-on-boot";
-import { startReconcileDaemon } from "./reconcile/daemon";
 import { seedAzureImages } from "./services/CloudCatalogService";
 import { SwitchableProvisioningServiceLive } from "./services/ProvisioningService.switchable";
 import { FakeSecretsProviderLive } from "./services/SecretsProvider.fake";
 import { AzureSignerLive } from "./services/Signer.azure";
 import { LocalSignerLive } from "./services/Signer.local";
+import { startStatusRefreshDaemon } from "./status-refresh/daemon";
 import { TunnelRegistry } from "./tunnel/registry";
 
 // Fakes by default for this skeleton — a real deployment would swap the
@@ -118,7 +118,7 @@ const TunnelRoutesLive = Layer.mergeAll(TunnelConnectRouteLive, AccessAttachRout
   Layer.provide(TunnelRegistry.Default),
 );
 
-// Forks `reconcile/daemon.ts`'s `startReconcileDaemon` as a background fiber sharing
+// Forks `status-refresh/daemon.ts`'s `startStatusRefreshDaemon` as a background fiber sharing
 // this same layer graph's `Db`/`ProvisioningServiceTag`/`MachineService`/`EventBus`
 // (all supplied by `AppLive` below) — no second connection pool for the reconcile
 // work itself, only the dedicated advisory-lock connection the daemon opens on its
@@ -127,7 +127,7 @@ const TunnelRoutesLive = Layer.mergeAll(TunnelConnectRouteLive, AccessAttachRout
 // instead — same as the HTTP server itself. `effectDiscard` because forking returns
 // a `Fiber` this layer has no further use for; the daemon runs supervised in the
 // background from here on.
-const ReconcileDaemonLive = Layer.effectDiscard(Effect.forkDaemon(startReconcileDaemon));
+const StatusRefreshDaemonLive = Layer.effectDiscard(Effect.forkDaemon(startStatusRefreshDaemon));
 
 // The other background fiber, on the same `forkDaemon` reasoning as reconcile above:
 // `expiry/daemon.ts` runs the four expiry sweeps that, until it existed, nothing in
@@ -187,7 +187,7 @@ const ServerLive = HttpApiBuilder.serve((httpApp) =>
   Layer.provide(AuthRouteLive),
   Layer.provide(BinariesRouteLive),
   Layer.provide(ConsoleStaticRouteLive),
-  Layer.provide(ReconcileDaemonLive),
+  Layer.provide(StatusRefreshDaemonLive),
   Layer.provide(ExpirySweepDaemonLive),
   Layer.provide(AppLive),
   // idleTimeout (seconds, Bun's own default is 10) needs real headroom: the Azure

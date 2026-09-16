@@ -15,13 +15,12 @@ import {
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ActorCell } from "@/components/actor-cell";
 import { Freshness } from "@/components/freshness";
-import { LineageGutter } from "@/components/lineage-gutter";
-import { SettingRow } from "@/components/setting-row";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MachinePackagesTable } from "@/routes/machines/machine-packages-table";
 
 /**
  * The machine layer of the package manifest, and the record of every change to it.
@@ -42,8 +41,10 @@ import { Skeleton } from "@/components/ui/skeleton";
  * Pinning is not offered here. A pin means "cannot be overridden below" and
  * nothing sits below a machine, so it belongs to the org
  * (`routes/organisation/org-package-manifest-card.tsx`). The server still
- * rejects a machine edit that collides with an org pin, and that 422 is what
- * the inline error under a row is showing.
+ * rejects a machine edit that collides with an org pin.
+ *
+ * The table itself lives in `machine-packages-table.tsx`; this tab is the
+ * table, the form for declaring something new, and the change history.
  */
 export function MachineManifestTab({ machineId }: { machineId: string }) {
   const queryClient = useQueryClient();
@@ -57,64 +58,6 @@ export function MachineManifestTab({ machineId }: { machineId: string }) {
     queryFn: () => getMachineManifestHistory(machineId),
   });
 
-  const [editingPackage, setEditingPackage] = useState<string | null>(null);
-  const [draftVersion, setDraftVersion] = useState("");
-  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
-  // Which package each in-flight edit is for, so only that row shows a pending
-  // state — editing two rows in quick succession must not blank the first.
-  const [pendingPackage, setPendingPackage] = useState<string | null>(null);
-
-  const editMutation = useMutation({
-    mutationFn: (vars: {
-      packageName: string;
-      upsert?: { versionPin?: string | null; excluded?: boolean };
-      remove?: boolean;
-      successMessage: string;
-    }) =>
-      updateMachinePackages(machineId, {
-        ...(vars.remove
-          ? { removals: [vars.packageName] }
-          : { upserts: [{ packageName: vars.packageName, ...(vars.upsert ?? {}) }] }),
-      }),
-    onMutate: (vars) => {
-      setPendingPackage(vars.packageName);
-    },
-    onSuccess: (_manifest, vars) => {
-      setRowErrors((prev) => {
-        const next = { ...prev };
-        delete next[vars.packageName];
-        return next;
-      });
-      setEditingPackage(null);
-      setPendingPackage(null);
-      void queryClient.invalidateQueries({ queryKey: machinesKeys.manifest(machineId) });
-      // The edit is only durably recorded once the control plane has written
-      // the event, so refetch the history rather than appending optimistically.
-      void queryClient.invalidateQueries({ queryKey: machinesKeys.manifestHistory(machineId) });
-      toast.success(vars.successMessage);
-    },
-    onError: (err, vars) => {
-      const message =
-        err instanceof ManifestOverrideError ? err.body.error.message : "That edit failed.";
-      setRowErrors((prev) => ({ ...prev, [vars.packageName]: message }));
-      setPendingPackage(null);
-    },
-  });
-
-  function startOverride(entry: ManifestEntry) {
-    setEditingPackage(entry.package);
-    setDraftVersion(entry.version ?? "");
-  }
-
-  function submitVersion(entry: ManifestEntry) {
-    const trimmed = draftVersion.trim();
-    editMutation.mutate({
-      packageName: entry.package,
-      upsert: { versionPin: trimmed === "" ? null : trimmed },
-      successMessage: `"${entry.package}" set to ${trimmed === "" ? "any version" : trimmed}`,
-    });
-  }
-
   const manifest = manifestQuery.data ?? [];
 
   return (
@@ -123,122 +66,13 @@ export function MachineManifestTab({ machineId }: { machineId: string }) {
         <CardHeader>
           <CardTitle>Packages</CardTitle>
           <CardDescription>
-            What this machine is declared to run. Entries without a machine-level row are inherited
-            from the org and change when the org's do.
+            What this machine is allowed to have, and what it actually has. Permission is inherited
+            from the org unless this machine overrides it; installing and removing are separate
+            actions the machine carries out on its next check-in.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {manifestQuery.isPending && (
-            <div className="flex flex-col gap-3">
-              {["skel-a", "skel-b", "skel-c"].map((key) => (
-                <div key={key} className="flex items-center justify-between gap-3">
-                  <Skeleton className="h-4 w-40" />
-                  <Skeleton className="h-4 w-16" />
-                </div>
-              ))}
-            </div>
-          )}
-          {manifestQuery.isError && (
-            <p className="text-sm text-destructive">Failed to load package manifest.</p>
-          )}
-          {manifestQuery.data?.length === 0 && (
-            <p className="text-sm text-muted-foreground">No packages declared.</p>
-          )}
-
-          {manifest.map((entry) => {
-            const isPending = pendingPackage === entry.package;
-            return (
-              <div key={entry.package} className="border-b border-border/60 py-2 last:border-b-0">
-                <div className={entry.excluded ? "opacity-60" : undefined}>
-                  <SettingRow
-                    label={entry.package}
-                    value={entry.excluded ? "excluded" : (entry.version ?? "any")}
-                    source={entry.source}
-                    {...(entry.excluded ? {} : { onOverride: () => startOverride(entry) })}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center gap-2 pb-2">
-                  {entry.pinned && <Badge variant="outline">pinned</Badge>}
-                  {entry.excluded && <Badge variant="outline">excluded</Badge>}
-                  <LineageGutter source={entry.source} viewing="machine" />
-                  <div className="ml-auto flex items-center gap-2">
-                    {entry.excluded ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isPending}
-                        onClick={() =>
-                          editMutation.mutate({
-                            packageName: entry.package,
-                            upsert: { excluded: false },
-                            successMessage: `"${entry.package}" is allowed again`,
-                          })
-                        }
-                      >
-                        {isPending ? "Working…" : "Allow again"}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isPending}
-                        onClick={() =>
-                          editMutation.mutate({
-                            packageName: entry.package,
-                            upsert: { excluded: true },
-                            successMessage: `"${entry.package}" excluded from this machine`,
-                          })
-                        }
-                      >
-                        {isPending ? "Working…" : "Exclude"}
-                      </Button>
-                    )}
-                    {entry.source === "machine" && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={isPending}
-                        onClick={() =>
-                          editMutation.mutate({
-                            packageName: entry.package,
-                            remove: true,
-                            successMessage: `"${entry.package}" no longer set on this machine`,
-                          })
-                        }
-                      >
-                        {isPending ? "Working…" : "Remove"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                {editingPackage === entry.package && (
-                  <div className="flex flex-col gap-1.5 pb-1">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        value={draftVersion}
-                        onChange={(event) => setDraftVersion(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") submitVersion(entry);
-                        }}
-                        placeholder="version (blank = any)"
-                        aria-label={`New version for ${entry.package}`}
-                        className="max-w-48"
-                      />
-                      <Button size="sm" onClick={() => submitVersion(entry)} disabled={isPending}>
-                        Save version
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setEditingPackage(null)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {rowErrors[entry.package] && (
-                  <p className="pb-1 text-xs text-destructive">{rowErrors[entry.package]}</p>
-                )}
-              </div>
-            );
-          })}
+        <CardContent className="flex flex-col gap-3">
+          <MachinePackagesTable machineId={machineId} />
 
           <AddPackageForm
             machineId={machineId}

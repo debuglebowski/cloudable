@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Fiber, Ref } from "effect";
 import type { MachineStatus } from "../services/ProvisioningService";
 import { makeFakeProvisioningServiceLive } from "../services/ProvisioningService.fake";
-import { reconcileAllOnce, runReconcileLoop } from "./loop";
+import { refreshAllOnce, runStatusRefreshLoop } from "./loop";
 import type { DesiredMachineState } from "./types";
 
 const machineA: DesiredMachineState = {
@@ -11,7 +11,6 @@ const machineA: DesiredMachineState = {
   provider: "fake",
   region: "eastus",
   sizeSku: "Standard_B2s",
-  packages: ["docker"],
   lifecycle: "live",
 };
 
@@ -21,11 +20,10 @@ const machineB: DesiredMachineState = {
   provider: "fake",
   region: "eastus",
   sizeSku: "Standard_B2s",
-  packages: [],
   lifecycle: "live",
 };
 
-describe("reconcileAllOnce", () => {
+describe("refreshAllOnce", () => {
   test("reconciles every machine in one pass", async () => {
     const layer = makeFakeProvisioningServiceLive();
 
@@ -33,7 +31,7 @@ describe("reconcileAllOnce", () => {
       const results = yield* Ref.make<string[]>([]);
       const errors = yield* Ref.make<string[]>([]);
 
-      yield* reconcileAllOnce({
+      yield* refreshAllOnce({
         listMachines: Effect.succeed([
           { desired: machineA, lastKnown: null },
           { desired: machineB, lastKnown: null },
@@ -68,7 +66,7 @@ describe("reconcileAllOnce", () => {
       const results = yield* Ref.make<string[]>([]);
       const errors = yield* Ref.make<string[]>([]);
 
-      yield* reconcileAllOnce({
+      yield* refreshAllOnce({
         listMachines: Effect.succeed([
           { desired: machineA, lastKnown: null },
           { desired: { ...machineB, machineId: "m-broken" }, lastKnown: archivedButDesiredLive },
@@ -88,14 +86,14 @@ describe("reconcileAllOnce", () => {
   });
 });
 
-describe("runReconcileLoop", () => {
+describe("runStatusRefreshLoop", () => {
   test("repeats reconcile passes on the given interval until interrupted", async () => {
     const layer = makeFakeProvisioningServiceLive();
 
     const program = Effect.gen(function* () {
       const passes = yield* Ref.make(0);
 
-      const loop = runReconcileLoop({
+      const loop = runStatusRefreshLoop({
         listMachines: Ref.update(passes, (n) => n + 1).pipe(
           Effect.as([{ desired: machineA, lastKnown: null }]),
         ),

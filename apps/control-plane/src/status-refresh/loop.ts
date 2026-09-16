@@ -5,16 +5,16 @@ import type {
   ProvisioningError,
   ProvisioningServiceTag,
 } from "../services/ProvisioningService";
-import { type ReconcileError, reconcileMachine } from "./reconcile-machine";
-import type { DesiredMachineState, ReconcileMachineResult } from "./types";
+import { type StatusRefreshError, refreshMachineStatus } from "./refresh-machine";
+import type { DesiredMachineState, RefreshMachineResult } from "./types";
 
 /** One machine's desired state paired with its last-known observed status. */
-export interface ReconcileInput {
+export interface RefreshInput {
   desired: DesiredMachineState;
   lastKnown: MachineStatus | null;
 }
 
-export interface ReconcileLoopConfig<E, R> {
+export interface StatusRefreshLoopConfig<E, R> {
   /**
    * Lists every machine the loop should reconcile this pass, with its
    * desired state and last-known status. Deliberately abstract: this unit
@@ -22,7 +22,7 @@ export interface ReconcileLoopConfig<E, R> {
    * persistence (the `machines` + settings tables in `packages/schema`) —
    * wire a real implementation once that repository exists.
    */
-  listMachines: Effect.Effect<ReadonlyArray<ReconcileInput>, E, R>;
+  listMachines: Effect.Effect<ReadonlyArray<RefreshInput>, E, R>;
   /** Time between the end of one pass and the start of the next. */
   interval: Duration.DurationInput;
   /**
@@ -31,9 +31,12 @@ export interface ReconcileLoopConfig<E, R> {
    * unit 6's job — event derivation is pure and happens above the
    * provisioning port.
    */
-  onResult?: (result: ReconcileMachineResult) => Effect.Effect<void>;
+  onResult?: (result: RefreshMachineResult) => Effect.Effect<void>;
   /** Called once per machine whose reconcile call failed this pass. */
-  onError?: (machineId: string, error: ProvisioningError | ReconcileError) => Effect.Effect<void>;
+  onError?: (
+    machineId: string,
+    error: ProvisioningError | StatusRefreshError,
+  ) => Effect.Effect<void>;
 }
 
 /**
@@ -41,10 +44,10 @@ export interface ReconcileLoopConfig<E, R> {
  *
  * A single machine's failure never aborts the pass or the caller's `Effect`
  * — it's caught and routed to `onError` so one bad machine can't starve the
- * rest of the fleet (or, in `runReconcileLoop`, stop the loop itself).
+ * rest of the fleet (or, in `runStatusRefreshLoop`, stop the loop itself).
  */
-export const reconcileAllOnce = <E, R>(
-  config: ReconcileLoopConfig<E, R>,
+export const refreshAllOnce = <E, R>(
+  config: StatusRefreshLoopConfig<E, R>,
 ): Effect.Effect<void, E, R | ProvisioningServiceTag> =>
   Effect.gen(function* () {
     const machines = yield* config.listMachines;
@@ -52,7 +55,7 @@ export const reconcileAllOnce = <E, R>(
     yield* Effect.forEach(
       machines,
       ({ desired, lastKnown }) =>
-        reconcileMachine(desired, lastKnown).pipe(
+        refreshMachineStatus(desired, lastKnown).pipe(
           Effect.tap((result) => config.onResult?.(result) ?? Effect.void),
           Effect.catchAll((error) => config.onError?.(desired.machineId, error) ?? Effect.void),
         ),
@@ -61,9 +64,9 @@ export const reconcileAllOnce = <E, R>(
   });
 
 /**
- * Repeats `reconcileAllOnce` on a fixed spacing, forever, as an Effect
+ * Repeats `refreshAllOnce` on a fixed spacing, forever, as an Effect
  * `Schedule`. Per-machine failures are already absorbed by `onError` inside
- * `reconcileAllOnce`; only a failure in `listMachines` itself (the `E` type
+ * `refreshAllOnce`; only a failure in `listMachines` itself (the `E` type
  * parameter) can end the loop, since there is nothing meaningful left to
  * reconcile against.
  *
@@ -71,7 +74,7 @@ export const reconcileAllOnce = <E, R>(
  * server startup — since wiring it into `server.ts`/`layers.ts` belongs to
  * whichever unit owns application bootstrap for this loop.
  */
-export const runReconcileLoop = <E, R>(
-  config: ReconcileLoopConfig<E, R>,
+export const runStatusRefreshLoop = <E, R>(
+  config: StatusRefreshLoopConfig<E, R>,
 ): Effect.Effect<void, E, R | ProvisioningServiceTag> =>
-  reconcileAllOnce(config).pipe(Effect.repeat(Schedule.spaced(config.interval)), Effect.asVoid);
+  refreshAllOnce(config).pipe(Effect.repeat(Schedule.spaced(config.interval)), Effect.asVoid);

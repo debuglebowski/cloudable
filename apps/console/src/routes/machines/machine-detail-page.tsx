@@ -16,13 +16,7 @@ import { useState } from "react";
 
 import { type ArchivedSnapshot, useMachineSnapshots } from "@/api/archive";
 import { SEVERITY_VARIANT, daysOpen, useAuditTimeline, useComplianceChecks } from "@/api/audit";
-import {
-  type DriftStatus,
-  getMachine,
-  getMachineDrift,
-  isMachineStale,
-  machinesKeys,
-} from "@/api/machines";
+import { getMachine, isMachineStale, machinesKeys } from "@/api/machines";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ActorCell } from "@/components/actor-cell";
 import { ControlStatus } from "@/components/control-status";
@@ -30,7 +24,7 @@ import { Freshness } from "@/components/freshness";
 import { OsIcon } from "@/components/os-icon";
 import { PageLoader } from "@/components/page-loader";
 import { TableHeaderIcon } from "@/components/table-header-icon";
-import { Badge, type BadgeProps } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -56,7 +50,6 @@ import {
   MACHINE_STATE_BADGE_VARIANT,
   MACHINE_STATE_LABEL,
 } from "./machine-state";
-import { ReconcileMachineDialog } from "./reconcile-machine-dialog";
 import { RestartMachineDialog } from "./restart-machine-dialog";
 import { UpgradeMachineDialog } from "./upgrade-machine-dialog";
 
@@ -95,21 +88,7 @@ function PropertyRow({
   );
 }
 
-/** No real per-machine drift-status badge existed anywhere before this page — see
- * `machine-state.ts`'s own `MACHINE_STATE_BADGE_VARIANT` for the precedent this follows. */
-const DRIFT_BADGE_VARIANT: Record<DriftStatus, BadgeProps["variant"]> = {
-  clean: "ok",
-  detected: "drift",
-  unknown: "stale",
-};
-
-const DRIFT_STATUS_LABEL: Record<DriftStatus, string> = {
-  clean: "clean",
-  detected: "drift detected",
-  unknown: "not yet reported",
-};
-
-type DetailTab = "properties" | "manifest" | "drift" | "compliance" | "snapshots" | "activity";
+type DetailTab = "properties" | "manifest" | "compliance" | "snapshots" | "activity";
 
 // Stable (non-index) keys for the six-check loading skeleton — this app's six v1 checks
 // never reorder, but a plain array index survives biome's own line-wrapping less reliably
@@ -129,25 +108,21 @@ export function MachineDetailPage() {
     queryKey: machinesKeys.detail(machineId),
     queryFn: () => getMachine(machineId),
   });
-  const driftQuery = useQuery({
-    queryKey: machinesKeys.drift(machineId),
-    queryFn: () => getMachineDrift(machineId),
-  });
   // Same query key `add-machine-dialog.tsx` already uses for this exact directory lookup —
   // shares its cache entry rather than fetching the same list twice under two keys.
   const peopleQuery = useQuery({
     queryKey: ["people-directory"],
     queryFn: listPeopleDirectory,
   });
-  // Org-wide endpoints — no per-machine drift/compliance/events API exists yet, so
+  // Org-wide endpoints — no per-machine compliance/events API exists yet, so
   // Compliance and Activity filter these by `machineId` client-side rather than
-  // waiting on a dedicated backend projection.
+  // waiting on a dedicated backend projection. (Packages is the exception: it
+  // has a real per-machine endpoint.)
   const checksQuery = useComplianceChecks();
   const timelineQuery = useAuditTimeline();
   const snapshotsQuery = useMachineSnapshots(machineId);
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const [reconcileOpen, setReconcileOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -162,7 +137,6 @@ export function MachineDetailPage() {
   }
 
   const machine = machineQuery.data;
-  const drift = driftQuery.data;
   // Owner is required at creation — a machine has exactly one owner, always a
   // person — but never shown again after that — not `activePeople`-filtered like the create
   // dialog's picker, since a machine's *existing* owner isn't re-validated as still active here.
@@ -187,7 +161,6 @@ export function MachineDetailPage() {
         <span aria-hidden="true">/</span>
         <span className="text-foreground">{machine.name}</span>
       </div>
-
       <div className="flex items-center gap-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
           <OsIcon image={machine.image} className="size-4" />
@@ -237,9 +210,6 @@ export function MachineDetailPage() {
           >
             Restart
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setReconcileOpen(true)}>
-            Reconcile
-          </Button>
           <Button variant="outline" size="sm" onClick={() => setUpgradeOpen(true)}>
             Upgrade
           </Button>
@@ -270,18 +240,15 @@ export function MachineDetailPage() {
             ))}
         </div>
       </div>
-
       {machine.state === "error" && machine.lastError && (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {machine.lastError}
         </div>
       )}
-
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as DetailTab)}>
         <TabsList>
           <TabsTrigger value="properties">Properties</TabsTrigger>
           <TabsTrigger value="manifest">Manifest</TabsTrigger>
-          <TabsTrigger value="drift">Drift</TabsTrigger>
           <TabsTrigger value="compliance">Compliance</TabsTrigger>
           <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
@@ -348,58 +315,6 @@ export function MachineDetailPage() {
 
         <TabsContent value="manifest">
           <MachineManifestTab machineId={machineId} />
-        </TabsContent>
-
-        <TabsContent value="drift">
-          <Card>
-            <CardContent className="flex flex-col gap-2 pt-4">
-              {!driftQuery.isPending && drift && (
-                <Badge variant={DRIFT_BADGE_VARIANT[drift.status]} className="w-fit">
-                  {DRIFT_STATUS_LABEL[drift.status]}
-                </Badge>
-              )}
-              {driftQuery.isPending && <Skeleton className="h-4 w-72" />}
-              {driftQuery.isError && (
-                <p className="text-sm text-destructive">Failed to load drift status.</p>
-              )}
-              {drift?.status === "clean" && (
-                <p className="text-sm text-muted-foreground">
-                  No drift — matches the declared manifest.
-                </p>
-              )}
-              {drift?.status === "unknown" && (
-                <p className="text-sm text-muted-foreground">
-                  No drift data available yet — this machine hasn't reported a reconcile pass.
-                </p>
-              )}
-              {drift?.status === "detected" && (
-                <div className="flex flex-col gap-2 text-sm">
-                  <p className="font-medium text-drift">
-                    Undeclared software found outside the manifest.
-                  </p>
-                  {drift.undeclaredPackages && drift.undeclaredPackages.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Undeclared packages
-                      </p>
-                      <p className="font-mono text-sm">{drift.undeclaredPackages.join(", ")}</p>
-                    </div>
-                  )}
-                  {drift.undeclaredPorts && drift.undeclaredPorts.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Undeclared open ports
-                      </p>
-                      <p className="font-mono text-sm">{drift.undeclaredPorts.join(", ")}</p>
-                    </div>
-                  )}
-                  {drift.detectedAt && (
-                    <Freshness occurredAt={drift.detectedAt} recordedAt={drift.detectedAt} />
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
         </TabsContent>
 
         <TabsContent value="compliance">
@@ -637,13 +552,7 @@ export function MachineDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
-
-      <UpgradeMachineDialog machine={machine} open={upgradeOpen} onOpenChange={setUpgradeOpen} />
-      <ReconcileMachineDialog
-        machine={machine}
-        open={reconcileOpen}
-        onOpenChange={setReconcileOpen}
-      />
+      <UpgradeMachineDialog machine={machine} open={upgradeOpen} onOpenChange={setUpgradeOpen} />{" "}
       <ConnectTerminalDialog machine={machine} open={connectOpen} onOpenChange={setConnectOpen} />
       <BrowseFilesDialog machine={machine} open={filesOpen} onOpenChange={setFilesOpen} />
       <RestartMachineDialog machine={machine} open={restartOpen} onOpenChange={setRestartOpen} />

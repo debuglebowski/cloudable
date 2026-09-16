@@ -18,7 +18,6 @@ import { ACCESS_METHODS_ENABLED_KEY } from "../machine/settings";
 import { updateOrgSettings } from "../organisation/settings";
 import { applySettingChange } from "./apply-setting-change";
 import { PinnedSettingError } from "./errors";
-import { triggerReconcile } from "./trigger-reconcile";
 
 // This suite runs against a real Postgres — the behaviour under test is the
 // interaction between `settingValues`, `machines.desiredStateVersion`, and
@@ -490,64 +489,6 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         .from(sessions)
         .where(eq(sessions.id, session.id));
       expect(refetchedSession?.endedAt).toBeNull();
-    });
-  });
-
-  describe("triggerReconcile", () => {
-    test("is rejected without an explicit confirm:true, and does not bump the version", async () => {
-      const org = await seedOrg();
-      const machine = await seedMachine(org.id);
-
-      const errorWhenAbsent = await run(
-        triggerReconcile({ orgId: org.id, machineId: machine.id, confirm: undefined }).pipe(
-          Effect.flip,
-        ),
-      );
-      const errorWhenFalse = await run(
-        triggerReconcile({ orgId: org.id, machineId: machine.id, confirm: false }).pipe(
-          Effect.flip,
-        ),
-      );
-
-      expect(errorWhenAbsent._tag).toBe("ConfirmationRequiredError");
-      expect(errorWhenFalse._tag).toBe("ConfirmationRequiredError");
-
-      const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
-      expect(row?.desiredStateVersion).toBe(0);
-    });
-
-    test("bumps desiredStateVersion when confirmed, once per call", async () => {
-      const org = await seedOrg();
-      const machine = await seedMachine(org.id);
-
-      const first = await run(
-        triggerReconcile({ orgId: org.id, machineId: machine.id, confirm: true }),
-      );
-      expect(first.desiredStateVersion).toBe(1);
-
-      const second = await run(
-        triggerReconcile({ orgId: org.id, machineId: machine.id, confirm: true }),
-      );
-      expect(second.desiredStateVersion).toBe(2);
-
-      const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
-      expect(row?.desiredStateVersion).toBe(2);
-    });
-
-    test("is rejected as not-found when the machine belongs to a different org", async () => {
-      const org = await seedOrg();
-      const otherOrg = await seedOrg();
-      const machine = await seedMachine(org.id);
-
-      const error = await run(
-        triggerReconcile({ orgId: otherOrg.id, machineId: machine.id, confirm: true }).pipe(
-          Effect.flip,
-        ),
-      );
-      expect(error._tag).toBe("MachineNotFoundError");
-
-      const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
-      expect(row?.desiredStateVersion).toBe(0);
     });
   });
 

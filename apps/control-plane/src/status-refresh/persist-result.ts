@@ -1,45 +1,38 @@
 import { machines } from "@cloudable/schema";
 import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { ulid } from "ulid";
 import { Db } from "../db/layer";
-import { machineDriftDetectedEvent } from "../domain/machine/events";
-import { EventBus } from "../services/EventBus";
 import type { MachineStatus } from "../services/ProvisioningService";
-import type { ReconcileMachineResult } from "./types";
+import type { RefreshMachineResult } from "./types";
 
 /**
- * How long a freshly-created machine gets before a reconcile pass observing
- * anything other than "running" is trusted at face value.
+ * States this pass is allowed to write.
  *
- * `ProvisioningService.azure.ts`'s `reconcile()` reports `state: "error"` for
- * *any* non-`"running"` Azure power state — there's no "still starting"
- * state in that adapter. A reconcile pass can land in the narrow window
- * between VM creation and the hypervisor actually reporting
- * `PowerState/running`, which would otherwise write a false "error" onto a
- * machine that's actually fine. 3 minutes comfortably covers ARM
- * finalization + OS boot + cloud-init (binary download, systemd unit,
- * service start) + one ~30s agent poll cycle, with real margin — see
- * `docs/agents.md` for the agent's own poll cadence.
+ * `"error"` is deliberately absent. It is the DEFAULT branch of
+ * `machineStateForPowerState` — Azure has no error power state, so that branch
+ * means "we did not recognise the answer", which in practice is
+ * `PowerState/unknown` or a missing PowerState on a perfectly healthy machine.
+ * Writing it here also fought `MachineDirectory.markVerified`, which promotes a
+ * machine back to `running` the moment its agent checks in, so the column
+ * flapped between the two while nothing was wrong.
+ *
+ * `error` belongs to the two things that actually know something failed:
+ * provisioning, which records a real message alongside it, and staleness,
+ * which is visible from `lastVerifiedAt`.
+ *
+ * `"archived"` and `"missing"` never appear here either — see this module's
+ * own doc comment on why `archived`/`already_archived` results skip the state
+ * column entirely.
  */
-const PROVISIONING_GRACE_PERIOD_SQL = sql`interval '3 minutes'`;
-
-/** The three `MachineStatus` states that can legitimately reach this
- * function via the `created`/`in_sync`/`drifted` result kinds — `"archived"`
- * and `"missing"` never appear here (see this module's own doc comment on
- * why `archived`/`already_archived` results skip the state column
- * entirely). */
 function isWritableState(
   state: MachineStatus["state"],
-): state is "provisioning" | "running" | "stopped" | "error" {
-  return (
-    state === "provisioning" || state === "running" || state === "stopped" || state === "error"
-  );
+): state is "provisioning" | "running" | "stopped" {
+  return state === "provisioning" || state === "running" || state === "stopped";
 }
 
 /**
- * The missing write-back `reconcile/loop.ts`'s own doc comment left for
- * `onResult`: nothing in this codebase persisted a `ReconcileMachineResult`
+ * The missing write-back `./loop.ts`'s own doc comment left for
+ * `onResult`: nothing in this codebase persisted a `RefreshMachineResult`
  * anywhere before this. Every `ReconcileAction` variant carries a fresh
  * `status: MachineStatus` (confirmed in `./types.ts`) — this is what makes
  * that observation real, both for a machine created moments ago
@@ -64,7 +57,7 @@ function isWritableState(
  *   as "access methods were just removed" against whatever the agent's own
  *   last real report said.
  * - `archived`/`already_archived` results never touch `state` at all — by
- *   the time `reconcileMachine` reaches that branch the row is already one
+ *   the time `refreshMachineStatus` reaches that branch the row is already one
  *   of the two specific `archived_restorable`/`archived_expired` DB values
  *   (that's what drove `desired.lifecycle === "archived"` in the first
  *   place, via `list-machines.ts`), and `MachineStatus`'s own `"archived"`
@@ -81,12 +74,10 @@ function isWritableState(
  *
  * Never fails: a bad row or a transient DB error is logged and swallowed,
  * matching `onResult`'s own `Effect.Effect<void>` (no error channel)
- * contract and `reconcileAllOnce`'s "one bad machine never stops the rest"
+ * contract and `refreshAllOnce`'s "one bad machine never stops the rest"
  * posture.
  */
-export function persistReconcileResult(
-  result: ReconcileMachineResult,
-): Effect.Effect<void, never, Db | EventBus> {
+export function persistRefreshResult(result: RefreshMachineResult): Effect.Effect<void, never, Db> {
   return Effect.gen(function* () {
     const db = yield* Db;
     const { action } = result;
@@ -111,66 +102,30 @@ export function persistReconcileResult(
 
     const newState = action.status.state;
     if (!isWritableState(newState)) {
+      // Includes every "error" this pass observes, which is why there is no
+      // grace period here any more: nothing it writes can be a false error.
       yield* Effect.logWarning(
-        `reconcile: unexpected status.state "${newState}" for ${result.machineId} on a ${action.kind} result — not persisted`,
+        `status-refresh: not persisting state "${newState}" for ${result.machineId} on a ${action.kind} result`,
       );
       return;
     }
-    const newLastError = newState === "error" ? `provider reconcile reported state "error"` : null;
 
-    const rows = yield* Effect.tryPromise({
+    yield* Effect.tryPromise({
       try: () =>
         db
           .update(machines)
           .set({
-            state: sql`CASE
-              WHEN ${machines.state} = 'provisioning'
-                AND ${newState} = 'error'
-                AND now() - ${machines.createdAt} < ${PROVISIONING_GRACE_PERIOD_SQL}
-              THEN ${machines.state}
-              ELSE ${newState}
-            END`,
-            lastError: sql`CASE
-              WHEN ${machines.state} = 'provisioning'
-                AND ${newState} = 'error'
-                AND now() - ${machines.createdAt} < ${PROVISIONING_GRACE_PERIOD_SQL}
-              THEN ${machines.lastError}
-              ELSE ${newLastError}
-            END`,
+            state: newState,
             externalResourceId: action.status.externalId ?? sql`${machines.externalResourceId}`,
           })
-          .where(eq(machines.id, result.machineId))
-          .returning({ orgId: machines.orgId }),
+          .where(eq(machines.id, result.machineId)),
       catch: (cause) => cause,
     }).pipe(
       Effect.catchAll((cause) =>
         Effect.logWarning(
-          `reconcile: failed to persist result for ${result.machineId}: ${String(cause)}`,
+          `status-refresh: failed to persist result for ${result.machineId}: ${String(cause)}`,
         ).pipe(Effect.as([])),
       ),
     );
-
-    const orgId = rows[0]?.orgId;
-    if (!orgId || action.kind !== "drifted") return;
-
-    const eventBus = yield* EventBus;
-    yield* eventBus
-      .publish([
-        machineDriftDetectedEvent({
-          machineId: result.machineId,
-          orgId,
-          correlationId: ulid(),
-          actorType: "system",
-          actorId: "reconcile-loop",
-          undeclaredPackages: action.undeclaredPackages,
-        }),
-      ])
-      .pipe(
-        Effect.catchAll((cause) =>
-          Effect.logWarning(
-            `reconcile: failed to publish drift event for ${result.machineId}: ${String(cause)}`,
-          ),
-        ),
-      );
   });
 }

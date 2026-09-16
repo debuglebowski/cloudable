@@ -1,7 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import {
-  ConfirmationRequiredError,
   InvalidScopeError,
   MachineNotFoundError,
   PinnedSettingError,
@@ -41,26 +40,9 @@ export const PatchSettingResponse = Schema.Struct({
   setting: SettingChangeResult,
 });
 
-export const ReconcileTriggerParams = Schema.Struct({
-  id: Schema.String,
-});
-
-// `confirm` is deliberately optional, not required: both "absent" and
-// "false" must be rejected by the same confirmation-gate error (see
-// trigger-reconcile.ts), rather than "absent" failing schema validation and
-// "false" failing a domain check — one rule, one code path. `orgId` is
-// gone from the wire — derived from `CurrentUserTag.orgId` and checked
-// against the target machine's own org, the tenant-isolation boundary this
-// endpoint needs (see `../middleware/auth.ts`).
-export const ReconcileTriggerPayload = Schema.Struct({
-  confirm: Schema.optional(Schema.Boolean),
-});
-
-export const ReconcileTriggerResponse = Schema.Struct({
-  machineId: Schema.String,
-  desiredStateVersion: Schema.Number,
-});
-
+// `orgId` is gone from the wire — derived from `CurrentUserTag.orgId` and
+// checked against the target machine's own org, the tenant-isolation boundary
+// this endpoint needs (see `../middleware/auth.ts`).
 export const ImportConfigEntry = Schema.Struct({
   scopeType: SettingScopeType,
   scopeId: Schema.String,
@@ -86,18 +68,6 @@ export const ConfigGroup = HttpApiGroup.make("config")
       .addError(InvalidScopeError, { status: 400 })
       .addError(MachineNotFoundError, { status: 404 })
       .addError(PinnedSettingError, { status: 409 })
-      .addError(SettingWriteError, { status: 500 }),
-  )
-  .add(
-    // The confirmation-gated reconcile trigger. This is the ONLY endpoint in
-    // this group allowed to mutate a machine — it never writes
-    // settingValues, it only bumps machines.desiredStateVersion.
-    HttpApiEndpoint.post("triggerReconcile", "/api/v1/config/machines/:id/reconcile")
-      .setPath(ReconcileTriggerParams)
-      .setPayload(ReconcileTriggerPayload)
-      .addSuccess(ReconcileTriggerResponse)
-      .addError(ConfirmationRequiredError, { status: 400 })
-      .addError(MachineNotFoundError, { status: 404 })
       .addError(SettingWriteError, { status: 500 }),
   )
   .add(

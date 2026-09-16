@@ -65,33 +65,51 @@ export interface ManifestEntry {
   overriddenBelow?: number;
 }
 
-export type DriftStatus = "clean" | "detected" | "unknown";
-
-/**
- * Shaped after `machine.drift_detected`'s payload in
- * `packages/events/src/domains/machine.ts` (`{ undeclaredPackages, undeclaredPorts }`).
- * `status: "unknown"` is distinct from `"clean"` — it means no drift event data exists
- * yet for this machine (never reconciled, or currently stopped), not that drift was
- * checked and found absent.
- *
- * NO real endpoint surfaces this today: drift is an *event* (`machine.drift_detected`),
- * not a queryable machine field, and no unit built a "current drift status per machine"
- * projection over that event stream. `getMachineDrift` below always returns `unknown`
- * against the real backend rather than fabricating a plausible-looking clean/detected
- * value — flagged as a real gap, not silently faked.
- */
-export interface DriftInfo {
-  status: DriftStatus;
-  undeclaredPackages?: string[];
-  undeclaredPorts?: number[];
-  detectedAt?: string;
-}
-
 export class ManifestOverrideError extends Error {
   readonly body: ApiErrorBody;
   constructor(body: ApiErrorBody) {
     super(body.error.message);
     this.name = "ManifestOverrideError";
+    this.body = body;
+  }
+}
+
+export type PackagePermission = "allowed" | "disallowed" | null;
+export type PackageInstallState = "installed" | "not_installed" | "unknown";
+export type PackageActionOp = "install" | "uninstall";
+export type PackageActionStatus = "pending" | "running" | "succeeded" | "failed" | "expired";
+
+export interface PendingPackageActionView {
+  id: string;
+  op: PackageActionOp;
+  status: PackageActionStatus;
+  requestedAt: string;
+  failureReason?: string;
+}
+
+/** One row of the packages table. See `MachinePackageRow` in the contracts package. */
+export interface MachinePackageRow {
+  packageName: string;
+  permission: PackagePermission;
+  versionPin: string | null;
+  source: SettingLevel | null;
+  installed: PackageInstallState;
+  installedVersion?: string;
+  versionMismatch: boolean;
+  isBaseline: boolean;
+  pendingAction?: PendingPackageActionView;
+}
+
+export interface MachinePackagesResponse {
+  items: MachinePackageRow[];
+  lastReportedAt: string | null;
+}
+
+export class PackageActionError extends Error {
+  readonly body: ApiErrorBody;
+  constructor(body: ApiErrorBody) {
+    super(body.error.message);
+    this.name = "PackageActionError";
     this.body = body;
   }
 }
@@ -105,7 +123,7 @@ export const machinesKeys = {
   manifest: (machineId: string) => [...machinesKeys.all, "manifest", machineId] as const,
   manifestHistory: (machineId: string) =>
     [...machinesKeys.all, "manifest-history", machineId] as const,
-  drift: (machineId: string) => [...machinesKeys.all, "drift", machineId] as const,
+  packages: (machineId: string) => [...machinesKeys.all, "packages", machineId] as const,
 };
 
 interface MachineSummaryWire {
@@ -201,11 +219,6 @@ export async function getMachine(machineId: string): Promise<Machine | undefined
 export async function getMachineManifest(machineId: string): Promise<ManifestEntry[]> {
   const wire = await apiGet<MachineDetailWire>(`/api/v1/machines/${machineId}`);
   return wire.manifest.map(toManifestEntry);
-}
-
-export async function getMachineDrift(_machineId: string): Promise<DriftInfo> {
-  // See the DriftInfo doc comment above — there is no real endpoint for this yet.
-  return { status: "unknown" };
 }
 
 export interface MachinePackageEdit {
@@ -353,24 +366,6 @@ export async function triggerUpgrade(
   });
 }
 
-export interface ReconcileResult {
-  machineId: string;
-  desiredStateVersion: number;
-}
-
-/**
- * Real `POST /api/v1/config/machines/:id/reconcile` — the ONLY operation
- * that mutates a live machine; editing desired state elsewhere
- * is always inert until this runs. `confirm: true` is required — the
- * server rejects both an absent and an explicit `false` with the same
- * confirmation-gate error, so there's nothing to send otherwise.
- */
-export async function triggerReconcile(machineId: string): Promise<ReconcileResult> {
-  return apiPost<ReconcileResult>(`/api/v1/config/machines/${machineId}/reconcile`, {
-    confirm: true,
-  });
-}
-
 export interface ArchiveMachineResult {
   machineId: string;
   state: "archived_restorable";
@@ -402,4 +397,43 @@ export interface RestartMachineResult {
  */
 export async function restartMachine(machineId: string): Promise<RestartMachineResult> {
   return apiPost<RestartMachineResult>(`/api/v1/machines/${machineId}/restart`, {});
+}
+
+/**
+ * `GET /machines/:id/packages` — the packages table.
+ *
+ * One row per package across the union of what the manifest allows and what
+ * the agent reported is installed, so a package can appear here because
+ * someone declared it, because it is on the machine, or both.
+ */
+export async function getMachinePackages(machineId: string): Promise<MachinePackagesResponse> {
+  return apiGet<MachinePackagesResponse>(`/api/v1/machines/${machineId}/packages`);
+}
+
+/**
+ * `POST /machines/:id/packages/:name/actions` — ask the machine to install or
+ * remove one package.
+ *
+ * Returns as soon as the request is recorded. The agent collects it on its next
+ * poll, so the row shows the action as pending until the machine reports back,
+ * and `installed` keeps saying whatever the machine last said rather than what
+ * was asked for.
+ */
+export async function createPackageAction(
+  machineId: string,
+  packageName: string,
+  op: PackageActionOp,
+): Promise<PendingPackageActionView> {
+  try {
+    const res = await apiPost<{ action: PendingPackageActionView }>(
+      `/api/v1/machines/${machineId}/packages/${encodeURIComponent(packageName)}/actions`,
+      { op },
+    );
+    return res.action;
+  } catch (err) {
+    if (err instanceof ApiError && err.body) {
+      throw new PackageActionError(err.body as ApiErrorBody);
+    }
+    throw err;
+  }
 }

@@ -1,11 +1,11 @@
-import { events, machines } from "@cloudable/schema";
-import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
+import { machinePackages, machines } from "@cloudable/schema";
+import { and, eq, notInArray, or } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
+import { type MachinePackageRow, resolveManifest } from "../../domain/machine/manifest";
+import { buildPackagesView, undeclaredFromView } from "../../domain/machine/packages-view";
 import { clearResolvedFindings, upsertFindingFirstSeen } from "../finding-store";
-
-const DRIFT_EVENT_TYPES = ["machine.drift_detected", "machine.drift_resolved"] as const;
 
 // Same set as active-owner.ts's ARCHIVED_STATES (not shared: two small
 // literal arrays are cheaper to keep in sync than a cross-check-file
@@ -15,47 +15,35 @@ const ARCHIVED_STATES: Array<"archived_restorable" | "archived_expired"> = [
   "archived_expired",
 ];
 
-function extractUndeclaredPackages(payload: unknown): string[] {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    Array.isArray((payload as { undeclaredPackages?: unknown }).undeclaredPackages)
-  ) {
-    return (payload as { undeclaredPackages: unknown[] }).undeclaredPackages.filter(
-      (item): item is string => typeof item === "string",
-    );
-  }
-  return [];
-}
+const stringArray = (value: unknown): string[] | null =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
 
 /**
  * Check #3 — "No undeclared software".
  *
- * Fails when installed packages diverge from the resolved manifest.
- * Rather than diffing `undeclaredPackages` sets across events, this uses
- * the simplest approach: a machine is
- * currently drifted if the *latest* drift-related event recorded for it is
- * `machine.drift_detected` rather than `machine.drift_resolved`. Reconcile
- * only closes gaps and drift is never auto-corrected,
- * so an open `drift_detected` genuinely stays open until an
- * explicit `drift_resolved` is recorded for that machine.
+ * Computed from what the agent actually reports, which is new. It used to read
+ * `machine.drift_detected` events, and those had one live emitter: a
+ * reconcile loop that compared the manifest against a provider call which
+ * never returned real package data. On Azure it returned none at all, so the
+ * check passed everywhere by construction. `machine.drift_resolved` was never
+ * emitted by anything, so a finding it did open could never close.
  *
- * `detailKey` for `upsertFindingFirstSeen` is the machine id — one finding
- * per machine, matching check #2 — not the triggering
- * `machine.drift_detected` event id. A machine that drifts, resolves, and
- * drifts again (even on a different package set) is treated as the same
- * finding key rather than a fresh incident. Per-incident granularity
- * (keying by the drift-detected event's id instead) is a reasonable
- * alternative if per-incident finding age is ever wanted; this picks
- * machine-level for consistency with check #2 and because the "Finding
- * age" dashboard story is per open finding, not per historical incident.
+ * Now: reported inventory, minus the image baseline, minus anything allowed.
+ * The same set the machine's packages table shows with its toggle off, via the
+ * same `buildPackagesView` — one definition of "undeclared", not two that can
+ * drift apart.
  *
- * Like check #2, this excludes archived machines from producing findings —
- * a machine that drifted and was later archived (with no `drift_resolved`
- * ever recorded, since offboarding doesn't remediate drift) shouldn't
- * surface as an open finding forever. That per-machine exclusion still lives
- * in `evaluate`'s query, same as `active-owner.ts`; `appliesTo` below only
- * gates at the org level.
+ * Subtracting the baseline is what makes this usable rather than noise. A real
+ * Ubuntu server image is several hundred packages; without that subtraction
+ * every machine reports several hundred findings on its first check-in and the
+ * check means nothing.
+ *
+ * A machine that has never reported produces no finding. It has told us
+ * nothing, and "no evidence of undeclared software" is not the same claim as
+ * "we looked and there is none" — the "machines are reporting" check is what
+ * catches a machine that has gone quiet.
+ *
+ * `detailKey` is the machine id — one finding per machine, matching check #2.
  */
 export const noUndeclaredSoftwareCheck: ComplianceCheck = {
   id: "no-undeclared-software",
@@ -84,67 +72,82 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
     Effect.gen(function* () {
       const db = yield* Db;
 
-      const liveMachineRows = yield* Effect.orDie(
+      const liveMachines = yield* Effect.orDie(
         Effect.tryPromise(() =>
           db
-            .select({ id: machines.id })
+            .select()
             .from(machines)
             .where(and(eq(machines.orgId, orgId), notInArray(machines.state, ARCHIVED_STATES))),
         ),
       );
-      const liveMachineIds = new Set(liveMachineRows.map((row) => row.id));
-
-      const rows = yield* Effect.orDie(
-        Effect.tryPromise(() =>
-          db
-            .select({
-              machineId: events.machineId,
-              type: events.type,
-              occurredAt: events.occurredAt,
-              payload: events.payload,
-            })
-            .from(events)
-            .where(and(eq(events.orgId, orgId), inArray(events.type, DRIFT_EVENT_TYPES)))
-            .orderBy(asc(events.occurredAt)),
-        ),
-      );
-
-      // Walk in occurredAt order, keeping only the latest drift-related
-      // event per machine (last write in iteration order wins).
-      const latestByMachine = new Map<string, (typeof rows)[number]>();
-      for (const row of rows) {
-        if (row.machineId === null) continue;
-        latestByMachine.set(row.machineId, row);
-      }
 
       const findings: ComplianceFinding[] = [];
       const openMachineIds: string[] = [];
-      for (const [machineId, latest] of latestByMachine) {
-        if (latest.type !== "machine.drift_detected") continue;
-        if (!liveMachineIds.has(machineId)) continue;
 
-        openMachineIds.push(machineId);
+      for (const machine of liveMachines) {
+        const installedPackages = stringArray(machine.installedPackages);
+        // Never reported. Nothing to say about software on a machine that has
+        // not spoken to us — that silence is check #4's business, not this one's.
+        if (installedPackages === null) continue;
 
+        const manifestRows = yield* Effect.orDie(
+          Effect.tryPromise(() =>
+            db
+              .select()
+              .from(machinePackages)
+              .where(
+                or(
+                  and(
+                    eq(machinePackages.scopeType, "org"),
+                    eq(machinePackages.scopeId, machine.orgId),
+                  ),
+                  and(
+                    eq(machinePackages.scopeType, "machine"),
+                    eq(machinePackages.scopeId, machine.id),
+                  ),
+                ),
+              ),
+          ),
+        );
+
+        const manifest = resolveManifest(manifestRows as MachinePackageRow[], {
+          orgId: machine.orgId,
+          templateId: machine.templateId,
+          machineId: machine.id,
+        });
+
+        const undeclaredPackages = undeclaredFromView(
+          buildPackagesView({
+            manifest,
+            installedPackages,
+            baselinePackages: stringArray(machine.baselinePackages),
+          }),
+        );
+
+        if (undeclaredPackages.length === 0) continue;
+
+        openMachineIds.push(machine.id);
         const firstSeenAt = yield* upsertFindingFirstSeen({
           checkId: "no-undeclared-software",
           orgId,
-          machineId,
-          detailKey: machineId,
+          machineId: machine.id,
+          detailKey: machine.id,
         }).pipe(Effect.orDie);
 
         findings.push({
           checkId: "no-undeclared-software",
           orgId,
-          machineId,
+          machineId: machine.id,
           firstSeenAt,
-          detail: { undeclaredPackages: extractUndeclaredPackages(latest.payload) },
+          detail: { undeclaredPackages },
         });
       }
 
-      // Anything previously open for this check+org that isn't among the
-      // machines found just now has resolved (a `drift_resolved` landed, or
-      // the machine was archived) — stop aging it, so a later re-drift of
-      // the same machine is treated as newly opened.
+      // Anything previously open that is not open now has resolved — the
+      // package was removed, allowed, or the machine was archived. Unlike the
+      // event-based version, this can actually close: it re-derives the answer
+      // from current state every run rather than waiting for a resolution
+      // event that nothing ever emitted.
       yield* clearResolvedFindings("no-undeclared-software", orgId, openMachineIds).pipe(
         Effect.orDie,
       );

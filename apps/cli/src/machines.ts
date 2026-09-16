@@ -10,7 +10,6 @@ import type {
   MachineDetail,
   MachineSummary,
   PackageManifestEdit,
-  ReconcileTriggerResponse,
   ResolvedPackageManifestEntry,
   UpdateMachinePackagesResponse,
 } from "@cloudable/contracts";
@@ -250,27 +249,6 @@ export async function runMachinesUpgradeCommand(argv: ReadonlyArray<string>): Pr
   if (result.snapshotId) console.log(`Snapshot taken first: ${result.snapshotId}`);
   if (result.driftUrl) console.log(`Drift: ${result.driftUrl}`);
   if (result.outcome !== "success") process.exitCode = 1;
-}
-
-export async function runMachinesReconcileCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const args = parseArgs(argv, readSpec());
-  const id = await machineId(
-    required(args, 0, "a machine", usageFor("machines reconcile <machine>")),
-  );
-  const result = await authenticatedApiRequest<ReconcileTriggerResponse>(
-    `/api/v1/config/machines/${id}/reconcile`,
-    postJson({ confirm: true }),
-  );
-  if (args.booleans.has("json")) {
-    printJson(result);
-    return;
-  }
-  // Says what the call did, not what it hoped would follow. The version bump
-  // is real; nothing reads it yet (the agent poll endpoint still serves a
-  // constant ETag), so promising an apply on the next poll was not true.
-  console.log(
-    `Desired state for ${result.machineId} is now version ${result.desiredStateVersion}.`,
-  );
 }
 
 export async function runMachinesArchiveCommand(argv: ReadonlyArray<string>): Promise<void> {

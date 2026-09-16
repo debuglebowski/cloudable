@@ -123,15 +123,6 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         ],
       },
       {
-        name: "reconcile",
-        summary: "Apply a machine's desired state on the agent's next poll",
-        args: "<machine>",
-        notes: [
-          "Reconcile only closes gaps. It removes undeclared software, it never installs.",
-          "The agent picks the change up on its next poll, roughly 30 seconds, not instantly.",
-        ],
-      },
-      {
         name: "archive",
         summary: "Snapshot a machine and archive it",
         args: "<machine>",

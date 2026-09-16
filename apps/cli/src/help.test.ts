@@ -40,7 +40,7 @@ test("every command and subcommand renders help with a usage line", () => {
 test("machines help shows both subcommands, login help shows both options", () => {
   const machines = renderCommandHelp(resolve(["machines"]).chain);
   expect(machines).toContain("list");
-  expect(machines).toContain("reconcile");
+  expect(machines).toContain("packages");
 
   const login = renderCommandHelp(resolve(["login"]).chain);
   expect(login).toContain("--os-user");
@@ -48,8 +48,8 @@ test("machines help shows both subcommands, login help shows both options", () =
 });
 
 test("resolve consumes the command path and leaves the arguments", () => {
-  const { chain, rest } = resolve(["machines", "reconcile", "m-1"]);
-  expect(chain.map((c) => c.name)).toEqual(["machines", "reconcile"]);
+  const { chain, rest } = resolve(["machines", "restart", "m-1"]);
+  expect(chain.map((c) => c.name)).toEqual(["machines", "restart"]);
   expect(rest).toEqual(["m-1"]);
 });
 

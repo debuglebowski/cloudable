@@ -25,7 +25,7 @@ import { type TunnelRelay, closeSessionsWithLapsedAuthorization } from "../tunne
  * now-expired grant kept running, which is the precise scenario
  * `closeSessionsWithLapsedAuthorization`'s own doc comment exists to rule out.
  *
- * Modelled on `reconcile/daemon.ts`, including its advisory-lock leader election,
+ * Modelled on `status-refresh/daemon.ts`, including its advisory-lock leader election,
  * for a reason that matters more here than there: these sweeps publish events, and
  * events are append-only. Two replicas sweeping the same overdue approval would
  * publish `approval.expired` twice, permanently. Reconcile's duplicate work is
@@ -34,7 +34,7 @@ import { type TunnelRelay, closeSessionsWithLapsedAuthorization } from "../tunne
 
 /** Distinct from every other advisory-lock key in this codebase, each on its own
  * dedicated `max:1` connection (`pg_advisory_lock`/`unlock` are session-scoped):
- * `reconcile/daemon.ts`'s `RECONCILE_LEADER_LOCK_KEY = 522_038_916`,
+ * `status-refresh/daemon.ts`'s `RECONCILE_LEADER_LOCK_KEY = 522_038_916`,
  * `migrate-on-boot.ts`'s `615_930_744`, `bootstrap-default-admin.ts`'s `394_812_207`,
  * `test-support/db.ts`'s `847_291_003`. Held for the life of the process, like
  * reconcile's: whichever replica acquires it is the sole sweeper, and if it dies
@@ -49,7 +49,7 @@ const EXPIRY_LEADER_LOCK_KEY = 738_164_502;
  * still 60x cheaper per pass than reconcile. */
 const SWEEP_INTERVAL = Duration.seconds(60);
 
-/** Same rationale as `reconcile/daemon.ts`'s keepalive: `pg_advisory_lock` never
+/** Same rationale as `status-refresh/daemon.ts`'s keepalive: `pg_advisory_lock` never
  * pushes a "you lost it" notification, so the only way to notice a silently dropped
  * connection is to use it. Bounds how long two replicas could both believe they lead. */
 const KEEPALIVE_INTERVAL = Duration.seconds(30);
@@ -132,7 +132,7 @@ export const startExpirySweepDaemon: Effect.Effect<never, never, Db | EventBus |
       // DATABASE_AUTH_MODE=entra the connection string carries no password, so
       // building a client directly sends an empty one and every acquisition fails
       // with an error that reads like a lock problem and is an auth one. Same trap
-      // `reconcile/daemon.ts` documents falling into in a real deployment.
+      // `status-refresh/daemon.ts` documents falling into in a real deployment.
       const lockSql = openPostgres({ max: 1 });
       const acquired = yield* Effect.tryPromise({
         try: () => lockSql`select pg_advisory_lock(${EXPIRY_LEADER_LOCK_KEY})`,

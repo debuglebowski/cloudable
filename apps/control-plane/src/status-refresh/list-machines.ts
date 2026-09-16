@@ -2,9 +2,8 @@ import { machines } from "@cloudable/schema";
 import { Effect } from "effect";
 import { Db } from "../db/layer";
 import { MachineService } from "../domain/machine/MachineService";
-import { declaredPackages } from "../domain/machine/manifest";
 import type { MachineStatus } from "../services/ProvisioningService";
-import type { ReconcileInput } from "./loop";
+import type { RefreshInput } from "./loop";
 
 /** Mirrors `archive/sub-state.ts`'s own list — kept separate (not imported) since that
  * module's states carry archive-lifecycle meaning this file doesn't need. */
@@ -13,7 +12,7 @@ const ARCHIVED_DB_STATES = new Set(["archived_restorable", "archived_expired"]);
 /** Maps this build's 6 DB machine states onto `ProvisioningService`'s narrower 5-value
  * `MachineStatus.state` — `"stopped"` has no real equivalent yet (nothing in this build
  * transitions a machine there outside the offboarding sequence, which archives it in the
- * same step) so it's treated as `"running"`: reconcile still checks it against
+ * same step) so it's treated as `"running"`: the pass still checks it against
  * provisioning rather than silently skipping it. */
 function toLastKnownStatus(row: {
   id: string;
@@ -31,18 +30,18 @@ function toLastKnownStatus(row: {
 }
 
 /**
- * Real `ReconcileLoopConfig["listMachines"]` — `reconcile/loop.ts`'s own doc
+ * Real `StatusRefreshLoopConfig["listMachines"]` — `./loop.ts`'s own doc
  * comment left this deliberately unimplemented ("wire a real implementation
  * once that repository exists"); it does now (`MachineService`).
  *
  * `E = never`: a transient failure reading the fleet must not end the whole
- * daemon loop (`runReconcileLoop` only stops on a `listMachines` failure,
+ * daemon loop (`runStatusRefreshLoop` only stops on a `listMachines` failure,
  * per its own doc comment) — logged and skipped for this pass instead, same
- * posture as a single machine's own reconcile failure (`reconcileAllOnce`'s
+ * posture as a single machine's own reconcile failure (`refreshAllOnce`'s
  * `onError`).
  */
-export const listReconcilableMachines: Effect.Effect<
-  ReadonlyArray<ReconcileInput>,
+export const listRefreshableMachines: Effect.Effect<
+  ReadonlyArray<RefreshInput>,
   never,
   Db | MachineService
 > = Effect.gen(function* () {
@@ -54,7 +53,7 @@ export const listReconcilableMachines: Effect.Effect<
     catch: (cause) => cause,
   }).pipe(
     Effect.catchAll((cause) =>
-      Effect.logError(`reconcile: failed to list machines: ${String(cause)}`).pipe(
+      Effect.logError(`status-refresh: failed to list machines: ${String(cause)}`).pipe(
         Effect.as([] as (typeof machines.$inferSelect)[]),
       ),
     ),
@@ -65,34 +64,30 @@ export const listReconcilableMachines: Effect.Effect<
     (row) =>
       machineService.getById(row.id, row.orgId).pipe(
         Effect.map(
-          (detail): ReconcileInput => ({
+          (detail): RefreshInput => ({
             desired: {
               machineId: detail.id,
               orgId: detail.orgId,
               provider: detail.provider,
               region: detail.region,
               sizeSku: detail.sizeSku,
-              // Excluded entries are resolved but not declared: they must never
-              // reach the provider as something to install, and they must read
-              // as undeclared if the machine reports them (`declaredPackages`).
-              packages: declaredPackages(detail.manifest).map((entry) => entry.packageName),
               lifecycle: ARCHIVED_DB_STATES.has(detail.state) ? "archived" : "live",
             },
             lastKnown: toLastKnownStatus(detail),
           }),
         ),
         Effect.catchAll((cause) =>
-          Effect.logError(`reconcile: skipping machine ${row.id} this pass: ${String(cause)}`).pipe(
-            Effect.as(null),
-          ),
+          Effect.logError(
+            `status-refresh: skipping machine ${row.id} this pass: ${String(cause)}`,
+          ).pipe(Effect.as(null)),
         ),
       ),
     // Sequential, not "unbounded": this loop's own concurrency budget is
-    // spent on machines in parallel already (`reconcileAllOnce`) — no need
+    // spent on machines in parallel already (`refreshAllOnce`) — no need
     // to also fan out N simultaneous `getById` reads on top of that for a
     // background pass with no latency deadline.
     { concurrency: 4 },
   );
 
-  return inputs.filter((input): input is ReconcileInput => input !== null);
+  return inputs.filter((input): input is RefreshInput => input !== null);
 });

@@ -84,7 +84,9 @@ export function UpgradeMachineDialog({ machine, open, onOpenChange }: UpgradeMac
     mutationFn: () => triggerUpgrade(machine.id, targetImage.trim(), scope),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: machinesKeys.detail(machine.id) });
-      void queryClient.invalidateQueries({ queryKey: machinesKeys.drift(machine.id) });
+      // A reimage replaces what is on the machine, so the packages table is
+      // stale until the agent reports against the new image.
+      void queryClient.invalidateQueries({ queryKey: machinesKeys.packages(machine.id) });
     },
   });
 

@@ -443,7 +443,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         // (a container starts near-instantly; nothing to wait for), so this branch is
         // inert for them — this only ever matters for azure.
         //
-        // The reconcile loop (`reconcile/daemon.ts`) and the agent's own first
+        // The reconcile loop (`status-refresh/daemon.ts`) and the agent's own first
         // check-in (`MachineDirectory.markVerified`) both promote "provisioning" to
         // "running" later — see their own doc comments. This DB write's job is only
         // to record the state Azure reported *right now*, honestly.

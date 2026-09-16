@@ -6,7 +6,7 @@ import { join } from "node:path";
  * Guards the rule that every runtime Postgres client goes through
  * `openPostgres()` in `db/connect.ts`.
  *
- * This is not style policing. `reconcile/daemon.ts` built its own client with
+ * This is not style policing. `status-refresh/daemon.ts` built its own client with
  * `postgres(config.databaseUrl, ...)`, which was fine under password auth and
  * silently fatal under `DATABASE_AUTH_MODE=entra`: the connection string has
  * no password in that mode, so every attempt failed with "Password returned by
