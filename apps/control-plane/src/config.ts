@@ -97,6 +97,16 @@ export interface AppConfig {
    */
   readonly localDockerControlPlaneUrl: string;
   /**
+   * A local disk image the FAKE provider serves for any snapshot read grant, so snapshot
+   * inspection (`docs/lifecycle.md`) can be driven end to end without Azure.
+   *
+   * Dev only, and null unless set. There is otherwise no way to see this feature work
+   * locally at all: the docker provider captures no disks, so a local machine's snapshots
+   * name nothing to read. Point it at
+   * `apps/control-plane/src/snapshot-fs/__fixtures__/home.img` (gunzip it first).
+   */
+  readonly fakeSnapshotImagePath: string | null;
+  /**
    * Azure subscription `ProvisioningService.azure.ts` provisions real
    * machines into. Self-hosted mode only (docs/cloud-auth.md's "fully
    * managed mode uses a managed identity ... same provisioning-layer code
@@ -281,6 +291,7 @@ const readConfig = (): AppConfig => {
     consoleOrigin: process.env.CONSOLE_ORIGIN ?? "http://localhost:5180",
     localDockerControlPlaneUrl:
       process.env.LOCAL_DOCKER_CONTROL_PLANE_URL ?? `http://host.docker.internal:${port}`,
+    fakeSnapshotImagePath: process.env.FAKE_SNAPSHOT_IMAGE_PATH ?? null,
     azureSubscriptionId: process.env.AZURE_SUBSCRIPTION_ID ?? null,
     azureMachinesResourceGroup: process.env.AZURE_MACHINES_RESOURCE_GROUP ?? "rg-cloudable-managed",
     azureMachinesSubnetId: process.env.AZURE_MACHINES_SUBNET_ID ?? null,

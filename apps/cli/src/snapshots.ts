@@ -276,3 +276,159 @@ export const runSnapshotsLegalHoldSetCommand = (argv: ReadonlyArray<string>) =>
   legalHold(argv, true);
 export const runSnapshotsLegalHoldClearCommand = (argv: ReadonlyArray<string>) =>
   legalHold(argv, false);
+
+// ---------------------------------------------------------------------------
+// `snapshots ls` / `snapshots cat` — reading what is inside a snapshot.
+//
+// Each command opens an inspection session, runs one operation and closes it.
+// Session-per-command rather than a persistent one: there is no interactive
+// shell here to hold state, and a session left open holds a provider read grant
+// that nothing would come back to release.
+//
+// Whether the caller may look is the server's decision — they own the machine,
+// or they hold a granted elevation on it. A 403 comes back with the reason and
+// what to do about it, which `ApiError.describe()` already prints.
+// ---------------------------------------------------------------------------
+
+interface InspectionSession {
+  sessionId: string;
+  snapshotId: string;
+  machineId: string;
+  rootPath: string;
+  expiresAt: string;
+}
+
+type FsEntryWire = {
+  name: string;
+  type: "file" | "directory" | "symlink" | "other";
+  sizeBytes: number;
+  modifiedAt: string;
+  mode: string;
+  symlinkTarget: string | null;
+};
+
+type FsResultWire =
+  | { ok: false; reason: string }
+  | {
+      ok: true;
+      op: "list";
+      path: string;
+      parent: string | null;
+      entries: FsEntryWire[];
+      truncated: boolean;
+    }
+  | {
+      ok: true;
+      op: "read";
+      path: string;
+      contentBase64: string;
+      modifiedAt: string;
+      sizeBytes: number;
+    };
+
+const FS_FAILURE_TEXT: Record<string, string> = {
+  not_found: "No such path in this snapshot.",
+  not_a_directory: "That isn't a directory.",
+  is_a_directory: "That's a directory, not a file.",
+  too_large: "That file is too large to print. It is still in the snapshot.",
+  is_binary: "That looks like a binary file.",
+  invalid_path: "That path isn't valid.",
+  permission_denied: "Your access to this snapshot was withdrawn.",
+  io_error: "The snapshot couldn't be read.",
+};
+
+/** Opens a session, runs `use`, and always closes it — including when `use` throws, so a
+ * failed read does not leave a provider grant open until it times out. */
+async function withInspection<T>(
+  snapshotId: string,
+  use: (session: InspectionSession) => Promise<T>,
+): Promise<T> {
+  const session = await authenticatedApiRequest<InspectionSession>(
+    `/api/v1/archive/snapshots/${snapshotId}/inspections`,
+    postJson({}),
+  );
+  try {
+    return await use(session);
+  } finally {
+    await authenticatedApiRequest(
+      `/api/v1/archive/inspections/${session.sessionId}/end`,
+      postJson({}),
+    ).catch(() => {});
+  }
+}
+
+/** `printTable` pads every column to its widest cell, so one long symlink target would
+ * push the whole listing off to the right. `--json` carries the untruncated value. */
+function elide(value: string, max = 44): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
+function failAndExit(result: { ok: false; reason: string }): never {
+  console.error(
+    FS_FAILURE_TEXT[result.reason] ?? `The snapshot couldn't be read: ${result.reason}`,
+  );
+  process.exit(1);
+}
+
+export async function runSnapshotsLsCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor("snapshots ls <snapshotId> [path]");
+  const args = parseArgs(argv, readSpec());
+  const snapshotId = required(args, 0, "a snapshot id", usage);
+
+  await withInspection(snapshotId, async (session) => {
+    const path = args.positionals[1] ?? session.rootPath;
+    const result = await authenticatedApiRequest<FsResultWire>(
+      `/api/v1/archive/inspections/${session.sessionId}/list${query({ path })}`,
+    );
+
+    if (args.booleans.has("json")) {
+      printJson(result);
+      return;
+    }
+    if (!result.ok) failAndExit(result);
+    if (result.op !== "list") return;
+    if (result.entries.length === 0) {
+      printEmpty("files");
+      return;
+    }
+
+    printTable(
+      ["name", "type", "size", "mode", "modified"],
+      result.entries.map((entry) => [
+        entry.type === "symlink" && entry.symlinkTarget
+          ? `${entry.name} -> ${elide(entry.symlinkTarget)}`
+          : entry.name,
+        entry.type,
+        entry.type === "directory" ? dash(null) : humanBytes(entry.sizeBytes),
+        entry.mode,
+        shortTime(entry.modifiedAt),
+      ]),
+    );
+    if (result.truncated) {
+      console.log("\nMore. This directory has more entries than are shown.");
+    }
+  });
+}
+
+export async function runSnapshotsCatCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor("snapshots cat <snapshotId> <path>");
+  const args = parseArgs(argv, readSpec());
+  const snapshotId = required(args, 0, "a snapshot id", usage);
+  const path = required(args, 1, "a path", usage);
+
+  await withInspection(snapshotId, async (session) => {
+    const result = await authenticatedApiRequest<FsResultWire>(
+      `/api/v1/archive/inspections/${session.sessionId}/read${query({ path })}`,
+    );
+
+    if (args.booleans.has("json")) {
+      printJson(result);
+      return;
+    }
+    if (!result.ok) failAndExit(result);
+    if (result.op !== "read") return;
+    // Raw to stdout, so this pipes. No trailing newline added — the file's own bytes are
+    // the output, and appending one would corrupt a diff.
+    process.stdout.write(Buffer.from(result.contentBase64, "base64"));
+  });
+}

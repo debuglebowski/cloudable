@@ -223,6 +223,21 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       { name: "get", summary: "Show one snapshot", args: "<snapshotId>" },
       { name: "cost", summary: "Estimate what a snapshot costs to keep", args: "<snapshotId>" },
       {
+        name: "ls",
+        summary: "List files inside a snapshot",
+        args: "<snapshotId> [path]",
+        notes: [
+          "Read-only, and the persistent disk only — the volume mounted at /home. Defaults to the machine's home directory.",
+          "You must own the machine, or hold a granted elevation on it.",
+        ],
+      },
+      {
+        name: "cat",
+        summary: "Print a file from inside a snapshot",
+        args: "<snapshotId> <path>",
+        notes: ["Writes raw bytes to stdout, so it pipes."],
+      },
+      {
         name: "restore",
         summary: "Restore a snapshot onto a machine",
         args: "<snapshotId>",

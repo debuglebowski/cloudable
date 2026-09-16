@@ -14,7 +14,7 @@ import {
 } from "./ProvisioningService";
 import { AzureProvisioningServiceLive } from "./ProvisioningService.azure";
 import { makeDockerProvisioningServiceLive } from "./ProvisioningService.docker";
-import { FakeProvisioningServiceLive } from "./ProvisioningService.fake";
+import { makeFakeProvisioningServiceLive } from "./ProvisioningService.fake";
 
 /**
  * Builds all three real implementations once, unconditionally, at boot —
@@ -26,7 +26,13 @@ import { FakeProvisioningServiceLive } from "./ProvisioningService.fake";
 export const SwitchableProvisioningServiceLive: Layer.Layer<ProvisioningServiceTag> = Layer.effect(
   ProvisioningServiceTag,
   Effect.gen(function* () {
-    const fake = yield* Effect.provide(ProvisioningServiceTag, FakeProvisioningServiceLive);
+    const fake = yield* Effect.provide(
+      ProvisioningServiceTag,
+      // `fallbackSnapshotImage` is null unless a developer sets FAKE_SNAPSHOT_IMAGE_PATH.
+      // It is the only way to exercise snapshot inspection locally: docker machines
+      // capture no disks, so their snapshots name nothing to read.
+      makeFakeProvisioningServiceLive({ fallbackSnapshotImage: config.fakeSnapshotImagePath }),
+    );
     const docker = yield* Effect.provide(
       ProvisioningServiceTag,
       makeDockerProvisioningServiceLive({ controlPlaneUrl: config.localDockerControlPlaneUrl }),

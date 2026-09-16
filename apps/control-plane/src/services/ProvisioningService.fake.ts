@@ -37,6 +37,12 @@ export interface FakeProvisioningOptions {
    * against itself and prove nothing about whether the reader can read a real ext4.
    */
   snapshotImages?: ReadonlyMap<string, string>;
+  /**
+   * Served for ANY disk id, when no per-id entry matches. `config.fakeSnapshotImagePath`
+   * sets it for local development, where there is otherwise no readable snapshot to look
+   * at — the docker provider captures no disks.
+   */
+  fallbackSnapshotImage?: string | null;
 }
 
 /**
@@ -167,7 +173,8 @@ export const makeFakeProvisioningServiceLive = (
         durationSeconds,
       }) =>
         Effect.gen(function* () {
-          const path = options.snapshotImages?.get(diskExternalId);
+          const path =
+            options.snapshotImages?.get(diskExternalId) ?? options.fallbackSnapshotImage ?? null;
           if (!path) {
             // Deliberately `not_found` rather than a stub URL: a test that forgot to
             // register an image should fail where the image is missing, not later with an
