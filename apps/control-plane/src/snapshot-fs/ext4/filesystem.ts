@@ -92,10 +92,23 @@ const parentImagePath = (imagePath: string): string | null => {
   return cut === -1 ? "" : imagePath.slice(0, cut);
 };
 
+/**
+ * `FsResult` narrowed to the one operation each method can actually answer with.
+ *
+ * `FsResult` covers every op a LIVE session has, `write` and `upload` among them. Leaving
+ * these as the full union would let a handler declare a wire shape that says a listing
+ * might come back as a write receipt — and would quietly hide the fact that this
+ * filesystem has no write path at all.
+ */
+export type FsFailureResult = Extract<FsResult, { ok: false }>;
+export type FsListResult = Extract<FsResult, { ok: true; op: "list" }> | FsFailureResult;
+export type FsReadResult = Extract<FsResult, { ok: true; op: "read" }> | FsFailureResult;
+export type FsDownloadResult = Extract<FsResult, { ok: true; op: "download" }> | FsFailureResult;
+
 export interface SnapshotFilesystem {
-  list(path: string, limit?: number): Promise<FsResult>;
-  read(path: string): Promise<FsResult>;
-  download(path: string): Promise<{ result: FsResult; bytes?: Uint8Array }>;
+  list(path: string, limit?: number): Promise<FsListResult>;
+  read(path: string): Promise<FsReadResult>;
+  download(path: string): Promise<{ result: FsDownloadResult; bytes?: Uint8Array }>;
 }
 
 export const openExt4Filesystem = async (reader: RangeReader): Promise<SnapshotFilesystem> => {
@@ -168,7 +181,9 @@ export const openExt4Filesystem = async (reader: RangeReader): Promise<SnapshotF
     };
   };
 
-  const settle = async (run: () => Promise<FsResult>): Promise<FsResult> => {
+  const settle = async <R extends FsResult>(
+    run: () => Promise<R>,
+  ): Promise<R | FsFailureResult> => {
     try {
       return await run();
     } catch (error) {
@@ -181,7 +196,7 @@ export const openExt4Filesystem = async (reader: RangeReader): Promise<SnapshotF
 
   return {
     list: (path, limit = FS_MAX_ENTRIES) =>
-      settle(async () => {
+      settle<Extract<FsResult, { ok: true; op: "list" }>>(async () => {
         const imagePath = toImagePath(path);
         let inode = await resolve(imagePath);
         if (inode.kind === "symlink") {
@@ -216,7 +231,7 @@ export const openExt4Filesystem = async (reader: RangeReader): Promise<SnapshotF
       }),
 
     read: (path) =>
-      settle(async () => {
+      settle<Extract<FsResult, { ok: true; op: "read" }>>(async () => {
         const imagePath = toImagePath(path);
         let inode = await resolve(imagePath);
         if (inode.kind === "symlink") {
@@ -241,7 +256,7 @@ export const openExt4Filesystem = async (reader: RangeReader): Promise<SnapshotF
 
     download: async (path) => {
       let bytes: Uint8Array | undefined;
-      const result = await settle(async () => {
+      const result = await settle<Extract<FsResult, { ok: true; op: "download" }>>(async () => {
         const imagePath = toImagePath(path);
         let inode = await resolve(imagePath);
         if (inode.kind === "symlink") {

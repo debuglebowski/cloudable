@@ -2,13 +2,16 @@ import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import {
   FullRestoreNotAcknowledgedError,
+  InspectionSessionNotFoundError,
   InvalidLegalHoldReasonError,
   InvalidRestoreApprovalError,
   MachineAlreadyArchivedError,
   MachineNotFoundError,
   RestoreNotApprovedError,
+  SnapshotDiskNotReadableError,
   SnapshotEmptyError,
   SnapshotExpiredError,
+  SnapshotInspectionDeniedError,
   SnapshotNotFoundError,
 } from "../../domain/archive";
 import { CurrentUserAuthentication } from "../middleware/auth";
@@ -119,6 +122,59 @@ const ListSnapshotsResponse = Schema.Struct({
   }),
 });
 
+const SessionIdPath = Schema.Struct({ sessionId: Schema.String });
+
+/** `path` is a URL param rather than a body, because these are GETs — a directory
+ * listing is a read and should behave like one (cacheable, re-runnable, safe). */
+const InspectionPathParams = Schema.Struct({ path: Schema.String });
+
+const OpenInspectionSuccess = Schema.Struct({
+  sessionId: Schema.String,
+  snapshotId: Schema.String,
+  machineId: Schema.String,
+  /** Where a browser should open: the machine's home directory. */
+  rootPath: Schema.String,
+  expiresAt: Schema.String,
+});
+
+const FsEntrySchema = Schema.Struct({
+  name: Schema.String,
+  type: Schema.Literal("file", "directory", "symlink", "other"),
+  sizeBytes: Schema.Number,
+  modifiedAt: Schema.String,
+  mode: Schema.String,
+  symlinkTarget: Schema.NullOr(Schema.String),
+});
+
+/**
+ * Mirrors `FsResult` from `@cloudable/contracts`, minus the operations a snapshot does
+ * not have. The console's file browser already speaks this, which is why inspection
+ * reuses the vocabulary instead of inventing a parallel one.
+ *
+ * A filesystem-level failure is a 200 carrying `ok: false`, not an HTTP error — the
+ * same choice the live path makes. "That file is binary" is an answer the browser
+ * renders, not a transport failure.
+ */
+const FsResultSchema = Schema.Union(
+  Schema.Struct({ ok: Schema.Literal(false), reason: Schema.String }),
+  Schema.Struct({
+    ok: Schema.Literal(true),
+    op: Schema.Literal("list"),
+    path: Schema.String,
+    parent: Schema.NullOr(Schema.String),
+    entries: Schema.Array(FsEntrySchema),
+    truncated: Schema.Boolean,
+  }),
+  Schema.Struct({
+    ok: Schema.Literal(true),
+    op: Schema.Literal("read"),
+    path: Schema.String,
+    contentBase64: Schema.String,
+    modifiedAt: Schema.String,
+    sizeBytes: Schema.Number,
+  }),
+);
+
 export const ArchiveGroup = HttpApiGroup.make("archive")
   .add(
     HttpApiEndpoint.post("archiveMachine", "/api/v1/archive/machines/:machineId/archive")
@@ -191,5 +247,51 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .setPath(SnapshotIdPath)
       .addSuccess(CostEstimateSuccess)
       .addError(SnapshotNotFoundError, { status: 404 }),
+  )
+  .add(
+    // Opening is a POST because it creates a session row and writes an event. The reads
+    // that follow are GETs against that session.
+    HttpApiEndpoint.post("openInspection", "/api/v1/archive/snapshots/:snapshotId/inspections")
+      .setPath(SnapshotIdPath)
+      .addSuccess(OpenInspectionSuccess)
+      .addError(SnapshotNotFoundError, { status: 404 })
+      .addError(MachineNotFoundError, { status: 404 })
+      .addError(SnapshotExpiredError, { status: 409 })
+      .addError(SnapshotEmptyError, { status: 409 })
+      .addError(SnapshotDiskNotReadableError, { status: 409 })
+      // 403 with a stated reason, never a 404 that hides the snapshot: the person is
+      // allowed to know it exists and what to do about it (request an elevation).
+      .addError(SnapshotInspectionDeniedError, { status: 403 }),
+  )
+  .add(
+    HttpApiEndpoint.post("closeInspection", "/api/v1/archive/inspections/:sessionId/end")
+      .setPath(SessionIdPath)
+      .addSuccess(Schema.Struct({ ok: Schema.Literal(true) })),
+  )
+  .add(
+    HttpApiEndpoint.get("inspectionList", "/api/v1/archive/inspections/:sessionId/list")
+      .setPath(SessionIdPath)
+      .setUrlParams(InspectionPathParams)
+      .addSuccess(FsResultSchema)
+      .addError(InspectionSessionNotFoundError, { status: 404 })
+      .addError(SnapshotNotFoundError, { status: 404 })
+      .addError(MachineNotFoundError, { status: 404 })
+      .addError(SnapshotExpiredError, { status: 409 })
+      .addError(SnapshotEmptyError, { status: 409 })
+      .addError(SnapshotDiskNotReadableError, { status: 409 })
+      .addError(SnapshotInspectionDeniedError, { status: 403 }),
+  )
+  .add(
+    HttpApiEndpoint.get("inspectionRead", "/api/v1/archive/inspections/:sessionId/read")
+      .setPath(SessionIdPath)
+      .setUrlParams(InspectionPathParams)
+      .addSuccess(FsResultSchema)
+      .addError(InspectionSessionNotFoundError, { status: 404 })
+      .addError(SnapshotNotFoundError, { status: 404 })
+      .addError(MachineNotFoundError, { status: 404 })
+      .addError(SnapshotExpiredError, { status: 409 })
+      .addError(SnapshotEmptyError, { status: 409 })
+      .addError(SnapshotDiskNotReadableError, { status: 409 })
+      .addError(SnapshotInspectionDeniedError, { status: 403 }),
   )
   .middleware(CurrentUserAuthentication);

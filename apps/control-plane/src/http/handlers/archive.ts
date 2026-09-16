@@ -5,12 +5,15 @@ import {
   type SnapshotRow,
   archiveMachine,
   clearLegalHold,
+  closeInspection,
   estimateSnapshotCost,
   fetchLatestSnapshotForMachine,
   fetchMachine,
   fetchSnapshot,
   getSnapshotSubState,
+  inspectionFilesystem,
   listSnapshotsByOrg,
+  openInspection,
   restoreSnapshot,
   restoreUnavailableReason,
   resumeRestore,
@@ -174,6 +177,63 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
           currency: "USD" as const,
           disclaimer: COST_ESTIMATE_DISCLAIMER,
         })),
+      ),
+    )
+    .handle("openInspection", ({ path }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        const opened = yield* openInspection({
+          snapshotId: path.snapshotId,
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+        });
+        return { ...opened, expiresAt: opened.expiresAt.toISOString() };
+      }).pipe(Effect.catchTag("ArchiveDbError", (e) => Effect.die(e))),
+    )
+    .handle("closeInspection", ({ path }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        yield* closeInspection({
+          sessionId: path.sessionId,
+          orgId: currentUser.orgId,
+          actor: { actorType: "person", actorId: currentUser.personId },
+          reason: "person_ended",
+        });
+        // Closing a session that was already closed, or never existed for this caller,
+        // reports success: the caller wanted it not open, and it is not open. A 404 here
+        // would make a browser tab closing twice look like a failure.
+        return { ok: true as const };
+      }).pipe(Effect.catchTag("ArchiveDbError", (e) => Effect.die(e))),
+    )
+    .handle("inspectionList", ({ path, urlParams }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        const filesystem = yield* inspectionFilesystem({
+          sessionId: path.sessionId,
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+        });
+        return yield* Effect.promise(() => filesystem.list(urlParams.path));
+      }).pipe(
+        Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
+        // A provider failure is ours, not the caller's: the grant could not be taken or
+        // the image could not be opened. Died on rather than wired as a reason code,
+        // same as every other infrastructure failure in this group.
+        Effect.catchTag("ProvisioningError", (e) => Effect.die(e)),
+      ),
+    )
+    .handle("inspectionRead", ({ path, urlParams }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        const filesystem = yield* inspectionFilesystem({
+          sessionId: path.sessionId,
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+        });
+        return yield* Effect.promise(() => filesystem.read(urlParams.path));
+      }).pipe(
+        Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
+        Effect.catchTag("ProvisioningError", (e) => Effect.die(e)),
       ),
     ),
 );
