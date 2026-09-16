@@ -56,6 +56,15 @@ export interface ArchivedSnapshot {
   expiredAt: string | null;
   legalHold: boolean;
   legalHoldReason: string | null;
+  /** Computed server-side (`domain/archive/sub-state.ts`). Carried through rather than
+   * re-derived from `expiredAt` here: the server knows about `"empty"` — a snapshot that
+   * captured nothing — and a console deriving its own answer would show a working
+   * Restore button over one. A value this console does not recognise must be treated as
+   * NOT restorable, which is the safe direction. */
+  subState: "restorable" | "expired" | "empty";
+  /** Null when the snapshot is usable. When set, actions that need the data must be
+   * greyed out WITH this shown — never hidden (`sub-state.ts`). */
+  restoreUnavailableReason: string | null;
 }
 
 export const archiveKeys = {
@@ -106,6 +115,8 @@ export async function fetchArchivedSnapshots(): Promise<ArchivedSnapshot[]> {
     expiredAt: s.expiredAt,
     legalHold: s.legalHold,
     legalHoldReason: s.legalHoldReason,
+    subState: s.subState,
+    restoreUnavailableReason: s.restoreUnavailableReason,
   }));
 }
 
@@ -198,6 +209,34 @@ export function useRestoreSnapshot() {
     },
     onError: (error) => {
       toast.error("Couldn't start restore", { description: error.message });
+    },
+  });
+}
+
+export interface OpenInspectionResponse {
+  sessionId: string;
+  snapshotId: string;
+  machineId: string;
+  /** Where the browser should open — the machine's home directory, not the disk root. */
+  rootPath: string;
+  expiresAt: string;
+}
+
+/**
+ * Opens a read-only inspection of a snapshot's persistent disk.
+ *
+ * Whether the caller is allowed is the server's decision and only the server's: they own
+ * the machine, or they hold a granted elevation on it. Nothing here predicts that — the
+ * same rule `browse-files-dialog.tsx` states for live file sessions, and it matters more
+ * here, because a button that guessed wrong in the permissive direction would be guessing
+ * about a departed person's home directory.
+ */
+export function useOpenSnapshotInspection() {
+  return useMutation({
+    mutationFn: (snapshotId: string) =>
+      apiPost<OpenInspectionResponse>(`/api/v1/archive/snapshots/${snapshotId}/inspections`),
+    onError: (error) => {
+      toast.error("Can't open this snapshot", { description: error.message });
     },
   });
 }

@@ -1,6 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 
 import { FileBrowser } from "@/components/files/file-browser";
+import { useFileSession } from "@/components/files/use-file-session";
 
 /**
  * Attaches to an already-minted `method: "files"` session by id — reached either from the
@@ -13,6 +14,9 @@ import { FileBrowser } from "@/components/files/file-browser";
  */
 export function SessionFilesPage() {
   const { sessionId } = useParams({ from: "/access/sessions/$sessionId/files" });
+  // The websocket transport. `FileBrowser` itself is transport-agnostic now — a snapshot
+  // inspection renders the same component over an HTTP one.
+  const session = useFileSession(sessionId);
 
   return (
     // h-full min-h-0: bounds this page to `main`'s real available height (see root.tsx's
@@ -26,7 +30,7 @@ export function SessionFilesPage() {
         <span aria-hidden="true">/</span>
         <span className="text-foreground">Files</span>
       </div>
-      <FileBrowser sessionId={sessionId} />
+      <FileBrowser session={session} />
     </div>
   );
 }

@@ -66,7 +66,7 @@ import { FileTree } from "./file-tree";
 import { formatSize, joinPath, parentOf } from "./paths";
 import { SplitPane } from "./split-pane";
 import { useDirectoryCache } from "./use-directory-cache";
-import { type FsOutcome, useFileSession } from "./use-file-session";
+import type { FileSession, FsOutcome } from "./use-file-session";
 import { type NavigatorMode, useViewModes } from "./use-view-modes";
 
 /** Where the tree is rooted and the table opens. Derived from the contract constant so it
@@ -74,8 +74,25 @@ import { type NavigatorMode, useViewModes } from "./use-view-modes";
 const DEFAULT_PATH = `/home/${MACHINE_OS_USER}`;
 
 export interface FileBrowserProps {
-  sessionId: string;
+  /**
+   * The transport. Injected rather than opened here, because there are two:
+   * `useFileSession` talks to a live machine over the tunnel websocket, and
+   * `useSnapshotInspection` reads an archived machine's snapshot over HTTP. Both satisfy
+   * this shape, and everything below is written against it rather than against either.
+   */
+  session: FileSession;
   initialPath?: string;
+  /**
+   * Hides every operation that would change something: save, rename, new folder, upload.
+   *
+   * Not merely cosmetic for a snapshot — there is no write path on that side at all
+   * (`apps/control-plane/src/snapshot-fs/ext4/filesystem.ts`), so a Save button would be
+   * offering something the server cannot do. The editor and content pane already accept
+   * `readOnly` and this is the first caller to pass it.
+   */
+  readOnly?: boolean;
+  /** Shown above the navigator — e.g. that a snapshot is the persistent disk only. */
+  notice?: string;
 }
 
 interface OpenFile {
@@ -112,8 +129,12 @@ const encodeText = (text: string): string => {
   return btoa(binary);
 };
 
-export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrowserProps) {
-  const session = useFileSession(sessionId);
+export function FileBrowser({
+  session,
+  initialPath = DEFAULT_PATH,
+  readOnly = false,
+  notice,
+}: FileBrowserProps) {
   const { state, closeReason, run, upload } = session;
   const { navigatorMode, setNavigatorMode, contentMode, setContentMode } = useViewModes();
   const cache = useDirectoryCache(session, describeFailure);
@@ -390,7 +411,7 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
             variant="ghost"
             size="sm"
             disabled={busy}
-            title="Edit"
+            title={readOnly ? "View" : "Edit"}
             onClick={() => void activate(entry, full)}
           >
             <Pencil className="size-3.5" />
@@ -407,9 +428,11 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
             <Download className="size-3.5" />
           </Button>
         )}
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRenaming(entry)}>
-          <span className="text-xs">Rename</span>
-        </Button>
+        {!readOnly && (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRenaming(entry)}>
+            <span className="text-xs">Rename</span>
+          </Button>
+        )}
       </div>
     );
   };
@@ -498,9 +521,11 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
                   <ModeTab value="plain" label="Plain" icon={<FileText className="size-3.5" />} />
                 </TabsList>
               </Tabs>
-              <Button size="sm" disabled={!dirty || busy} onClick={() => void save()}>
-                <Save className="size-3.5" /> Save
-              </Button>
+              {!readOnly && (
+                <Button size="sm" disabled={!dirty || busy} onClick={() => void save()}>
+                  <Save className="size-3.5" /> Save
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -518,6 +543,7 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
               value={open.draft}
               onChange={(draft) => setOpen((prev) => (prev ? { ...prev, draft } : prev))}
               onSave={() => void save()}
+              readOnly={readOnly}
             />
           </div>
         </>
@@ -552,34 +578,44 @@ export function FileBrowser({ sessionId, initialPath = DEFAULT_PATH }: FileBrows
           >
             <RotateCw className="size-3.5" /> Refresh
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || navigatorMode === "tree"}
-            onClick={() => setNewFolderOpen(true)}
-          >
-            <FolderPlus className="size-3.5" /> New folder
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || navigatorMode === "tree"}
-            onClick={() => uploadInputRef.current?.click()}
-          >
-            <ArrowUpFromLine className="size-3.5" /> Upload
-          </Button>
-          <input
-            ref={uploadInputRef}
-            type="file"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) handleUpload(file);
-            }}
-          />
+          {!readOnly && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy || navigatorMode === "tree"}
+                onClick={() => setNewFolderOpen(true)}
+              >
+                <FolderPlus className="size-3.5" /> New folder
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy || navigatorMode === "tree"}
+                onClick={() => uploadInputRef.current?.click()}
+              >
+                <ArrowUpFromLine className="size-3.5" /> Upload
+              </Button>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) handleUpload(file);
+                }}
+              />
+            </>
+          )}
         </div>
       </div>
+
+      {notice && (
+        <p className="shrink-0 rounded-xl bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+          {notice}
+        </p>
+      )}
 
       <SplitPane
         storageKey="cloudable-files-pane-width"
