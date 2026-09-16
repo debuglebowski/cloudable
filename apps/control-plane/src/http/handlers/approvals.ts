@@ -17,11 +17,21 @@ const mapError = (error: ApprovalError) => {
       return new HttpApiError.Conflict();
     case "reason_required":
       return new HttpApiError.BadRequest();
+    // `self_approval` cannot reach here: only `decide` compares the caller against the
+    // requester, and it uses `mapDecideError` below. Folding it into this shared mapper
+    // would make every endpoint declare a 403 it can never return.
+    case "self_approval":
     case "query_failed":
     case "insert_failed":
       return new HttpApiError.InternalServerError();
   }
 };
+
+/** `decide` only. 403 rather than 409: the request is well-formed and the approval is
+ * decidable — just not by this person. A conflict would read as "try again later", which
+ * is the wrong advice; nothing changes by waiting. */
+const mapDecideError = (error: ApprovalError) =>
+  error.reason === "self_approval" ? new HttpApiError.Forbidden() : mapError(error);
 
 const toWire = (result: ApprovalResult) => ({
   ...result,
@@ -58,7 +68,7 @@ export const ApprovalsLive = HttpApiBuilder.group(Api, "approvals", (handlers) =
           payload.reason,
         );
         return toWire(result);
-      }).pipe(Effect.mapError(mapError)),
+      }).pipe(Effect.mapError(mapDecideError)),
     )
     .handle("getById", ({ path }) =>
       Effect.gen(function* () {

@@ -145,6 +145,19 @@ export interface AccessMethodsEnabled {
   webTerminal: boolean;
   ssh: boolean;
   files: boolean;
+  /**
+   * Read-only browsing of an archived machine's snapshot (`docs/lifecycle.md`).
+   *
+   * Separate from `files` even though both browse files, because they are separately
+   * worth turning off: `files` reaches a LIVE machine and can write to it, while this
+   * reaches a frozen copy of a machine that may no longer have an owner. An org that
+   * wants recovery from archives without live file access, or the reverse, can have
+   * either — and neither flag implies the other.
+   *
+   * Same no-migration story as `files`: a stored value predating this key lacks it and
+   * falls back to the default.
+   */
+  snapshotInspect: boolean;
 }
 
 export interface MachineDetail extends MachineSummary {

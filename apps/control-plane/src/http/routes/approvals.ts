@@ -76,6 +76,9 @@ const decide = HttpApiEndpoint.post(
   .addError(HttpApiError.NotFound)
   .addError(HttpApiError.Conflict)
   .addError(HttpApiError.BadRequest)
+  // Only `decide` can refuse a self-approval — it is the only endpoint where the caller
+  // and the requester can be the same person.
+  .addError(HttpApiError.Forbidden)
   .addError(HttpApiError.InternalServerError);
 
 const getById = HttpApiEndpoint.get(

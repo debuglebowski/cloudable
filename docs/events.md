@@ -50,9 +50,9 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | :--- | :--- | :--- |
 | `access.certificate_issued` | 1 | A short-lived SSH certificate was issued for a principal. |
 | `access.certificate_revoked` | 1 | An SSH certificate was revoked before its expiry. |
-| `access.session_started` | 2 | A terminal or SSH session started on a machine. |
-| `access.session_ended` | 2 | A terminal or SSH session ended after a given duration. |
-| `access.session_denied` | 1 | A terminal or SSH session was denied access to a machine. |
+| `access.session_started` | 2 | An interactive session started: a terminal, SSH, file browsing on a machine, or a read-only inspection of a snapshot. |
+| `access.session_ended` | 2 | An interactive session ended after a given duration. |
+| `access.session_denied` | 1 | An interactive session was denied, with the reason it was refused. |
 | `access.elevation_requested` | 1 | A person requested elevated access (file recovery or shell) with a reason. |
 | `access.elevation_granted` | 1 | Elevated access was granted for a limited time. |
 | `access.elevation_expired` | 1 | A granted elevation expired. |

@@ -206,6 +206,10 @@ describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)"
     const targetMachine = await seedMachine(org.id);
     const snapshot = await seedCapturedSnapshot(sourceMachine.id);
     const requestedByPersonId = crypto.randomUUID();
+    // A DIFFERENT person decides it. `ApprovalService.decide` refuses a requester
+    // approving their own request, so a single id here would make this test assert that
+    // a restore can be self-served — which is exactly what it must not be.
+    const approverPersonId = crypto.randomUUID();
 
     const pending = await run(
       restoreSnapshot({
@@ -228,7 +232,7 @@ describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)"
     await run(
       Effect.gen(function* () {
         const approvalService = yield* ApprovalService;
-        yield* approvalService.decide(pending.approvalId, org.id, requestedByPersonId, "approved");
+        yield* approvalService.decide(pending.approvalId, org.id, approverPersonId, "approved");
       }),
     );
 

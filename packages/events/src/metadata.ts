@@ -146,15 +146,16 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2 | 3; desc
     },
     "access.session_started": {
       tier: 2,
-      description: "A terminal or SSH session started on a machine.",
+      description:
+        "An interactive session started: a terminal, SSH, file browsing on a machine, or a read-only inspection of a snapshot.",
     },
     "access.session_ended": {
       tier: 2,
-      description: "A terminal or SSH session ended after a given duration.",
+      description: "An interactive session ended after a given duration.",
     },
     "access.session_denied": {
       tier: 1,
-      description: "A terminal or SSH session was denied access to a machine.",
+      description: "An interactive session was denied, with the reason it was refused.",
     },
     "access.elevation_requested": {
       tier: 1,

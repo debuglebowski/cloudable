@@ -1,3 +1,4 @@
+import type { SessionRowMethod } from "@cloudable/contracts";
 import type { DomainEvent, OrgEvent } from "@cloudable/events";
 import { type SettingRow, machines, resolveSetting, settingValues } from "@cloudable/schema";
 import { and, eq, inArray } from "drizzle-orm";
@@ -6,11 +7,11 @@ import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import { TunnelServer } from "../../tunnel/server";
-import type { SessionMethod } from "../../tunnel/session-token";
 import { machineSettingChangedEvent } from "../machine/events";
 import {
   ACCESS_METHODS_ENABLED_KEY,
   filesEnabledOf,
+  snapshotInspectEnabledOf,
   webTerminalEnabledOf,
 } from "../machine/settings";
 import {
@@ -306,12 +307,21 @@ export const applySettingChange = (
     // live file session (or an SSH one), which is what an unfiltered
     // `terminateSessionsForMachine` here used to do.
     if (input.key === ACCESS_METHODS_ENABLED_KEY) {
-      const newlyDisabled: { method: SessionMethod; reason: string }[] = [];
+      const newlyDisabled: { method: SessionRowMethod; reason: string }[] = [];
       if (webTerminalEnabledOf(previous) && !webTerminalEnabledOf(input.value)) {
         newlyDisabled.push({ method: "terminal", reason: "access.web_terminal_disabled" });
       }
       if (filesEnabledOf(previous) && !filesEnabledOf(input.value)) {
         newlyDisabled.push({ method: "files", reason: "access.files_disabled" });
+      }
+      // Turning off snapshot inspection ends the inspections already open, for the same
+      // reason the other two do: "disabling terminates live sessions" is worth little if
+      // whoever is already looking gets to keep looking.
+      if (snapshotInspectEnabledOf(previous) && !snapshotInspectEnabledOf(input.value)) {
+        newlyDisabled.push({
+          method: "snapshot_files",
+          reason: "access.snapshot_inspect_disabled",
+        });
       }
 
       if (newlyDisabled.length > 0) {

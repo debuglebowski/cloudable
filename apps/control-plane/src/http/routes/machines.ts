@@ -54,6 +54,7 @@ const accessMethodsEnabledValueSchema = Schema.Struct({
   webTerminal: Schema.Boolean,
   ssh: Schema.Boolean,
   files: Schema.Boolean,
+  snapshotInspect: Schema.Boolean,
 });
 
 const _accessMethodsKeysMatchContract = {} as Schema.Schema.Type<

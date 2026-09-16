@@ -18,8 +18,13 @@ export type AccessEvent =
       payload: { certificateId: string; reason: string };
     })
   | (EventEnvelope & {
+      // `method` gained `"snapshot_files"` — a read-only inspection of an archived
+      // machine's snapshot. Widening a payload union is additive and leaves the event
+      // TYPE untouched, so invariant 11 holds and the catalogue snapshot does not move.
+      // A consumer that only knows the first three sees a value it does not recognise,
+      // never a missing event.
       type: "access.session_started";
-      payload: { method: "terminal" | "ssh" | "files"; osUser: string };
+      payload: { method: "terminal" | "ssh" | "files" | "snapshot_files"; osUser: string };
     })
   | (EventEnvelope & {
       type: "access.session_ended";
@@ -30,7 +35,7 @@ export type AccessEvent =
     })
   | (EventEnvelope & {
       type: "access.session_denied";
-      payload: { reason: string; method: "terminal" | "ssh" | "files" };
+      payload: { reason: string; method: "terminal" | "ssh" | "files" | "snapshot_files" };
     })
   | (EventEnvelope & {
       type: "access.elevation_requested";

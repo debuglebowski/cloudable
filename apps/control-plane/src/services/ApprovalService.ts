@@ -68,6 +68,7 @@ export class ApprovalError extends Data.TaggedError("ApprovalError")<{
     | "not_found"
     | "already_decided"
     | "duplicate_decision"
+    | "self_approval"
     | "reason_required"
     | "query_failed"
     | "insert_failed";
@@ -464,6 +465,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
           | { kind: "not_found" }
           | { kind: "already_decided" }
           | { kind: "duplicate_decision" }
+          | { kind: "self_approval" }
           | { kind: "denied"; row: ApprovalRow; approverIds: string[] }
           | { kind: "granted"; row: ApprovalRow; approverIds: string[] }
           | { kind: "still_pending"; row: ApprovalRow; approverIds: string[] };
@@ -486,6 +488,21 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
               // "denied" case — same reasoning as `getRow` above.
               if (!existing || existing.orgId !== orgId) return { kind: "not_found" };
               if (existing.status !== "pending") return { kind: "already_decided" };
+
+              // Nobody decides their own request, in either direction.
+              //
+              // `docs/spec.md` §13 already says it — "A confirmation dialog is
+              // self-approval and is not an approval" — and until this, nothing enforced
+              // it. In `single` mode that made every approval-gated action self-serve:
+              // request an `admin_access` elevation against a machine you do not own,
+              // approve it yourself, and the elevation is granted. Snapshot inspection
+              // rests on exactly that elevation, so without this its gate would have been
+              // a formality.
+              //
+              // Checked inside the transaction, against the locked row, rather than by
+              // the caller — five call sites would each have had to remember, and the one
+              // that forgot would be the hole.
+              if (existing.requestedByPersonId === personId) return { kind: "self_approval" };
 
               const [duplicate] = await tx
                 .select({ id: approvalDecisions.id })
@@ -572,6 +589,9 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
         }
         if (outcome.kind === "duplicate_decision") {
           return yield* Effect.fail(new ApprovalError({ reason: "duplicate_decision" }));
+        }
+        if (outcome.kind === "self_approval") {
+          return yield* Effect.fail(new ApprovalError({ reason: "self_approval" }));
         }
 
         if (outcome.kind === "denied") {

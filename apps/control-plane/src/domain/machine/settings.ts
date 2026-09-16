@@ -51,6 +51,7 @@ export const DEFAULT_ACCESS_METHODS_ENABLED: AccessMethodsEnabled = {
   webTerminal: true,
   ssh: true,
   files: true,
+  snapshotInspect: true,
 };
 
 export interface ResolvedMachineSetting<T> {
@@ -176,4 +177,10 @@ export function webTerminalEnabledOf(value: unknown): boolean {
 export function filesEnabledOf(value: unknown): boolean {
   const v = value as Partial<AccessMethodsEnabled> | null | undefined;
   return v?.files ?? DEFAULT_ACCESS_METHODS_ENABLED.files;
+}
+
+/** The `snapshotInspect` counterpart, same fallback rule. */
+export function snapshotInspectEnabledOf(value: unknown): boolean {
+  const v = value as Partial<AccessMethodsEnabled> | null | undefined;
+  return v?.snapshotInspect ?? DEFAULT_ACCESS_METHODS_ENABLED.snapshotInspect;
 }

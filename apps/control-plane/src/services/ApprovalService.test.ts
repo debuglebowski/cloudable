@@ -343,6 +343,107 @@ describe("ApprovalService", () => {
     });
   });
 
+  test("refuses a requester approving their own request", async () => {
+    // `docs/spec.md` §13: "A confirmation dialog is self-approval and is not an
+    // approval." Before this was enforced, `single` mode made every approval-gated
+    // action self-serve — including the `admin_access` elevation that snapshot
+    // inspection is gated on, which would have made that gate decorative.
+    const orgId = crypto.randomUUID();
+    const personId = crypto.randomUUID();
+    await setApprovalMode(orgId, "admin_access", "single");
+
+    const requested = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.request({
+          orgId,
+          actionType: "admin_access",
+          requestedByPersonId: personId,
+          targetMachineId: null,
+          reason: "recovering a departed colleague's file",
+        });
+      }),
+    );
+    expect(requested.status).toBe("pending");
+
+    const error = await runFail(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.decide(requested.id, orgId, personId, "approved");
+      }),
+    );
+    expect((error as ApprovalError).reason).toBe("self_approval");
+
+    // Still pending, not quietly left half-decided.
+    const after = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.status(requested.id, orgId);
+      }),
+    );
+    expect(after.status).toBe("pending");
+    expect(after.approvedCount).toBe(0);
+  });
+
+  test("refuses a requester REJECTING their own request too", async () => {
+    // Both directions. Withdrawing is a legitimate thing to want, but it is not a
+    // decision, and letting it in through `decide` would put a denial in the evidence
+    // trail attributed to an approver who never existed.
+    const orgId = crypto.randomUUID();
+    const personId = crypto.randomUUID();
+    await setApprovalMode(orgId, "admin_access", "single");
+
+    const requested = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.request({
+          orgId,
+          actionType: "admin_access",
+          requestedByPersonId: personId,
+          targetMachineId: null,
+          reason: "changed my mind",
+        });
+      }),
+    );
+
+    const error = await runFail(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.decide(requested.id, orgId, personId, "rejected", "withdrawing");
+      }),
+    );
+    expect((error as ApprovalError).reason).toBe("self_approval");
+  });
+
+  test("someone else can still approve the same request", async () => {
+    const orgId = crypto.randomUUID();
+    const personId = crypto.randomUUID();
+    const approverId = crypto.randomUUID();
+    await setApprovalMode(orgId, "admin_access", "single");
+
+    const requested = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.request({
+          orgId,
+          actionType: "admin_access",
+          requestedByPersonId: personId,
+          targetMachineId: null,
+          reason: "recovering a departed colleague's file",
+        });
+      }),
+    );
+
+    const decided = await run(
+      Effect.gen(function* () {
+        const service = yield* ApprovalService;
+        return yield* service.decide(requested.id, orgId, approverId, "approved");
+      }),
+    );
+    expect(decided.status).toBe("approved");
+    expect(decided.approvedCount).toBe(1);
+  });
+
   test("rejects a duplicate decision from the same person on the same approval", async () => {
     const orgId = crypto.randomUUID();
     const personId = crypto.randomUUID();

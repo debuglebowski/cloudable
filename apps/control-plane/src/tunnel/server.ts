@@ -19,7 +19,7 @@
 // stop". See `signal.ts`'s own header comment for why this is a new channel
 // rather than a repurposed `wake`.
 // ---------------------------------------------------------------------------
-import { MACHINE_OS_USER } from "@cloudable/contracts";
+import { MACHINE_OS_USER, type SessionRowMethod } from "@cloudable/contracts";
 import { machines, sessions } from "@cloudable/schema";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
@@ -342,7 +342,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
        * a person who never had the disabled method taken away from them would be
        * disconnected by a policy change that did not apply to them.
        */
-      methods?: ReadonlyArray<SessionMethod>;
+      methods?: ReadonlyArray<SessionRowMethod>;
     }): Effect.Effect<number, TunnelError> =>
       Effect.gen(function* () {
         const now = new Date();
