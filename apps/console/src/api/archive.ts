@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { apiGet, apiPost } from "@/lib/api-client";
+import { ApiError, apiGet, apiPost } from "@/lib/api-client";
 import { listMachines } from "./machines";
 
 /**
@@ -236,7 +236,22 @@ export function useOpenSnapshotInspection() {
     mutationFn: (snapshotId: string) =>
       apiPost<OpenInspectionResponse>(`/api/v1/archive/snapshots/${snapshotId}/inspections`),
     onError: (error) => {
-      toast.error("Can't open this snapshot", { description: error.message });
+      // The server's `reason` is the whole point of refusing with one — it says to request
+      // elevated access, and for an offboarded machine that it has no owner to ask. The
+      // generic `error.message` is "POST /api/v1/... -> 403", because these errors carry
+      // `reason` rather than the `message` field `ApiError` knows to lift. Reading the
+      // body directly is what `api-client.ts` tells callers who need the structured reason
+      // to do.
+      toast.error("Can't open this snapshot", { description: reasonOf(error) });
     },
   });
+}
+
+/** The `reason` off a tagged domain error body, falling back to the generic message. */
+function reasonOf(error: unknown): string {
+  if (error instanceof ApiError && error.body && typeof error.body === "object") {
+    const reason = (error.body as Record<string, unknown>).reason;
+    if (typeof reason === "string" && reason.length > 0) return reason;
+  }
+  return error instanceof Error ? error.message : String(error);
 }

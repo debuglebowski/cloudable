@@ -30,8 +30,8 @@ test("signs in with a real BetterAuth login and loads its own org's Machines pag
   // org-scoped query (http/middleware/auth.ts) rather than 401/500ing —
   // the exact class of bug a CORS/cookie misconfiguration produces (see
   // c8b6ee5). The freshly-created e2e org owns zero machines, so the
-  // real "No machines to show." empty state, not the page's error state,
-  // is success.
+  // real "No machines yet" empty state, not the page's error state, is
+  // success.
   await expect(page.getByText("Failed to load machines")).not.toBeVisible();
-  await expect(page.getByText("No machines to show.")).toBeVisible();
+  await expect(page.getByText("No machines yet")).toBeVisible();
 });

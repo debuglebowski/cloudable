@@ -76,14 +76,24 @@ export function useSnapshotInspection(sessionId: string): FileSession {
 
   const upload = useCallback(async (): Promise<FsOutcome> => ({ result: READ_ONLY }), []);
 
-  // Ends the session when the page goes away, so the control plane can revoke the
-  // provider grant rather than waiting for the TTL. Best-effort: a closed tab cannot be
-  // relied on to finish a request, which is why the server also expires sessions on its
-  // own.
+  // Ends the session when the TAB goes away, so the control plane can revoke the provider
+  // grant rather than holding it for the rest of the TTL.
+  //
+  // `pagehide`, deliberately NOT an unmount cleanup. React runs effect cleanups on every
+  // unmount, including the immediate mount/unmount/mount of StrictMode in development —
+  // so ending the session there killed it a few milliseconds after opening it, and the
+  // browser's first listing came back "this inspection session has ended". A remount is
+  // not a departure, and only the document actually going away is.
+  //
+  // Best-effort either way: a closing tab cannot be relied on to finish a request, which
+  // is why `INSPECTION_TTL_MS` and the re-authorization sweep are the real bounds and this
+  // is only tidiness on top of them.
   useEffect(() => {
-    return () => {
+    const end = () => {
       void apiPost(`/api/v1/archive/inspections/${sessionId}/end`).catch(() => {});
     };
+    window.addEventListener("pagehide", end);
+    return () => window.removeEventListener("pagehide", end);
   }, [sessionId]);
 
   return useMemo(() => ({ state, closeReason, run, upload }), [state, closeReason, run, upload]);
