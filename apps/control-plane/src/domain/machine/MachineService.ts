@@ -861,7 +861,10 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
               installedPackages: [...input.installedPackages],
               declaredPackageVersions: input.declaredPackageVersions ?? {},
               baselinePackages: sql`coalesce(${machines.baselinePackages}, ${JSON.stringify([...input.installedPackages])}::jsonb)`,
-              baselineCapturedAt: sql`coalesce(${machines.baselineCapturedAt}, ${input.observedAt})`,
+              // ISO string with an explicit cast, not the Date itself: a JS Date
+              // bound inside a `sql` template never reaches the driver's
+              // parameter serializer and fails with ERR_INVALID_ARG_TYPE.
+              baselineCapturedAt: sql`coalesce(${machines.baselineCapturedAt}, ${input.observedAt.toISOString()}::timestamptz)`,
             })
             .where(eq(machines.id, input.machineId)),
         catch: (cause) => new MachineServiceError({ reason: "manifest_write_failed", cause }),
