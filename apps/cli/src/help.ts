@@ -223,6 +223,18 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       { name: "get", summary: "Show one snapshot", args: "<snapshotId>" },
       { name: "cost", summary: "Estimate what a snapshot costs to keep", args: "<snapshotId>" },
       {
+        name: "take",
+        summary: "Take a snapshot of a machine now",
+        args: "<machine>",
+        options: [
+          {
+            flag: "--scope shallow|full",
+            description: "shallow (default) copies the persistent volume; full adds the OS disk",
+          },
+        ],
+        notes: ["The machine keeps running, so the copy is crash-consistent."],
+      },
+      {
         name: "ls",
         summary: "List files inside a snapshot",
         args: "<snapshotId> [path]",

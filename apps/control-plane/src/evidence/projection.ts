@@ -122,6 +122,12 @@ function assertNever(x: never): never {
  * new event type without teaching this function to summarise it is a
  * compile error, not a silently blank row in the audit export.
  */
+/** Reads as prose in an evidence timeline. Only `snapshot_files` needs translating; the
+ * other three are already the words a person would use. Falls through to the raw value so
+ * a method added later shows up as itself rather than as nothing. */
+const sessionMethodLabel = (method: string): string =>
+  method === "snapshot_files" ? "snapshot file" : method;
+
 function summarize(row: RawEventRow): string {
   // The write path (`EventBus.publish`) only ever inserts validated
   // `DomainEvent` rows, so this cast is safe: `row.type` narrows the union
@@ -220,11 +226,11 @@ function summarize(row: RawEventRow): string {
     case "access.certificate_revoked":
       return `SSH certificate ${event.payload.certificateId} was revoked: ${event.payload.reason}.`;
     case "access.session_started":
-      return `A ${event.payload.method} session started as OS user "${event.payload.osUser}".`;
+      return `A ${sessionMethodLabel(event.payload.method)} session started as OS user "${event.payload.osUser}".`;
     case "access.session_ended":
       return `A session ended after ${event.payload.durationSeconds}s.`;
     case "access.session_denied":
-      return `A ${event.payload.method} session was denied: ${event.payload.reason}.`;
+      return `A ${sessionMethodLabel(event.payload.method)} session was denied: ${event.payload.reason}.`;
     case "access.elevation_requested":
       return `Elevated access (${event.payload.level}) was requested: ${event.payload.reason}.`;
     case "access.elevation_granted":

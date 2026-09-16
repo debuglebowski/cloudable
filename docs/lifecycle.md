@@ -93,6 +93,22 @@ stays fully visible and restorable, just permanently exempt from the sweep until
 Clearing a hold does **not** recompute `expiresAt` — the original retention window
 resumes as if the hold had paused it, not reset it.
 
+## Taking a snapshot on purpose
+
+`POST /api/v1/archive/machines/:machineId/snapshots`, or `cloudable snapshots take
+<machine>`. `createSnapshot` has supported `trigger: "manual"` since it was written and
+nothing ever called it — the only ways to produce a snapshot were archiving a machine or
+upgrading it, both destructive. So "keep a copy before I do something" and "let me look at
+what is on here" were impossible without tearing the machine down.
+
+Defaults to `scope: "shallow"`: a snapshot taken deliberately is nearly always about the
+data, and the persistent volume is the whole of what cannot be rebuilt.
+
+**Never quiesced.** Stopping someone's running machine to take a snapshot they asked for
+would be a worse surprise than a crash-consistent copy — which is what pulling the power
+gives you, and what ext4 journals for. `archiveMachine` still quiesces, because there the
+machine is going away anyway.
+
 ## Snapshot contents
 
 A snapshot is a real copy of real disks. `createSnapshot` calls
@@ -547,6 +563,7 @@ two-argument contract described in the feature-unit brief.
 
 | Method | Path | Notes |
 |---|---|---|
+| `POST` | `/api/v1/archive/machines/:machineId/snapshots` | Takes a snapshot of a LIVE machine now. Body `{scope?}`, default `shallow`. Never quiesced — the machine keeps running, so the copy is crash-consistent. |
 | `POST` | `/api/v1/archive/machines/:machineId/archive` | Body: `{approvalId?}`. `404` if the machine doesn't exist, `409` if it's already archived (archiving is one-way — see "The state machine"). |
 | `POST` | `/api/v1/archive/snapshots/:snapshotId/restore` | Body: `RestoreSnapshotRequest`. `404` snapshot or target machine not found, `409` expired, `400` full-mode without acknowledgement, `403` denied/expired approval. |
 | `POST` | `/api/v1/archive/snapshots/:snapshotId/legal-hold` | Body: `{reason}`. `400` on an empty reason. |

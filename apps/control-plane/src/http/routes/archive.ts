@@ -146,6 +146,22 @@ const FileBytes = Schema.Uint8ArrayFromSelf.pipe(
   HttpApiSchema.withEncoding({ kind: "Uint8Array", contentType: "application/octet-stream" }),
 );
 
+const TakeSnapshotPayload = Schema.Struct({
+  /** `"shallow"` copies only the persistent volume — smaller and faster, and the whole of
+   * what cannot be rebuilt. `"full"` adds the OS disk. Defaults to shallow: a snapshot
+   * taken on purpose is nearly always about the data. */
+  scope: Schema.optional(Schema.Literal("full", "shallow")),
+});
+
+const TakeSnapshotSuccess = Schema.Struct({
+  snapshotId: Schema.String,
+  machineId: Schema.String,
+  scope: Schema.Literal("full", "shallow"),
+  capturedDiskCount: Schema.Number,
+  sizeBytes: Schema.NullOr(Schema.Number),
+  expiresAt: Schema.String,
+});
+
 const OpenInspectionSuccess = Schema.Struct({
   sessionId: Schema.String,
   snapshotId: Schema.String,
@@ -267,6 +283,24 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .setPath(SnapshotIdPath)
       .addSuccess(CostEstimateSuccess)
       .addError(SnapshotNotFoundError, { status: 404 }),
+  )
+  .add(
+    // Takes a snapshot of a LIVE machine, on purpose, right now.
+    //
+    // `createSnapshot` has supported `trigger: "manual"` since it was written and nothing
+    // ever called it: the only ways to produce a snapshot were archiving a machine or
+    // upgrading it, both destructive. So "let me keep a copy of this before I do
+    // something" and "let me look at what is on here" were both impossible without
+    // tearing the machine down.
+    //
+    // Never quiesced. Stopping someone's running machine to take a snapshot they asked
+    // for would be a worse surprise than a crash-consistent copy, which is what pulling
+    // the power gives you and what ext4 journals for.
+    HttpApiEndpoint.post("takeSnapshot", "/api/v1/archive/machines/:machineId/snapshots")
+      .setPath(MachineIdPath)
+      .setPayload(TakeSnapshotPayload)
+      .addSuccess(TakeSnapshotSuccess)
+      .addError(MachineNotFoundError, { status: 404 }),
   )
   .add(
     // Opening is a POST because it creates a session row and writes an event. The reads

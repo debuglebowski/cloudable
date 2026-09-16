@@ -370,6 +370,42 @@ function failAndExit(result: { ok: false; reason: string }): never {
   process.exit(1);
 }
 
+export async function runSnapshotsTakeCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor("snapshots take <machine> [--scope shallow|full]");
+  const args = parseArgs(argv, readSpec({ values: ["scope"] }));
+  const machine = await machineId(required(args, 0, "a machine", usage));
+  const scope = args.flags.scope
+    ? oneOf(args.flags.scope, ["shallow", "full"] as const, "scope")
+    : undefined;
+
+  const result = await authenticatedApiRequest<{
+    snapshotId: string;
+    machineId: string;
+    scope: "full" | "shallow";
+    capturedDiskCount: number;
+    sizeBytes: number | null;
+    expiresAt: string;
+  }>(`/api/v1/archive/machines/${machine}/snapshots`, postJson(scope ? { scope } : {}));
+
+  if (args.booleans.has("json")) {
+    printJson(result);
+    return;
+  }
+  printFields([
+    ["snapshot", result.snapshotId],
+    ["machine", result.machineId],
+    ["scope", result.scope],
+    ["disks copied", String(result.capturedDiskCount)],
+    ["size", result.sizeBytes === null ? dash(null) : humanBytes(result.sizeBytes)],
+    ["expires", shortTime(result.expiresAt)],
+  ]);
+  if (result.capturedDiskCount === 0) {
+    // Honest rather than silent: a row naming nothing is what a machine with no live
+    // infrastructure produces, and it can neither be restored from nor browsed.
+    console.log("\nNo disks were copied — this machine has no infrastructure to snapshot.");
+  }
+}
+
 export async function runSnapshotsLsCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor("snapshots ls <snapshotId> [path]");
   const args = parseArgs(argv, readSpec());

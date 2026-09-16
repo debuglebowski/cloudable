@@ -112,6 +112,10 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     const { runSnapshotsCostCommand } = await import("./snapshots");
     await runSnapshotsCostCommand(rest);
   },
+  "snapshots take": async (rest) => {
+    const { runSnapshotsTakeCommand } = await import("./snapshots");
+    await runSnapshotsTakeCommand(rest);
+  },
   "snapshots ls": async (rest) => {
     const { runSnapshotsLsCommand } = await import("./snapshots");
     await runSnapshotsLsCommand(rest);

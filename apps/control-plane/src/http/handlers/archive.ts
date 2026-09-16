@@ -7,6 +7,7 @@ import {
   archiveMachine,
   clearLegalHold,
   closeInspection,
+  createSnapshot,
   estimateSnapshotCost,
   fetchLatestSnapshotForMachine,
   fetchMachine,
@@ -179,6 +180,31 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
           currency: "USD" as const,
           disclaimer: COST_ESTIMATE_DISCLAIMER,
         })),
+      ),
+    )
+    .handle("takeSnapshot", ({ path, payload }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        // The tenancy gate, same as every other machine-scoped action here:
+        // `createSnapshot`'s own signature is load-bearing and takes no orgId.
+        yield* fetchMachine(path.machineId, currentUser.orgId);
+        const snapshot = yield* createSnapshot(path.machineId, "manual", undefined, undefined, {
+          scope: payload.scope ?? "shallow",
+          // Never true. See the route's own comment: stopping a running machine to take
+          // a snapshot someone asked for is a worse surprise than a crash-consistent copy.
+          quiesce: false,
+        });
+        return {
+          snapshotId: snapshot.id,
+          machineId: snapshot.machineId,
+          scope: snapshot.scope,
+          capturedDiskCount: snapshot.capturedDisks.length,
+          sizeBytes: snapshot.sizeBytes,
+          expiresAt: snapshot.expiresAt.toISOString(),
+        };
+      }).pipe(
+        Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
+        Effect.catchTag("ProvisioningError", (e) => Effect.die(e)),
       ),
     )
     .handle("openInspection", ({ path }) =>

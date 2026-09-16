@@ -17,7 +17,7 @@ import { EventBus } from "../../services/EventBus";
 import type { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { makeFakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { isDbReachable } from "../../testing/db-reachable";
-import { detectMissingSnapshotData } from "./snapshot";
+import { createSnapshot, detectMissingSnapshotData } from "./snapshot";
 import { getSnapshotSubState, restoreUnavailableReason } from "./sub-state";
 
 const databaseUrl = config.databaseUrl;
@@ -189,6 +189,47 @@ describe.skipIf(!dbReachable)("snapshot integrity sweep (requires Postgres)", ()
     // Which object was lost is the first question anyone investigating asks.
     expect(payload.missingDiskExternalIds).toEqual(["the-one-that-went"]);
     expect(payload.recordedDiskCount).toBe(2);
+  });
+
+  test("a manual snapshot of a live machine is restorable, and the sweep leaves it alone", async () => {
+    // The whole point of `trigger: "manual"`: a snapshot someone asked for, on a machine
+    // that keeps running. Until this there was no way to produce one — archive and
+    // upgrade were the only paths, and both destroy the machine.
+    const [org] = await db
+      .insert(orgs)
+      .values({ name: `manual-${crypto.randomUUID()}` })
+      .returning();
+    if (!org) throw new Error("seed failed");
+    const [owner] = await db
+      .insert(people)
+      .values({ orgId: org.id, email: `m-${crypto.randomUUID()}@example.test` })
+      .returning();
+    if (!owner) throw new Error("seed failed");
+    const [machine] = await db
+      .insert(machines)
+      .values({
+        orgId: org.id,
+        name: "still-running",
+        provider: "fake",
+        region: "eastus",
+        sizeSku: "Standard_B2s",
+        image: "ubuntu-24.04",
+        ownerPersonId: owner.id,
+        state: "running",
+      })
+      .returning();
+    if (!machine) throw new Error("seed failed");
+
+    // The fake adapter answers `not_found` for a machine it never created, so this
+    // records a row naming nothing — the honest outcome for infrastructure that is not
+    // really there, and the same thing a real machine with no cloud resource produces.
+    const snap = await run(createSnapshot(machine.id, "manual"));
+    expect(snap.trigger).toBe("manual");
+    expect(getSnapshotSubState(snap)).toBe("empty");
+
+    // The machine is untouched — a manual snapshot must never stop it.
+    const [after] = await db.select().from(machines).where(eq(machines.id, machine.id));
+    expect(after?.state).toBe("running");
   });
 
   test("the record itself is never rewritten", async () => {
