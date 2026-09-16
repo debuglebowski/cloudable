@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RestoreDialog } from "@/routes/archive/restore-dialog";
-import { RetentionStatus, formatBytes, formatDate } from "@/routes/archive/snapshot-format";
+import { RetentionStatus, formatDate, formatSnapshotSize } from "@/routes/archive/snapshot-format";
 
 import { ArchiveMachineDialog } from "./archive-machine-dialog";
 import { BrowseFilesDialog } from "./browse-files-dialog";
@@ -516,7 +516,7 @@ export function MachineDetailPage() {
                           <RetentionStatus snapshot={snapshot} />
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {formatBytes(snapshot.sizeBytes)}
+                          {formatSnapshotSize(snapshot)}
                         </TableCell>
                         <TableCell className="text-right">
                           {snapshot.expiredAt ? (

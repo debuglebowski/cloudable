@@ -40,6 +40,9 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `machine.drift_resolved` | 1 | Detected drift was removed from a machine under approval. |
 | `machine.reconciled` | 2 | Reconciliation removed undeclared software or settings to close a gap with desired state. |
 | `machine.first_seen` | 1 | The control agent contacted the control plane for the first time on a machine. |
+| `machine.package_action_requested` | 1 | A person asked for a package to be installed or removed on a machine. |
+| `machine.package_action_completed` | 1 | A package install or removal completed on a machine. |
+| `machine.package_action_failed` | 1 | A package install or removal failed on a machine, or was collected by the agent and never reported back. |
 
 ## Access
 

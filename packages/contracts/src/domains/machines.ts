@@ -18,6 +18,18 @@ import type { PageInfo, PaginatedRequest } from "../common";
  */
 export const MACHINE_OS_USER = "cloudable";
 
+/**
+ * Where the machine's persistent volume is mounted.
+ *
+ * The data disk is mounted here, and `/home` IS that mount — see
+ * `homeVolumeSection` in the azure provisioner. It is the one path that survives a
+ * reimage, so it is also the only path worth measuring when sizing a snapshot.
+ *
+ * Shared for the same reason `MACHINE_OS_USER` is: the agent measures this path and
+ * the provisioner mounts it, and the two must not drift apart.
+ */
+export const MACHINE_PERSISTENT_VOLUME_PATH = "/home";
+
 export type MachineState =
   | "provisioning"
   | "running"
@@ -179,4 +191,93 @@ export interface PackagePinConflict {
   pinnedAtScope: ManifestScope;
   pinnedAtScopeId: string;
   pinnedVersionPin: string | null;
+}
+
+/**
+ * Whether a package may be on a machine.
+ *
+ * `null` means nobody has said: the agent found it installed and no manifest
+ * entry covers it. That is a real and common state — it is what somebody
+ * installing something over the terminal looks like — so it is a value here
+ * rather than an absence.
+ */
+export type PackagePermission = "allowed" | "disallowed" | null;
+
+/**
+ * Whether the package is on the machine, according to the agent's last report.
+ *
+ * `"unknown"` is not `"not_installed"`. A machine that has never reported has
+ * told us nothing, and rendering that as "not installed" would be a claim
+ * nobody made.
+ */
+export type PackageInstallState = "installed" | "not_installed" | "unknown";
+
+export type PackageActionOp = "install" | "uninstall";
+
+export type PackageActionStatus = "pending" | "running" | "succeeded" | "failed" | "expired";
+
+export interface PendingPackageActionView {
+  id: string;
+  op: PackageActionOp;
+  status: PackageActionStatus;
+  requestedAt: string;
+  failureReason?: string;
+}
+
+/**
+ * One row of a machine's packages table: the union of what the manifest
+ * declares and what the agent reported, joined on the package name.
+ *
+ * Permission and installation move independently on purpose. A package can be
+ * allowed and absent (nobody has installed it yet), or disallowed and present
+ * (somebody installed it anyway, which is precisely what the compliance check
+ * is looking for).
+ */
+export interface MachinePackageRow {
+  packageName: string;
+  permission: PackagePermission;
+  /** The pin in force from the manifest, null for "any version". */
+  versionPin: string | null;
+  /** Which scope the permission came from; null when there is no manifest entry. */
+  source: ManifestScope | null;
+  installed: PackageInstallState;
+  /** The version the agent reported, when it could determine one. */
+  installedVersion?: string;
+  /**
+   * True when there is a pin and the installed version does not match it.
+   * Asking for `nodejs 20` and getting 18 is not a clean install, and the
+   * table says so rather than showing a green tick.
+   */
+  versionMismatch: boolean;
+  /**
+   * Part of the image this machine was provisioned from. Hidden by default in
+   * the console — a real Ubuntu server image is several hundred packages, and
+   * listing them all buries the handful anyone cares about.
+   */
+  isBaseline: boolean;
+  /** Set while an action is outstanding, so the row can show progress. */
+  pendingAction?: PendingPackageActionView;
+}
+
+export interface MachinePackagesResponse {
+  items: MachinePackageRow[];
+  /** Null when the machine has never reported, which is why `installed` reads "unknown". */
+  lastReportedAt: string | null;
+}
+
+/**
+ * `POST /machines/:id/packages/:name/actions` — ask the machine to install or
+ * uninstall one package.
+ *
+ * Nothing happens at the moment of the request beyond recording it. The agent
+ * collects the action on its next poll and reports the outcome on its next
+ * report, so the honest answer to "is it installed" stays whatever the machine
+ * last said, not what was asked for.
+ */
+export interface CreatePackageActionRequest {
+  op: PackageActionOp;
+}
+
+export interface CreatePackageActionResponse {
+  action: PendingPackageActionView;
 }

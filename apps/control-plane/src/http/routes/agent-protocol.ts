@@ -39,11 +39,22 @@ const AttestSuccess = Schema.Struct({
   machineId: Schema.String,
 });
 
+/** One package operation handed to the agent to perform. */
+const PendingPackageAction = Schema.Struct({
+  id: Schema.String,
+  op: Schema.Literal("install", "uninstall"),
+  packageName: Schema.String,
+  versionPin: Schema.NullOr(Schema.String),
+});
+
 /** 200 body for `GET /poll` — a 304 (unchanged) has no body. See `docs/agents.md`. */
 const DesiredState = Schema.Struct({
   version: Schema.String,
+  // What this machine is ALLOWED to have, not an install list — the agent
+  // acts on `pendingActions`, never on this.
   packages: Schema.Array(Schema.String),
   settings: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  pendingActions: Schema.Array(PendingPackageAction),
 });
 
 /** Mirrors `ConfigState` in `packages/contracts/src/domains/agent-protocol.ts`. */
@@ -51,12 +62,37 @@ const ConfigState = Schema.Struct({
   runningAccessMethods: Schema.Array(Schema.String),
 });
 
+/** What became of one action the agent collected. */
+const PackageActionResult = Schema.Struct({
+  id: Schema.String,
+  outcome: Schema.Literal("succeeded", "failed"),
+  detail: Schema.optional(Schema.String),
+  installedVersion: Schema.optional(Schema.String),
+});
+
 const ReportPayload = Schema.Struct({
   agentVersion: Schema.String,
   observedAt: Schema.String,
   installedPackages: Schema.Array(Schema.String),
+  // Declared packages only — see `AgentReportRequest`.
+  declaredPackageVersions: Schema.optional(
+    Schema.Record({ key: Schema.String, value: Schema.String }),
+  ),
   openPorts: Schema.Array(Schema.Number),
   configState: ConfigState,
+  // The machine's own measurement of its filesystems. Absent means the agent could
+  // not measure them, which must not be recorded as a measurement of zero — see
+  // `AgentReportRequest`. Each half is optional independently: a machine can have a
+  // readable root and an unmounted persistent volume.
+  volumeUsage: Schema.optional(
+    Schema.Struct({
+      persistent: Schema.optional(
+        Schema.Struct({ usedBytes: Schema.Number, totalBytes: Schema.Number }),
+      ),
+      root: Schema.optional(Schema.Struct({ usedBytes: Schema.Number, totalBytes: Schema.Number })),
+    }),
+  ),
+  actionResults: Schema.optional(Schema.Array(PackageActionResult)),
 });
 
 const ReportSuccess = Schema.Struct({ acknowledged: Schema.Literal(true) });

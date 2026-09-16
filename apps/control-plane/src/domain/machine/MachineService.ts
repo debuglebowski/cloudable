@@ -1,5 +1,5 @@
 import { machinePackages, machines } from "@cloudable/schema";
-import { and, asc, eq, gt, or } from "drizzle-orm";
+import { and, asc, eq, gt, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { ulid } from "ulid";
 import { config } from "../../config";
@@ -32,6 +32,8 @@ import {
   resolveManifest,
 } from "./manifest";
 import { queryManifestHistory } from "./manifest-history";
+import { outstandingActionsByPackage } from "./package-actions";
+import { buildPackagesView } from "./packages-view";
 import {
   type AccessMethodsEnabled,
   type PersistentPaths,
@@ -802,7 +804,109 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       cursor?: string | undefined;
     }) => queryManifestHistory(db, input);
 
-    return { create, list, getById, updatePackages, manifestHistory } as const;
+    /** Reads a machine's jsonb string array back, tolerating a null or a shape we did not write. */
+    const stringArray = (value: unknown): string[] | null =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string")
+        : null;
+
+    /**
+     * What the agent's poll serves: the version it compares against, and the
+     * packages this machine is allowed to have.
+     *
+     * The allowed list is a permission list, not an install list. The agent
+     * does not act on it — it acts on `pendingActions` — and it is sent so the
+     * agent can tell an allowed package from an undeclared one without a round
+     * trip.
+     */
+    const desiredStateFor = (machineId: string, orgId: string) =>
+      Effect.gen(function* () {
+        const machine = yield* fetchMachine(machineId, orgId);
+        const rows = (yield* fetchManifestRows(machine)).map(toManifestRow);
+        const manifest = resolveManifest(rows, {
+          orgId: machine.orgId,
+          templateId: machine.templateId,
+          machineId: machine.id,
+        });
+        return {
+          version: String(machine.desiredStateVersion),
+          allowedPackages: declaredPackages(manifest).map((entry) => entry.packageName),
+        };
+      });
+
+    /**
+     * Stores what the agent just reported, and captures the image baseline on
+     * the first report.
+     *
+     * `captureBaseline` is decided by the caller from `lastVerifiedAt`, not
+     * from whether `baselinePackages` is null, so a machine that somehow
+     * reports before its baseline column is written cannot overwrite an
+     * existing baseline later. The SQL guard below says the same thing a
+     * second time: baseline is only ever written where it is still null.
+     */
+    const recordReportedPackages = (input: {
+      machineId: string;
+      installedPackages: ReadonlyArray<string>;
+      declaredPackageVersions?: Readonly<Record<string, string>> | undefined;
+      captureBaseline: boolean;
+      observedAt: Date;
+    }) =>
+      Effect.tryPromise({
+        try: () =>
+          db
+            .update(machines)
+            .set({
+              installedPackages: [...input.installedPackages],
+              declaredPackageVersions: input.declaredPackageVersions ?? {},
+              ...(input.captureBaseline
+                ? {
+                    baselinePackages: sql`coalesce(${machines.baselinePackages}, ${JSON.stringify([...input.installedPackages])}::jsonb)`,
+                    baselineCapturedAt: sql`coalesce(${machines.baselineCapturedAt}, ${input.observedAt})`,
+                  }
+                : {}),
+            })
+            .where(eq(machines.id, input.machineId)),
+        catch: (cause) => new MachineServiceError({ reason: "manifest_write_failed", cause }),
+      });
+
+    /** The machine's packages table: manifest joined with what the agent reported. */
+    const packagesView = (machineId: string, orgId: string) =>
+      Effect.gen(function* () {
+        const machine = yield* fetchMachine(machineId, orgId);
+        const rows = (yield* fetchManifestRows(machine)).map(toManifestRow);
+        const manifest = resolveManifest(rows, {
+          orgId: machine.orgId,
+          templateId: machine.templateId,
+          machineId: machine.id,
+        });
+        const pendingActions = yield* outstandingActionsByPackage(db, machine.id).pipe(
+          Effect.catchAll(() => Effect.succeed(new Map())),
+        );
+
+        return {
+          items: buildPackagesView({
+            manifest,
+            installedPackages: stringArray(machine.installedPackages),
+            declaredPackageVersions: (machine.declaredPackageVersions ?? undefined) as
+              | Record<string, string>
+              | undefined,
+            baselinePackages: stringArray(machine.baselinePackages),
+            pendingActions,
+          }),
+          lastReportedAt: machine.lastVerifiedAt?.toISOString() ?? null,
+        };
+      });
+
+    return {
+      create,
+      list,
+      getById,
+      updatePackages,
+      manifestHistory,
+      desiredStateFor,
+      recordReportedPackages,
+      packagesView,
+    } as const;
   }),
   dependencies: [EventBus.Default],
 }) {}

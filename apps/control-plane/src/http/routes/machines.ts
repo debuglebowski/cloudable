@@ -5,6 +5,7 @@ import {
   InvalidCursorError,
   InvalidMachineRequestError,
   MachineNotFoundError,
+  PackageActionRejected,
   PackagePinConflictError,
 } from "../../domain/machine/errors";
 import { CurrentUserAuthentication } from "../middleware/auth";
@@ -177,6 +178,54 @@ const manifestHistoryEntrySchema = Schema.Struct({
   current: Schema.NullOr(manifestHistoryStateSchema),
 });
 
+const packageRowSchema = Schema.Struct({
+  packageName: Schema.String,
+  // `null` is a real value here, not a missing one: the agent found the
+  // package installed and no manifest entry covers it.
+  permission: Schema.NullOr(Schema.Literal("allowed", "disallowed")),
+  versionPin: Schema.NullOr(Schema.String),
+  source: Schema.NullOr(manifestScopeSchema),
+  // "unknown" is not "not_installed" — a machine that has never reported has
+  // told us nothing.
+  installed: Schema.Literal("installed", "not_installed", "unknown"),
+  installedVersion: Schema.optional(Schema.String),
+  versionMismatch: Schema.Boolean,
+  isBaseline: Schema.Boolean,
+  pendingAction: Schema.optional(
+    Schema.Struct({
+      id: Schema.String,
+      op: Schema.Literal("install", "uninstall"),
+      status: Schema.Literal("pending", "running", "succeeded", "failed", "expired"),
+      requestedAt: Schema.String,
+      failureReason: Schema.optional(Schema.String),
+    }),
+  ),
+});
+
+const machinePackagesResponseSchema = Schema.Struct({
+  items: Schema.Array(packageRowSchema),
+  lastReportedAt: Schema.NullOr(Schema.String),
+});
+
+const packageActionPathSchema = Schema.Struct({
+  id: Schema.UUID,
+  packageName: Schema.String.pipe(Schema.minLength(1)),
+});
+
+const createPackageActionPayloadSchema = Schema.Struct({
+  op: Schema.Literal("install", "uninstall"),
+});
+
+const createPackageActionResponseSchema = Schema.Struct({
+  action: Schema.Struct({
+    id: Schema.String,
+    op: Schema.Literal("install", "uninstall"),
+    status: Schema.Literal("pending", "running", "succeeded", "failed", "expired"),
+    requestedAt: Schema.String,
+    failureReason: Schema.optional(Schema.String),
+  }),
+});
+
 const manifestHistoryUrlParamsSchema = Schema.Struct({
   limit: Schema.optional(Schema.NumberFromString),
   cursor: Schema.optional(Schema.String),
@@ -218,6 +267,25 @@ export const MachinesGroup = HttpApiGroup.make("machines")
       .addSuccess(updateMachinePackagesResponseSchema)
       .addError(MachineNotFoundError, { status: 404 })
       .addError(PackagePinConflictError, { status: 422 }),
+  )
+  .add(
+    // The packages table: what the manifest allows, joined with what the agent
+    // reported is actually installed.
+    HttpApiEndpoint.get("packages", "/:id/packages")
+      .setPath(machineIdPathSchema)
+      .addSuccess(machinePackagesResponseSchema)
+      .addError(MachineNotFoundError, { status: 404 }),
+  )
+  .add(
+    // Asks the machine to install or remove one package. Nothing happens at
+    // the moment of the request beyond recording it — the agent collects it on
+    // its next poll.
+    HttpApiEndpoint.post("createPackageAction", "/:id/packages/:packageName/actions")
+      .setPath(packageActionPathSchema)
+      .setPayload(createPackageActionPayloadSchema)
+      .addSuccess(createPackageActionResponseSchema, { status: 202 })
+      .addError(MachineNotFoundError, { status: 404 })
+      .addError(PackageActionRejected, { status: 422 }),
   )
   .add(
     // Read-only projection over the append-only event log: every package

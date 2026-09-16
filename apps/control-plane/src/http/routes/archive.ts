@@ -68,7 +68,15 @@ const SnapshotViewSuccess = Schema.Struct({
   machineId: Schema.String,
   trigger: SnapshotTrigger,
   region: Schema.NullOr(Schema.String),
+  /** Provisioned size of the disks captured. Identical on every machine in a fleet
+   * with identical disks, so it is a ceiling, not a measurement. */
   sizeBytes: Schema.NullOr(Schema.Number),
+  /** What the snapshot actually stores, as the machine measured its own filesystems
+   * just before the copy. Null when never measured — never a zero standing in for it.
+   * This is the figure a provider bills. */
+  usedBytes: Schema.NullOr(Schema.Number),
+  /** "full" captured both disks, "shallow" the persistent volume only. */
+  scope: Schema.Literal("full", "shallow"),
   containsData: Schema.Boolean,
   containsConfig: Schema.Boolean,
   legalHold: Schema.Boolean,

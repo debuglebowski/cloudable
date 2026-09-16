@@ -357,3 +357,95 @@ export function machineSettingChangedEvent(input: MachineSettingChangedInput): M
     },
   };
 }
+
+export interface PackageActionEventInput extends ActorContext {
+  machineId: string;
+  orgId: string;
+  correlationId: string;
+  actionId: string;
+  packageName: string;
+  op: "install" | "uninstall";
+  occurredAt?: Date;
+}
+
+/**
+ * The three package-action events.
+ *
+ * These are the first events recording Cloudable asking a machine to change
+ * itself, so they carry the actionId throughout: a request, its outcome and
+ * any failure are one story, and an auditor should be able to join them
+ * without inferring from timestamps.
+ *
+ * Built here rather than in the agent, always. The agent reports what
+ * happened; the control plane decides what that means and writes it
+ * (invariant 12).
+ */
+export function machinePackageActionRequestedEvent(
+  input: PackageActionEventInput & { versionPin: string | null },
+): MachineEvent {
+  return {
+    id: PLACEHOLDER_ID,
+    type: "machine.package_action_requested",
+    occurredAt: input.occurredAt ?? new Date(),
+    recordedAt: PLACEHOLDER_RECORDED_AT,
+    orgId: input.orgId,
+    actorType: input.actorType,
+    actorId: input.actorId,
+    machineId: input.machineId,
+    correlationId: input.correlationId,
+    schemaVersion: 1,
+    payload: {
+      actionId: input.actionId,
+      packageName: input.packageName,
+      op: input.op,
+      versionPin: input.versionPin,
+    },
+  };
+}
+
+export function machinePackageActionCompletedEvent(
+  input: PackageActionEventInput & { installedVersion: string | null },
+): MachineEvent {
+  return {
+    id: PLACEHOLDER_ID,
+    type: "machine.package_action_completed",
+    occurredAt: input.occurredAt ?? new Date(),
+    recordedAt: PLACEHOLDER_RECORDED_AT,
+    orgId: input.orgId,
+    actorType: input.actorType,
+    actorId: input.actorId,
+    machineId: input.machineId,
+    correlationId: input.correlationId,
+    schemaVersion: 1,
+    payload: {
+      actionId: input.actionId,
+      packageName: input.packageName,
+      op: input.op,
+      installedVersion: input.installedVersion,
+    },
+  };
+}
+
+export function machinePackageActionFailedEvent(
+  input: PackageActionEventInput & { reason: string; expired: boolean },
+): MachineEvent {
+  return {
+    id: PLACEHOLDER_ID,
+    type: "machine.package_action_failed",
+    occurredAt: input.occurredAt ?? new Date(),
+    recordedAt: PLACEHOLDER_RECORDED_AT,
+    orgId: input.orgId,
+    actorType: input.actorType,
+    actorId: input.actorId,
+    machineId: input.machineId,
+    correlationId: input.correlationId,
+    schemaVersion: 1,
+    payload: {
+      actionId: input.actionId,
+      packageName: input.packageName,
+      op: input.op,
+      reason: input.reason,
+      expired: input.expired,
+    },
+  };
+}

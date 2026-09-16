@@ -68,6 +68,33 @@ export class MachineDirectory extends Effect.Service<MachineDirectory>()("Machin
         catch: (cause) => new Error(`machine update failed: ${String(cause)}`),
       }).pipe(Effect.asVoid, Effect.orDie);
 
-    return { findById, markVerified } as const;
+    /**
+     * Stores the machine's own measurement of its persistent volume.
+     *
+     * Separate from `markVerified` so that one keeps doing the single thing it does.
+     * Deliberately unconditional on machine state, unlike `markVerified`: a measurement
+     * is an observation, not a liveness claim, and recording one can never revive an
+     * archived row's displayed state the way a state change could.
+     */
+    const recordVolumeUsage = (
+      machineId: string,
+      usage: {
+        readonly persistent?:
+          | { readonly usedBytes: number; readonly totalBytes: number }
+          | undefined;
+        readonly root?: { readonly usedBytes: number; readonly totalBytes: number } | undefined;
+      },
+      at: Date,
+    ): Effect.Effect<void> =>
+      Effect.tryPromise({
+        try: () =>
+          db
+            .update(machines)
+            .set({ volumeUsage: { ...usage, at: at.toISOString() } })
+            .where(eq(machines.id, machineId)),
+        catch: (cause) => new Error(`volume usage update failed: ${String(cause)}`),
+      }).pipe(Effect.asVoid, Effect.orDie);
+
+    return { findById, markVerified, recordVolumeUsage } as const;
   }),
 }) {}

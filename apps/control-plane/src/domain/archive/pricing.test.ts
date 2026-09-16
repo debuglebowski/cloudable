@@ -42,3 +42,27 @@ describe("estimateSnapshotCost", () => {
     expect(AZURE_SNAPSHOT_PRICING.pricePerGbMonthUsd).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sizing, which is what the estimate above is only as good as.
+//
+// The bug: `sizeBytes` is the PROVISIONED size of the disks a snapshot copied. Every
+// machine gets the same 64 GiB data disk, so every snapshot in the fleet reported an
+// identical figure whatever was on it — and the cost estimate then multiplied that
+// ceiling by a per-GB price. A provider bills a full snapshot on used data, so the
+// measured number is both the honest size and the billable one.
+// ---------------------------------------------------------------------------
+describe("estimateSnapshotCost against measured rather than provisioned size", () => {
+  const expiresAt = new Date("2026-01-31T00:00:00Z");
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  test("a near-empty volume costs orders of magnitude less than its disk suggests", () => {
+    // A real observation: cosmic-otter's persistent volume held 52 KiB on a 64 GiB disk.
+    const provisioned = estimateSnapshotCost({ sizeBytes: 68_719_476_736, expiresAt }, now);
+    const measured = estimateSnapshotCost({ sizeBytes: 53_248, expiresAt }, now);
+
+    expect(provisioned).toBeGreaterThan(3);
+    expect(measured).toBe(0);
+    expect(measured).toBeLessThan(provisioned);
+  });
+});

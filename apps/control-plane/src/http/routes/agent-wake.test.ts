@@ -108,6 +108,7 @@ describe("GET /api/v1/agent/wake", () => {
     _tag: "MachineDirectory" as const,
     findById: (id: string) => Effect.succeed(id === machine.id ? machine : undefined),
     markVerified: () => Effect.void,
+    recordVolumeUsage: () => Effect.void,
   });
 
   const SharedLive = Layer.mergeAll(

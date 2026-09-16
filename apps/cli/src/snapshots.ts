@@ -19,6 +19,8 @@ interface SnapshotView {
   trigger: "archive" | "upgrade" | "manual";
   region: string | null;
   sizeBytes: number | null;
+  usedBytes: number | null;
+  scope: "full" | "shallow";
   containsData: boolean;
   containsConfig: boolean;
   legalHold: boolean;
@@ -40,9 +42,32 @@ interface RestoreResult {
   restored: boolean;
 }
 
-function gib(bytes: number | null): string {
-  if (bytes === null) return dash(null);
-  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+/** Bytes at a sensible unit. A snapshot of a near-empty home is kilobytes, and
+ * printing that as "0.0 GiB" is how the old display managed to be both accurate and
+ * useless at the same time. */
+function humanBytes(bytes: number): string {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
+}
+
+/**
+ * What the snapshot stores, preferring the machine's own measurement.
+ *
+ * Falls back to the provisioned size, marked "max", when nothing measured it. That
+ * number is the size of the disks the copy came from — the same figure for every
+ * machine in a fleet with identical disks — so it is a ceiling and is labelled as one
+ * rather than presented as a size.
+ */
+function sizeOf(snapshot: { sizeBytes: number | null; usedBytes: number | null }): string {
+  if (snapshot.usedBytes !== null) return humanBytes(snapshot.usedBytes);
+  if (snapshot.sizeBytes !== null) return `${humanBytes(snapshot.sizeBytes)} max`;
+  return dash(null);
 }
 
 function contents(snapshot: SnapshotView): string {
@@ -70,13 +95,14 @@ export async function runSnapshotsListCommand(argv: ReadonlyArray<string>): Prom
     return;
   }
   printTable(
-    ["id", "machine", "trigger", "holds", "size", "state", "expires"],
+    ["id", "machine", "trigger", "holds", "scope", "size", "state", "expires"],
     page.items.map((s) => [
       s.id,
       s.machineId,
       s.trigger,
       contents(s),
-      gib(s.sizeBytes),
+      s.scope,
+      sizeOf(s),
       s.legalHold ? `${s.subState} (legal hold)` : s.subState,
       shortTime(s.expiresAt),
     ]),
@@ -99,7 +125,12 @@ export async function runSnapshotsGetCommand(argv: ReadonlyArray<string>): Promi
     ["machine", snapshot.machineId],
     ["trigger", snapshot.trigger],
     ["contains", contents(snapshot)],
-    ["size", gib(snapshot.sizeBytes)],
+    ["scope", snapshot.scope],
+    ["size", sizeOf(snapshot)],
+    [
+      "provisioned",
+      snapshot.sizeBytes === null ? dash(null) : `${humanBytes(snapshot.sizeBytes)} of disk`,
+    ],
     ["region", dash(snapshot.region)],
     ["state", snapshot.subState],
     ["legal hold", snapshot.legalHold ? `yes (${dash(snapshot.legalHoldReason)})` : "no"],

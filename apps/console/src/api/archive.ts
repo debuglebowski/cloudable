@@ -46,6 +46,8 @@ export interface ArchivedSnapshot {
   /** `null` for a machine whose provider has no region concept (docker/fake). */
   region: string | null;
   sizeBytes: number;
+  usedBytes: number | null;
+  scope: "full" | "shallow";
   createdAt: string;
   retentionDays: number;
   expiresAt: string;
@@ -67,6 +69,8 @@ interface SnapshotViewWire {
   trigger: SnapshotTrigger;
   region: string | null;
   sizeBytes: number | null;
+  usedBytes: number | null;
+  scope: "full" | "shallow";
   containsData: boolean;
   containsConfig: boolean;
   legalHold: boolean;
@@ -91,6 +95,8 @@ export async function fetchArchivedSnapshots(): Promise<ArchivedSnapshot[]> {
     trigger: s.trigger,
     region: s.region,
     sizeBytes: s.sizeBytes ?? 0,
+    usedBytes: s.usedBytes ?? null,
+    scope: s.scope,
     createdAt: s.createdAt,
     retentionDays: s.retentionDays,
     expiresAt: s.expiresAt,

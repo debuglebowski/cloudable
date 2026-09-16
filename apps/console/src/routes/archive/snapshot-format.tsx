@@ -66,8 +66,33 @@ export function formatDate(iso: string): string {
 }
 
 export function formatBytes(bytes: number): string {
-  const gb = bytes / 1_000_000_000;
-  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1_000_000).toFixed(0)} MB`;
+  const units = [
+    { limit: 1_000_000_000_000, suffix: "TB", divisor: 1_000_000_000_000 },
+    { limit: 1_000_000_000, suffix: "GB", divisor: 1_000_000_000 },
+    { limit: 1_000_000, suffix: "MB", divisor: 1_000_000 },
+    { limit: 1_000, suffix: "kB", divisor: 1_000 },
+  ];
+  for (const unit of units) {
+    if (bytes >= unit.limit) return `${(bytes / unit.divisor).toFixed(1)} ${unit.suffix}`;
+  }
+  return `${bytes} B`;
+}
+
+/**
+ * What the snapshot stores, preferring the machine's own measurement of its
+ * filesystems, and falling back to the provisioned size of the disks it copied.
+ *
+ * The fallback is labelled "max" because it is a ceiling, not a size: it is the same
+ * figure for every machine with the same disks, which is how every snapshot in the
+ * fleet once displayed an identical 34 GB regardless of what was in it.
+ */
+export function formatSnapshotSize(snapshot: {
+  sizeBytes: number;
+  usedBytes: number | null;
+}): string {
+  return snapshot.usedBytes !== null
+    ? formatBytes(snapshot.usedBytes)
+    : `${formatBytes(snapshot.sizeBytes)} max`;
 }
 
 export function daysUntil(iso: string): number {

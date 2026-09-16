@@ -32,6 +32,37 @@ const publishOrDie = <A>(
   );
 
 /**
+ * What the snapshot will actually store, from the machine's own last measurement of its
+ * filesystems (`machines.volumeUsage`, written by the agent's report).
+ *
+ * This is the number a person means by "how big is the snapshot", and the number the
+ * provider bills: a full snapshot is charged on used data, not on the size of the disk
+ * it came from. `sizeBytes` alongside it is the provisioned size, which is identical on
+ * every machine in the fleet and therefore tells you nothing about any of them.
+ *
+ * `undefined` when the machine never reported a measurement, or reported only the half
+ * this scope does not cover. Never a zero standing in for "unknown" — a snapshot that
+ * reports 0 bytes because nobody looked is the same class of lie as one that reports
+ * 64 GiB because nobody looked.
+ */
+const measuredUsedBytes = (volumeUsage: unknown, scope: SnapshotScope): number | undefined => {
+  if (typeof volumeUsage !== "object" || volumeUsage === null) return undefined;
+  const read = (key: "persistent" | "root"): number | undefined => {
+    const part = (volumeUsage as Record<string, unknown>)[key];
+    if (typeof part !== "object" || part === null) return undefined;
+    const used = (part as Record<string, unknown>).usedBytes;
+    return typeof used === "number" && Number.isFinite(used) && used >= 0 ? used : undefined;
+  };
+  const persistent = read("persistent");
+  // "shallow" copies the persistent volume only, so that measurement IS the answer.
+  if (scope === "shallow") return persistent;
+  // "full" also copies the root filesystem. Both halves are needed, or the total would
+  // silently understate by however much the OS disk holds.
+  const root = read("root");
+  return persistent !== undefined && root !== undefined ? persistent + root : undefined;
+};
+
+/**
  * Captures a point-in-time snapshot of a machine: volume data AND its desired
  * state/configuration (`containsData`/`containsConfig` both default `true`).
  * Region is inherited from the machine's own region.
@@ -129,6 +160,7 @@ export const createSnapshot = (
             // expiry deletion at. Both were previously a hardcoded placeholder and
             // nothing at all, respectively.
             sizeBytes: captured.sizeBytes,
+            usedBytes: measuredUsedBytes(machine.volumeUsage, scope) ?? null,
             scope,
             capturedDisks: captured.disks,
             // False when the provider copied nothing, so the console stops labelling an

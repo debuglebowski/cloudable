@@ -54,6 +54,9 @@ export const EVENT_TYPES = [
   "machine.drift_resolved",
   "machine.reconciled",
   "machine.first_seen",
+  "machine.package_action_requested",
+  "machine.package_action_completed",
+  "machine.package_action_failed",
 
   // --- access ---
   "access.certificate_issued",

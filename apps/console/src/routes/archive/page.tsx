@@ -37,7 +37,7 @@ import {
 import { ARCHIVED_MACHINE_STATES } from "@/routes/machines/machine-state";
 
 import { LegalHoldDialog } from "./legal-hold-dialog";
-import { RetentionStatus, formatBytes, formatDate } from "./snapshot-format";
+import { RetentionStatus, formatDate, formatSnapshotSize } from "./snapshot-format";
 
 /** Read-only — placing/clearing a hold is a menu action now, not a button on this cell. */
 function LegalHoldStatus({ legalHold }: { legalHold: boolean }) {
@@ -155,7 +155,7 @@ export function ArchivePage() {
                         <span className="font-medium">{machine.name}</span>
                         <span className="font-mono text-xs text-muted-foreground no-underline">
                           {snapshot
-                            ? `${snapshot.region ?? "no region"} · ${formatBytes(snapshot.sizeBytes)}`
+                            ? `${snapshot.region ?? "no region"} · ${snapshot.scope} · ${formatSnapshotSize(snapshot)}`
                             : (machine.region ?? "no region")}
                           {snapshotCount > 1 ? ` · ${snapshotCount} snapshots` : ""}
                         </span>

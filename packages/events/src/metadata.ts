@@ -117,6 +117,22 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2 | 3; desc
       tier: 1,
       description: "The control agent contacted the control plane for the first time on a machine.",
     },
+    // Tier 1, all three. Software arriving on or leaving a governed machine is
+    // the question an auditor is here to ask, and a tier-2 event is one
+    // logging-tier setting away from never being written at all.
+    "machine.package_action_requested": {
+      tier: 1,
+      description: "A person asked for a package to be installed or removed on a machine.",
+    },
+    "machine.package_action_completed": {
+      tier: 1,
+      description: "A package install or removal completed on a machine.",
+    },
+    "machine.package_action_failed": {
+      tier: 1,
+      description:
+        "A package install or removal failed on a machine, or was collected by the agent and never reported back.",
+    },
 
     // --- access --- (certificates, denials, and elevation are always
     // audited at tier 1; routine session start/end is tier 2)

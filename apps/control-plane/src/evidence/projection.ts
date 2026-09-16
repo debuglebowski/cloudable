@@ -261,6 +261,26 @@ function summarize(row: RawEventRow): string {
     case "cloud.resource_deleted":
       return `Cloud resource deleted: ${event.payload.kind} (${event.payload.resourceId}).`;
 
+    case "machine.package_action_requested": {
+      const pin = event.payload.versionPin ? ` (version ${event.payload.versionPin})` : "";
+      const verb = event.payload.op === "install" ? "install" : "removal";
+      return `Requested ${verb} of "${event.payload.packageName}"${pin} on this machine.`;
+    }
+    case "machine.package_action_completed": {
+      const version = event.payload.installedVersion ? ` (${event.payload.installedVersion})` : "";
+      return event.payload.op === "install"
+        ? `Installed "${event.payload.packageName}"${version} on this machine.`
+        : `Removed "${event.payload.packageName}" from this machine.`;
+    }
+    case "machine.package_action_failed": {
+      const verb = event.payload.op === "install" ? "Install" : "Removal";
+      // An action nobody ever reported back on is a different failure from one
+      // the package manager refused, and reads as one.
+      return event.payload.expired
+        ? `${verb} of "${event.payload.packageName}" was never reported back by the agent.`
+        : `${verb} of "${event.payload.packageName}" failed: ${event.payload.reason}`;
+    }
+
     case "agent.attested":
       return `Control agent attested via ${event.payload.method}.`;
     case "agent.attestation_failed":
@@ -335,6 +355,9 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "snapshot.expired":
     case "snapshot.legal_hold_set":
     case "snapshot.legal_hold_cleared":
+    case "machine.package_action_requested":
+    case "machine.package_action_completed":
+    case "machine.package_action_failed":
     case "agent.attested":
     case "agent.attestation_failed":
       return undefined;

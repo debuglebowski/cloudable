@@ -27,6 +27,8 @@ const toSnapshotView = (snapshot: SnapshotRow) => ({
   trigger: snapshot.trigger,
   region: snapshot.region,
   sizeBytes: snapshot.sizeBytes,
+  usedBytes: snapshot.usedBytes,
+  scope: snapshot.scope,
   containsData: snapshot.containsData,
   containsConfig: snapshot.containsConfig,
   legalHold: snapshot.legalHold,

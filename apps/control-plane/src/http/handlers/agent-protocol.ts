@@ -2,6 +2,13 @@ import * as crypto from "node:crypto";
 import type { DomainEvent } from "@cloudable/events";
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { Effect } from "effect";
+import { Db } from "../../db/layer";
+import { MachineService } from "../../domain/machine/MachineService";
+import {
+  applyActionResults,
+  collectPendingActions,
+  expireStaleActions,
+} from "../../domain/machine/package-actions";
 import { EventBus } from "../../services/EventBus";
 import { AgentSessionToken } from "../../services/attestation/AgentSessionToken";
 import { AttestationRegistryTag } from "../../services/attestation/AttestationMethod";
@@ -189,21 +196,46 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
         if (!token) {
           return yield* Effect.fail(new AgentUnauthorized({ reason: "missing_bearer_token" }));
         }
-        yield* sessions
+        const identity = yield* sessions
           .verify(token)
           .pipe(Effect.mapError((error) => new AgentUnauthorized({ reason: error.reason })));
 
-        // Desired state is a stub until unit 2's package manifest merges — see this unit's PR
-        // description. There is nothing yet that varies it per machine or over time, so the
-        // ETag is currently constant; the 304 path below is real and load-bearing once it does.
-        const version = "v0-stub";
-        const etag = `"${version}"`;
+        const machineService = yield* MachineService;
+        const db = yield* Db;
 
+        const desired = yield* machineService
+          .desiredStateFor(identity.machineId, identity.orgId)
+          .pipe(Effect.catchAll(() => Effect.succeed(null)));
+        if (!desired) {
+          return yield* Effect.fail(new AgentUnauthorized({ reason: "machine_not_found" }));
+        }
+
+        const etag = `"${desired.version}"`;
+
+        // A 304 must not swallow work. Collecting below is a write, so the
+        // early return is only safe because a new action always bumps
+        // `desiredStateVersion` in the same transaction that inserts it —
+        // meaning an unchanged ETag really does mean "nothing to collect".
         if (request.headers["if-none-match"] === etag) {
           return HttpServerResponse.empty({ status: 304, headers: { etag } });
         }
+
+        const collected = yield* collectPendingActions(db, identity.machineId, new Date()).pipe(
+          Effect.catchAll(() => Effect.succeed([])),
+        );
+
         return HttpServerResponse.unsafeJson(
-          { version, packages: [], settings: {} },
+          {
+            version: desired.version,
+            packages: desired.allowedPackages,
+            settings: {},
+            pendingActions: collected.map((row) => ({
+              id: row.id,
+              op: row.op,
+              packageName: row.packageName,
+              versionPin: row.versionPin,
+            })),
+          },
           { status: 200, headers: { etag } },
         );
       }),
@@ -235,11 +267,87 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
 
         yield* directory.markVerified(machine.id, now);
 
+        // Only when the machine actually measured it. An absent field means the agent
+        // could not look, which must not be recorded as a measurement of zero.
+        if (payload.volumeUsage) {
+          yield* directory.recordVolumeUsage(machine.id, payload.volumeUsage, now);
+        }
+
         const identityFields = {
           orgId: identity.orgId,
           actorId: identity.machineId,
           machineId: identity.machineId,
         };
+
+        const db = yield* Db;
+        const machineService = yield* MachineService;
+
+        // Persist the inventory, and capture the baseline on the very first
+        // report. The baseline is what the image shipped with: written once,
+        // never rewritten, so a package later removed from the image still
+        // reads as part of what it came with — which it was.
+        yield* machineService
+          .recordReportedPackages({
+            machineId: machine.id,
+            installedPackages: payload.installedPackages,
+            declaredPackageVersions: payload.declaredPackageVersions,
+            captureBaseline: wasFirstSeen,
+            observedAt: now,
+          })
+          .pipe(Effect.catchAll(() => Effect.void));
+
+        // Close out the actions this agent just ran, then give up on anything
+        // it collected and never mentioned. The agent tells us what happened;
+        // the events below are ours to write (invariant 12).
+        const finished = yield* applyActionResults(
+          db,
+          machine.id,
+          (payload.actionResults ?? []).map((result) => ({
+            id: result.id,
+            outcome: result.outcome,
+            detail: result.detail,
+          })),
+          now,
+        ).pipe(Effect.catchAll(() => Effect.succeed([])));
+
+        const expired = yield* expireStaleActions(db, machine.id, now).pipe(
+          Effect.catchAll(() => Effect.succeed([])),
+        );
+
+        const versionByAction = new Map(
+          (payload.actionResults ?? []).map((result) => [result.id, result.installedVersion]),
+        );
+
+        const actionEvents: DomainEvent[] = [
+          ...finished.map((row) =>
+            row.status === "succeeded"
+              ? makeEvent("machine.package_action_completed", identityFields, {
+                  actionId: row.id,
+                  packageName: row.packageName,
+                  op: row.op,
+                  installedVersion: versionByAction.get(row.id) ?? null,
+                })
+              : makeEvent("machine.package_action_failed", identityFields, {
+                  actionId: row.id,
+                  packageName: row.packageName,
+                  op: row.op,
+                  reason: row.failureReason ?? "the package manager reported a failure",
+                  expired: false,
+                }),
+          ),
+          ...expired.map((row) =>
+            makeEvent("machine.package_action_failed", identityFields, {
+              actionId: row.id,
+              packageName: row.packageName,
+              op: row.op,
+              reason: "the agent collected this action and never reported back",
+              expired: true,
+            }),
+          ),
+        ];
+        if (actionEvents.length > 0) {
+          yield* eventBus.publish(actionEvents).pipe(Effect.orDie);
+        }
 
         if (wasFirstSeen) {
           yield* eventBus

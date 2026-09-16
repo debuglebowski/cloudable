@@ -80,3 +80,27 @@ export class PackagePinConflictError extends Schema.TaggedError<PackagePinConfli
     }),
   }),
 }) {}
+
+/**
+ * A package action the control plane declined to record (HTTP 422).
+ *
+ * Refusals, not failures: the machine was never asked. `baseline_package`
+ * covers the deliberate refusal to install or remove anything the image
+ * shipped with — uninstalling `systemd` through a button with no undo is not a
+ * capability worth having. `already_pending` stops a second request stacking
+ * up behind one the agent has not answered yet.
+ */
+export class PackageActionRejected extends Schema.TaggedError<PackageActionRejected>(
+  "PackageActionRejected",
+)("PackageActionRejected", {
+  error: Schema.Struct({
+    code: Schema.Literal(
+      "invalid_package_name",
+      "baseline_package",
+      "already_pending",
+      "write_failed",
+    ),
+    message: Schema.String,
+    requestId: Schema.String,
+  }),
+}) {}

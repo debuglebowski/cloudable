@@ -32,6 +32,14 @@ export const snapshots = pgTable("snapshots", {
   // what a RESTORE writes back. This is what the snapshot CAPTURED. The two vocabularies
   // share the word "full" and mean different things: a "shallow" snapshot can never
   // serve a "full"-mode restore, because there is no OS disk in it.
+  // What the snapshot actually stores, as the machine measured its own filesystem just
+  // before the copy was taken. This is the number a person means by "how big is it":
+  // a provider bills a full snapshot on used data, so this is also what it costs.
+  //
+  // Null when the machine never reported a measurement — an older agent, or a machine
+  // whose infrastructure was already gone. Null means "not measured", never "empty";
+  // `sizeBytes` (provisioned) is the fallback to display, clearly labelled as such.
+  usedBytes: bigint("used_bytes", { mode: "number" }),
   scope: text("scope", { enum: ["full", "shallow"] })
     .notNull()
     .default("full"),

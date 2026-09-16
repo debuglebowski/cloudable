@@ -5,6 +5,7 @@ import { config } from "./config";
 import { ApiError } from "./http-client";
 import { listInstalledPackages } from "./installed-packages";
 import { listOpenPorts } from "./open-ports";
+import { readAllVolumeUsage } from "./volume-usage";
 import { connectWake } from "./wake";
 import type { AgentReportRequest, AgentReportResponse, DesiredStateResponse } from "./wire-types";
 
@@ -178,12 +179,18 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
           listOpenPorts(),
           listRunningAccessMethods(),
         ]);
+        // Synchronous and cheap (two statfs calls), so it stays out of the Promise.all.
+        const volumeUsage = readAllVolumeUsage();
         await reportObservedState(session.bearerToken, {
           agentVersion: AGENT_VERSION,
           observedAt: new Date().toISOString(),
           installedPackages,
           openPorts,
           configState: { runningAccessMethods },
+          // Omitted entirely when unmeasurable rather than sent as zeroes: "we did not
+          // look" and "there is nothing there" are different answers, and a snapshot
+          // sized from the second one would be a new way of lying about the same thing.
+          ...(Object.keys(volumeUsage).length > 0 ? { volumeUsage } : {}),
         });
 
         attempt = 0;

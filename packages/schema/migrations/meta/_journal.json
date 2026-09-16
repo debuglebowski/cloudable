@@ -99,6 +99,20 @@
       "when": 1789508982784,
       "tag": "0013_slow_naoko",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789543129024,
+      "tag": "0014_tense_manta",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1789543688460,
+      "tag": "0015_outstanding_valkyrie",
+      "breakpoints": true
     }
   ]
 }
