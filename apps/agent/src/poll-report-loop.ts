@@ -1,4 +1,6 @@
+import type { PackageActionResult } from "@cloudable/contracts";
 import { listRunningAccessMethods } from "./access-methods";
+import { applyPackageActions, declaredPackageVersions } from "./apply-packages";
 import { AttestationRejectedError, attest, clearCachedSession } from "./attestation";
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
@@ -127,6 +129,9 @@ async function reportObservedState(
 export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Promise<never> {
   let attempt = 0;
   let lastEtag: string | null = null;
+  // Held across iterations because a 304 carries no body: the allowed list is
+  // only resent when it changes, and the report needs it every time.
+  let allowedPackages: readonly string[] = [];
   const waker = makeWaker(options.signal);
 
   // Optional fast path: wakes this loop's sleep the instant the control plane has
@@ -158,15 +163,23 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
         const session = await attest();
 
         const poll = await pollDesiredState(session.bearerToken, lastEtag);
+        let actionResults: PackageActionResult[] = [];
         if (poll.changed) {
           lastEtag = poll.etag;
           console.log(
             `poll: desired state changed (version=${poll.desiredState?.version ?? "unknown"})`,
           );
-          // Reconcile locally against `poll.desiredState` here once there's a real package
-          // manifest to reconcile against ("reconcile only closes gaps — it removes undeclared
-          // software, never installs"). `poll.desiredState` is a stub today, so there's nothing
-          // to reconcile yet.
+
+          // The only thing this agent ever does TO the machine, and only ever
+          // what a person asked for through the control plane. Nothing here
+          // installs the allowed list or removes what is not on it — the
+          // allowed list is a permission, not an instruction.
+          const pendingActions = poll.desiredState?.pendingActions ?? [];
+          if (pendingActions.length > 0) {
+            console.log(`poll: applying ${pendingActions.length} package action(s)`);
+            actionResults = await applyPackageActions(pendingActions);
+          }
+          allowedPackages = poll.desiredState?.packages ?? allowedPackages;
         }
 
         // Real observed state: `installedPackages`, `openPorts`, and `configState`
@@ -174,19 +187,29 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
         // `access-methods.ts` — not hardcoded placeholders. The three scans have
         // no data dependency on each other, so they run concurrently rather than
         // one after another.
-        const [installedPackages, openPorts, runningAccessMethods] = await Promise.all([
-          listInstalledPackages(),
-          listOpenPorts(),
-          listRunningAccessMethods(),
-        ]);
+        const [installedPackages, openPorts, runningAccessMethods, packageVersions] =
+          await Promise.all([
+            listInstalledPackages(),
+            listOpenPorts(),
+            listRunningAccessMethods(),
+            // Only the allowed set — versions exist to check pins, and only
+            // declared entries carry pins.
+            declaredPackageVersions(allowedPackages),
+          ]);
         // Synchronous and cheap (two statfs calls), so it stays out of the Promise.all.
         const volumeUsage = readAllVolumeUsage();
         await reportObservedState(session.bearerToken, {
           agentVersion: AGENT_VERSION,
           observedAt: new Date().toISOString(),
           installedPackages,
+          ...(Object.keys(packageVersions).length > 0
+            ? { declaredPackageVersions: packageVersions }
+            : {}),
           openPorts,
           configState: { runningAccessMethods },
+          // Reported as observed state. What these outcomes mean, and what
+          // gets written about them, is the control plane's call (invariant 12).
+          ...(actionResults.length > 0 ? { actionResults } : {}),
           // Omitted entirely when unmeasurable rather than sent as zeroes: "we did not
           // look" and "there is nothing there" are different answers, and a snapshot
           // sized from the second one would be a new way of lying about the same thing.

@@ -51,6 +51,12 @@ function linesOf(stdout: string): string[] {
 export interface CommandResult {
   readonly stdout: string;
   readonly exitCode: number;
+  /**
+   * Captured so a failing command can explain itself. Package managers put the
+   * useful part here — "E: Unable to locate package foo" is the answer a
+   * person needs, and "install failed" is not.
+   */
+  readonly stderr?: string;
 }
 
 /** Abstracts the one primitive this module needs from the OS — runs a command,
@@ -65,8 +71,12 @@ export const bunCommandRunner: CommandRunner = {
   async run(binary, args) {
     try {
       const proc = Bun.spawn([binary, ...args], { stdout: "pipe", stderr: "pipe" });
-      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-      return { stdout, exitCode };
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      return { stdout, stderr, exitCode };
     } catch {
       // ENOENT (binary not on PATH) or any other spawn-level failure — treated the
       // same as "this package manager isn't present," not a report-blocking error.
