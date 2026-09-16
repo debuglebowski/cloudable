@@ -48,6 +48,7 @@ exports[`event type catalogue is append-only 1`] = `
   "person.deactivated",
   "person.role_changed",
   "snapshot.created",
+  "snapshot.data_missing",
   "snapshot.expired",
   "snapshot.legal_hold_cleared",
   "snapshot.legal_hold_set",

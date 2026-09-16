@@ -150,3 +150,18 @@ export class InspectionFileUnreadableError extends Schema.TaggedError<Inspection
   "InspectionFileUnreadableError",
   { path: Schema.String, reason: Schema.String },
 ) {}
+
+/**
+ * The snapshot recorded disks that no longer exist at the provider, found while its
+ * retention window was still open.
+ *
+ * A third state distinct from both siblings, and the distinction is the point.
+ * `SnapshotEmptyError` means nothing was ever captured. `SnapshotExpiredError` means the
+ * data was deleted ON SCHEDULE and is evidence retention worked. This means it went away
+ * early and nothing recorded why — a retention failure wearing neither of the other two
+ * names.
+ */
+export class SnapshotDataMissingError extends Schema.TaggedError<SnapshotDataMissingError>()(
+  "SnapshotDataMissingError",
+  { snapshotId: Schema.String, reason: Schema.String },
+) {}

@@ -61,7 +61,7 @@ export interface ArchivedSnapshot {
    * captured nothing — and a console deriving its own answer would show a working
    * Restore button over one. A value this console does not recognise must be treated as
    * NOT restorable, which is the safe direction. */
-  subState: "restorable" | "expired" | "empty";
+  subState: "restorable" | "expired" | "empty" | "data_missing";
   /** Null when the snapshot is usable. When set, actions that need the data must be
    * greyed out WITH this shown — never hidden (`sub-state.ts`). */
   restoreUnavailableReason: string | null;
@@ -90,7 +90,7 @@ interface SnapshotViewWire {
   createdAt: string;
   expiresAt: string;
   expiredAt: string | null;
-  subState: "restorable" | "expired" | "empty";
+  subState: "restorable" | "expired" | "empty" | "data_missing";
   restoreUnavailableReason: string | null;
 }
 

@@ -38,6 +38,27 @@ export type SnapshotEvent =
       payload: { createdAt: string; retentionDays: number };
     })
   | (EventEnvelope & {
+      /**
+       * A disk this snapshot recorded no longer exists at the provider, found while its
+       * retention window was still open.
+       *
+       * Deliberately NOT `snapshot.expired`. Expiry means the data was deleted on
+       * schedule and is evidence that retention worked; this means it went away early
+       * and nothing recorded why. Reporting one as the other would turn a retention
+       * failure into proof of a retention success.
+       */
+      type: "snapshot.data_missing";
+      payload: {
+        /** The recorded ids that could not be found. */
+        missingDiskExternalIds: string[];
+        /** How many disks the row recorded in total, so "1 of 2" is distinguishable
+         * from "all of them". */
+        recordedDiskCount: number;
+        /** Still in the future when this was found — that is what makes it early. */
+        expiresAt: string;
+      };
+    })
+  | (EventEnvelope & {
       type: "snapshot.legal_hold_set";
       payload: { reason: string };
     })

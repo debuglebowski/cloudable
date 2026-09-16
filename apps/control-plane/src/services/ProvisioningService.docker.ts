@@ -461,4 +461,7 @@ export const makeDockerProvisioningServiceLive = (options: {
         }),
       ),
     revokeSnapshotRead: () => Effect.void,
+    // Nothing was ever captured, so nothing can still exist. Reached only if a docker
+    // machine somehow has a row naming a disk, which would itself be the bug.
+    snapshotDiskExists: () => Effect.succeed(false),
   } satisfies ProvisioningService);

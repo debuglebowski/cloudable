@@ -911,6 +911,20 @@ const service: ProvisioningService = {
       } satisfies SnapshotReadGrant;
     }),
 
+  snapshotDiskExists: ({ diskExternalId }) =>
+    Effect.gen(function* () {
+      const clients = yield* getClients();
+      const name = parseSnapshotNameFromResourceId(diskExternalId);
+      // An id we cannot parse names nothing we could find, which is the same answer as
+      // an id that parses and is gone.
+      if (!name) return false;
+
+      const found = yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.snapshots.get(config.azureMachinesResourceGroup, name)),
+      );
+      return found !== null;
+    }),
+
   revokeSnapshotRead: ({ diskExternalId }) =>
     Effect.gen(function* () {
       const clients = yield* getClients();

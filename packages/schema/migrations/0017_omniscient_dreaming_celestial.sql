@@ -1,0 +1,1 @@
+ALTER TABLE "snapshots" ADD COLUMN "data_missing_at" timestamp with time zone;

@@ -10,6 +10,7 @@ import {
   FullRestoreNotAcknowledgedError,
   InvalidRestoreApprovalError,
   RestoreNotApprovedError,
+  SnapshotDataMissingError,
   SnapshotEmptyError,
   SnapshotExpiredError,
 } from "./errors";
@@ -125,6 +126,21 @@ export const restoreSnapshot = (input: RestoreSnapshotInput) =>
           snapshotId: snapshot.id,
           expiredAt: expiredAt.toISOString(),
           reason: restoreUnavailableReason(snapshot) ?? "Snapshot expired.",
+        }),
+      );
+    }
+
+    // Checked here rather than left to the reconcile loop to discover: the whole point
+    // of the integrity sweep is that a restore must not consume an approval — up to dual
+    // sign-off — to put back data that is not there. Same 409 and the same stated reason
+    // an expired or empty snapshot gets.
+    if (getSnapshotSubState(snapshot) === "data_missing") {
+      return yield* Effect.fail(
+        new SnapshotDataMissingError({
+          snapshotId: snapshot.id,
+          reason:
+            restoreUnavailableReason(snapshot) ??
+            "The disks this snapshot records no longer exist at the provider.",
         }),
       );
     }

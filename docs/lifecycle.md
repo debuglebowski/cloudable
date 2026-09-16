@@ -43,9 +43,10 @@ this primitive after obtaining its own approval.
 `archived_restorable` vs. `archived_expired` are real values of `machines.state`. For a
 `snapshot` row (which outlives the machine and has its own retention clock — see
 "Archive is separate from Machines" in `docs/frontend.md`), the equivalent distinction is
-**computed, not stored**: `getSnapshotSubState()` (`domain/archive/sub-state.ts`) returns
-`"restorable"` or `"expired"` purely from whether `snapshots.expiredAt` is set. There is
-no separate sub-state column to drift out of sync with it.
+**computed, not stored**: `getSnapshotSubState()` (`domain/archive/sub-state.ts`) derives
+it from the row — `capturedDisks`, `expiredAt`, `dataMissingAt` — rather than from a
+column of its own that could drift out of sync. See "Snapshot integrity" below for the
+four values and their precedence.
 
 An expired snapshot's restore is **greyed out with a stated reason, never hidden**:
 `restoreUnavailableReason()` returns a human-readable sentence (`null` when restore is
@@ -279,6 +280,55 @@ It is destroyed by the next reimage regardless.
 
 **One lossy edge, tell the person in advance:** `pkill -u cloudable` kills a detached
 tmux or editor, so unsaved in-memory state is lost. Files on disk are captured by pass 2.
+
+## Snapshot integrity — does "restorable" mean anything?
+
+`detectMissingSnapshotData()` (`domain/archive/snapshot.ts`), run by the same 60s sweep
+loop as expiry, reads every unexpired snapshot's `capturedDisks` and asks the provider
+whether each recorded object still exists. Rows where one does not get `dataMissingAt`
+stamped and a `snapshot.data_missing` event.
+
+**Why this is not paranoia.** A row names its copies by `CapturedDisk.externalId`, and
+until this nothing ever re-read those ids. Production had two rows pointing at objects
+since replaced or cleaned up, both still reading `restorable` with a live Restore button.
+Pressing it would have gone through approval — up to dual sign-off — to restore nothing.
+
+It is the third time this class of bug has been fixed. The first two taught
+`getSnapshotSubState` more about the ROW: it captured nothing (`empty`), its retention
+elapsed (`expired`). This one cannot be learned from the row at all — only the provider
+knows the object is gone — so it needs a sweep rather than a better pure function.
+
+**`data_missing` is not `expired`, and the difference is the whole point.** Expiry means
+the data was deleted ON SCHEDULE and is evidence retention worked. `data_missing` means it
+went away while the retention window was still open and nothing recorded why. Reporting
+one as the other would turn a retention failure into proof of a retention success.
+
+| Sub-state | Means |
+|---|---|
+| `restorable` | Disks recorded, and the provider still has them |
+| `empty` | Nothing was ever captured |
+| `expired` | Retention elapsed; data deleted on schedule |
+| `data_missing` | Data gone early, cause unknown |
+
+Precedence is `empty` → `expired` → `data_missing` → `restorable`. Expiry outranks
+`data_missing` because past the window the data being gone is the expected outcome, and
+re-reporting it as a fault would bury the anomalies.
+
+**Flags, never corrects** (invariant 5). `dataMissingAt` is a first-observation stamp and
+nothing else on the row is touched — `capturedDisks` keeps the ids that went missing,
+because "which object did we lose" is the first question anyone investigating asks. A
+provider that cannot answer is treated as "present" and retried next pass: flagging on a
+transient failure would put a permanent, wrong mark on a healthy snapshot, and the stamp is
+never cleared.
+
+`restoreSnapshot()` refuses a `data_missing` snapshot with `SnapshotDataMissingError`
+(409) before requesting an approval, for the same reason it refuses an empty one: a
+restore must not consume dual sign-off to put back data that is not there.
+
+**Known gap.** Compliance check #5 ("retention is honoured") does not yet read this. It
+treats `snapshot.expired` as proof that deletion happened on schedule, and a snapshot whose
+data vanished early is the opposite failure — data that should have been retained was not.
+The event and the column now exist to build that on; the check has not been changed.
 
 ## Snapshot inspection — reading a snapshot's files
 

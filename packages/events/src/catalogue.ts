@@ -78,6 +78,7 @@ export const EVENT_TYPES = [
   "snapshot.created",
   "snapshot.restored",
   "snapshot.expired",
+  "snapshot.data_missing",
   "snapshot.legal_hold_set",
   "snapshot.legal_hold_cleared",
 

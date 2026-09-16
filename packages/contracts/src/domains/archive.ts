@@ -21,7 +21,7 @@ export type SnapshotTrigger = "archive" | "upgrade" | "manual";
  * button. Additive to the union; consumers that only knew the first two treat an
  * unknown value as not-restorable, which is the safe direction.
  */
-export type SnapshotSubState = "restorable" | "expired" | "empty";
+export type SnapshotSubState = "restorable" | "expired" | "empty" | "data_missing";
 
 export interface ArchiveMachineRequest {
   /** An approval already obtained elsewhere (e.g. by an offboarding flow). Archiving a

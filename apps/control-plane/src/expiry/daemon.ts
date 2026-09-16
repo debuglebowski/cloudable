@@ -1,10 +1,11 @@
 import { Duration, Effect } from "effect";
 import { openPostgres } from "../db/connect";
 import type { Db } from "../db/layer";
-import { expireOverdueSnapshots } from "../domain/archive/snapshot";
+import { detectMissingSnapshotData, expireOverdueSnapshots } from "../domain/archive/snapshot";
 import { expireOverdueElevations } from "../domain/elevation/ElevationService";
 import { expireOverdueApprovals } from "../services/ApprovalService";
 import type { EventBus } from "../services/EventBus";
+import type { ProvisioningServiceTag } from "../services/ProvisioningService";
 import { type TunnelRelay, closeSessionsWithLapsedAuthorization } from "../tunnel/relay";
 
 /**
@@ -59,12 +60,12 @@ const KEEPALIVE_INTERVAL = Duration.seconds(30);
 const RETRY_BACKOFF = Duration.seconds(10);
 
 /**
- * One pass over all four sweeps.
+ * One pass over all five sweeps.
  *
  * Each is run independently and its failure caught and logged, rather than letting
  * the first one to fail abandon the other three: they share only a cadence, not a
  * transaction, and a broken snapshot sweep is no reason to stop expiring elevations.
- * A pass that logs four warnings is a visibly broken pass; a pass that silently did
+ * A pass that logs five warnings is a visibly broken pass; a pass that silently did
  * one quarter of its job is not.
  */
 /** Every sweep reports failure as a tagged error carrying a `reason` (`ApprovalError`,
@@ -87,8 +88,8 @@ const describeError = (error: unknown): string => {
 /**
  * One sweep, its failure caught and logged rather than propagated.
  *
- * The four share only a cadence, not a transaction: a broken snapshot sweep is no
- * reason to stop expiring elevations, and a pass that logs four warnings is visibly
+ * They share only a cadence, not a transaction: a broken snapshot sweep is no
+ * reason to stop expiring elevations, and a pass that logs five warnings is visibly
  * broken in a way that a pass which silently did a quarter of its job is not.
  *
  * Only a sweep that actually changed something logs on success — at a 60s cadence,
@@ -109,14 +110,22 @@ const runSweep = <R>(
     ),
   );
 
-const runSweepPass: Effect.Effect<void, never, Db | EventBus | TunnelRelay> = Effect.gen(
-  function* () {
-    yield* runSweep("approvals", expireOverdueApprovals);
-    yield* runSweep("snapshots", expireOverdueSnapshots());
-    yield* runSweep("elevations", expireOverdueElevations);
-    yield* runSweep("sessions with lapsed authorization", closeSessionsWithLapsedAuthorization());
-  },
-);
+const runSweepPass: Effect.Effect<
+  void,
+  never,
+  Db | EventBus | TunnelRelay | ProvisioningServiceTag
+> = Effect.gen(function* () {
+  yield* runSweep("approvals", expireOverdueApprovals);
+  yield* runSweep("snapshots", expireOverdueSnapshots());
+  yield* runSweep("elevations", expireOverdueElevations);
+  yield* runSweep("sessions with lapsed authorization", closeSessionsWithLapsedAuthorization());
+  // Unlike the others this one makes provider calls — one read per recorded disk on
+  // every unexpired snapshot. That is small at this fleet size and bounded by the
+  // number of snapshots, not machines, but it is the first sweep here that can be
+  // slowed by something outside Postgres. If it ever gets heavy, give it its own,
+  // slower cadence rather than slowing the other four down with it.
+  yield* runSweep("snapshots with missing data", detectMissingSnapshotData());
+});
 
 /**
  * Loops forever: acquire the leader lock (blocks until held), then run `runSweepPass`
@@ -125,62 +134,67 @@ const runSweepPass: Effect.Effect<void, never, Db | EventBus | TunnelRelay> = Ef
  * is gone — the connection is closed, a warning logged, and the cycle retries after
  * `RETRY_BACKOFF`. Never lets a failure propagate out and kill the daemon fiber.
  */
-export const startExpirySweepDaemon: Effect.Effect<never, never, Db | EventBus | TunnelRelay> =
-  Effect.gen(function* () {
-    while (true) {
-      // `openPostgres`, not `postgres(config.databaseUrl)` — under
-      // DATABASE_AUTH_MODE=entra the connection string carries no password, so
-      // building a client directly sends an empty one and every acquisition fails
-      // with an error that reads like a lock problem and is an auth one. Same trap
-      // `status-refresh/daemon.ts` documents falling into in a real deployment.
-      const lockSql = openPostgres({ max: 1 });
-      const acquired = yield* Effect.tryPromise({
-        try: () => lockSql`select pg_advisory_lock(${EXPIRY_LEADER_LOCK_KEY})`,
-        catch: (cause) => cause,
-      }).pipe(
-        Effect.as(true),
-        Effect.catchAll((cause) =>
-          Effect.logWarning(
-            `expiry daemon: failed to acquire leader lock, retrying: ${String(cause)}`,
-          ).pipe(Effect.as(false)),
-        ),
-      );
+export const startExpirySweepDaemon: Effect.Effect<
+  never,
+  never,
+  Db | EventBus | TunnelRelay | ProvisioningServiceTag
+> = Effect.gen(function* () {
+  while (true) {
+    // `openPostgres`, not `postgres(config.databaseUrl)` — under
+    // DATABASE_AUTH_MODE=entra the connection string carries no password, so
+    // building a client directly sends an empty one and every acquisition fails
+    // with an error that reads like a lock problem and is an auth one. Same trap
+    // `status-refresh/daemon.ts` documents falling into in a real deployment.
+    const lockSql = openPostgres({ max: 1 });
+    const acquired = yield* Effect.tryPromise({
+      try: () => lockSql`select pg_advisory_lock(${EXPIRY_LEADER_LOCK_KEY})`,
+      catch: (cause) => cause,
+    }).pipe(
+      Effect.as(true),
+      Effect.catchAll((cause) =>
+        Effect.logWarning(
+          `expiry daemon: failed to acquire leader lock, retrying: ${String(cause)}`,
+        ).pipe(Effect.as(false)),
+      ),
+    );
 
-      if (!acquired) {
-        yield* Effect.tryPromise({ try: () => lockSql.end(), catch: () => undefined }).pipe(
-          Effect.catchAll(() => Effect.void),
-        );
-        yield* Effect.sleep(RETRY_BACKOFF);
-        continue;
-      }
-
-      yield* Effect.logInfo("expiry daemon: acquired leader lock, starting sweep passes");
-
-      const keepAlive: Effect.Effect<never, unknown> = Effect.gen(function* () {
-        while (true) {
-          yield* Effect.sleep(KEEPALIVE_INTERVAL);
-          yield* Effect.tryPromise({ try: () => lockSql`select 1`, catch: (cause) => cause });
-        }
-      });
-
-      const sweeping: Effect.Effect<never, never, Db | EventBus | TunnelRelay> = Effect.gen(
-        function* () {
-          while (true) {
-            yield* runSweepPass;
-            yield* Effect.sleep(SWEEP_INTERVAL);
-          }
-        },
-      );
-
-      yield* Effect.race(sweeping, keepAlive).pipe(
-        Effect.catchAll((cause) =>
-          Effect.logWarning(`expiry daemon: lost leadership: ${String(cause)}`),
-        ),
-      );
-
+    if (!acquired) {
       yield* Effect.tryPromise({ try: () => lockSql.end(), catch: () => undefined }).pipe(
         Effect.catchAll(() => Effect.void),
       );
       yield* Effect.sleep(RETRY_BACKOFF);
+      continue;
     }
-  });
+
+    yield* Effect.logInfo("expiry daemon: acquired leader lock, starting sweep passes");
+
+    const keepAlive: Effect.Effect<never, unknown> = Effect.gen(function* () {
+      while (true) {
+        yield* Effect.sleep(KEEPALIVE_INTERVAL);
+        yield* Effect.tryPromise({ try: () => lockSql`select 1`, catch: (cause) => cause });
+      }
+    });
+
+    const sweeping: Effect.Effect<
+      never,
+      never,
+      Db | EventBus | TunnelRelay | ProvisioningServiceTag
+    > = Effect.gen(function* () {
+      while (true) {
+        yield* runSweepPass;
+        yield* Effect.sleep(SWEEP_INTERVAL);
+      }
+    });
+
+    yield* Effect.race(sweeping, keepAlive).pipe(
+      Effect.catchAll((cause) =>
+        Effect.logWarning(`expiry daemon: lost leadership: ${String(cause)}`),
+      ),
+    );
+
+    yield* Effect.tryPromise({ try: () => lockSql.end(), catch: () => undefined }).pipe(
+      Effect.catchAll(() => Effect.void),
+    );
+    yield* Effect.sleep(RETRY_BACKOFF);
+  }
+});

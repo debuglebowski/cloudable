@@ -196,6 +196,12 @@ export const makeFakeProvisioningServiceLive = (
       // every close path calls this, including for disks that were never granted.
       const revokeSnapshotRead: ProvisioningService["revokeSnapshotRead"] = () => Effect.void;
 
+      const snapshotDiskExists: ProvisioningService["snapshotDiskExists"] = ({ diskExternalId }) =>
+        Effect.succeed(
+          options.snapshotImages?.has(diskExternalId) === true ||
+            options.fallbackSnapshotImage != null,
+        );
+
       const archive: ProvisioningService["archive"] = (machineId: string, _provider) =>
         Effect.gen(function* () {
           const existing = yield* require(machineId);
@@ -261,6 +267,7 @@ export const makeFakeProvisioningServiceLive = (
         snapshot,
         grantSnapshotRead,
         revokeSnapshotRead,
+        snapshotDiskExists,
         archive,
         reconcile,
         reimage,

@@ -73,6 +73,7 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `snapshot.created` | 1 | A snapshot was created on archive, upgrade, or manual trigger. |
 | `snapshot.restored` | 1 | A snapshot was restored to a target machine under approval. |
 | `snapshot.expired` | 1 | A snapshot passed its retention window and expired. |
+| `snapshot.data_missing` | 1 | A disk a snapshot recorded was found missing at the provider while its retention window was still open. |
 | `snapshot.legal_hold_set` | 1 | A legal hold was placed on a snapshot, suspending its retention expiry. |
 | `snapshot.legal_hold_cleared` | 1 | A legal hold on a snapshot was cleared. |
 

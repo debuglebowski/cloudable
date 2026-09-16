@@ -110,6 +110,20 @@ export function daysUntil(iso: string): number {
 
 /** Retention countdown / expired / legal-hold state for one row. Never hides the "why". */
 export function RetentionStatus({ snapshot }: { snapshot: ArchivedSnapshot }) {
+  // Checked before legal hold, and that ordering is deliberate. A retention bar reading
+  // "20 days left" over data that is already gone is the exact false reassurance the
+  // integrity sweep exists to end, and a snapshot under legal hold whose data has
+  // vanished is the most alarming version of it — "exempt from expiry" would be a
+  // reassuring label on a hold that has already failed.
+  if (snapshot.subState === "data_missing") {
+    return (
+      <div className="flex flex-col gap-1">
+        <RetentionBar label="Data missing" percent={0} tone="stale" />
+        <span className="text-xs text-muted-foreground">gone before its retention ended</span>
+      </div>
+    );
+  }
+
   if (snapshot.legalHold) {
     return (
       <div className="flex flex-col gap-1">

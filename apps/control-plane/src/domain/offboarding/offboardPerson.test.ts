@@ -110,6 +110,7 @@ function buildTestLayers(opts: {
   const provisioning: ProvisioningService = {
     snapshot: () => Effect.die("not used in this test"),
     create: () => Effect.die("not used in this test"),
+    snapshotDiskExists: () => Effect.die("not used in this test"),
     grantSnapshotRead: () => Effect.die("not used in this test"),
     revokeSnapshotRead: () => Effect.die("not used in this test"),
     archive: (machineId) =>

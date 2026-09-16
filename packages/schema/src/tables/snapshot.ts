@@ -79,4 +79,14 @@ export const snapshots = pgTable("snapshots", {
   // `snapshot.expired`; it does NOT yet delete anything at the provider — see
   // `docs/lifecycle.md`. So this means "past retention", not "data destroyed".
   expiredAt: timestamp("expired_at", { withTimezone: true }),
+  // When the integrity sweep first found that a disk in `capturedDisks` no longer
+  // exists at the provider. Distinct from `expiredAt` in the way that matters most:
+  // expiry means the data was deleted ON SCHEDULE, this means it went away and nobody
+  // knows why. Data that vanished before its retention window is a retention failure,
+  // not a retention success.
+  //
+  // Set once and never cleared — first observation, like `compliance_finding_state`'s
+  // `firstSeenAt`. Flagged, never corrected (invariant 5), and the row itself is
+  // permanent regardless (invariant 6).
+  dataMissingAt: timestamp("data_missing_at", { withTimezone: true }),
 });

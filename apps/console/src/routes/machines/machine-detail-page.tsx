@@ -101,6 +101,20 @@ const COMPLIANCE_SKELETON_KEYS = ["skel-1", "skel-2", "skel-3", "skel-4", "skel-
  * own change history (`./machine-manifest-tab.tsx`) — which reads better behind a real URL and
  * back button than packed into a table row.
  */
+/**
+ * What a non-restorable snapshot shows in place of the Restore action.
+ *
+ * Three distinct states, kept distinct because they mean different things to whoever is
+ * reading: nothing was ever captured, the data was deleted on schedule, or the data went
+ * away early and nobody knows why. The full sentence is on the `title`; this is the part
+ * that has to fit in a column.
+ */
+const SNAPSHOT_UNAVAILABLE_LABEL: Record<string, string> = {
+  empty: "Nothing captured",
+  expired: "Data expired",
+  data_missing: "Data missing",
+};
+
 export function MachineDetailPage() {
   const { machineId } = useParams({ from: "/machines/$machineId" });
 
@@ -223,16 +237,19 @@ export function MachineDetailPage() {
             Archive
           </Button>
           {ARCHIVED_MACHINE_STATES.has(machine.state) &&
-            (latestArchiveSnapshot && !latestArchiveSnapshot.expiredAt ? (
+            (latestArchiveSnapshot?.subState === "restorable" ? (
               <RestoreDialog snapshot={latestArchiveSnapshot} />
             ) : (
               <Button
                 size="sm"
                 disabled
+                // The server's own reason, not one re-derived here. This used to read
+                // `expiredAt` alone, which meant a snapshot that captured nothing — or
+                // one whose disks have since vanished from the provider — showed a live
+                // Restore button over data that is not there.
                 title={
-                  latestArchiveSnapshot?.expiredAt
-                    ? `Restore unavailable — volume data was hard-deleted on ${formatDate(latestArchiveSnapshot.expiredAt)}.`
-                    : "No archive snapshot on record."
+                  latestArchiveSnapshot?.restoreUnavailableReason ??
+                  "No archive snapshot on record."
                 }
               >
                 Restore
@@ -434,15 +451,15 @@ export function MachineDetailPage() {
                           {formatSnapshotSize(snapshot)}
                         </TableCell>
                         <TableCell className="text-right">
-                          {snapshot.expiredAt ? (
+                          {snapshot.subState === "restorable" ? (
+                            <RestoreDialog snapshot={snapshot} />
+                          ) : (
                             <span
                               className="text-xs text-muted-foreground"
-                              title={`Volume data was hard-deleted on ${formatDate(snapshot.expiredAt)}.`}
+                              title={snapshot.restoreUnavailableReason ?? undefined}
                             >
-                              Data expired
+                              {SNAPSHOT_UNAVAILABLE_LABEL[snapshot.subState]}
                             </span>
-                          ) : (
-                            <RestoreDialog snapshot={snapshot} />
                           )}
                         </TableCell>
                       </TableRow>

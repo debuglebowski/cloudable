@@ -42,6 +42,7 @@ const toSnapshotView = (snapshot: SnapshotRow) => ({
   createdAt: snapshot.createdAt.toISOString(),
   expiresAt: snapshot.expiresAt.toISOString(),
   expiredAt: snapshot.expiredAt ? snapshot.expiredAt.toISOString() : null,
+  dataMissingAt: snapshot.dataMissingAt ? snapshot.dataMissingAt.toISOString() : null,
   subState: getSnapshotSubState(snapshot),
   restoreUnavailableReason: restoreUnavailableReason(snapshot),
 });

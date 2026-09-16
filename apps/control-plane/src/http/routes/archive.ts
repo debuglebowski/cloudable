@@ -9,6 +9,7 @@ import {
   MachineAlreadyArchivedError,
   MachineNotFoundError,
   RestoreNotApprovedError,
+  SnapshotDataMissingError,
   SnapshotDiskNotReadableError,
   SnapshotEmptyError,
   SnapshotExpiredError,
@@ -23,7 +24,7 @@ import { CurrentUserAuthentication } from "../middleware/auth";
 
 const RestoreMode = Schema.Literal("data", "config", "full");
 const SnapshotTrigger = Schema.Literal("archive", "upgrade", "manual");
-const SnapshotSubState = Schema.Literal("restorable", "expired", "empty");
+const SnapshotSubState = Schema.Literal("restorable", "expired", "empty", "data_missing");
 const ApprovalStatus = Schema.Literal("pending", "approved", "rejected", "expired");
 
 const MachineIdPath = Schema.Struct({ machineId: Schema.String });
@@ -99,6 +100,9 @@ const SnapshotViewSuccess = Schema.Struct({
   createdAt: Schema.String,
   expiresAt: Schema.String,
   expiredAt: Schema.NullOr(Schema.String),
+  /** When the integrity sweep first found a recorded disk missing at the provider.
+   * Null normally. Set means the data went away while retention was still open. */
+  dataMissingAt: Schema.NullOr(Schema.String),
   subState: SnapshotSubState,
   restoreUnavailableReason: Schema.NullOr(Schema.String),
 });
@@ -207,6 +211,7 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .addError(MachineNotFoundError, { status: 404 })
       .addError(SnapshotExpiredError, { status: 409 })
       .addError(SnapshotEmptyError, { status: 409 })
+      .addError(SnapshotDataMissingError, { status: 409 })
       .addError(FullRestoreNotAcknowledgedError, { status: 400 })
       .addError(RestoreNotApprovedError, { status: 403 }),
   )
@@ -224,6 +229,7 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .addError(SnapshotNotFoundError, { status: 404 })
       .addError(SnapshotExpiredError, { status: 409 })
       .addError(SnapshotEmptyError, { status: 409 })
+      .addError(SnapshotDataMissingError, { status: 409 })
       .addError(RestoreNotApprovedError, { status: 403 }),
   )
   .add(

@@ -262,6 +262,23 @@ export interface ProvisioningService {
     provider: Provider;
     diskExternalId: string;
   }): Effect.Effect<void, ProvisioningError>;
+  /**
+   * Whether a disk this snapshot recorded still exists at the provider.
+   *
+   * A `snapshots` row names its copies by `CapturedDisk.externalId` and nothing
+   * re-checks that the named object is still there. Production has rows pointing at
+   * objects since replaced or cleaned up, and those rows still read "restorable" with a
+   * live Restore button — so the one thing the product promises about a snapshot is
+   * unverified. This is the check that makes it verifiable.
+   *
+   * A plain read, not a grant: on Azure it is `snapshots/read`, which the role already
+   * has, so detecting this needs no new permission. Absence is reported as `false`
+   * rather than as an error — a missing object is the ANSWER here, not a failure.
+   */
+  snapshotDiskExists(input: {
+    provider: Provider;
+    diskExternalId: string;
+  }): Effect.Effect<boolean, ProvisioningError>;
   archive(
     machineId: string,
     provider: Provider,

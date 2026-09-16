@@ -1,4 +1,4 @@
-import { snapshots } from "@cloudable/schema";
+import { machines, snapshots } from "@cloudable/schema";
 import { and, eq, inArray, isNull, lt } from "drizzle-orm";
 import { Effect } from "effect";
 import { ulid } from "ulid";
@@ -382,4 +382,103 @@ export const expireOverdueSnapshots = (
     );
 
     return candidates.length;
+  });
+
+/**
+ * Checks that every disk a snapshot recorded still exists at the provider, and flags the
+ * rows where one does not.
+ *
+ * This exists because "restorable" was a claim nobody verified. A `snapshots` row names
+ * its copies by `CapturedDisk.externalId`, nothing re-read those ids after writing them,
+ * and production has rows pointing at objects since replaced or cleaned up — still
+ * showing a green badge and a live Restore button over data that is gone. Pressing it
+ * would have gone through approval, up to dual sign-off, to restore nothing.
+ *
+ * It is the third time this class of bug has been fixed. The first two taught
+ * `getSnapshotSubState` more about the ROW (it captured nothing; it has expired). This
+ * one cannot be learned from the row at all — only the provider knows the object is
+ * gone — which is why it needs a sweep rather than a better pure function.
+ *
+ * FLAGS, NEVER CORRECTS (invariant 5). `dataMissingAt` is a first-observation stamp and
+ * the row is never otherwise touched: `capturedDisks` keeps the ids that went missing,
+ * because "which object did we lose" is the question anyone investigating will ask.
+ *
+ * Deliberately scoped to rows that are NOT expired. Past its retention window the data
+ * being gone is the expected outcome, and re-reporting it as a fault would bury the
+ * anomalies in noise.
+ */
+export const detectMissingSnapshotData = (
+  now: Date = new Date(),
+): Effect.Effect<number, ArchiveDbError, Db | EventBus | ProvisioningServiceTag> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const eventBus = yield* EventBus;
+    const provisioning = yield* ProvisioningServiceTag;
+
+    const candidates = yield* dbTry(
+      () =>
+        db
+          .select({
+            id: snapshots.id,
+            orgId: snapshots.orgId,
+            machineId: snapshots.machineId,
+            capturedDisks: snapshots.capturedDisks,
+            expiresAt: snapshots.expiresAt,
+            provider: machines.provider,
+          })
+          .from(snapshots)
+          .innerJoin(machines, eq(snapshots.machineId, machines.id))
+          .where(and(isNull(snapshots.expiredAt), isNull(snapshots.dataMissingAt))),
+      "select_snapshot_integrity_candidates",
+    );
+
+    let flagged = 0;
+    for (const row of candidates) {
+      const disks = row.capturedDisks;
+      // A row that captured nothing is already `empty`; there is no id to check and
+      // nothing a provider call could tell us.
+      if (disks.length === 0) continue;
+
+      const missing: string[] = [];
+      for (const disk of disks) {
+        const exists = yield* provisioning
+          .snapshotDiskExists({ provider: row.provider, diskExternalId: disk.externalId })
+          .pipe(
+            // A provider that cannot answer is not the same as an object that is gone.
+            // Treat an error as "present" and try again next pass: flagging on a
+            // transient failure would put a permanent, wrong mark on a healthy snapshot,
+            // and `dataMissingAt` is never cleared.
+            Effect.catchAll(() => Effect.succeed(true)),
+          );
+        if (!exists) missing.push(disk.externalId);
+      }
+      if (missing.length === 0) continue;
+
+      yield* dbTry(
+        () => db.update(snapshots).set({ dataMissingAt: now }).where(eq(snapshots.id, row.id)),
+        "flag_snapshot_data_missing",
+      );
+
+      yield* publishOrDie(
+        eventBus.publish([
+          {
+            ...makeEnvelope({
+              orgId: row.orgId,
+              machineId: row.machineId,
+              correlationId: row.id,
+              ...SYSTEM_ACTOR,
+            }),
+            type: "snapshot.data_missing",
+            payload: {
+              missingDiskExternalIds: missing,
+              recordedDiskCount: disks.length,
+              expiresAt: row.expiresAt.toISOString(),
+            },
+          },
+        ]),
+      );
+      flagged++;
+    }
+
+    return flagged;
   });
