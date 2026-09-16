@@ -207,3 +207,35 @@ describe("undeclaredFromView", () => {
     expect(undeclaredFromView(rows)).toEqual(["nmap"]);
   });
 });
+
+describe("baseline capture", () => {
+  test("a machine whose baseline was never captured shows the whole image as undeclared", () => {
+    // The shape of the bug this guards. `recordReportedPackages` used to take a
+    // `captureBaseline` flag derived from `lastVerifiedAt`, which `create()`
+    // already sets the moment a provider returns "running" — true for docker,
+    // false for azure, which returns "provisioning". So the baseline silently
+    // never captured on docker machines and did on azure ones, and nothing
+    // said so: the table just showed every one of the image's packages as
+    // undeclared software installed by nobody.
+    const image = ["bash", "systemd", "coreutils"];
+
+    const withoutBaseline = buildPackagesView({
+      manifest: [],
+      installedPackages: [...image, "nmap"],
+      baselinePackages: null,
+    });
+    expect(undeclaredFromView(withoutBaseline).sort()).toEqual([
+      "bash",
+      "coreutils",
+      "nmap",
+      "systemd",
+    ]);
+
+    const withBaseline = buildPackagesView({
+      manifest: [],
+      installedPackages: [...image, "nmap"],
+      baselinePackages: image,
+    });
+    expect(undeclaredFromView(withBaseline)).toEqual(["nmap"]);
+  });
+});

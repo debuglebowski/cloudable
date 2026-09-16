@@ -282,19 +282,27 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
         const db = yield* Db;
         const machineService = yield* MachineService;
 
-        // Persist the inventory, and capture the baseline on the very first
-        // report. The baseline is what the image shipped with: written once,
-        // never rewritten, so a package later removed from the image still
-        // reads as part of what it came with — which it was.
+        // Persist the inventory. The baseline — what the image shipped with —
+        // fills itself on the first report that arrives and is never rewritten;
+        // see `recordReportedPackages` for why this is not keyed off
+        // `wasFirstSeen`.
         yield* machineService
           .recordReportedPackages({
             machineId: machine.id,
             installedPackages: payload.installedPackages,
             declaredPackageVersions: payload.declaredPackageVersions,
-            captureBaseline: wasFirstSeen,
             observedAt: now,
           })
-          .pipe(Effect.catchAll(() => Effect.void));
+          .pipe(
+            // Logged, not swallowed. A report that silently fails to store
+            // anything leaves the packages table looking like a machine that
+            // never spoke, which is indistinguishable from a real problem.
+            Effect.catchAll((error) =>
+              Effect.logWarning(
+                `report: failed to store reported packages for ${machine.id}: ${String(error.cause ?? error)}`,
+              ),
+            ),
+          );
 
         // Close out the actions this agent just ran, then give up on anything
         // it collected and never mentioned. The agent tells us what happened;

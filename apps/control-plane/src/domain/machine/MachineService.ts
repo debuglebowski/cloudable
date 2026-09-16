@@ -835,20 +835,22 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       });
 
     /**
-     * Stores what the agent just reported, and captures the image baseline on
-     * the first report.
+     * Stores what the agent just reported, and captures the image baseline the
+     * first time it hears anything at all.
      *
-     * `captureBaseline` is decided by the caller from `lastVerifiedAt`, not
-     * from whether `baselinePackages` is null, so a machine that somehow
-     * reports before its baseline column is written cannot overwrite an
-     * existing baseline later. The SQL guard below says the same thing a
-     * second time: baseline is only ever written where it is still null.
+     * The baseline write is guarded by `coalesce` rather than by a caller's
+     * "is this the first report" flag. The obvious flag, `lastVerifiedAt`, does
+     * not mean what it looks like it means here: `create()` already sets it at
+     * settle time, so it is never null by the time an agent reports and the
+     * baseline was silently never captured. Letting the column's own emptiness
+     * decide is both correct and idempotent — it fills once and never again,
+     * so a package later removed from the image still reads as part of what the
+     * machine came with, which it was.
      */
     const recordReportedPackages = (input: {
       machineId: string;
       installedPackages: ReadonlyArray<string>;
       declaredPackageVersions?: Readonly<Record<string, string>> | undefined;
-      captureBaseline: boolean;
       observedAt: Date;
     }) =>
       Effect.tryPromise({
@@ -858,12 +860,8 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             .set({
               installedPackages: [...input.installedPackages],
               declaredPackageVersions: input.declaredPackageVersions ?? {},
-              ...(input.captureBaseline
-                ? {
-                    baselinePackages: sql`coalesce(${machines.baselinePackages}, ${JSON.stringify([...input.installedPackages])}::jsonb)`,
-                    baselineCapturedAt: sql`coalesce(${machines.baselineCapturedAt}, ${input.observedAt})`,
-                  }
-                : {}),
+              baselinePackages: sql`coalesce(${machines.baselinePackages}, ${JSON.stringify([...input.installedPackages])}::jsonb)`,
+              baselineCapturedAt: sql`coalesce(${machines.baselineCapturedAt}, ${input.observedAt})`,
             })
             .where(eq(machines.id, input.machineId)),
         catch: (cause) => new MachineServiceError({ reason: "manifest_write_failed", cause }),
