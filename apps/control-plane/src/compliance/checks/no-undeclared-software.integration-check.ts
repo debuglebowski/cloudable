@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { events, machines, orgs } from "@cloudable/schema";
+import { machinePackages, machines, orgs } from "@cloudable/schema";
+import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { ulid } from "ulid";
 import { startTestDb } from "../../../test/testcontainers";
 import { Db } from "../../db/layer";
 import { noUndeclaredSoftwareCheck } from "./no-undeclared-software";
@@ -12,6 +12,11 @@ function mustFirst<T>(rows: T[]): T {
   if (!row) throw new Error("expected at least one row");
   return row;
 }
+
+/** Stands in for an image's own packages. Subtracting these is what makes the check
+ * usable: a real Ubuntu image is several hundred packages, and without the subtraction
+ * every machine reports several hundred findings on its first check-in. */
+const BASELINE = ["bash", "coreutils"];
 
 describe("noUndeclaredSoftwareCheck", () => {
   let db: Awaited<ReturnType<typeof startTestDb>>["db"];
@@ -53,39 +58,46 @@ describe("noUndeclaredSoftwareCheck", () => {
     );
   }
 
-  async function recordDrift(machineId: string, occurredAt: Date, undeclaredPackages: string[]) {
-    await db.insert(events).values({
-      id: ulid(),
-      type: "machine.drift_detected",
-      occurredAt,
-      orgId,
-      actorType: "agent",
-      actorId: "agent-1",
-      machineId,
-      correlationId: ulid(),
-      schemaVersion: 1,
-      payload: { undeclaredPackages, undeclaredPorts: [] },
+  /**
+   * Undeclared software is now derived from state, not from drift events.
+   *
+   * This file used to seed `machine.drift_detected` / `machine.drift_resolved` events
+   * and assert the check read them. It no longer does: the check computes
+   * "reported inventory, minus the image baseline, minus anything allowed" straight
+   * from `machines.installedPackages`, `machines.baselinePackages` and the manifest,
+   * through the same `buildPackagesView` the console's package table uses.
+   *
+   * Seeding events against the rewritten check did not merely fail — three of the six
+   * tests here PASSED while asserting "no finding", because nothing was ever detected.
+   * A check that has stopped detecting looks identical to a fleet with nothing to find,
+   * which is the failure mode this whole suite exists to rule out. Every test below now
+   * asserts a positive detection or a specific reason for its absence.
+   */
+  async function setInventory(
+    machineId: string,
+    installedPackages: string[],
+    baselinePackages: string[] = BASELINE,
+  ) {
+    await db
+      .update(machines)
+      .set({ installedPackages, baselinePackages })
+      .where(eq(machines.id, machineId));
+  }
+
+  /** Allow a package at machine scope — the other way drift resolves, alongside
+   * someone actually removing the software. */
+  async function allowPackage(machineId: string, packageName: string) {
+    await db.insert(machinePackages).values({
+      scopeType: "machine",
+      scopeId: machineId,
+      packageName,
+      source: "machine",
     });
   }
 
-  async function resolveDrift(machineId: string, occurredAt: Date) {
-    await db.insert(events).values({
-      id: ulid(),
-      type: "machine.drift_resolved",
-      occurredAt,
-      orgId,
-      actorType: "person",
-      actorId: "person-1",
-      machineId,
-      correlationId: ulid(),
-      schemaVersion: 1,
-      payload: { removed: [], approvalId: ulid() },
-    });
-  }
-
-  test("machine with open drift -> finding carrying the undeclared packages", async () => {
+  test("installed software nobody allowed -> finding carrying it", async () => {
     const machine = await makeMachine();
-    await recordDrift(machine.id, new Date("2026-01-01T00:00:00Z"), ["curl-extra"]);
+    await setInventory(machine.id, [...BASELINE, "curl-extra"]);
 
     const findings = await evaluate();
     const finding = findings.find((f) => f.machineId === machine.id);
@@ -94,35 +106,37 @@ describe("noUndeclaredSoftwareCheck", () => {
     expect(finding?.detail).toEqual({ undeclaredPackages: ["curl-extra"] });
   });
 
-  test("machine with resolved drift -> no finding", async () => {
+  test("the same software, once allowed by the manifest -> no finding", async () => {
     const machine = await makeMachine();
-    await recordDrift(machine.id, new Date("2026-01-01T00:00:00Z"), ["curl-extra"]);
-    await resolveDrift(machine.id, new Date("2026-01-02T00:00:00Z"));
+    await setInventory(machine.id, [...BASELINE, "curl-extra"]);
+    await allowPackage(machine.id, "curl-extra");
 
     const findings = await evaluate();
     expect(findings.find((f) => f.machineId === machine.id)).toBeUndefined();
   });
 
-  test("machine with no drift history -> no finding", async () => {
+  test("machine that has never reported an inventory -> no finding", async () => {
+    // Silence is not evidence of cleanliness. A machine that has told us nothing is
+    // the "machines are reporting" check's business, not this one's.
     const machine = await makeMachine();
 
     const findings = await evaluate();
     expect(findings.find((f) => f.machineId === machine.id)).toBeUndefined();
   });
 
-  test("archived machine with open drift -> no finding (gated out as not-live)", async () => {
+  test("archived machine with undeclared software -> no finding (gated out as not-live)", async () => {
     const machine = await makeMachine({ state: "archived_restorable" });
-    await recordDrift(machine.id, new Date("2026-01-01T00:00:00Z"), ["curl-extra"]);
+    await setInventory(machine.id, [...BASELINE, "curl-extra"]);
 
     const findings = await evaluate();
     expect(findings.find((f) => f.machineId === machine.id)).toBeUndefined();
   });
 
-  test("machine that drifts again after resolution -> finding again", async () => {
+  test("software removed, then different software appears -> finding again", async () => {
     const machine = await makeMachine();
-    await recordDrift(machine.id, new Date("2026-01-01T00:00:00Z"), ["curl-extra"]);
-    await resolveDrift(machine.id, new Date("2026-01-02T00:00:00Z"));
-    await recordDrift(machine.id, new Date("2026-01-03T00:00:00Z"), ["vim-extra"]);
+    await setInventory(machine.id, [...BASELINE, "curl-extra"]);
+    await setInventory(machine.id, [...BASELINE]);
+    await setInventory(machine.id, [...BASELINE, "vim-extra"]);
 
     const findings = await evaluate();
     const finding = findings.find((f) => f.machineId === machine.id);
@@ -139,19 +153,19 @@ describe("noUndeclaredSoftwareCheck", () => {
   // the finding is resolved.
   test("closes and reopens across evaluations -> firstSeenAt resets, not the stale original", async () => {
     const machine = await makeMachine();
-    await recordDrift(machine.id, new Date("2026-01-01T00:00:00Z"), ["curl-extra"]);
+    await setInventory(machine.id, [...BASELINE, "curl-extra"]);
 
     const opened = await evaluate();
     const openedFinding = opened.find((f) => f.machineId === machine.id);
     expect(openedFinding).toBeDefined();
     const firstSeenAt = openedFinding?.firstSeenAt;
 
-    await resolveDrift(machine.id, new Date("2026-01-02T00:00:00Z"));
+    await setInventory(machine.id, [...BASELINE]);
     const resolved = await evaluate();
     expect(resolved.find((f) => f.machineId === machine.id)).toBeUndefined();
 
     await new Promise((resolve) => setTimeout(resolve, 10));
-    await recordDrift(machine.id, new Date("2026-01-03T00:00:00Z"), ["vim-extra"]);
+    await setInventory(machine.id, [...BASELINE, "vim-extra"]);
     const reopened = await evaluate();
     const reopenedFinding = reopened.find((f) => f.machineId === machine.id);
     expect(reopenedFinding).toBeDefined();
