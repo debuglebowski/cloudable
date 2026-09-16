@@ -11,8 +11,13 @@ Systemd service (`apps/agent/systemd/cloudable-agent.service`), pull-only,
 no inbound access ever. One binary, compiled per-arch via
 `bun build --compile` (`apps/agent/package.json`'s `build`/`build:arm64`).
 
-On boot it attests its identity, then loops: poll desired state, reconcile
-locally, report observed state, sleep, repeat.
+On boot it attests its identity, then loops: poll for work, perform any package
+actions it was handed, report observed state, sleep, repeat.
+
+The agent observes, with one exception: `apply-packages.ts` installs and removes
+packages. It never decides to — it performs actions the control plane handed it,
+each requested by a person. There is no local convergence towards the manifest,
+and the allowed list it receives is a permission, not an instruction.
 
 ### Attestation
 
@@ -99,18 +104,16 @@ One `HttpApiGroup` (`agent-protocol`, `/api/v1/agent/*`):
 |---|---|---|
 | Attest | `POST /attest` | Credential → machine identity → bearer token. Rejects with 401 + `agent.attestation_failed`, never a crash. |
 | Poll | `GET /poll` | Desired state. `If-None-Match` / `ETag`; `304` when unchanged. |
-| Report | `POST /report` | Observed state, submitted after the agent reconciles locally. |
+| Report | `POST /report` | Observed state, plus the outcome of any actions it performed. |
 | Wake | `GET /wake` (websocket) | Optional fast path, CP → agent. See below. |
 
-**Poll** returns a minimal stub shape today
-(`{version, packages, settings}`) — unit 2's package manifest isn't merged
-yet. The `ETag`/`304` mechanics are real and load-bearing (the handler
-always returns a raw `HttpServerResponse` with the header set, bypassing
-the declared success schema for the 304 case, since a 304 has no body);
-there's just nothing yet that varies the desired state per machine or over
-time, so the version is currently constant. Extend `DesiredStateResponse`
-(`packages/contracts/src/domains/agent-protocol.ts`) additively once the
-manifest lands.
+**Poll** returns `{version, packages, settings, pendingActions}`. `version` is
+the machine's `desiredStateVersion`, so an unchanged poll costs a `304` with no
+body; it is bumped in the same transaction that records an action, which is what
+makes the `304` safe. `packages` is what the machine is *allowed* to have.
+`pendingActions` is the work to do, and collecting it is a write — the same
+`UPDATE ... RETURNING` claims and returns the rows, so two polls racing cannot
+hand the same install out twice.
 
 **Report** persists `machines.last_verified_at` and derives events
 *server-side* from the observed-state diff — the agent never submits audit
@@ -257,8 +260,14 @@ no-payload spirit even though it's a different channel.
 
 ### Poll/report loop, backoff, and jitter
 
-`apps/agent/src/poll-report-loop.ts`: attest, poll, (reconcile locally —
-currently a no-op, see above), report, sleep ~30s, repeat.
+`apps/agent/src/poll-report-loop.ts`: attest, poll, apply any package actions,
+report (observed state + action outcomes), sleep ~30s, repeat.
+
+Actions run one at a time: two `apt-get` processes on one machine collide on the
+dpkg lock. An action the agent collects and never reports on is expired by the
+control plane after five minutes — visibly, never retried, because the package
+may be half-installed and running the package manager again over an unknown
+state is not something to do unasked.
 
 On any failure it backs off instead of retrying immediately or on a fixed
 schedule:

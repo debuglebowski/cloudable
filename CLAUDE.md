@@ -25,13 +25,13 @@ Never violate these. If one seems wrong, stop and say so — do not work around 
 1. No cloud credential is ever stored. Federation only, never client secrets.
 2. Events are append-only. No updates, no deletes. Retention is expiry.
 3. A machine has exactly one owner, always a person. No shared or unowned machines.
-4. Reconcile only closes gaps. It removes undeclared software, never installs.
+4. Nothing installs or removes software unasked. A person asks, per package, and it is recorded.
 5. Drift is flagged, never auto-corrected.
 6. Machines are archived, never deleted. Data expires; the record is permanent.
 7. No inbound access to any machine. Agents poll; tunnels are outbound.
 8. Cloudable injects secrets, never stores them.
 9. The CA private key never enters the control plane. Sign operations only.
-10. Desired state is edited; live machines are not.
+10. A machine changes only through an explicit, audited action. No background loop mutates one.
 11. Event type names are a public interface. Additive only, no renaming.
 12. The agent never submits audit events. It reports state; the control plane derives.
 
@@ -70,7 +70,7 @@ Read the relevant file before working in that area.
 
 | File                  | Covers                                                         |
 | :-------------------- | :------------------------------------------------------------- |
-| `docs/inheritance.md` | org → template → machine, package manifest, overrides, pinning |
+| `docs/inheritance.md` | org → template → machine, package permission, overrides, pinning |
 | `docs/agents.md`      | Control agent, tunnel daemon, wire protocol, attestation       |
 | `docs/cloud-auth.md`  | Self-hosted managed identity (the real path), RBAC scope, why BYOC federation was removed |
 | `docs/access.md`      | Web terminal, SSH certificates, session tokens                 |
@@ -85,3 +85,7 @@ Read the relevant file before working in that area.
 No templates. No Tailscale. No AWS or GCP. No billing. No idle suspend. Six compliance checks, not more.
 
 Never build: SSH public key upload, per-machine passwords or 2FA codes, shared machines, auto-correcting drift, code-server, application hosting.
+
+The package manifest is a **permission** list, not an install list. Declaring a package says a
+machine may have it; installing is a separate action a person takes per package. Nothing converges
+a machine towards its manifest on its own.

@@ -94,9 +94,17 @@ addable/removable named entries (not one keyed value), so it gets a table shaped
 concept — while still sharing the exact same resolution algorithm, not a parallel one that could
 drift from it.
 
-## The package manifest
+## The package manifest is permission, not desired state
 
-A manifest entry names a package and **optionally** pins a version (`docker`, `nodejs 20`).
+A manifest entry says a machine **may** have a package, and optionally pins the version it may have
+(`docker`, `nodejs 20`). It does not say the package will be installed, and nothing converges a
+machine towards it. Installing and removing are explicit per-package actions a person takes
+(`domain/machine/package-actions.ts`), each one recorded as a request, an outcome, and a failure if
+there was one.
+
+That split is why a machine's packages table has two independent columns. A package can be allowed
+and absent because nobody has installed it yet, or present and disallowed because somebody
+installed it anyway — and the second is exactly what the compliance check is looking for.
 There is no dependency resolution here; that is the machine's own package manager's job. Rows
 live in `machinePackages`, one per `(scopeType, scopeId, packageName)` (enforced by a unique index,
 `machine_packages_scope_package_idx`), which is also the upsert key `MachineService.updatePackages`
@@ -120,9 +128,9 @@ These are different edits and resolve differently:
 
 An excluded entry still resolves — the console renders it and offers to lift it — but it is not
 *declared*. `declaredPackages()` (`domain/machine/manifest.ts`) is the effective install set, and
-every caller that means "what should be on this machine" goes through it: the reconcile loop's
-desired state (`reconcile/list-machines.ts`), what the provider is asked to create
-(`MachineService.create`), and allowlist detection. So a package that is excluded and installed
+every caller that means "what this machine may have" goes through it: what the provider is asked
+to create (`MachineService.create`), the allowed list served to the agent on poll, and undeclared
+software detection. So a package that is excluded and installed
 anyway reads as undeclared software and surfaces as drift, which is the point of excluding it.
 
 Lifting an exclusion that is all the machine row ever said deletes the row rather than rewriting it
@@ -140,7 +148,7 @@ of a pinned package would make the pin decorative.
 
 **An org (or, once it exists, a template) can mark an entry `pinned`.** A pinned entry cannot be
 overridden *below* its own scope: *"Attempting to override one is a validation error
-at edit time, not a silent no-op at reconcile."*
+at edit time, not a silent no-op later."*
 
 This is enforced by `findPinConflicts()` (`apps/control-plane/src/domain/machine/manifest.ts`):
 given the full set of existing rows relevant to a machine and the package names an edit touches, it
@@ -168,19 +176,22 @@ No row is written and no event is emitted when this happens — the edit fails a
 `machine_packages` write. This is deliberately **edit-time-only**: pinning does not retroactively
 change what `resolveManifest()` returns for a machine-level row that was written *before* the pin
 was set (a machine can still be resolving its own pre-existing override). Reconcile never silently
-drops such a row either (reconcile only closes gaps against declared
-state and never auto-corrects); the pin only ever blocks a *new* write attempt.
+drops such a row either — nothing converges a machine towards its manifest at all; the pin only
+ever blocks a *new* write attempt.
 
 ## Allowlist detection
 
-`computeUndeclaredPackages(manifest, reported)`
-(`apps/control-plane/src/domain/machine/manifest.ts`) is the pure data path behind the "no
-undeclared software" check and the reconcile loop's removal set: given a resolved manifest and a
-list of package names the agent reported as actually installed, it returns the reported names that
-aren't declared anywhere in the chain. It has no DB or HTTP dependency and no license to act on its
-own output — only the reconcile loop (unit 1) may *remove* what this
-function reports, and only compliance (unit 8) may *surface* it as a finding; this function itself
-only computes the set.
+`buildPackagesView` / `undeclaredFromView` (`apps/control-plane/src/domain/machine/packages-view.ts`)
+are the pure data path behind both the machine's packages table and the "no undeclared software"
+check: given a resolved manifest, the inventory the agent reported, and the image baseline, they
+return what is installed that nothing allows and that did not ship with the image.
+
+Subtracting the baseline is what makes the answer usable. A real Ubuntu server image carries several
+hundred packages; without it, every machine reports several hundred findings on its first check-in.
+
+One definition, two consumers, deliberately: the table a person looks at and the finding an auditor
+reads are computed by the same function, so they cannot disagree. Neither has any license to act —
+removing a package is always an explicit per-package action someone asked for.
 
 ## Events
 

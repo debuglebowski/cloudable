@@ -14,13 +14,19 @@ Violating any of these breaks a stated customer promise. They are not preference
 1. **No cloud credential is ever stored.** Federation only. Client secrets are never acceptable.
 2. **Events are append-only.** No updates, no deletes. Retention is expiry, not mutation.
 3. **A machine has exactly one owner, and the owner is a person.** No shared, team-owned or unowned machines.
-4. **Reconcile only closes gaps.** It removes undeclared software; it never installs something it found running.
+4. **Nothing installs or removes software unasked.** A person asks, per package, and the request,
+   its outcome and its failures are all recorded. The package manifest is a *permission* list —
+   declaring a package says a machine may have it, never that something will go and install it.
+   Nothing adopts software it found running into the manifest either.
 5. **Drift is never auto-corrected.** Detected, surfaced, aged — never silently removed.
 6. **Machines are never deleted.** Only archived. Snapshot data expires; the record is permanent.
 7. **No inbound network access to any machine, ever.** Agents are pull-only; tunnels are outbound.
 8. **Cloudable never stores customer secrets.** It injects at runtime from the customer's own store.
 9. **The CA private key never enters the control plane.** Sign operations only.
-10. **Desired state is edited; live machines are not.** Reconcile is the only operation that mutates a machine.
+10. **A machine changes only through an explicit, audited action.** Create, archive, restart,
+    reimage, and per-package install/remove — each one requested by a person and recorded. No
+    background loop mutates a machine. The status-refresh pass only *observes*, and writes nothing
+    but the state it read back.
 11. **Event type names are a public interface.** Additive changes only. No renaming.
 12. **The agent never submits audit events.** It reports observed state; the control plane diffs and emits. A user with root could otherwise write their own audit history.
 
@@ -421,6 +427,7 @@ See `docs/frontend.md` for implementation detail (tokens, routing/nav convention
 | SSH public key upload | Certificates replace it entirely |
 | Shared, team-owned or unowned machines | Breaks offboarding, ownership checks and break-glass notification |
 | Auto-correcting drift | A tool that deletes an engineer's packages gets routed around |
+| A loop that converges a machine to its manifest | Same reason. The manifest is permission; installing is a person's decision, one package at a time |
 | code-server or any full IDE | Owning an IDE's update cadence and vulnerability surface |
 | Idle suspend / cost optimisation | Lowers a bill, does not unlock a customer |
 | General application hosting | Competing with Kubernetes and Vercel |

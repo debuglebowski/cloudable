@@ -18,7 +18,7 @@ One check can evidence several controls; one control usually needs several check
 |---|---|---|---|
 | 1 | `access-revoked-on-offboarding` | A certificate is still valid 24h after the owner was offboarded | yes |
 | 2 | `active-owner` | Owner absent from the IdP or deactivated | yes |
-| 3 | `no-undeclared-software` | Installed packages diverge from the resolved manifest | yes |
+| 3 | `no-undeclared-software` | Installed packages that nothing allows and that did not ship with the image | yes |
 | 4 | `elevated-access-approved` | A break-glass or admin session has no approval record and reason | yes |
 | 5 | `retention-honoured` | A snapshot outlives its retention window without a legal hold | yes |
 | 6 | `machines-reporting` | `lastVerifiedAt` older than the expected reconcile window | **no** |
