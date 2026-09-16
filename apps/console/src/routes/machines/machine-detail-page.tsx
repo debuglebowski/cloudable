@@ -1,24 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import {
-  Clock,
-  Cloud,
-  Cpu,
-  Disc,
-  FileText,
-  History,
-  type LucideIcon,
-  MapPin,
-  User,
-  Zap,
-} from "lucide-react";
+import { Clock, Cloud, Cpu, Disc, History, type LucideIcon, MapPin, User } from "lucide-react";
 import { useState } from "react";
 
 import { type ArchivedSnapshot, useMachineSnapshots } from "@/api/archive";
-import { SEVERITY_VARIANT, daysOpen, useAuditTimeline, useComplianceChecks } from "@/api/audit";
+import { SEVERITY_VARIANT, daysOpen, useComplianceChecks } from "@/api/audit";
 import { getMachine, isMachineStale, machinesKeys } from "@/api/machines";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
-import { ActorCell } from "@/components/actor-cell";
 import { ControlStatus } from "@/components/control-status";
 import { Freshness } from "@/components/freshness";
 import { OsIcon } from "@/components/os-icon";
@@ -44,6 +32,7 @@ import { RetentionStatus, formatDate, formatSnapshotSize } from "@/routes/archiv
 import { ArchiveMachineDialog } from "./archive-machine-dialog";
 import { BrowseFilesDialog } from "./browse-files-dialog";
 import { ConnectTerminalDialog } from "./connect-terminal-dialog";
+import { MachineActivityTab } from "./machine-activity-tab";
 import { MachineManifestTab } from "./machine-manifest-tab";
 import {
   ARCHIVED_MACHINE_STATES,
@@ -128,12 +117,11 @@ export function MachineDetailPage() {
     queryKey: ["people-directory"],
     queryFn: listPeopleDirectory,
   });
-  // Org-wide endpoints — no per-machine compliance/events API exists yet, so
-  // Compliance and Activity filter these by `machineId` client-side rather than
-  // waiting on a dedicated backend projection. (Packages is the exception: it
-  // has a real per-machine endpoint.)
+  // Org-wide endpoint — no per-machine compliance API exists yet, so Compliance
+  // filters this by `machineId` client-side rather than waiting on a dedicated
+  // backend projection. Packages, Snapshots and Activity each have a real
+  // per-machine endpoint of their own.
   const checksQuery = useComplianceChecks();
-  const timelineQuery = useAuditTimeline();
   const snapshotsQuery = useMachineSnapshots(machineId);
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
@@ -155,9 +143,6 @@ export function MachineDetailPage() {
   // person — but never shown again after that — not `activePeople`-filtered like the create
   // dialog's picker, since a machine's *existing* owner isn't re-validated as still active here.
   const owner = peopleQuery.data?.find((person) => person.id === machine?.ownerPersonId);
-
-  const machineTimeline =
-    timelineQuery.data?.filter((entry) => entry.machineId === machineId) ?? [];
 
   // The snapshot `archiveMachine()` took when this machine was archived — the header's
   // Restore action mirrors the header's Archive action, same as the Snapshots tab's own
@@ -478,95 +463,7 @@ export function MachineDetailPage() {
         </TabsContent>
 
         <TabsContent value="activity">
-          <Card>
-            <CardContent className="p-0">
-              {timelineQuery.isPending || timelineQuery.isError || machineTimeline.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>
-                        <span className="flex items-center gap-1.5">
-                          <TableHeaderIcon icon={Zap} />
-                          Event
-                        </span>
-                      </TableHead>
-                      <TableHead>
-                        <span className="flex items-center gap-1.5">
-                          <TableHeaderIcon icon={FileText} />
-                          Summary
-                        </span>
-                      </TableHead>
-                      <TableHead>
-                        <span className="flex items-center gap-1.5">
-                          <TableHeaderIcon icon={User} />
-                          Actor
-                        </span>
-                      </TableHead>
-                      <TableHead>
-                        <span className="flex items-center gap-1.5">
-                          <TableHeaderIcon icon={Clock} />
-                          When
-                        </span>
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {timelineQuery.isPending &&
-                      Array.from({ length: 6 }, (_, i) => (
-                        // biome-ignore lint/suspicious/noArrayIndexKey: fixed-count skeleton placeholder rows, never reordered.
-                        <TableRow key={i}>
-                          <TableCell>
-                            <Skeleton className="h-4 w-36" />
-                          </TableCell>
-                          <TableCell>
-                            <Skeleton className="h-4 w-64" />
-                          </TableCell>
-                          <TableCell>
-                            <Skeleton className="h-4 w-24" />
-                          </TableCell>
-                          <TableCell>
-                            <Skeleton className="h-4 w-16" />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    {timelineQuery.isError && (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center text-destructive">
-                          Failed to load activity.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                    {!timelineQuery.isPending &&
-                      machineTimeline.map((entry) => (
-                        <TableRow key={entry.id}>
-                          <TableCell className="align-top">
-                            <code className="font-mono text-xs text-muted-foreground">
-                              {entry.type}
-                            </code>
-                          </TableCell>
-                          <TableCell className="max-w-md align-top">{entry.summary}</TableCell>
-                          <TableCell className="whitespace-nowrap align-top text-sm">
-                            <ActorCell entry={entry} people={peopleQuery.data} />
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap align-top">
-                            <Freshness
-                              occurredAt={entry.occurredAt}
-                              recordedAt={entry.recordedAt}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <EmptyState
-                  icon={History}
-                  title="No recorded events yet"
-                  description="Events for this machine will appear here as they happen."
-                />
-              )}
-            </CardContent>
-          </Card>
+          <MachineActivityTab machineId={machineId} people={peopleQuery.data} />
         </TabsContent>
       </Tabs>
       <UpgradeMachineDialog machine={machine} open={upgradeOpen} onOpenChange={setUpgradeOpen} />{" "}
