@@ -28,3 +28,13 @@ export {
   type RestoreSnapshotInput,
   type RestoreSnapshotResult,
 } from "./restore";
+export {
+  openInspection,
+  closeInspection,
+  inspectionFilesystem,
+  INSPECTION_TTL_MS,
+  INSPECTION_ROOT_PATH,
+  type OpenInspectionResult,
+} from "./inspect";
+export { isAuthorizedToInspectSnapshot } from "./inspect-authorization";
+export { releaseInspection, heldInspectionSessionIds } from "./inspection-registry";

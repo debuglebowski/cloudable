@@ -109,3 +109,36 @@ export class ApprovalRequestFailedError extends Schema.TaggedError<ApprovalReque
 export class ArchiveDbError extends Schema.TaggedError<ArchiveDbError>()("ArchiveDbError", {
   reason: Schema.String,
 }) {}
+
+/**
+ * The caller may not inspect this snapshot: they do not own the machine and hold no
+ * granted elevation on it.
+ *
+ * Carries `reason` because the console must say WHY rather than hiding the action, the
+ * same rule `restoreUnavailableReason` follows. "You need approval to look at this" is
+ * actionable; a missing button is not.
+ */
+export class SnapshotInspectionDeniedError extends Schema.TaggedError<SnapshotInspectionDeniedError>()(
+  "SnapshotInspectionDeniedError",
+  { snapshotId: Schema.String, reason: Schema.String },
+) {}
+
+/** No inspection session with this id belongs to this caller, or it has already ended.
+ *
+ * One error for all three of "no such session", "someone else's session" and "ended",
+ * deliberately — distinguishing them tells an unauthorized caller which session ids are
+ * real, the same reasoning `fetchSnapshot` follows for cross-org reads. */
+export class InspectionSessionNotFoundError extends Schema.TaggedError<InspectionSessionNotFoundError>()(
+  "InspectionSessionNotFoundError",
+  { sessionId: Schema.String },
+) {}
+
+/** The snapshot captured disks, but none of them is the persistent one this can read.
+ *
+ * Distinct from `SnapshotEmptyError` (captured nothing at all): here there IS data,
+ * just not data v1 reads. A `shallow` snapshot always has it; a `full` one has it plus
+ * the OS disk, which needs a partition-table parser this build does not have. */
+export class SnapshotDiskNotReadableError extends Schema.TaggedError<SnapshotDiskNotReadableError>()(
+  "SnapshotDiskNotReadableError",
+  { snapshotId: Schema.String, reason: Schema.String },
+) {}
