@@ -7,6 +7,7 @@ import {
   MachineAlreadyArchivedError,
   MachineNotFoundError,
   RestoreNotApprovedError,
+  SnapshotEmptyError,
   SnapshotExpiredError,
   SnapshotNotFoundError,
 } from "../../domain/archive";
@@ -135,6 +136,7 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .addError(SnapshotNotFoundError, { status: 404 })
       .addError(MachineNotFoundError, { status: 404 })
       .addError(SnapshotExpiredError, { status: 409 })
+      .addError(SnapshotEmptyError, { status: 409 })
       .addError(FullRestoreNotAcknowledgedError, { status: 400 })
       .addError(RestoreNotApprovedError, { status: 403 }),
   )
@@ -151,6 +153,7 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .addError(InvalidRestoreApprovalError, { status: 404 })
       .addError(SnapshotNotFoundError, { status: 404 })
       .addError(SnapshotExpiredError, { status: 409 })
+      .addError(SnapshotEmptyError, { status: 409 })
       .addError(RestoreNotApprovedError, { status: 403 }),
   )
   .add(

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as schema from "@cloudable/schema";
-import { machines, orgs, settingValues } from "@cloudable/schema";
+import { machines, orgs, settingValues, snapshots } from "@cloudable/schema";
+import { eq } from "drizzle-orm";
 import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
 import postgres from "postgres";
@@ -55,6 +56,27 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     effect: Effect.Effect<A, E, Db | EventBus | ApprovalService | ProvisioningServiceTag>,
   ) => Effect.runPromise(Effect.provide(effect, TestLayer));
 
+  /**
+   * A snapshot that actually captured something.
+   *
+   * These machines are seeded straight into Postgres and never into the fake
+   * provisioning adapter's own map, so its `snapshot()` answers "not_found" and
+   * `createSnapshot` records a row with no captured disks — which `restoreSnapshot` now
+   * refuses outright, as it should: restoring from a snapshot that names nothing is the
+   * bug, not the test. These suites are about approval escalation and tenant isolation,
+   * so they need a snapshot with something in it.
+   */
+  async function seedCapturedSnapshot(machineId: string) {
+    const snapshot = await run(createSnapshot(machineId, "manual"));
+    await db
+      .update(snapshots)
+      .set({
+        capturedDisks: [{ kind: "data", externalId: `test-snap-${snapshot.id}`, sizeBytes: 1_024 }],
+      })
+      .where(eq(snapshots.id, snapshot.id));
+    return snapshot;
+  }
+
   async function seedOrg() {
     const [org] = await db
       .insert(orgs)
@@ -105,7 +127,7 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     const org = await seedOrg();
     await setRestoreApprovalMode(org.id, "none");
     const machine = await seedMachine(org.id);
-    const snapshot = await run(createSnapshot(machine.id, "manual"));
+    const snapshot = await seedCapturedSnapshot(machine.id);
 
     const result = await run(
       restoreSnapshot({
@@ -133,7 +155,7 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     const org = await seedOrg();
     await setRestoreApprovalMode(org.id, "none");
     const machine = await seedMachine(org.id);
-    const snapshot = await run(createSnapshot(machine.id, "manual"));
+    const snapshot = await seedCapturedSnapshot(machine.id);
 
     const result = await run(
       restoreSnapshot({
@@ -155,7 +177,7 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     const org = await seedOrg();
     await setRestoreApprovalMode(org.id, "none");
     const machine = await seedMachine(org.id);
-    const snapshot = await run(createSnapshot(machine.id, "manual"));
+    const snapshot = await seedCapturedSnapshot(machine.id);
 
     const result = await run(
       restoreSnapshot({
@@ -175,7 +197,7 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     const org = await seedOrg();
     await setRestoreApprovalMode(org.id, "dual");
     const machine = await seedMachine(org.id);
-    const snapshot = await run(createSnapshot(machine.id, "manual"));
+    const snapshot = await seedCapturedSnapshot(machine.id);
     const approverA = crypto.randomUUID();
     const approverB = crypto.randomUUID();
 

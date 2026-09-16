@@ -37,6 +37,25 @@ export class SnapshotNotFoundError extends Schema.TaggedError<SnapshotNotFoundEr
 /** Restore was attempted against a snapshot whose retention window has elapsed and
  * whose volume data was hard-deleted. Restore must be greyed out with this reason
  * shown, never just hidden ("Archived, expired"). */
+/**
+ * The snapshot names no disks at the provider, so there is nothing to restore FROM.
+ *
+ * Distinct from `SnapshotExpiredError`: that one means the data existed and its
+ * retention elapsed. This means it never existed. Every snapshot written before
+ * `createSnapshot` called a provider is in this state — a row, a retention clock and a
+ * Restore button standing over nothing. Six of them are in production.
+ *
+ * Same 409 as expiry, and the same rule: greyed out WITH the reason shown, never
+ * hidden. A restore that silently succeeds against no data is how this went unnoticed.
+ */
+export class SnapshotEmptyError extends Schema.TaggedError<SnapshotEmptyError>()(
+  "SnapshotEmptyError",
+  {
+    snapshotId: Schema.String,
+    reason: Schema.String,
+  },
+) {}
+
 export class SnapshotExpiredError extends Schema.TaggedError<SnapshotExpiredError>()(
   "SnapshotExpiredError",
   {

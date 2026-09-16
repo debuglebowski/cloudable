@@ -10,6 +10,7 @@ import {
   FullRestoreNotAcknowledgedError,
   InvalidRestoreApprovalError,
   RestoreNotApprovedError,
+  SnapshotEmptyError,
   SnapshotExpiredError,
 } from "./errors";
 import { makeEnvelope } from "./events";
@@ -20,7 +21,7 @@ import {
   markRestoreRequestCompleted,
   saveRestoreRequest,
 } from "./queries";
-import { getSnapshotSubState, restoreUnavailableReason } from "./sub-state";
+import { capturedNothing, getSnapshotSubState, restoreUnavailableReason } from "./sub-state";
 
 export type { RestoreMode } from "./approval-escalation";
 
@@ -105,6 +106,17 @@ export const restoreSnapshot = (input: RestoreSnapshotInput) =>
     // `snapshot.restored` written against a machine that was never real or never should
     // have been reachable from this snapshot at all.
     yield* fetchMachine(input.targetMachineId, snapshot.orgId);
+
+    // Before the expiry check and before any approval is requested: asking two people
+    // to sign off on restoring nothing is worse than refusing outright.
+    if (capturedNothing(snapshot)) {
+      return yield* Effect.fail(
+        new SnapshotEmptyError({
+          snapshotId: snapshot.id,
+          reason: restoreUnavailableReason(snapshot) ?? "Snapshot captured no disks.",
+        }),
+      );
+    }
 
     if (getSnapshotSubState(snapshot) === "expired") {
       const expiredAt = snapshot.expiredAt as Date;
