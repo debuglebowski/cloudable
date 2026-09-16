@@ -968,6 +968,13 @@ resource "azurerm_role_definition" "machine_operator" {
       "Microsoft.Compute/snapshots/read",
       "Microsoft.Compute/snapshots/write",
       "Microsoft.Compute/snapshots/delete",
+      # Snapshot INSPECTION (docs/lifecycle.md) reads a snapshot's filesystem over a
+      # time-limited read SAS, which `snapshots.grantAccess` mints. Note this is the
+      # snapshot-side pair of the `disks/beginGetAccess` above and a genuinely different
+      # permission — having the disk one does not grant the snapshot one, and the failure
+      # is an authorization error the Activity Log does not record either.
+      "Microsoft.Compute/snapshots/beginGetAccess/action",
+      "Microsoft.Compute/snapshots/endGetAccess/action",
       "Microsoft.Network/networkInterfaces/read",
       "Microsoft.Network/networkInterfaces/write",
       "Microsoft.Network/networkInterfaces/delete",
