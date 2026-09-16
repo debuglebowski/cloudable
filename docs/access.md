@@ -530,6 +530,31 @@ Failures are a fixed reason vocabulary and never carry the raw errno string, whi
 paths and internals into a browser and the control plane's logs — the same rule
 `AttestationError` follows for credentials.
 
+## 4c. Snapshot inspection (`method: "snapshot_files"`) — a session with no machine
+
+`docs/lifecycle.md` owns this; what belongs here is why it is a `sessions` row at all when
+nothing in this document's machinery touches it.
+
+It never reaches a tunnel daemon. The control plane reads the archived machine's disk
+snapshot itself, so there is no PTY, no `su`, no privilege drop, no attach websocket and
+**no session token** — nothing downstream would verify one. `SessionMethod` in
+`tunnel/session-token.ts` deliberately stays `terminal | ssh | files`: a method the daemon
+must never spawn should not appear in the type that says which methods it may.
+`SessionRowMethod` in `@cloudable/contracts` is the wider set a `sessions` ROW can hold,
+and code reading a row generically branches on `"snapshot_files"` first and narrows after.
+
+It is still a session row, because everything that makes access governable is keyed off
+that table rather than off the transport: it appears on the Access page, it can be
+terminated, `closeSessionsWithLapsedAuthorization` re-checks it (dispatching to its own
+gate — see below), and it emits `access.session_started` / `_ended` / `_denied` with
+`method: "snapshot_files"`.
+
+**Do not reuse `isAuthorizedForInteractiveAccess` for it.** That function treats a null
+owner as "allow anyone in the org", which is right for a machine mid-provisioning and wrong
+for an offboarded one — and every snapshot offboarding produces belongs to a machine with a
+null owner. `domain/archive/inspect-authorization.ts` is the gate, and
+`docs/lifecycle.md` has the full reasoning.
+
 ## 5. HTTP surface (`apps/control-plane/src/http/routes/access.ts` + `handlers/access.ts`)
 
 | Method | Path | Purpose |

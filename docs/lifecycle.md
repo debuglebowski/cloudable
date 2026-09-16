@@ -280,6 +280,153 @@ It is destroyed by the next reimage regardless.
 **One lossy edge, tell the person in advance:** `pkill -u cloudable` kills a detached
 tmux or editor, so unsaved in-memory state is lost. Files on disk are captured by pass 2.
 
+## Snapshot inspection — reading a snapshot's files
+
+Domain code: `domain/archive/inspect.ts`, `inspect-authorization.ts`,
+`inspection-registry.ts`. The reader itself is `apps/control-plane/src/snapshot-fs/`.
+
+Opening an inspection gives a time-boxed, **read-only** session over the snapshot's
+persistent disk. It exists for the case the rest of this document creates: someone leaves,
+offboarding archives their machine, and a file only they had is now inside a snapshot with
+no way to reach it short of the Azure portal — outside Cloudable and outside the audit
+trail.
+
+### The gate, and why it is not the one live access uses
+
+`isAuthorizedToInspectSnapshot` looks almost exactly like
+`tunnel/access-authorization.ts`'s `isAuthorizedForInteractiveAccess`. The difference is
+one line, and it is the whole reason this is a separate function.
+
+The live gate opens with:
+
+```ts
+if (input.ownerPersonId === null || input.ownerPersonId === input.personId) {
+  return Effect.succeed(true);
+}
+```
+
+A null owner means "allow anyone in the org". That is correct for what it guards — a
+machine mid-provisioning or mid owner-reassignment must not become unreachable to
+everyone, and a live machine always has exactly one owner.
+
+Here it would be a hole. `offboardPerson.ts` clears the owner and **then** archives, so
+every snapshot offboarding produces belongs to a machine whose `ownerPersonId` is null.
+Reusing that gate would mean any member of the org could read a departed colleague's home
+directory with no elevation, no approval and no reason recorded.
+
+It is masked today only because `mintSession` refuses any machine that is not `running`.
+Inspection works precisely on archived machines, so it removes the mask.
+
+**For a snapshot, a null owner is closed.** It means "offboarded", not "not yet assigned",
+and the people who may still look are the ones who went through elevation to get there.
+`inspect.test.ts` pins both gates side by side on the same offboarded machine and asserts
+they disagree, so anyone who later merges them gets a failure that explains itself.
+
+Who may look:
+
+| | |
+|---|---|
+| The machine's owner | Directly. Their own data, which they could have read on the live machine. |
+| Anyone else | A granted, unexpired `file_recovery` or `shell` elevation on that machine — which is itself approval-gated (`ElevationService`). |
+| Nobody owns it | Elevation, always. There is no owner fast path to fall into. |
+
+Inspection is not charged an elevation level of its own. It is strictly less than a live
+files session — read-only, against a frozen copy rather than a running machine — so
+requiring more than `file_recovery` would make the safer operation the harder one to
+reach, and anyone blocked would restore the snapshot instead, which is a bigger grant.
+
+`ElevationService.request()` never checks machine state, so an elevation can already be
+requested against an archived machine. For an offboarded one nobody is the owner, so
+`SelfOwnedMachineError` cannot fire and every requester goes through approval.
+
+### The gate runs on every operation, not just at open
+
+`list` and `read` re-ask all six questions `openInspection` asked: does the snapshot exist
+in your org, did it capture anything, has it expired, is there a persistent volume, is
+inspection enabled here, do you still have standing.
+
+That costs two indexed queries per operation and buys the property that matters: revoking
+an elevation stops the reads it was holding open **immediately**, rather than within a
+minute when `closeSessionsWithLapsedAuthorization` next runs. The sweep still closes the
+session — `relay.ts` dispatches on `sessions.method` so an inspection is re-checked with
+its own gate rather than the interactive one — but the window between the two is harmless
+rather than merely short.
+
+### Permissions are reported, never enforced
+
+On a live machine, file operations run as an unprivileged OS user and the kernel decides
+what they may touch (`fs-helper.ts`, and `docs/access.md` §4b on why that privilege drop is
+the security property).
+
+There is no process and no uid here — just bytes and a parser — so **every byte on the
+disk is readable to anyone who passes the gate**, including files mode 600. `FsEntry.mode`
+is shown because it is useful evidence about the live machine, not because it is applied.
+
+This is why the gate is the whole of the security story rather than one layer of several,
+and why it is the part with the tests.
+
+### What is readable, and what is not
+
+Only the **persistent disk** — the volume mounted at `/home`. It is `mkfs.ext4` on a raw
+device with no partition table (`homeVolumeSection()`), so the superblock is at byte 1024
+and there is nothing to parse ahead of it.
+
+The OS disk is not readable in v1. It carries a GPT this build has no parser for, and it
+holds the part of a machine that is rebuilt from an image rather than the part that cannot
+be recreated. A `full` snapshot captures both; only the `data` disk is opened. A snapshot
+with an OS disk and no persistent volume fails with `SnapshotDiskNotReadableError`, not a
+misleading empty listing.
+
+Paths are the **machine's**, not the image's. The image root is `/home`, so
+`/home/cloudable/notes.txt` is what a person sees for the file they know by that name. A
+path off this disk — `/etc/nginx.conf` — is `not_found`, honestly: it is a real path on the
+machine, just not on this disk.
+
+Holes and uninitialised extents read as zeroes. The second is a data-leak guard rather than
+a nicety: those blocks are allocated and never written, so their contents belong to
+whatever used them last.
+
+### The grant is never stored
+
+Reading needs a provider read grant — on Azure, a SAS URL from `snapshots.grantAccess`,
+which is a working read capability over someone's home directory. **Invariant 1: no cloud
+credential is ever stored.** So `inspection-registry.ts` holds it in memory only, keyed by
+session, re-grants lazily after a restart, and revokes on every close path. It is a cache
+of an expensive handle, never a record of anything.
+
+Azure authorizes `grantAccess` against `Microsoft.Compute/snapshots/beginGetAccess/action`,
+which is **not** the `disks/beginGetAccess` the archive path already has. Both are on
+`azurerm_role_definition.machine_operator`; a missing one surfaces as an authorization
+failure that the Activity Log does not record.
+
+### Audit
+
+Session-level, using the events that already exist: `access.session_started`,
+`access.session_ended`, `access.session_denied`, each carrying `method: "snapshot_files"`.
+No new event type — the payload union was widened, the type names did not move, and the
+catalogue snapshot test passes unchanged, which is the proof (invariant 11).
+
+Refusals are recorded as well as opens. Nothing is emitted per file read, matching the
+live-files precedent in `docs/access.md` §4b.
+
+### Policy
+
+`accessMethodsEnabled.snapshotInspect`, default on, org- or machine-scoped. Separate from
+`files` because the two are worth turning off separately: `files` reaches a live machine and
+can write to it, this reaches a frozen copy that may have no owner. Neither implies the
+other. Turning it off terminates the inspections already open, like the other two methods.
+
+### Not built
+
+- **The OS disk**, as above.
+- **Download.** The reader implements it and the wire does not expose it; `read` is capped
+  at 1 MiB inline, so a larger file is visible in a listing and not yet retrievable. The
+  next unit to want it needs a streaming response, not more parser.
+- **Per-path audit.** Deliberate, see above.
+- **Local development** needs `FAKE_SNAPSHOT_IMAGE_PATH` pointed at a real ext4 image
+  (`apps/control-plane/src/snapshot-fs/__fixtures__/home.img.gz`, gunzipped). Docker
+  machines capture no disks, so there is otherwise nothing to read.
+
 ## Actor attribution
 
 `createSnapshot` and `restoreSnapshot`'s own events (`snapshot.created`) are attributed
@@ -341,6 +488,10 @@ two-argument contract described in the feature-unit brief.
 | `POST` | `/api/v1/archive/snapshots/:snapshotId/legal-hold/clear` | Same shape as above. |
 | `GET` | `/api/v1/archive/snapshots/:snapshotId` | Returns `SnapshotView`, including computed `subState` and `restoreUnavailableReason`. |
 | `GET` | `/api/v1/archive/snapshots/:snapshotId/cost-estimate` | Returns `SnapshotCostEstimateResponse`. |
+| `POST` | `/api/v1/archive/snapshots/:snapshotId/inspections` | Opens a read-only inspection. `403` with a stated reason when the caller neither owns the machine nor holds an elevation; `409` expired/empty/no readable disk. |
+| `POST` | `/api/v1/archive/inspections/:sessionId/end` | Ends one. Succeeds on an already-ended session — several paths end one and any may be second. |
+| `GET` | `/api/v1/archive/inspections/:sessionId/list?path=` | Directory listing. Re-authorizes first. |
+| `GET` | `/api/v1/archive/inspections/:sessionId/read?path=` | File contents, base64, capped at 1 MiB. Re-authorizes first. |
 
 All six are declared in `http/routes/archive.ts` (`ArchiveGroup`, registered in
 `http/api.ts`) and implemented in `http/handlers/archive.ts` (`ArchiveLive`, registered in

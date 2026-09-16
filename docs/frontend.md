@@ -257,10 +257,9 @@ export interface ControlStatusProps {
 }
 ```
 
-## Session pages (web terminal, files)
+## Session pages (web terminal, files, snapshot files)
 
-Both live sessions are their own routes under `/access/sessions/$sessionId/...`, not tabs on
-the machine page. That is because a session is a real object with a lifetime — it holds a
+Every session is its own route rather than a tab on the machine page. That is because a session is a real object with a lifetime — it holds a
 signed token, appears in the Access list, can be terminated, and is closed by the
 re-authorization sweep when the elevation behind it lapses. Inside a tab, that lifetime would
 be implicit and tied to whether someone happened to navigate away.
@@ -269,11 +268,19 @@ be implicit and tied to whether someone happened to navigate away.
 | :--- | :--- | :--- |
 | `/access/sessions/$sessionId/terminal` | `components/terminal/terminal-session.tsx` | machine page "Connect" (fresh mint), Access page row (rejoin) |
 | `/access/sessions/$sessionId/files` | `components/files/file-browser.tsx` | machine page "Files" (fresh mint), Access page row (rejoin) |
+| `/archive/inspections/$sessionId` | `routes/archive/snapshot-files-page.tsx` | Archive page "Browse files" |
 
 The machine page mints via `useMintSession({ targetMachineId, method })` and navigates.
-Neither button checks the access-method policy locally — the server's own `method_disabled`
+No button checks the access-method policy locally — the server's own `method_disabled`
 denial is the single authority, and a button predicting policy from a stale cached read would
-sometimes be wrong in the permissive direction.
+sometimes be wrong in the permissive direction. That matters most for the snapshot route,
+where wrong-in-the-permissive-direction means offering a departed colleague's home directory
+to someone who cannot open it.
+
+**The snapshot route is not under `/access`**, because the thing it reads is not a machine:
+it is an archived machine's disk snapshot, reached from Archive, and it mints through
+`POST /api/v1/archive/snapshots/:id/inspections` rather than through `mintSession`. There is
+no daemon on the other end and no session token — see `docs/access.md` §4c.
 
 `components/session/transport.ts` holds what both legs share: `attachUrl`, the
 `ConnectionState` union, and the binary-safe base64 helpers. Those helpers exist specifically
@@ -282,6 +289,13 @@ leg. `bytesToBase64` chunks its input — `String.fromCharCode(...bytes)` on a 6
 exceeds the argument limit and throws, which the terminal never hit because keystrokes are tiny.
 
 ### The file browser's two panes and five modes
+
+`FileBrowser` takes its transport as a prop rather than opening one, because there are two:
+`use-file-session.ts` is a websocket to a tunnel daemon on a live machine, and
+`use-snapshot-inspection.ts` is plain HTTP against a snapshot the control plane reads itself.
+Both satisfy the same `FileSession` shape, and everything above the transport is the same
+browser. `readOnly` hides Save, Rename, New folder and Upload — not decoration on the
+snapshot side, where the server has no write path at all.
 
 `components/files/` is a navigator on the left and the open file on the right, split by a
 draggable divider (`split-pane.tsx`, hand-rolled — the console has no other split layout, so
