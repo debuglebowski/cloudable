@@ -50,6 +50,20 @@ const EXPIRY_LEADER_LOCK_KEY = 738_164_502;
  * still 60x cheaper per pass than reconcile. */
 const SWEEP_INTERVAL = Duration.seconds(60);
 
+/**
+ * The integrity sweep runs on its own, much slower clock.
+ *
+ * It is the only sweep here that leaves Postgres: one provider read per recorded disk, on
+ * every unexpired snapshot, every time it runs. At a minute's cadence a fleet with a
+ * thousand snapshots would sustain tens of ARM reads per second forever and get itself
+ * throttled — for nothing, because a snapshot's disks vanishing is not a per-minute
+ * concern. It is something to know about the same day, not the same minute.
+ *
+ * Flagged rows are skipped afterwards (`dataMissingAt` is set once), so the standing cost
+ * is proportional to the healthy snapshots — which is exactly the set that never changes.
+ */
+const INTEGRITY_SWEEP_INTERVAL = Duration.minutes(30);
+
 /** Same rationale as `status-refresh/daemon.ts`'s keepalive: `pg_advisory_lock` never
  * pushes a "you lost it" notification, so the only way to notice a silently dropped
  * connection is to use it. Bounds how long two replicas could both believe they lead. */
@@ -110,6 +124,11 @@ const runSweep = <R>(
     ),
   );
 
+/** Last time the integrity sweep ran, so it can keep a slower clock than the pass it rides
+ * on. Module-level and not persisted: on restart it runs once immediately, which is the
+ * right behaviour for a check whose whole job is noticing drift. */
+let lastIntegritySweep = 0;
+
 const runSweepPass: Effect.Effect<
   void,
   never,
@@ -119,12 +138,14 @@ const runSweepPass: Effect.Effect<
   yield* runSweep("snapshots", expireOverdueSnapshots());
   yield* runSweep("elevations", expireOverdueElevations);
   yield* runSweep("sessions with lapsed authorization", closeSessionsWithLapsedAuthorization());
-  // Unlike the others this one makes provider calls — one read per recorded disk on
-  // every unexpired snapshot. That is small at this fleet size and bounded by the
-  // number of snapshots, not machines, but it is the first sweep here that can be
-  // slowed by something outside Postgres. If it ever gets heavy, give it its own,
-  // slower cadence rather than slowing the other four down with it.
-  yield* runSweep("snapshots with missing data", detectMissingSnapshotData());
+  // Its own cadence — see INTEGRITY_SWEEP_INTERVAL. Gated here rather than given its own
+  // fiber so it still runs under the same leader lock: two replicas checking the same
+  // snapshot would be harmless, but two replicas PUBLISHING snapshot.data_missing for it
+  // would put the same fact in the append-only log twice.
+  if (Date.now() - lastIntegritySweep >= Duration.toMillis(INTEGRITY_SWEEP_INTERVAL)) {
+    lastIntegritySweep = Date.now();
+    yield* runSweep("snapshots with missing data", detectMissingSnapshotData());
+  }
 });
 
 /**

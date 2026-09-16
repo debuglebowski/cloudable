@@ -299,9 +299,12 @@ tmux or editor, so unsaved in-memory state is lost. Files on disk are captured b
 
 ## Snapshot integrity — does "restorable" mean anything?
 
-`detectMissingSnapshotData()` (`domain/archive/snapshot.ts`), run by the same 60s sweep
-loop as expiry, reads every unexpired snapshot's `capturedDisks` and asks the provider
-whether each recorded object still exists. Rows where one does not get `dataMissingAt`
+`detectMissingSnapshotData()` (`domain/archive/snapshot.ts`) reads every unexpired
+snapshot's `capturedDisks` and asks the provider whether each recorded object still
+exists. It rides the same leader-elected loop as expiry but on a **30-minute** clock of
+its own: it is the only sweep there that leaves Postgres, and at a minute's cadence a
+fleet with a thousand snapshots would sustain tens of ARM reads a second forever. Disks
+vanishing is a same-day concern, not a same-minute one. Rows where one does not get `dataMissingAt`
 stamped and a `snapshot.data_missing` event.
 
 **Why this is not paranoia.** A row names its copies by `CapturedDisk.externalId`, and
