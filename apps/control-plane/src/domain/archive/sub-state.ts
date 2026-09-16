@@ -1,21 +1,37 @@
-export type SnapshotSubState = "restorable" | "expired";
-
-/** Computed sub-state — never stored as its own
- * column, always derived from whether `expiredAt` has been set. */
-export function getSnapshotSubState(snapshot: { expiredAt: Date | null }): SnapshotSubState {
-  return snapshot.expiredAt ? "expired" : "restorable";
+/**
+ * True when the provider copied no disks for this snapshot, so it names nothing and
+ * there is nothing to restore from. Every row written before `createSnapshot` called a
+ * provider is in this state — six of them are in production.
+ *
+ * Present AND empty. An ABSENT field means the caller did not tell us, which is not the
+ * same claim as "the provider copied nothing" — reading it that way would make every
+ * snapshot look empty to any caller that omits the field, which is the same
+ * over-claiming in the other direction. The column is notNull with a '[]' default, so a
+ * real row always carries it.
+ */
+export function capturedNothing(snapshot: { capturedDisks?: unknown }): boolean {
+  return Array.isArray(snapshot.capturedDisks) && snapshot.capturedDisks.length === 0;
 }
 
-/** True when the provider copied no disks for this snapshot, so it names nothing and
- * there is nothing to restore from. Every row written before `createSnapshot` called a
- * provider is in this state. */
-export function capturedNothing(snapshot: { capturedDisks?: unknown }): boolean {
-  // Present AND empty. An ABSENT field means the caller did not tell us, which is not
-  // the same claim as "the provider copied nothing" — reading it that way would make
-  // every snapshot look empty to any caller that omits the field, which is exactly the
-  // over-claiming this function exists to stop. The column is notNull with a '[]'
-  // default, so a real row always carries it.
-  return Array.isArray(snapshot.capturedDisks) && snapshot.capturedDisks.length === 0;
+export type SnapshotSubState = "restorable" | "expired" | "empty";
+
+/**
+ * Computed sub-state — never stored as its own column.
+ *
+ * `empty` is checked first, for the same reason `restoreUnavailableReason` checks it
+ * first: a snapshot that captured nothing and then passed its retention window is not
+ * "expired". Expiry means the data existed and was deleted on schedule, and saying that
+ * about data which never existed is a claim about a deletion that never happened.
+ *
+ * Before `empty` existed this was derived from `expiredAt` alone, so a snapshot holding
+ * nothing displayed as "restorable" with a working Restore button.
+ */
+export function getSnapshotSubState(snapshot: {
+  expiredAt: Date | null;
+  capturedDisks?: unknown;
+}): SnapshotSubState {
+  if (capturedNothing(snapshot)) return "empty";
+  return snapshot.expiredAt ? "expired" : "restorable";
 }
 
 /** Human-readable reason restore is unavailable, or `null` when it's available.
@@ -24,9 +40,7 @@ export function restoreUnavailableReason(snapshot: {
   expiredAt: Date | null;
   capturedDisks?: unknown;
 }): string | null {
-  // Checked before expiry: a snapshot that captured nothing and then passed its
-  // retention window would otherwise be explained as "the data was hard-deleted",
-  // which claims data existed. It never did.
+  // Checked before expiry, same ordering and same reason as `getSnapshotSubState`.
   if (capturedNothing(snapshot)) {
     return "This snapshot records no disks at the provider, so there is nothing to restore from. It was created before snapshots captured anything — the record and its audit history are permanent, but no data was ever stored.";
   }

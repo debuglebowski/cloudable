@@ -30,7 +30,7 @@ interface SnapshotView {
   createdAt: string;
   expiresAt: string;
   expiredAt: string | null;
-  subState: "restorable" | "expired";
+  subState: "restorable" | "expired" | "empty";
   restoreUnavailableReason: string | null;
 }
 

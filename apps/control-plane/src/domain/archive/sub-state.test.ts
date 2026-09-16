@@ -61,3 +61,25 @@ describe("restoreUnavailableReason for a snapshot that captured nothing", () => 
     ).toBeNull();
   });
 });
+
+describe("getSnapshotSubState with the empty state", () => {
+  test("a snapshot that captured nothing is empty, not restorable", () => {
+    // The badge used to read "restorable" next to a Restore button that would take you
+    // through approval to restore nothing.
+    expect(getSnapshotSubState({ expiredAt: null, capturedDisks: [] })).toBe("empty");
+  });
+
+  test("empty wins over expired, so the badge never implies data was deleted", () => {
+    expect(
+      getSnapshotSubState({ expiredAt: new Date("2026-01-01T00:00:00Z"), capturedDisks: [] }),
+    ).toBe("empty");
+  });
+
+  test("real disks still grade on retention alone", () => {
+    const disks = [{ kind: "data", externalId: "/snapshots/x", sizeBytes: 1 }];
+    expect(getSnapshotSubState({ expiredAt: null, capturedDisks: disks })).toBe("restorable");
+    expect(
+      getSnapshotSubState({ expiredAt: new Date("2026-01-01T00:00:00Z"), capturedDisks: disks }),
+    ).toBe("expired");
+  });
+});

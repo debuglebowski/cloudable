@@ -8,7 +8,20 @@ import type { ApprovalStatus } from "./approvals";
 export type { ApprovalStatus };
 export type RestoreMode = "data" | "config" | "full";
 export type SnapshotTrigger = "archive" | "upgrade" | "manual";
-export type SnapshotSubState = "restorable" | "expired";
+/**
+ * Whether a snapshot's data can be restored, and if not, why not.
+ *
+ * - `restorable` — real disks were captured and retention has not elapsed.
+ * - `expired` — the data existed and its retention window elapsed.
+ * - `empty` — the provider copied nothing, so there is no data and never was. Every
+ *   snapshot written before `createSnapshot` called a provider is in this state.
+ *
+ * `empty` was added because the first two were derived from `expiredAt` alone, so a
+ * snapshot that captured nothing displayed as `restorable` with a working Restore
+ * button. Additive to the union; consumers that only knew the first two treat an
+ * unknown value as not-restorable, which is the safe direction.
+ */
+export type SnapshotSubState = "restorable" | "expired" | "empty";
 
 export interface ArchiveMachineRequest {
   /** An approval already obtained elsewhere (e.g. by an offboarding flow). Archiving a

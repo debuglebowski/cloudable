@@ -19,7 +19,7 @@ import { CurrentUserAuthentication } from "../middleware/auth";
 
 const RestoreMode = Schema.Literal("data", "config", "full");
 const SnapshotTrigger = Schema.Literal("archive", "upgrade", "manual");
-const SnapshotSubState = Schema.Literal("restorable", "expired");
+const SnapshotSubState = Schema.Literal("restorable", "expired", "empty");
 const ApprovalStatus = Schema.Literal("pending", "approved", "rejected", "expired");
 
 const MachineIdPath = Schema.Struct({ machineId: Schema.String });
