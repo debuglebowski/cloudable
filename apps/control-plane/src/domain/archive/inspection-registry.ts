@@ -36,13 +36,33 @@ export const GRANT_DURATION_SECONDS = 60 * 60;
  * clock runs out does not fail on a URL that died between check and use. */
 const GRANT_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
+/**
+ * How long a grant outlives its last reader before being revoked.
+ *
+ * Revoking the moment the last session closed looked tidy and was wrong. Azure's
+ * `revokeAccess` is still settling when it returns, so a `grantAccess` immediately
+ * afterwards hands back a SAS that the in-flight revoke then kills — the next read gets
+ * 403. `cloudable snapshots ls` opens, reads and closes, so running it twice hit this
+ * every other time. Proven in production: five reads through ONE session succeeded five
+ * times, while six separate sessions alternated pass/fail.
+ *
+ * A grace period fixes it by making the common case reuse a live grant instead of
+ * churning one. The capability still dies — within this window of the last reader
+ * leaving, and in any case when the grant itself expires.
+ */
+const RELEASE_GRACE_MS = 5 * 60 * 1000;
+
 interface Entry {
   grant: SnapshotReadGrant;
   filesystem: SnapshotFilesystem;
   provider: "azure" | "docker" | "fake";
   /** Every session currently reading through this grant. The grant is released when the
-   * last one goes, never before. */
+   * last one goes — after `RELEASE_GRACE_MS`, never immediately. */
   sessionIds: Set<string>;
+  /** When the last reader left, or null while any remain. Cleared again if a new session
+   * picks the entry up during the grace window, so a grant in active back-to-back use is
+   * never revoked out from under it. */
+  releasedAt: number | null;
 }
 
 /**
@@ -86,6 +106,8 @@ export const ensureInspectionFilesystem = (input: {
     const existing = entries.get(input.disk.externalId);
     if (existing && existing.grant.expiresAt.getTime() - Date.now() > GRANT_REFRESH_MARGIN_MS) {
       existing.sessionIds.add(input.sessionId);
+      // Back in use — cancels any pending release.
+      existing.releasedAt = null;
       return existing.filesystem;
     }
 
@@ -112,16 +134,16 @@ export const ensureInspectionFilesystem = (input: {
       filesystem,
       provider: input.provider,
       sessionIds: new Set([...(existing?.sessionIds ?? []), input.sessionId]),
+      releasedAt: null,
     });
     return filesystem;
   });
 
 /**
- * Drops the handle and revokes the grant at the provider.
+ * Marks a session as no longer reading. Does NOT revoke — see `RELEASE_GRACE_MS`.
  *
- * Never fails. Every path that ends a session calls this — the person closing the tab,
- * the re-authorization sweep, a policy change, the expiry daemon — and a close path that
- * can throw leaves the grant open, which is the opposite of what it is for.
+ * Never fails. Every path that ends a session calls this: the person closing the tab, the
+ * re-authorization sweep, a policy change, the expiry daemon.
  */
 export const releaseInspection = (
   sessionId: string,
@@ -136,11 +158,36 @@ export const releaseInspection = (
     // them mid-listing — see this file's header.
     if (entry.sessionIds.size > 0) return;
 
-    entries.delete(diskExternalId);
+    // Last reader gone, but NOT revoked here. `releaseIdleInspections` does it once the
+    // grace window has passed, so the very common open-read-close-open-read sequence
+    // reuses one grant instead of racing a revoke against the next grant.
+    entry.releasedAt = Date.now();
+  });
+
+/**
+ * Revokes grants whose last reader left more than `RELEASE_GRACE_MS` ago.
+ *
+ * Runs on the expiry daemon's pass. An entry picked back up during its grace window has
+ * `releasedAt` cleared by `ensureInspectionFilesystem`, so this only ever revokes a grant
+ * nothing has touched for the whole window.
+ */
+export const releaseIdleInspections = (
+  now: number = Date.now(),
+): Effect.Effect<number, never, ProvisioningServiceTag> =>
+  Effect.gen(function* () {
+    const due = [...entries.entries()].filter(
+      ([, entry]) => entry.releasedAt !== null && now - entry.releasedAt >= RELEASE_GRACE_MS,
+    );
+    if (due.length === 0) return 0;
+
     const provisioning = yield* ProvisioningServiceTag;
-    yield* provisioning
-      .revokeSnapshotRead({ provider: entry.provider, diskExternalId })
-      .pipe(Effect.catchAll(() => Effect.void));
+    for (const [diskExternalId, entry] of due) {
+      entries.delete(diskExternalId);
+      yield* provisioning
+        .revokeSnapshotRead({ provider: entry.provider, diskExternalId })
+        .pipe(Effect.catchAll(() => Effect.void));
+    }
+    return due.length;
   });
 
 /** Session ids currently reading through a grant, across every disk. */

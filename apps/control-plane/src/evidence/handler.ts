@@ -7,7 +7,7 @@ import { queryEvidencePage } from "./service";
 
 /**
  * `GET /api/v1/evidence` — a page of the normalised evidence projection for
- * the caller's own org, newest first.
+ * the caller's own org, newest first. `?machineId=` narrows it to one machine.
  *
  * DB failures are turned into defects (`Effect.orDie`) rather than a typed
  * endpoint error: this mirrors the placeholder posture of
@@ -24,6 +24,7 @@ export const EvidenceLive = HttpApiBuilder.group(Api, "evidence", (handlers) =>
         orgId: currentUser.orgId,
         cursor: urlParams.cursor,
         limit: urlParams.limit,
+        machineId: urlParams.machineId,
       });
     }).pipe(Effect.orDie),
   ),

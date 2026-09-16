@@ -50,9 +50,17 @@ export const EvidencePageSchema = Schema.Struct({
   }),
 });
 
+/**
+ * `machineId` narrows the page to one machine's own events. It exists because
+ * the console's per-machine Activity view previously fetched an org-wide page
+ * and filtered it in the browser, which on a multi-machine org showed an
+ * arbitrary slice of that machine's history — most of any org-wide page belongs
+ * to other machines. Filtering belongs on the side that has every row.
+ */
 export const EvidenceQueryParams = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.NumberFromString),
+  machineId: Schema.optional(Schema.String),
 });
 
 export const EvidenceGroup = HttpApiGroup.make("evidence")

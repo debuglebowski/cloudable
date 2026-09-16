@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import type { BadgeProps } from "@/components/ui/badge";
@@ -65,6 +65,10 @@ export function useDownloadExport() {
 export const auditKeys = {
   all: ["audit"] as const,
   timeline: () => [...auditKeys.all, "timeline"] as const,
+  /** Deliberately under `timeline()`'s prefix: anything that already
+   * invalidates the org timeline invalidates the per-machine feeds too,
+   * since they read the same events. */
+  machineTimeline: (machineId: string) => [...auditKeys.timeline(), "machine", machineId] as const,
   evidence: () => [...auditKeys.all, "evidence"] as const,
 };
 
@@ -125,9 +129,8 @@ interface EvidenceRecordWire {
   summary: string;
 }
 
-async function fetchAuditTimeline(): Promise<AuditTimelineEntry[]> {
-  const res = await apiGet<{ data: EvidenceRecordWire[] }>("/api/v1/evidence?limit=100");
-  return res.data.map((e) => ({
+function toTimelineEntry(e: EvidenceRecordWire): AuditTimelineEntry {
+  return {
     id: e.id,
     type: e.type,
     occurredAt: e.occurredAt,
@@ -136,7 +139,69 @@ async function fetchAuditTimeline(): Promise<AuditTimelineEntry[]> {
     actorId: e.actor.id,
     machineId: e.machineId ?? undefined,
     summary: e.summary,
-  }));
+  };
+}
+
+async function fetchAuditTimeline(): Promise<AuditTimelineEntry[]> {
+  const res = await apiGet<{ data: EvidenceRecordWire[] }>("/api/v1/evidence?limit=100");
+  return res.data.map(toTimelineEntry);
+}
+
+/** One page of the evidence feed, cursor and all. `fetchAuditTimeline` above
+ * throws `pageInfo` away because the views on it show a fixed newest-100 and
+ * never page; the machine Activity tab does page, so this keeps it. */
+export interface AuditTimelinePage {
+  entries: AuditTimelineEntry[];
+  nextCursor: string | null;
+}
+
+async function fetchEvidencePage(params: {
+  machineId?: string;
+  cursor?: string | undefined;
+  limit: number;
+}): Promise<AuditTimelinePage> {
+  const query = new URLSearchParams({ limit: String(params.limit) });
+  if (params.machineId) query.set("machineId", params.machineId);
+  if (params.cursor) query.set("cursor", params.cursor);
+
+  const res = await apiGet<{
+    data: EvidenceRecordWire[];
+    pageInfo: { nextCursor: string | null; hasMore: boolean };
+  }>(`/api/v1/evidence?${query.toString()}`);
+
+  return {
+    entries: res.data.map(toTimelineEntry),
+    // `hasMore` isn't carried separately — a null cursor already means "no more",
+    // and two sources of truth for the same fact drift apart.
+    nextCursor: res.pageInfo.hasMore ? res.pageInfo.nextCursor : null,
+  };
+}
+
+/** How many events the Activity tab pulls per request. The server clamps to
+ * 100; 50 keeps the first paint light while still covering most machines'
+ * whole history in one go. */
+export const MACHINE_ACTIVITY_PAGE_SIZE = 50;
+
+/**
+ * A single machine's own events, newest first, paged on demand.
+ *
+ * Filtered server-side by `machineId` rather than pulled from the org-wide
+ * timeline and narrowed in the browser: on an org with several machines, most
+ * of any org-wide page belongs to other machines, so client-side narrowing
+ * showed an arbitrary slice of this machine's history.
+ */
+export function useMachineActivity(machineId: string) {
+  return useInfiniteQuery({
+    queryKey: auditKeys.machineTimeline(machineId),
+    queryFn: ({ pageParam }) =>
+      fetchEvidencePage({
+        machineId,
+        cursor: pageParam,
+        limit: MACHINE_ACTIVITY_PAGE_SIZE,
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: AuditTimelinePage) => last.nextCursor ?? undefined,
+  });
 }
 
 interface ControlMapEntryWire {

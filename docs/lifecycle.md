@@ -483,8 +483,18 @@ immediately raced the revoke against the new grant — which is exactly what
 `cloudable snapshots ls` does twice in a row, and it failed every other invocation.
 
 `inspection-registry.ts` is therefore keyed by `CapturedDisk.externalId` and holds the set
-of sessions reading through it. The grant is released when the last one leaves, never
-before. That also costs one fewer provider round trip per session.
+of sessions reading through it. That also costs one fewer provider round trip per session.
+
+**And the grant outlives its last reader by five minutes.** Revoking the instant a session
+closed looked tidy and was wrong: `revokeAccess` is still settling when it returns, so a
+`grantAccess` immediately afterwards hands back a SAS the in-flight revoke then kills, and
+the next read gets a 403. `cloudable snapshots ls` opens, reads and closes, so running it
+twice failed every other time. The evidence was unambiguous — five reads through ONE
+session passed five times, while six separate sessions alternated.
+
+So nothing revokes on close. `releaseIdleInspections`, on the expiry daemon's pass, revokes
+grants nothing has touched for the grace window; picking an entry back up inside that
+window cancels the pending release. The capability still dies, just not in the hot path.
 
 ### The grant is never stored
 

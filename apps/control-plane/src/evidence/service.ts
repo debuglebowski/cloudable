@@ -16,6 +16,8 @@ export interface EvidencePageParams {
   orgId: string;
   cursor?: string | undefined;
   limit?: number | undefined;
+  /** Narrows the page to one machine's own events. Omitted means org-wide. */
+  machineId?: string | undefined;
 }
 
 export interface EvidencePage {
@@ -37,6 +39,11 @@ export const EVIDENCE_MAX_PAGE_LIMIT = 100;
  * "newest first" cursor without needing a separate offset or timestamp tie
  * -breaker.
  *
+ * `machineId`, when given, is an equality predicate on the same table — the
+ * console's per-machine Activity view needs *that machine's* newest events, and
+ * paging an org-wide feed until enough of them turn up is not the same thing.
+ * `events_org_machine_id_idx` covers this predicate and the id ordering below.
+ *
  * `access.command_recorded` rows (tier-3 shell capture, a separate
  * high-volume table — see `@cloudable/schema`) are looked up by
  * `correlationId` for the page's events and attached as a count/pointer,
@@ -52,16 +59,20 @@ export const queryEvidencePage = (
       EVIDENCE_MAX_PAGE_LIMIT,
     );
 
+    // Built as a list rather than nested ternaries: org scope, cursor, and the
+    // machine filter are independent, and `and()` ignores the undefined gaps.
+    const conditions = [
+      eq(events.orgId, params.orgId),
+      params.cursor ? lt(events.id, params.cursor) : undefined,
+      params.machineId ? eq(events.machineId, params.machineId) : undefined,
+    ];
+
     const rows = yield* Effect.tryPromise({
       try: () =>
         db
           .select()
           .from(events)
-          .where(
-            params.cursor
-              ? and(eq(events.orgId, params.orgId), lt(events.id, params.cursor))
-              : eq(events.orgId, params.orgId),
-          )
+          .where(and(...conditions))
           .orderBy(desc(events.id))
           .limit(limit + 1),
       catch: (cause) => new EvidenceQueryError({ reason: "events_query_failed", cause }),

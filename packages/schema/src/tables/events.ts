@@ -31,5 +31,12 @@ export const events = pgTable(
     schemaVersion: integer("schema_version").notNull(),
     payload: jsonb("payload").notNull(),
   },
-  (table) => [index("events_org_type_occurred_idx").on(table.orgId, table.type, table.occurredAt)],
+  (table) => [
+    index("events_org_type_occurred_idx").on(table.orgId, table.type, table.occurredAt),
+    // A machine's own activity feed: filter on (org, machine), order by id desc
+    // (see `evidence/service.ts`). The type index above can't serve that — it
+    // leads with `type`, which that query doesn't constrain. `id` trails so the
+    // ordering comes off the index instead of a sort.
+    index("events_org_machine_id_idx").on(table.orgId, table.machineId, table.id),
+  ],
 );

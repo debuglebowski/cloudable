@@ -22,19 +22,29 @@ import type { ProvisioningServiceTag } from "../../services/ProvisioningService"
 import { makeFakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { isDbReachable } from "../../testing/db-reachable";
 import { closeInspection, inspectionFilesystem, openInspection } from "./inspect";
+import { releaseIdleInspections } from "./inspection-registry";
 
 const databaseUrl = config.databaseUrl;
 const dbReachable = await isDbReachable(databaseUrl);
 
-const DISK_EXTERNAL_ID = "fake-snap-data-e2e";
+/**
+ * One disk id per seeded snapshot, registered here as it is created.
+ *
+ * Shared across the file deliberately rather than a constant: the read registry is keyed
+ * by DISK, so reusing one id would make every test in this file share a registry entry
+ * and leak session refcounts into each other.
+ */
+const images = new Map<string, string>();
 
 describe.skipIf(!dbReachable)("snapshot inspection — end to end (requires Postgres)", () => {
   let sql: ReturnType<typeof postgres>;
   let db: PostgresJsDatabase<typeof schema>;
   let TestLayer: Layer.Layer<Db | EventBus | ProvisioningServiceTag>;
 
+  let image = "";
+
   beforeAll(() => {
-    const image = join(mkdtempSync(join(tmpdir(), "cloudable-e2e-")), "home.img");
+    image = join(mkdtempSync(join(tmpdir(), "cloudable-e2e-")), "home.img");
     writeFileSync(
       image,
       gunzipSync(
@@ -50,9 +60,8 @@ describe.skipIf(!dbReachable)("snapshot inspection — end to end (requires Post
     TestLayer = Layer.mergeAll(
       dbLayer,
       Layer.provide(EventBus.Default, dbLayer),
-      makeFakeProvisioningServiceLive({
-        snapshotImages: new Map([[DISK_EXTERNAL_ID, image]]),
-      }),
+      // The same Map object the seeds add to, so an id registered later is still found.
+      makeFakeProvisioningServiceLive({ snapshotImages: images }),
     );
   });
 
@@ -64,6 +73,8 @@ describe.skipIf(!dbReachable)("snapshot inspection — end to end (requires Post
     Effect.runPromise(Effect.provide(effect, TestLayer));
 
   const seedOwnedSnapshot = async () => {
+    const diskId = `fake-snap-data-${crypto.randomUUID()}`;
+    images.set(diskId, image);
     const [org] = await db
       .insert(orgs)
       .values({ name: `org-${crypto.randomUUID()}` })
@@ -96,7 +107,7 @@ describe.skipIf(!dbReachable)("snapshot inspection — end to end (requires Post
         trigger: "archive",
         retentionDays: 30,
         expiresAt: new Date(Date.now() + 30 * 86_400_000),
-        capturedDisks: [{ kind: "data", externalId: DISK_EXTERNAL_ID, sizeBytes: 1024 }],
+        capturedDisks: [{ kind: "data", externalId: diskId, sizeBytes: 1024 }],
       })
       .returning();
     if (!snapshot) throw new Error("seed failed");
@@ -267,6 +278,42 @@ describe.skipIf(!dbReachable)("snapshot inspection — end to end (requires Post
         }),
       );
     }
+  });
+
+  test("a grant outlives its last reader, so reopening immediately still works", async () => {
+    // Revoking the instant the last session closed was wrong: Azure's revokeAccess is
+    // still settling when it returns, so the next grant came back already dead and the
+    // read 403'd. Proven in production — five reads through one session passed five
+    // times, six separate sessions alternated. Nothing is revoked on close now; the
+    // daemon does it once the grace window has passed.
+    const { org, owner, snapshot } = await seedOwnedSnapshot();
+    const open = () =>
+      run(openInspection({ snapshotId: snapshot.id, orgId: org.id, personId: owner.id }));
+
+    for (let i = 0; i < 4; i++) {
+      const opened = await open();
+      const fs = await run(
+        inspectionFilesystem({ sessionId: opened.sessionId, orgId: org.id, personId: owner.id }),
+      );
+      expect((await fs.list(opened.rootPath)).ok).toBe(true);
+      await run(
+        closeInspection({
+          sessionId: opened.sessionId,
+          orgId: org.id,
+          actor: { actorType: "person", actorId: owner.id },
+          reason: "person_ended",
+        }),
+      );
+      // Nothing is released yet — the grace window has not passed.
+      expect(await run(releaseIdleInspections())).toBe(0);
+    }
+
+    // Once it has, the grant goes. At least one — the registry is process-wide, so other
+    // tests in this file have idle grants of their own that this same call sweeps.
+    const released = await run(releaseIdleInspections(Date.now() + 10 * 60 * 1000));
+    expect(released).toBeGreaterThanOrEqual(1);
+    // And the sweep drains: a second pass has nothing left to do.
+    expect(await run(releaseIdleInspections(Date.now() + 10 * 60 * 1000))).toBe(0);
   });
 
   test("standing is re-checked on every operation, not just at open", async () => {

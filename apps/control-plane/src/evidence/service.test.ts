@@ -45,7 +45,12 @@ const freshOrgId = () => {
 // Inserted directly against the raw `events` table — this test exercises
 // the read side (`queryEvidencePage`), not `EventBus.publish`'s tier
 // filtering (covered in `../services/EventBus.test.ts`).
-const insertRawEvent = (orgId: string, id: string, correlationId: string) =>
+const insertRawEvent = (
+  orgId: string,
+  id: string,
+  correlationId: string,
+  machineId: string | null = null,
+) =>
   db.insert(events).values({
     id,
     type: "machine.started",
@@ -53,7 +58,7 @@ const insertRawEvent = (orgId: string, id: string, correlationId: string) =>
     orgId,
     actorType: "person",
     actorId: "person-1",
-    machineId: null,
+    machineId,
     correlationId,
     schemaVersion: 1,
     payload: {},
@@ -144,5 +149,80 @@ describe("queryEvidencePage", () => {
 
     const page = await Effect.runPromise(queryEvidencePage(db, { orgId: orgA }));
     expect(page.data.map((r) => r.orgId)).toEqual([orgA]);
+  });
+
+  test("machineId returns only that machine's events, newest first", async () => {
+    const orgId = freshOrgId();
+    const target = crypto.randomUUID();
+    const other = crypto.randomUUID();
+    await insertRawEvent(orgId, "01J0000000000000000004AAA", "corr-a", target);
+    await insertRawEvent(orgId, "01J0000000000000000004BBB", "corr-b", other);
+    await insertRawEvent(orgId, "01J0000000000000000004CCC", "corr-c", target);
+    // Org-scoped but machine-less (e.g. person.added) — must not leak into a
+    // machine's own feed just because it shares the org.
+    await insertRawEvent(orgId, "01J0000000000000000004DDD", "corr-d");
+
+    const page = await Effect.runPromise(queryEvidencePage(db, { orgId, machineId: target }));
+
+    expect(page.data.map((r) => r.id)).toEqual([
+      "01J0000000000000000004CCC",
+      "01J0000000000000000004AAA",
+    ]);
+  });
+
+  test("omitting machineId still returns the whole org", async () => {
+    const orgId = freshOrgId();
+    const machineId = crypto.randomUUID();
+    await insertRawEvent(orgId, "01J0000000000000000005AAA", "corr-a", machineId);
+    await insertRawEvent(orgId, "01J0000000000000000005BBB", "corr-b");
+
+    const page = await Effect.runPromise(queryEvidencePage(db, { orgId }));
+
+    expect(page.data.map((r) => r.id)).toEqual([
+      "01J0000000000000000005BBB",
+      "01J0000000000000000005AAA",
+    ]);
+  });
+
+  test("machineId never crosses an org boundary", async () => {
+    const orgA = freshOrgId();
+    const orgB = freshOrgId();
+    // Same machine id under two orgs: the org predicate has to hold even when
+    // the machine predicate matches on its own.
+    const machineId = crypto.randomUUID();
+    await insertRawEvent(orgA, "01J0000000000000000006AAA", "corr-a", machineId);
+    await insertRawEvent(orgB, "01J0000000000000000006BBB", "corr-b", machineId);
+
+    const page = await Effect.runPromise(queryEvidencePage(db, { orgId: orgA, machineId }));
+
+    expect(page.data.map((r) => r.id)).toEqual(["01J0000000000000000006AAA"]);
+  });
+
+  test("cursor-paginates within a machineId filter", async () => {
+    const orgId = freshOrgId();
+    const target = crypto.randomUUID();
+    const other = crypto.randomUUID();
+    await insertRawEvent(orgId, "01J0000000000000000007AAA", "corr-a", target);
+    // Interleaved with the target's events, so a cursor that ignored the filter
+    // would land the second page on this row instead.
+    await insertRawEvent(orgId, "01J0000000000000000007BBB", "corr-b", other);
+    await insertRawEvent(orgId, "01J0000000000000000007CCC", "corr-c", target);
+
+    const page1 = await Effect.runPromise(
+      queryEvidencePage(db, { orgId, machineId: target, limit: 1 }),
+    );
+    expect(page1.data.map((r) => r.id)).toEqual(["01J0000000000000000007CCC"]);
+    expect(page1.pageInfo.hasMore).toBe(true);
+
+    const page2 = await Effect.runPromise(
+      queryEvidencePage(db, {
+        orgId,
+        machineId: target,
+        limit: 1,
+        cursor: page1.pageInfo.nextCursor ?? undefined,
+      }),
+    );
+    expect(page2.data.map((r) => r.id)).toEqual(["01J0000000000000000007AAA"]);
+    expect(page2.pageInfo.hasMore).toBe(false);
   });
 });

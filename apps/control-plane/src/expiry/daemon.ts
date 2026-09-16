@@ -1,6 +1,7 @@
 import { Duration, Effect } from "effect";
 import { openPostgres } from "../db/connect";
 import type { Db } from "../db/layer";
+import { releaseIdleInspections } from "../domain/archive/inspection-registry";
 import { detectMissingSnapshotData, expireOverdueSnapshots } from "../domain/archive/snapshot";
 import { expireOverdueElevations } from "../domain/elevation/ElevationService";
 import { expireOverdueApprovals } from "../services/ApprovalService";
@@ -138,6 +139,9 @@ const runSweepPass: Effect.Effect<
   yield* runSweep("snapshots", expireOverdueSnapshots());
   yield* runSweep("elevations", expireOverdueElevations);
   yield* runSweep("sessions with lapsed authorization", closeSessionsWithLapsedAuthorization());
+  // Cheap and in-memory apart from the revoke calls it makes, so it rides the 60s pass:
+  // a grant that nothing has used for its grace window should not linger much past it.
+  yield* runSweep("idle snapshot read grants", releaseIdleInspections());
   // Its own cadence — see INTEGRITY_SWEEP_INTERVAL. Gated here rather than given its own
   // fiber so it still runs under the same leader lock: two replicas checking the same
   // snapshot would be harmless, but two replicas PUBLISHING snapshot.data_missing for it
