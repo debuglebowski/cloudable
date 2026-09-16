@@ -136,6 +136,46 @@ describe.skipIf(!dbReachable)("snapshot inspection — end to end (requires Post
     expect((after as { _tag: string })._tag).toBe("InspectionSessionNotFoundError");
   });
 
+  test("a snapshot naming a disk the provider no longer has refuses, with a reason", async () => {
+    // A real production state, not a hypothetical: rows written before snapshots got
+    // unique names point at objects that were later replaced or cleaned up. Before this
+    // was handled, it surfaced as a 500, which tells whoever clicked nothing.
+    const { org, owner, machine } = await seedOwnedSnapshot();
+    const [orphaned] = await db
+      .insert(snapshots)
+      .values({
+        orgId: org.id,
+        machineId: machine.id,
+        trigger: "archive",
+        retentionDays: 30,
+        expiresAt: new Date(Date.now() + 30 * 86_400_000),
+        // Never registered with the fake provider, so grantSnapshotRead answers not_found
+        // exactly as Azure does for a deleted snapshot.
+        capturedDisks: [{ kind: "data", externalId: "gone-from-the-provider", sizeBytes: 1024 }],
+      })
+      .returning();
+    if (!orphaned) throw new Error("seed failed");
+
+    const opened = await run(
+      openInspection({ snapshotId: orphaned.id, orgId: org.id, personId: owner.id }),
+    );
+
+    const error = await Effect.runPromise(
+      Effect.provide(
+        Effect.flip(
+          inspectionFilesystem({
+            sessionId: opened.sessionId,
+            orgId: org.id,
+            personId: owner.id,
+          }),
+        ),
+        TestLayer,
+      ),
+    );
+    expect((error as { _tag: string })._tag).toBe("SnapshotDiskNotReadableError");
+    expect((error as { reason: string }).reason).toContain("no longer exists at the provider");
+  });
+
   test("another person cannot use a session they did not open", async () => {
     const { org, owner, snapshot } = await seedOwnedSnapshot();
     const [stranger] = await db

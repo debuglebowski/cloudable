@@ -374,7 +374,28 @@ export const inspectionFilesystem = (input: {
       sessionId: session.id,
       provider: authorized.machine.provider,
       disk: authorized.disk,
-    });
+    }).pipe(
+      // A snapshot row can name a disk the provider no longer has. That is a real state
+      // in production right now: rows written before snapshots got unique names point at
+      // objects that were later replaced or cleaned up, and the id recorded is all
+      // anything has to go on.
+      //
+      // It is knowable, not a server fault, so it must not surface as a 500 — that tells
+      // whoever clicked nothing and reads as "the control plane is broken". Same
+      // treatment as a snapshot that captured nothing: refused with a stated reason,
+      // greyed out rather than hidden. Only `not_found` is translated; a quota error or a
+      // dead credential really is ours and still dies.
+      Effect.catchIf(
+        (error): error is ProvisioningError => error.reason === "not_found",
+        () =>
+          Effect.fail(
+            new SnapshotDiskNotReadableError({
+              snapshotId: authorized.snapshot.id,
+              reason: `This snapshot records a disk (${authorized.disk.externalId}) that no longer exists at the provider, so there is nothing left to read. The record and its audit history are permanent, but the data is gone.`,
+            }),
+          ),
+      ),
+    );
   });
 
 /** Ends a session: the row, the event, the grant. */
