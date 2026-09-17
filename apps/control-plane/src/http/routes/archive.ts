@@ -159,6 +159,12 @@ const TakeSnapshotSuccess = Schema.Struct({
   scope: Schema.Literal("full", "shallow"),
   capturedDiskCount: Schema.Number,
   sizeBytes: Schema.NullOr(Schema.Number),
+  /** What the copy actually holds, when it could be measured. `sizeBytes` is the
+   * provisioned ceiling of the disks it came from -- the same figure for every machine
+   * in a fleet with identical disks -- so a caller that prints one unlabelled reports a
+   * 64 GiB snapshot of a 1.6 GiB home directory. Null means nothing measured it, which
+   * is not the same as zero. */
+  usedBytes: Schema.NullOr(Schema.Number),
   expiresAt: Schema.String,
 });
 

@@ -200,6 +200,7 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
           scope: snapshot.scope,
           capturedDiskCount: snapshot.capturedDisks.length,
           sizeBytes: snapshot.sizeBytes,
+          usedBytes: snapshot.usedBytes,
           expiresAt: snapshot.expiresAt.toISOString(),
         };
       }).pipe(

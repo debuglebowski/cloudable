@@ -384,6 +384,7 @@ export async function runSnapshotsTakeCommand(argv: ReadonlyArray<string>): Prom
     scope: "full" | "shallow";
     capturedDiskCount: number;
     sizeBytes: number | null;
+    usedBytes: number | null;
     expiresAt: string;
   }>(`/api/v1/archive/machines/${machine}/snapshots`, postJson(scope ? { scope } : {}));
 
@@ -396,7 +397,10 @@ export async function runSnapshotsTakeCommand(argv: ReadonlyArray<string>): Prom
     ["machine", result.machineId],
     ["scope", result.scope],
     ["disks copied", String(result.capturedDiskCount)],
-    ["size", result.sizeBytes === null ? dash(null) : humanBytes(result.sizeBytes)],
+    // Same formatter the list uses, so the two surfaces cannot disagree about the same
+    // row. Printing `sizeBytes` raw here said "64.0 GiB" for a 1.6 GiB home directory --
+    // the provisioned ceiling, unlabelled, and read as a measurement.
+    ["size", sizeOf(result)],
     ["expires", shortTime(result.expiresAt)],
   ]);
   if (result.capturedDiskCount === 0) {
