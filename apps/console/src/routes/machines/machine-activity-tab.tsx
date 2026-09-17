@@ -1,15 +1,17 @@
 import {
   Check,
+  ChevronDown,
   Clock,
   FileText,
   History,
   Loader2,
+  Minus,
   Search,
   SlidersHorizontal,
   User,
   Zap,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { forwardRef, useMemo, useState } from "react";
 
 import { type AuditTimelineEntry, useMachineActivity } from "@/api/audit";
 import type { DirectoryPerson } from "@/api/people-directory";
@@ -42,21 +44,30 @@ import {
 import { cn } from "@/lib/utils";
 
 import {
-  ACTOR_KIND_LABEL,
+  ANY_TIME,
   type ActivityFilters,
+  type ActorOptions,
   NO_FILTERS,
-  TIME_RANGES,
-  type TimeRange,
+  TIME_PRESETS,
+  TIME_UNITS,
+  type TimeFilter,
+  type TimeUnit,
+  type TypeGroup,
   activeFilterCount,
   deriveActorFacets,
   deriveActorOptions,
   deriveTimeFacets,
   deriveTypeFacets,
   deriveTypeGroups,
-  describeActorFilter,
-  describeTypeFilter,
+  describeActors,
+  describeTimeFilter,
+  describeTypes,
   domainLabel,
   filterActivity,
+  groupState,
+  isSameTimeFilter,
+  toggleGroup,
+  toggleSelection,
 } from "./machine-activity-filters";
 
 /**
@@ -105,7 +116,15 @@ export function MachineActivityToolbar({ state }: { state: ActivityState }) {
   const actorOptions = useMemo(() => deriveActorOptions(entries, people), [entries, people]);
   const typeFacets = useMemo(() => deriveTypeFacets(entries, filters), [entries, filters]);
   const actorFacets = useMemo(() => deriveActorFacets(entries, filters), [entries, filters]);
-  const timeFacets = useMemo(() => deriveTimeFacets(entries, filters), [entries, filters]);
+  const presetFacets = useMemo(
+    () =>
+      deriveTimeFacets(
+        entries,
+        filters,
+        TIME_PRESETS.map((preset) => preset.value),
+      ),
+    [entries, filters],
+  );
 
   const filterCount = activeFilterCount(filters);
   const setFilter = <K extends keyof ActivityFilters>(key: K, value: ActivityFilters[K]) =>
@@ -145,11 +164,10 @@ export function MachineActivityToolbar({ state }: { state: ActivityState }) {
           </Button>
         </PopoverTrigger>
 
-        {/* Three sections of real content, not three dropdowns that each open a
-            fourth layer. A Select inside a Popover means two nested portals and
-            two Escape presses to get back out, and it hides every option behind
-            one more click than it needs. */}
-        <PopoverContent align="end" className="max-h-[70vh] w-80 overflow-y-auto p-0">
+        {/* Compact on purpose: Event and Actor are collapsed triggers rather than
+            two open lists, which kept the menu around 600px tall and pushed Actor
+            off the bottom on a laptop. Each opens its own list beside this one. */}
+        <PopoverContent align="end" className="w-80 p-0">
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-sm font-medium">Filters</span>
             {filterCount > 0 && (
@@ -167,131 +185,41 @@ export function MachineActivityToolbar({ state }: { state: ActivityState }) {
 
           <FilterSection
             title="When"
-            value={filters.time === "all" ? null : TIME_RANGES[filters.time].label}
-            onClear={filters.time === "all" ? undefined : () => setFilter("time", "all")}
+            value={describeTimeFilter(filters.time)}
+            onClear={filters.time.amount === null ? undefined : () => setFilter("time", ANY_TIME)}
           >
-            {/* Four fixed options, so segments rather than a list: every choice
-                is visible and one click away, and the counts make the shape of
-                the machine's history readable at a glance. A 2x2 grid, not a
-                wrapping row — four labelled pills with counts overflow a 320px
-                menu, and a deliberate grid reads better than a row that breaks
-                three-and-one. */}
-            <div className="grid grid-cols-2 gap-1">
-              {(Object.keys(TIME_RANGES) as TimeRange[]).map((range) => (
-                <button
-                  key={range}
-                  type="button"
-                  onClick={() => setFilter("time", range)}
-                  aria-pressed={filters.time === range}
-                  className={cn(
-                    "inline-flex items-center justify-between gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-                    filters.time === range
-                      ? "bg-foreground text-background"
-                      : "bg-accent text-muted-foreground hover:text-foreground",
-                    // Same dimming an empty option row gets: a window holding
-                    // nothing should look spent before you click it.
-                    timeFacets[range] === 0 && filters.time !== range && "opacity-45",
-                  )}
-                >
-                  {TIME_RANGES[range].short}
-                  <span className="tabular-nums opacity-60">{timeFacets[range]}</span>
-                </button>
-              ))}
-            </div>
+            <TimeField
+              value={filters.time}
+              counts={presetFacets}
+              onChange={(next) => setFilter("time", next)}
+            />
           </FilterSection>
 
           <FilterSection
             title="Event"
-            value={describeTypeFilter(filters.type)}
-            onClear={filters.type === "all" ? undefined : () => setFilter("type", "all")}
+            value={filters.types.length > 0 ? describeTypes(filters.types) : null}
+            onClear={filters.types.length === 0 ? undefined : () => setFilter("types", [])}
           >
-            <Command className="rounded-md border border-border">
-              <CommandInput placeholder="Find an event type…" className="h-9" />
-              <CommandList className="max-h-52">
-                <CommandEmpty className="py-4 text-xs text-muted-foreground">
-                  No event type by that name.
-                </CommandEmpty>
-                <CommandGroup>
-                  <OptionRow
-                    label="All events"
-                    count={typeFacets.total}
-                    selected={filters.type === "all"}
-                    onSelect={() => setFilter("type", "all")}
-                  />
-                </CommandGroup>
-                {typeGroups.map(({ domain, types }) => (
-                  <CommandGroup key={domain} heading={domainLabel(domain)}>
-                    <OptionRow
-                      // The whole domain in one click — most of the time the
-                      // question is "everything access-related", not one type.
-                      label={`All ${domainLabel(domain).toLowerCase()} events`}
-                      count={typeFacets.byDomain[domain] ?? 0}
-                      selected={filters.type === `domain:${domain}`}
-                      onSelect={() => setFilter("type", `domain:${domain}`)}
-                    />
-                    {types.map((type) => (
-                      <OptionRow
-                        key={type}
-                        label={type}
-                        mono
-                        count={typeFacets.byType[type] ?? 0}
-                        selected={filters.type === `type:${type}`}
-                        onSelect={() => setFilter("type", `type:${type}`)}
-                      />
-                    ))}
-                  </CommandGroup>
-                ))}
-              </CommandList>
-            </Command>
+            <EventDropdown
+              groups={typeGroups}
+              facets={typeFacets}
+              selected={filters.types}
+              onChange={(next) => setFilter("types", next)}
+            />
           </FilterSection>
 
           <FilterSection
             title="Actor"
-            value={describeActorFilter(filters.actor, actorOptions)}
-            onClear={filters.actor === "all" ? undefined : () => setFilter("actor", "all")}
+            value={filters.actors.length > 0 ? describeActors(filters.actors, actorOptions) : null}
+            onClear={filters.actors.length === 0 ? undefined : () => setFilter("actors", [])}
             last
           >
-            {/* No search box here: a machine has a handful of actors, not the
-                dozens of event types above, and an input over four rows is
-                furniture. */}
-            <Command className="rounded-md border border-border">
-              <CommandList className="max-h-44">
-                <CommandGroup>
-                  <OptionRow
-                    label="Anyone"
-                    count={actorFacets.total}
-                    selected={filters.actor === "all"}
-                    onSelect={() => setFilter("actor", "all")}
-                  />
-                </CommandGroup>
-                {actorOptions.persons.length > 0 && (
-                  <CommandGroup heading="People">
-                    {actorOptions.persons.map((person) => (
-                      <OptionRow
-                        key={person.id}
-                        label={person.label}
-                        count={actorFacets.byPerson[person.id] ?? 0}
-                        selected={filters.actor === `person:${person.id}`}
-                        onSelect={() => setFilter("actor", `person:${person.id}`)}
-                      />
-                    ))}
-                  </CommandGroup>
-                )}
-                {actorOptions.kinds.length > 0 && (
-                  <CommandGroup heading="Not a person">
-                    {actorOptions.kinds.map((kind) => (
-                      <OptionRow
-                        key={kind}
-                        label={ACTOR_KIND_LABEL[kind] ?? kind}
-                        count={actorFacets.byKind[kind] ?? 0}
-                        selected={filters.actor === `kind:${kind}`}
-                        onSelect={() => setFilter("actor", `kind:${kind}`)}
-                      />
-                    ))}
-                  </CommandGroup>
-                )}
-              </CommandList>
-            </Command>
+            <ActorDropdown
+              options={actorOptions}
+              facets={actorFacets}
+              selected={filters.actors}
+              onChange={(next) => setFilter("actors", next)}
+            />
           </FilterSection>
         </PopoverContent>
       </Popover>
@@ -299,10 +227,260 @@ export function MachineActivityToolbar({ state }: { state: ActivityState }) {
   );
 }
 
+/** Preset windows plus a free amount and unit, because "the last N of anything"
+ * is a question the four chips can't answer and the machine you are looking at
+ * decides which N matters. Typing an amount takes over from the chips; the
+ * chips highlight again when the value matches one exactly. */
+function TimeField({
+  value,
+  counts,
+  onChange,
+}: {
+  value: TimeFilter;
+  counts: number[];
+  onChange: (next: TimeFilter) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-1">
+        {TIME_PRESETS.map((preset, index) => {
+          const active = isSameTimeFilter(preset.value, value);
+          const count = counts[index] ?? 0;
+          return (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={() => onChange(preset.value)}
+              aria-pressed={active}
+              className={cn(
+                "inline-flex items-center justify-between gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+                active
+                  ? "bg-foreground text-background"
+                  : "bg-accent text-muted-foreground hover:text-foreground",
+                // Same dimming an empty option row gets: a window holding
+                // nothing should look spent before you click it.
+                count === 0 && !active && "opacity-45",
+              )}
+            >
+              {preset.label}
+              <span className="tabular-nums opacity-60">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">Last</span>
+        <Input
+          type="number"
+          min={1}
+          inputMode="numeric"
+          aria-label="Amount of time"
+          placeholder="any"
+          value={value.amount ?? ""}
+          onChange={(event) => {
+            const raw = event.target.value.trim();
+            const parsed = Number(raw);
+            // An empty or nonsensical amount is "any time" rather than an error
+            // state — there is nothing to get wrong, only a window to drop.
+            onChange({
+              ...value,
+              amount: raw === "" || !Number.isFinite(parsed) || parsed <= 0 ? null : parsed,
+            });
+          }}
+          className="h-8 w-16 text-xs"
+        />
+        <select
+          aria-label="Unit of time"
+          value={value.unit}
+          onChange={(event) => onChange({ ...value, unit: event.target.value as TimeUnit })}
+          className="h-8 flex-1 rounded-md border border-input bg-transparent px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {(Object.keys(TIME_UNITS) as TimeUnit[]).map((unit) => (
+            <option key={unit} value={unit}>
+              {TIME_UNITS[unit].label}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+/** The collapsed trigger both pickers share: reads back what is selected, opens
+ * the list beside the filter menu rather than inside it.
+ *
+ * forwardRef and a props spread, not a wrapping div: `PopoverTrigger asChild`
+ * hands its ref and `aria-haspopup`/`aria-expanded` to whatever it clones, and
+ * on a div those land on something a screen reader reads as neither a button
+ * nor a thing that opens anything. */
+const DropdownTrigger = forwardRef<
+  HTMLButtonElement,
+  { label: string; active: boolean } & React.ComponentPropsWithoutRef<typeof Button>
+>(({ label, active, className, ...props }, ref) => (
+  <Button
+    ref={ref}
+    type="button"
+    variant="outline"
+    className={cn(
+      "h-8 w-full justify-between gap-2 px-2.5 text-xs font-normal",
+      active && "border-foreground/30",
+      className,
+    )}
+    {...props}
+  >
+    <span className="truncate">{label}</span>
+    <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+  </Button>
+));
+DropdownTrigger.displayName = "DropdownTrigger";
+
+function EventDropdown({
+  groups,
+  facets,
+  selected,
+  onChange,
+}: {
+  groups: TypeGroup[];
+  facets: ReturnType<typeof deriveTypeFacets>;
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <DropdownTrigger
+          label={describeTypes(selected)}
+          active={selected.length > 0}
+          aria-label={`Event types: ${describeTypes(selected)}`}
+        />
+      </PopoverTrigger>
+      {/* side="left": this opens from inside another popover that is already
+          pinned to the right edge of the page, so opening right would run the
+          list off screen. */}
+      <PopoverContent side="left" align="start" className="w-72 p-0">
+        <Command>
+          <CommandInput placeholder="Find an event type…" className="h-9" />
+          <CommandList className="max-h-72">
+            <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">
+              No event type by that name.
+            </CommandEmpty>
+            <CommandGroup>
+              <OptionRow
+                label="All events"
+                count={facets.total}
+                state={selected.length === 0 ? "all" : "none"}
+                onSelect={() => onChange([])}
+              />
+            </CommandGroup>
+            {groups.map(({ domain, types }) => {
+              const state = groupState(selected, types);
+              return (
+                <CommandGroup key={domain} heading={domainLabel(domain)}>
+                  <OptionRow
+                    // Not a selector of its own — ticking it ticks every type
+                    // under it, so what is stored never overlaps and the
+                    // summary can be counted honestly.
+                    label={`All ${domainLabel(domain).toLowerCase()} events`}
+                    count={facets.byDomain[domain] ?? 0}
+                    state={state}
+                    onSelect={() => onChange(toggleGroup(selected, types, state !== "all"))}
+                  />
+                  {types.map((type) => (
+                    <OptionRow
+                      key={type}
+                      label={type}
+                      mono
+                      count={facets.byType[type] ?? 0}
+                      state={selected.includes(type) ? "all" : "none"}
+                      onSelect={() => onChange(toggleSelection(selected, type))}
+                    />
+                  ))}
+                </CommandGroup>
+              );
+            })}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ActorDropdown({
+  options,
+  facets,
+  selected,
+  onChange,
+}: {
+  options: ActorOptions;
+  facets: ReturnType<typeof deriveActorFacets>;
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const manyPeople = options.persons.length > 8;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <DropdownTrigger
+          label={describeActors(selected, options)}
+          active={selected.length > 0}
+          aria-label={`Actors: ${describeActors(selected, options)}`}
+        />
+      </PopoverTrigger>
+      <PopoverContent side="left" align="start" className="w-72 p-0">
+        <Command>
+          {/* A search box over four rows is furniture; over a big org's people
+              list it is the only way through. */}
+          {manyPeople && <CommandInput placeholder="Find an actor…" className="h-9" />}
+          <CommandList className="max-h-72">
+            <CommandEmpty className="py-4 text-center text-xs text-muted-foreground">
+              No actor by that name.
+            </CommandEmpty>
+            <CommandGroup>
+              <OptionRow
+                label="Anyone"
+                count={facets.total}
+                state={selected.length === 0 ? "all" : "none"}
+                onSelect={() => onChange([])}
+              />
+            </CommandGroup>
+            {options.persons.length > 0 && (
+              <CommandGroup heading="People">
+                {options.persons.map((option) => (
+                  <OptionRow
+                    key={option.value}
+                    label={option.label}
+                    count={facets.byActor[option.value] ?? 0}
+                    state={selected.includes(option.value) ? "all" : "none"}
+                    onSelect={() => onChange(toggleSelection(selected, option.value))}
+                  />
+                ))}
+              </CommandGroup>
+            )}
+            {options.kinds.length > 0 && (
+              <CommandGroup heading="Not a person">
+                {options.kinds.map((option) => (
+                  <OptionRow
+                    key={option.value}
+                    label={option.label}
+                    count={facets.byActor[option.value] ?? 0}
+                    state={selected.includes(option.value) ? "all" : "none"}
+                    onSelect={() => onChange(toggleSelection(selected, option.value))}
+                  />
+                ))}
+              </CommandGroup>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 /** One labelled block of the filter menu. The header carries the dimension's
  * current value and its own clear button, so what is set is readable without
- * scrolling a list to find the tick, and undoing one filter doesn't mean
- * clearing all of them. */
+ * opening the dropdown, and undoing one filter doesn't mean clearing all. */
 function FilterSection({
   title,
   value,
@@ -322,17 +500,15 @@ function FilterSection({
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {title}
         </span>
-        {onClear ? (
+        {onClear && (
           <button
             type="button"
             onClick={onClear}
             title={`Clear: ${value}`}
-            className="max-w-[60%] truncate text-xs text-foreground underline-offset-2 hover:underline"
+            className="max-w-[60%] shrink-0 truncate text-xs text-foreground underline-offset-2 hover:underline"
           >
-            {value}
+            Clear
           </button>
-        ) : (
-          value && <span className="max-w-[60%] truncate text-xs">{value}</span>
         )}
       </div>
       {children}
@@ -340,20 +516,23 @@ function FilterSection({
   );
 }
 
-/** A single-select row: tick on the left so the selection is scannable down one
- * column, count on the right. The count is what the list would hold if you
- * picked this — every other filter still applied — so a 0 tells you not to
- * bother rather than leaving you to find out by clicking. */
+/** A multi-select row: box on the left so what is ticked is scannable down one
+ * column, count on the right. The count is what the list would hold with this
+ * also ticked — every other filter still applied — so a 0 tells you not to
+ * bother rather than leaving you to find out by clicking.
+ *
+ * `state` is three-valued because a domain row is a tick-all over its group and
+ * has to be able to say "some of these". */
 function OptionRow({
   label,
   count,
-  selected,
+  state,
   mono,
   onSelect,
 }: {
   label: string;
   count: number;
-  selected: boolean;
+  state: "none" | "some" | "all";
   mono?: boolean;
   onSelect: () => void;
 }) {
@@ -361,9 +540,20 @@ function OptionRow({
     <CommandItem
       value={label}
       onSelect={onSelect}
-      className={cn("cursor-pointer gap-2", count === 0 && !selected && "opacity-45")}
+      className={cn("cursor-pointer gap-2", count === 0 && state === "none" && "opacity-45")}
     >
-      <Check className={cn("size-3.5 shrink-0", selected ? "opacity-100" : "opacity-0")} />
+      <span
+        aria-hidden="true"
+        className={cn(
+          "flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border transition-colors",
+          state === "none"
+            ? "border-muted-foreground/40"
+            : "border-foreground bg-foreground text-background",
+        )}
+      >
+        {state === "all" && <Check className="size-2.5" strokeWidth={3} />}
+        {state === "some" && <Minus className="size-2.5" strokeWidth={3} />}
+      </span>
       <span className={cn("truncate", mono && "font-mono text-xs")}>{label}</span>
       <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{count}</span>
     </CommandItem>

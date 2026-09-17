@@ -38,34 +38,99 @@ export const ACTOR_KIND_LABEL: Record<string, string> = {
   idp: "IdP",
 };
 
-/** `label` is the full phrase, used where a filter is read back as a sentence
- * (the section header, the toolbar). `short` is for the segmented pills, which
- * sit four-across in a 320px menu and wrapped to a second line at full length. */
-export const TIME_RANGES = {
-  all: { label: "Any time", short: "Any time", ms: null },
-  "24h": { label: "Last 24 hours", short: "24 hours", ms: 24 * 60 * 60 * 1000 },
-  "7d": { label: "Last 7 days", short: "7 days", ms: 7 * 24 * 60 * 60 * 1000 },
-  "30d": { label: "Last 30 days", short: "30 days", ms: 30 * 24 * 60 * 60 * 1000 },
-} as const;
-export type TimeRange = keyof typeof TIME_RANGES;
+// ---------------------------------------------------------------------------
+// Time
+// ---------------------------------------------------------------------------
 
-/** `all`, `domain:<domain>`, or `type:<exact event type>`. */
-export type TypeFilter = string;
-/** `all`, `person:<personId>`, or `kind:<actorType>`. */
-export type ActorFilter = string;
+/** Fixed-length units carry their own milliseconds; `months` is null because a
+ * month has no fixed length and is walked on the calendar instead — see
+ * `timeCutoff`. */
+export const TIME_UNITS = {
+  minutes: { label: "minutes", ms: 60 * 1000 },
+  hours: { label: "hours", ms: 60 * 60 * 1000 },
+  days: { label: "days", ms: 24 * 60 * 60 * 1000 },
+  weeks: { label: "weeks", ms: 7 * 24 * 60 * 60 * 1000 },
+  months: { label: "months", ms: null },
+} as const;
+export type TimeUnit = keyof typeof TIME_UNITS;
+
+/** `amount: null` means no time constraint at all. The unit survives a clear so
+ * reopening the menu doesn't silently reset what you last picked. */
+export interface TimeFilter {
+  amount: number | null;
+  unit: TimeUnit;
+}
+
+export const ANY_TIME: TimeFilter = { amount: null, unit: "days" };
+
+/** The one-click windows. Anything else is typed into the amount field. */
+export const TIME_PRESETS: { label: string; value: TimeFilter }[] = [
+  { label: "Any time", value: ANY_TIME },
+  { label: "24 hours", value: { amount: 24, unit: "hours" } },
+  { label: "7 days", value: { amount: 7, unit: "days" } },
+  { label: "30 days", value: { amount: 30, unit: "days" } },
+];
+
+export function isSameTimeFilter(a: TimeFilter, b: TimeFilter): boolean {
+  // Two "any time"s are equal whatever unit each is parked on — the unit is
+  // only remembered for the amount field, and on its own narrows nothing.
+  if (a.amount === null || b.amount === null) return a.amount === b.amount;
+  return a.amount === b.amount && a.unit === b.unit;
+}
+
+/**
+ * The earliest `occurredAt` a filter admits, or null for no constraint.
+ *
+ * Months walk the calendar rather than multiplying out a 30-day average: "last
+ * 3 months" asked in March means back to December, not back to 90 days ago, and
+ * the two differ by up to three days depending on where in the year you ask.
+ */
+export function timeCutoff(time: TimeFilter, now: number): number | null {
+  if (time.amount === null || !Number.isFinite(time.amount) || time.amount <= 0) return null;
+  const unit = TIME_UNITS[time.unit];
+  if (unit.ms !== null) return now - time.amount * unit.ms;
+  const date = new Date(now);
+  date.setMonth(date.getMonth() - time.amount);
+  return date.getTime();
+}
+
+/** How a set time filter reads back in its section header. */
+export function describeTimeFilter(time: TimeFilter): string | null {
+  if (time.amount === null) return null;
+  const preset = TIME_PRESETS.find(
+    (candidate) => candidate.value.amount !== null && isSameTimeFilter(candidate.value, time),
+  );
+  if (preset) return preset.label;
+  const plural = TIME_UNITS[time.unit].label;
+  // "Last 1 days" is worth the one line it takes to avoid.
+  return `Last ${time.amount} ${time.amount === 1 ? plural.replace(/s$/, "") : plural}`;
+}
+
+// ---------------------------------------------------------------------------
+// Filters
+// ---------------------------------------------------------------------------
+
+/** One selected event type, always exact. A domain row in the picker is a
+ * select-all over its group, not a selector of its own, so no two stored values
+ * ever overlap and "what is selected" has exactly one reading. */
+export type TypeSelection = string;
+/** `person:<personId>` or `kind:<actorType>`. */
+export type ActorSelection = string;
 
 export interface ActivityFilters {
   search: string;
-  type: TypeFilter;
-  actor: ActorFilter;
-  time: TimeRange;
+  /** Empty means every type. Otherwise an event matches if it is any of these. */
+  types: TypeSelection[];
+  /** Empty means anyone. Otherwise an event matches if its actor is any of these. */
+  actors: ActorSelection[];
+  time: TimeFilter;
 }
 
 export const NO_FILTERS: ActivityFilters = {
   search: "",
-  type: "all",
-  actor: "all",
-  time: "all",
+  types: [],
+  actors: [],
+  time: ANY_TIME,
 };
 
 export function domainOf(type: string): string {
@@ -76,21 +141,28 @@ export function domainLabel(domain: string): string {
   return DOMAIN_LABEL[domain] ?? domain;
 }
 
+/** The selector an entry's actor would be stored as. */
+export function actorSelectionOf(entry: AuditTimelineEntry): ActorSelection {
+  return entry.actorType === "person" ? `person:${entry.actorId ?? ""}` : `kind:${entry.actorType}`;
+}
+
 /** How many filters are narrowing the list — drives the badge on the Filters
  * button and whether the "no match" empty state offers a way out. A search of
- * only whitespace matches everything, so it doesn't count. */
+ * only whitespace matches everything, so it doesn't count. A dimension counts
+ * once however many values it holds: the badge answers "how much is narrowed",
+ * not "how many boxes are ticked". */
 export function activeFilterCount(filters: ActivityFilters): number {
   return (
-    (filters.type === "all" ? 0 : 1) +
-    (filters.actor === "all" ? 0 : 1) +
-    (filters.time === "all" ? 0 : 1) +
+    (filters.types.length > 0 ? 1 : 0) +
+    (filters.actors.length > 0 ? 1 : 0) +
+    (filters.time.amount === null ? 0 : 1) +
     (filters.search.trim() ? 1 : 0)
   );
 }
 
 /**
- * `now` is passed in rather than read from `Date.now()` so the time-range cutoff
- * is one fixed instant for a whole pass, and so a test can pin it.
+ * `now` is passed in rather than read from `Date.now()` so the time cutoff is
+ * one fixed instant for a whole pass, and so a test can pin it.
  */
 export function matchesActivityFilters(
   entry: AuditTimelineEntry,
@@ -106,20 +178,13 @@ export function matchesActivityFilters(
     return false;
   }
 
-  if (filters.type.startsWith("domain:") && domainOf(entry.type) !== filters.type.slice(7)) {
-    return false;
-  }
-  if (filters.type.startsWith("type:") && entry.type !== filters.type.slice(5)) return false;
-
-  if (filters.actor.startsWith("person:")) {
-    if (entry.actorType !== "person" || entry.actorId !== filters.actor.slice(7)) return false;
-  }
-  if (filters.actor.startsWith("kind:") && entry.actorType !== filters.actor.slice(5)) return false;
+  if (filters.types.length > 0 && !filters.types.includes(entry.type)) return false;
+  if (filters.actors.length > 0 && !filters.actors.includes(actorSelectionOf(entry))) return false;
 
   // `occurredAt` (when it happened), not `recordedAt` (when we heard about it)
   // — "last 24 hours" is a question about the machine, not about ingestion.
-  const window = TIME_RANGES[filters.time].ms;
-  if (window !== null && new Date(entry.occurredAt).getTime() < now - window) return false;
+  const cutoff = timeCutoff(filters.time, now);
+  if (cutoff !== null && new Date(entry.occurredAt).getTime() < cutoff) return false;
 
   return true;
 }
@@ -132,6 +197,31 @@ export function filterActivity(
   return entries.filter((entry) => matchesActivityFilters(entry, filters, now));
 }
 
+/** Add or drop one value, keeping order of first selection so the stored list
+ * doesn't reshuffle under the cursor as boxes are ticked. */
+export function toggleSelection(current: string[], value: string): string[] {
+  return current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+}
+
+/** Tick-all / untick-all for one group. Ticking adds only what's missing, so it
+ * never duplicates; unticking removes exactly that group and leaves the rest. */
+export function toggleGroup(current: string[], values: string[], select: boolean): string[] {
+  if (!select) return current.filter((v) => !values.includes(v));
+  return [...current, ...values.filter((v) => !current.includes(v))];
+}
+
+export type GroupState = "none" | "some" | "all";
+
+export function groupState(current: string[], values: string[]): GroupState {
+  const picked = values.filter((v) => current.includes(v)).length;
+  if (picked === 0) return "none";
+  return picked === values.length ? "all" : "some";
+}
+
+// ---------------------------------------------------------------------------
+// Options
+// ---------------------------------------------------------------------------
+
 export interface TypeGroup {
   domain: string;
   types: string[];
@@ -140,9 +230,8 @@ export interface TypeGroup {
 /**
  * The event picker's options, grouped by domain.
  *
- * Callers derive this from everything loaded, never from the filtered result —
- * options that vanish as you narrow leave you unable to widen again without
- * clearing.
+ * Derived from everything loaded, never from the filtered result — options that
+ * vanish as you narrow leave you unable to widen again without clearing.
  */
 export function deriveTypeGroups(entries: AuditTimelineEntry[]): TypeGroup[] {
   const byDomain = new Map<string, Set<string>>();
@@ -163,9 +252,15 @@ export function deriveTypeGroups(entries: AuditTimelineEntry[]): TypeGroup[] {
     .map(([domain, types]) => ({ domain, types: [...types].sort() }));
 }
 
+export interface ActorOption {
+  /** The stored selector, e.g. `person:abc` or `kind:system`. */
+  value: ActorSelection;
+  label: string;
+}
+
 export interface ActorOptions {
-  persons: { id: string; label: string }[];
-  kinds: string[];
+  persons: ActorOption[];
+  kinds: ActorOption[];
 }
 
 /** Person actors resolve to an email through the people directory, the same
@@ -185,22 +280,30 @@ export function deriveActorOptions(
   }
   return {
     persons: [...personIds]
-      .map((id) => ({ id, label: people?.find((person) => person.id === id)?.email ?? id }))
+      .map((id) => ({
+        value: `person:${id}`,
+        label: people?.find((person) => person.id === id)?.email ?? id,
+      }))
       .sort((a, b) => a.label.localeCompare(b.label)),
-    kinds: Object.keys(ACTOR_KIND_LABEL).filter((kind) => kinds.has(kind)),
+    kinds: Object.keys(ACTOR_KIND_LABEL)
+      .filter((kind) => kinds.has(kind))
+      .map((kind) => ({ value: `kind:${kind}`, label: ACTOR_KIND_LABEL[kind] ?? kind })),
   };
 }
 
-/** Which dimension a facet count is being computed for, i.e. the one to ignore. */
+// ---------------------------------------------------------------------------
+// Facet counts
+// ---------------------------------------------------------------------------
+
 export type FilterDimension = keyof ActivityFilters;
 
 /**
  * Everything that passes every filter EXCEPT one.
  *
  * This is what a facet count is counted over. Counting a dimension's options
- * against its own current value would make every unselected option read 0, which
+ * against its own current value would make every unticked option read 0, which
  * says nothing; counting them against the *other* filters answers the question
- * you actually have with the menu open — "if I pick this instead, what do I get".
+ * you actually have with the menu open — "if I tick this too, what do I get".
  */
 export function filterActivityExcept(
   entries: AuditTimelineEntry[],
@@ -212,7 +315,7 @@ export function filterActivityExcept(
 }
 
 export interface TypeFacets {
-  /** Matching "All events", i.e. no type constraint at all. */
+  /** Matching with no type constraint at all. */
   total: number;
   byDomain: Record<string, number>;
   byType: Record<string, number>;
@@ -223,7 +326,7 @@ export function deriveTypeFacets(
   filters: ActivityFilters,
   now: number = Date.now(),
 ): TypeFacets {
-  const scope = filterActivityExcept(entries, filters, "type", now);
+  const scope = filterActivityExcept(entries, filters, "types", now);
   const byDomain: Record<string, number> = {};
   const byType: Record<string, number> = {};
   for (const item of scope) {
@@ -235,10 +338,10 @@ export function deriveTypeFacets(
 }
 
 export interface ActorFacets {
-  /** Matching "Anyone", i.e. no actor constraint at all. */
+  /** Matching with no actor constraint at all. */
   total: number;
-  byPerson: Record<string, number>;
-  byKind: Record<string, number>;
+  /** Keyed by the same selector the filter stores. */
+  byActor: Record<string, number>;
 }
 
 export function deriveActorFacets(
@@ -246,49 +349,51 @@ export function deriveActorFacets(
   filters: ActivityFilters,
   now: number = Date.now(),
 ): ActorFacets {
-  const scope = filterActivityExcept(entries, filters, "actor", now);
-  const byPerson: Record<string, number> = {};
-  const byKind: Record<string, number> = {};
+  const scope = filterActivityExcept(entries, filters, "actors", now);
+  const byActor: Record<string, number> = {};
   for (const item of scope) {
-    if (item.actorType === "person") {
-      if (item.actorId) byPerson[item.actorId] = (byPerson[item.actorId] ?? 0) + 1;
-    } else {
-      byKind[item.actorType] = (byKind[item.actorType] ?? 0) + 1;
-    }
+    const key = actorSelectionOf(item);
+    byActor[key] = (byActor[key] ?? 0) + 1;
   }
-  return { total: scope.length, byPerson, byKind };
+  return { total: scope.length, byActor };
 }
 
-/** Count for one time range, against every other filter — lets the When pills
- * show what each window holds before you commit to it. */
+/** Count for each candidate window, against every other filter — lets the
+ * preset chips show what each holds before you commit to it. */
 export function deriveTimeFacets(
   entries: AuditTimelineEntry[],
   filters: ActivityFilters,
+  candidates: TimeFilter[],
   now: number = Date.now(),
-): Record<TimeRange, number> {
+): number[] {
   const scope = filterActivityExcept(entries, filters, "time", now);
-  const counts = {} as Record<TimeRange, number>;
-  for (const range of Object.keys(TIME_RANGES) as TimeRange[]) {
-    const window = TIME_RANGES[range].ms;
-    counts[range] =
-      window === null
-        ? scope.length
-        : scope.filter((item) => new Date(item.occurredAt).getTime() >= now - window).length;
+  return candidates.map((candidate) => {
+    const cutoff = timeCutoff(candidate, now);
+    if (cutoff === null) return scope.length;
+    return scope.filter((item) => new Date(item.occurredAt).getTime() >= cutoff).length;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Read-back labels
+// ---------------------------------------------------------------------------
+
+/** What the Event dropdown's trigger says. One selection names itself; several
+ * are counted, since a menu button is not the place to list them. */
+export function describeTypes(types: TypeSelection[]): string {
+  if (types.length === 0) return "All events";
+  if (types.length === 1) return types[0] ?? "All events";
+  return `${types.length} event types`;
+}
+
+export function describeActors(actors: ActorSelection[], options: ActorOptions): string {
+  if (actors.length === 0) return "Anyone";
+  if (actors.length === 1) {
+    const only = actors[0] ?? "";
+    const match = [...options.persons, ...options.kinds].find((option) => option.value === only);
+    // An actor no longer among the loaded events still reads back as its own id
+    // rather than as an empty button.
+    return match?.label ?? only.replace(/^(person|kind):/, "");
   }
-  return counts;
-}
-
-/** The label for one dimension's current value, for the section header — so the
- * menu says what is set without making you scroll a list to find the tick. */
-export function describeTypeFilter(value: TypeFilter): string | null {
-  if (value === "all") return null;
-  if (value.startsWith("domain:")) return `All ${domainLabel(value.slice(7)).toLowerCase()}`;
-  return value.slice(5);
-}
-
-export function describeActorFilter(value: ActorFilter, options: ActorOptions): string | null {
-  if (value === "all") return null;
-  if (value.startsWith("kind:")) return ACTOR_KIND_LABEL[value.slice(5)] ?? value.slice(5);
-  const id = value.slice(7);
-  return options.persons.find((person) => person.id === id)?.label ?? id;
+  return `${actors.length} actors`;
 }
