@@ -17,7 +17,7 @@ import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import type { ProvisioningService } from "../../services/ProvisioningService";
-import { ProvisioningServiceTag } from "../../services/ProvisioningService";
+import { ProvisioningError, ProvisioningServiceTag } from "../../services/ProvisioningService";
 import {
   FAKE_CREATE_FAILURE_IMAGE,
   FakeProvisioningServiceLive,
@@ -492,7 +492,9 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
       // Not exercised here — inspection has its own tests. `die` rather than a stub
       // result so an unexpected call fails loudly instead of passing silently.
       snapshotDiskExists: () => Effect.die("not used in this test"),
-      grantSnapshotRead: () => Effect.die("grantSnapshotRead not stubbed in this test"),
+      // `createSnapshot` calls this to measure the copy. A provider with nothing readable
+      // answers not_found, and the measurement is skipped — which is this fake exactly.
+      grantSnapshotRead: () => Effect.fail(new ProvisioningError({ reason: "not_found" })),
       revokeSnapshotRead: () => Effect.die("revokeSnapshotRead not stubbed in this test"),
       archive: () => Effect.die("not used in this test"),
       reconcile: () => Effect.die("not used in this test"),

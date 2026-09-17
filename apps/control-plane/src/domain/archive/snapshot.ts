@@ -11,6 +11,7 @@ import {
 } from "../../services/ProvisioningService";
 import { ArchiveDbError, InvalidLegalHoldReasonError } from "./errors";
 import { SYSTEM_ACTOR, makeEnvelope } from "./events";
+import { ensureInspectionFilesystem, releaseInspection } from "./inspection-registry";
 import { resolveRetentionDays } from "./org-policy";
 import { type MachineRow, dbTry, fetchMachine, fetchSnapshot } from "./queries";
 
@@ -60,6 +61,45 @@ const measuredUsedBytes = (volumeUsage: unknown, scope: SnapshotScope): number |
   // silently understate by however much the OS disk holds.
   const root = read("root");
   return persistent !== undefined && root !== undefined ? persistent + root : undefined;
+};
+
+/**
+ * Reads what the copied filesystem itself says it holds, straight out of its superblock.
+ *
+ * The fallback when no agent measurement exists — which was every snapshot of a machine
+ * whose agent is old, gone, or never reported. Those rows had `usedBytes` null, so the
+ * console fell back to the PROVISIONED size and showed "64.0 GiB max" for a disk holding
+ * 1.56 GiB. A ceiling, in the place a person reads a size, forty times too big.
+ *
+ * Two 1 KiB reads and no directory walk, and it goes through the inspection registry so
+ * the grant is shared and released on the normal grace period rather than churned.
+ *
+ * Best-effort by construction: any failure leaves `usedBytes` null, which is what the
+ * column already means — "not measured", never "empty".
+ */
+const measureFromSnapshot = (
+  snapshotId: string,
+  provider: MachineRow["provider"],
+  disks: ReadonlyArray<CapturedDisk>,
+): Effect.Effect<number | undefined, never, ProvisioningServiceTag> => {
+  // Only the persistent disk is readable (no partition-table parser for the OS disk), so
+  // a `full` snapshot's total would understate by whatever the OS disk holds. Better to
+  // report nothing than a confidently wrong number.
+  const data = disks.find((disk) => disk.kind === "data");
+  if (!data || disks.length !== 1) return Effect.succeed(undefined);
+
+  return ensureInspectionFilesystem({
+    sessionId: `measure:${snapshotId}`,
+    provider,
+    disk: data,
+  }).pipe(
+    Effect.map((filesystem) => filesystem.usage().usedBytes),
+    // `catchAllCause`, not `catchAll`: this runs on the archive path, and a nice-to-have
+    // size must never be able to fail an archive. A provider that throws rather than
+    // returning an error is still just a snapshot whose size we do not know.
+    Effect.catchAllCause(() => Effect.succeed(undefined)),
+    Effect.tap(() => releaseInspection(`measure:${snapshotId}`)),
+  );
 };
 
 /**
@@ -143,6 +183,11 @@ export const createSnapshot = (
         ),
       );
 
+    const measuredFromDisk =
+      measuredUsedBytes(machine.volumeUsage, scope) === undefined
+        ? yield* measureFromSnapshot(snapshotId, machine.provider, captured.disks)
+        : undefined;
+
     const now = new Date();
     const expiresAt = new Date(now.getTime() + retentionDays * DAY_MS);
 
@@ -160,7 +205,10 @@ export const createSnapshot = (
             // expiry deletion at. Both were previously a hardcoded placeholder and
             // nothing at all, respectively.
             sizeBytes: captured.sizeBytes,
-            usedBytes: measuredUsedBytes(machine.volumeUsage, scope) ?? null,
+            // The agent's own measurement first: it saw the live machine and covers every
+            // disk in scope. Reading the copy is the fallback, and covers the machines
+            // whose agent never reported at all.
+            usedBytes: measuredUsedBytes(machine.volumeUsage, scope) ?? measuredFromDisk ?? null,
             scope,
             capturedDisks: [...captured.disks],
             // False when the provider copied nothing, so the console stops labelling an

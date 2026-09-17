@@ -106,6 +106,9 @@ export type FsReadResult = Extract<FsResult, { ok: true; op: "read" }> | FsFailu
 export type FsDownloadResult = Extract<FsResult, { ok: true; op: "download" }> | FsFailureResult;
 
 export interface SnapshotFilesystem {
+  /** What the filesystem itself says it holds — the same numbers `df` reports, read
+   * straight out of the superblock. Two 1 KiB reads, no directory walk. */
+  usage(): { totalBytes: number; usedBytes: number };
   list(path: string, limit?: number): Promise<FsListResult>;
   read(path: string): Promise<FsReadResult>;
   download(path: string): Promise<{ result: FsDownloadResult; bytes?: Uint8Array }>;
@@ -195,6 +198,11 @@ export const openExt4Filesystem = async (reader: RangeReader): Promise<SnapshotF
   };
 
   return {
+    usage: () => ({
+      totalBytes: superblock.blockCount * superblock.blockSize,
+      usedBytes: (superblock.blockCount - superblock.freeBlocks) * superblock.blockSize,
+    }),
+
     list: (path, limit = FS_MAX_ENTRIES) =>
       settle<Extract<FsResult, { ok: true; op: "list" }>>(async () => {
         const imagePath = toImagePath(path);

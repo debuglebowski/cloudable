@@ -36,6 +36,9 @@ export interface Superblock {
   inodeSize: number;
   inodeCount: number;
   blockCount: number;
+  /** Blocks not in use. `(blockCount - freeBlocks) * blockSize` is what `df` calls used —
+   * the figure `snapshots.usedBytes` wants, available without asking an agent. */
+  freeBlocks: number;
   firstDataBlock: number;
   /** 64 when the 64bit feature is on, else 32. */
   descriptorSize: number;
@@ -93,6 +96,7 @@ export const readSuperblock = async (reader: RangeReader): Promise<Superblock> =
     inodeSize,
     inodeCount: view.getUint32(0x00, true),
     blockCount: blockCountHi * 2 ** 32 + blockCountLo,
+    freeBlocks: (has64Bit ? view.getUint32(0x158, true) : 0) * 2 ** 32 + view.getUint32(0x0c, true),
     firstDataBlock: view.getUint32(0x14, true),
     descriptorSize,
     has64Bit,

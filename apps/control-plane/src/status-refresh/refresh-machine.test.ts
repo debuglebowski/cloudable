@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import {
   type MachineStatus,
+  ProvisioningError,
   type ProvisioningService,
   ProvisioningServiceTag,
 } from "../services/ProvisioningService";
@@ -105,7 +106,9 @@ describe("refreshMachineStatus", () => {
         // Not exercised here — inspection has its own tests. `die` rather than a stub
         // result so an unexpected call fails loudly instead of passing silently.
         snapshotDiskExists: () => Effect.die("not used in this test"),
-        grantSnapshotRead: () => Effect.die("grantSnapshotRead not stubbed in this test"),
+        // `createSnapshot` calls this to measure the copy. A provider with nothing readable
+        // answers not_found, and the measurement is skipped — which is this fake exactly.
+        grantSnapshotRead: () => Effect.fail(new ProvisioningError({ reason: "not_found" })),
         revokeSnapshotRead: () => Effect.die("revokeSnapshotRead not stubbed in this test"),
         archive: (machineId, _provider, externalId) => {
           calls.push({ method: "archive", machineId, externalId });

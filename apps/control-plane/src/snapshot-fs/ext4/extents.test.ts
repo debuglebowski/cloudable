@@ -16,6 +16,7 @@ const superblock: Superblock = {
   inodeSize: 256,
   inodeCount: 4096,
   blockCount: 4096,
+  freeBlocks: 4000,
   firstDataBlock: 1,
   descriptorSize: 64,
   has64Bit: true,
