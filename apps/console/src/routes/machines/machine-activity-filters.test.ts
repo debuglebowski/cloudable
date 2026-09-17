@@ -6,9 +6,15 @@ import type { DirectoryPerson } from "@/api/people-directory";
 import {
   NO_FILTERS,
   activeFilterCount,
+  deriveActorFacets,
   deriveActorOptions,
+  deriveTimeFacets,
+  deriveTypeFacets,
   deriveTypeGroups,
+  describeActorFilter,
+  describeTypeFilter,
   filterActivity,
+  filterActivityExcept,
 } from "./machine-activity-filters";
 
 // A fixed "now" so the time-range cases don't drift with the clock.
@@ -199,5 +205,87 @@ describe("deriveActorOptions", () => {
   test("lists only the non-person kinds actually present", () => {
     expect(deriveActorOptions(ENTRIES, people).kinds).toEqual(["system", "agent"]);
     expect(deriveActorOptions([onlyMachineStarted], people).kinds).toEqual([]);
+  });
+});
+
+describe("facet counts", () => {
+  test("filterActivityExcept ignores exactly one dimension", () => {
+    const filters = { ...NO_FILTERS, type: "domain:machine", time: "24h" as const };
+    // type ignored, time still applied: a and b are inside 24h, c and d are not.
+    expect(ids(filterActivityExcept(ENTRIES, filters, "type", NOW))).toEqual(["a", "b"]);
+    // time ignored, type still applied.
+    expect(ids(filterActivityExcept(ENTRIES, filters, "time", NOW))).toEqual(["a", "b"]);
+  });
+
+  test("type facets count against the OTHER filters, not their own", () => {
+    // The point of a facet count: with actor pinned to the agent, picking
+    // machine.started would yield nothing, and the menu should say 0 up front
+    // rather than after the click.
+    const facets = deriveTypeFacets(ENTRIES, { ...NO_FILTERS, actor: "kind:agent" }, NOW);
+    expect(facets.total).toBe(1);
+    expect(facets.byType["machine.state_reported"]).toBe(1);
+    expect(facets.byType["machine.started"]).toBeUndefined();
+    expect(facets.byDomain.machine).toBe(1);
+  });
+
+  test("an unfiltered type facet counts everything, grouped", () => {
+    const facets = deriveTypeFacets(ENTRIES, NO_FILTERS, NOW);
+    expect(facets.total).toBe(4);
+    expect(facets.byDomain).toEqual({ machine: 2, access: 1, snapshot: 1 });
+  });
+
+  test("actor facets split people from non-person kinds", () => {
+    const facets = deriveActorFacets(ENTRIES, NO_FILTERS, NOW);
+    expect(facets.total).toBe(4);
+    expect(facets.byPerson).toEqual({ "person-1": 1, "person-2": 1 });
+    expect(facets.byKind).toEqual({ agent: 1, system: 1 });
+  });
+
+  test("actor facets ignore the actor filter but honour the rest", () => {
+    const facets = deriveActorFacets(
+      ENTRIES,
+      { ...NO_FILTERS, actor: "kind:agent", time: "24h" },
+      NOW,
+    );
+    // Within 24h: a (person-1) and b (agent). The actor filter itself is ignored.
+    expect(facets.total).toBe(2);
+    expect(facets.byPerson).toEqual({ "person-1": 1 });
+    expect(facets.byKind).toEqual({ agent: 1 });
+  });
+
+  test("time facets count each window against the other filters", () => {
+    expect(deriveTimeFacets(ENTRIES, NO_FILTERS, NOW)).toEqual({
+      all: 4,
+      "24h": 2,
+      "7d": 3,
+      "30d": 4,
+    });
+    // With the domain pinned to machine, only a and b remain, both inside 24h.
+    expect(deriveTimeFacets(ENTRIES, { ...NO_FILTERS, type: "domain:machine" }, NOW)).toEqual({
+      all: 2,
+      "24h": 2,
+      "7d": 2,
+      "30d": 2,
+    });
+  });
+});
+
+describe("filter descriptions", () => {
+  test("describeTypeFilter reads back what is set", () => {
+    expect(describeTypeFilter("all")).toBeNull();
+    expect(describeTypeFilter("domain:machine")).toBe("All machine");
+    expect(describeTypeFilter("type:machine.started")).toBe("machine.started");
+  });
+
+  test("describeActorFilter resolves a person to their email", () => {
+    const options = deriveActorOptions(ENTRIES, [
+      { id: "person-2", email: "jordan.blake@acme.com", role: "member", active: true },
+    ]);
+    expect(describeActorFilter("all", options)).toBeNull();
+    expect(describeActorFilter("person:person-2", options)).toBe("jordan.blake@acme.com");
+    expect(describeActorFilter("kind:system", options)).toBe("System");
+    // An actor no longer in the loaded set still reads back as its raw id
+    // rather than as an empty header.
+    expect(describeActorFilter("person:ghost", options)).toBe("ghost");
   });
 });

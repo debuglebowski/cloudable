@@ -38,11 +38,14 @@ export const ACTOR_KIND_LABEL: Record<string, string> = {
   idp: "IdP",
 };
 
+/** `label` is the full phrase, used where a filter is read back as a sentence
+ * (the section header, the toolbar). `short` is for the segmented pills, which
+ * sit four-across in a 320px menu and wrapped to a second line at full length. */
 export const TIME_RANGES = {
-  all: { label: "Any time", ms: null },
-  "24h": { label: "Last 24 hours", ms: 24 * 60 * 60 * 1000 },
-  "7d": { label: "Last 7 days", ms: 7 * 24 * 60 * 60 * 1000 },
-  "30d": { label: "Last 30 days", ms: 30 * 24 * 60 * 60 * 1000 },
+  all: { label: "Any time", short: "Any time", ms: null },
+  "24h": { label: "Last 24 hours", short: "24 hours", ms: 24 * 60 * 60 * 1000 },
+  "7d": { label: "Last 7 days", short: "7 days", ms: 7 * 24 * 60 * 60 * 1000 },
+  "30d": { label: "Last 30 days", short: "30 days", ms: 30 * 24 * 60 * 60 * 1000 },
 } as const;
 export type TimeRange = keyof typeof TIME_RANGES;
 
@@ -186,4 +189,106 @@ export function deriveActorOptions(
       .sort((a, b) => a.label.localeCompare(b.label)),
     kinds: Object.keys(ACTOR_KIND_LABEL).filter((kind) => kinds.has(kind)),
   };
+}
+
+/** Which dimension a facet count is being computed for, i.e. the one to ignore. */
+export type FilterDimension = keyof ActivityFilters;
+
+/**
+ * Everything that passes every filter EXCEPT one.
+ *
+ * This is what a facet count is counted over. Counting a dimension's options
+ * against its own current value would make every unselected option read 0, which
+ * says nothing; counting them against the *other* filters answers the question
+ * you actually have with the menu open — "if I pick this instead, what do I get".
+ */
+export function filterActivityExcept(
+  entries: AuditTimelineEntry[],
+  filters: ActivityFilters,
+  except: FilterDimension,
+  now: number = Date.now(),
+): AuditTimelineEntry[] {
+  return filterActivity(entries, { ...filters, [except]: NO_FILTERS[except] }, now);
+}
+
+export interface TypeFacets {
+  /** Matching "All events", i.e. no type constraint at all. */
+  total: number;
+  byDomain: Record<string, number>;
+  byType: Record<string, number>;
+}
+
+export function deriveTypeFacets(
+  entries: AuditTimelineEntry[],
+  filters: ActivityFilters,
+  now: number = Date.now(),
+): TypeFacets {
+  const scope = filterActivityExcept(entries, filters, "type", now);
+  const byDomain: Record<string, number> = {};
+  const byType: Record<string, number> = {};
+  for (const item of scope) {
+    const domain = domainOf(item.type);
+    byDomain[domain] = (byDomain[domain] ?? 0) + 1;
+    byType[item.type] = (byType[item.type] ?? 0) + 1;
+  }
+  return { total: scope.length, byDomain, byType };
+}
+
+export interface ActorFacets {
+  /** Matching "Anyone", i.e. no actor constraint at all. */
+  total: number;
+  byPerson: Record<string, number>;
+  byKind: Record<string, number>;
+}
+
+export function deriveActorFacets(
+  entries: AuditTimelineEntry[],
+  filters: ActivityFilters,
+  now: number = Date.now(),
+): ActorFacets {
+  const scope = filterActivityExcept(entries, filters, "actor", now);
+  const byPerson: Record<string, number> = {};
+  const byKind: Record<string, number> = {};
+  for (const item of scope) {
+    if (item.actorType === "person") {
+      if (item.actorId) byPerson[item.actorId] = (byPerson[item.actorId] ?? 0) + 1;
+    } else {
+      byKind[item.actorType] = (byKind[item.actorType] ?? 0) + 1;
+    }
+  }
+  return { total: scope.length, byPerson, byKind };
+}
+
+/** Count for one time range, against every other filter — lets the When pills
+ * show what each window holds before you commit to it. */
+export function deriveTimeFacets(
+  entries: AuditTimelineEntry[],
+  filters: ActivityFilters,
+  now: number = Date.now(),
+): Record<TimeRange, number> {
+  const scope = filterActivityExcept(entries, filters, "time", now);
+  const counts = {} as Record<TimeRange, number>;
+  for (const range of Object.keys(TIME_RANGES) as TimeRange[]) {
+    const window = TIME_RANGES[range].ms;
+    counts[range] =
+      window === null
+        ? scope.length
+        : scope.filter((item) => new Date(item.occurredAt).getTime() >= now - window).length;
+  }
+  return counts;
+}
+
+/** The label for one dimension's current value, for the section header — so the
+ * menu says what is set without making you scroll a list to find the tick. */
+export function describeTypeFilter(value: TypeFilter): string | null {
+  if (value === "all") return null;
+  if (value.startsWith("domain:")) return `All ${domainLabel(value.slice(7)).toLowerCase()}`;
+  return value.slice(5);
+}
+
+export function describeActorFilter(value: ActorFilter, options: ActorOptions): string | null {
+  if (value === "all") return null;
+  if (value.startsWith("kind:")) return ACTOR_KIND_LABEL[value.slice(5)] ?? value.slice(5);
+  const id = value.slice(7);
+  return options.persons.find((person) => person.id === id)?.label ?? id;
 }

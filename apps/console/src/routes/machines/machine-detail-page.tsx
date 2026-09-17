@@ -32,7 +32,11 @@ import { RetentionStatus, formatDate, formatSnapshotSize } from "@/routes/archiv
 import { ArchiveMachineDialog } from "./archive-machine-dialog";
 import { BrowseFilesDialog } from "./browse-files-dialog";
 import { ConnectTerminalDialog } from "./connect-terminal-dialog";
-import { MachineActivityTab } from "./machine-activity-tab";
+import {
+  MachineActivityPanel,
+  MachineActivityToolbar,
+  useMachineActivityState,
+} from "./machine-activity-tab";
 import { MachineManifestTab } from "./machine-manifest-tab";
 import {
   ARCHIVED_MACHINE_STATES,
@@ -130,6 +134,11 @@ export function MachineDetailPage() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("properties");
+  // Lives here, not inside the tab, because its two halves render on either side
+  // of the Tabs boundary. `enabled` keeps the fetch lazy: the toolbar is mounted
+  // by this page rather than by TabsContent, so Radix unmounting an inactive tab
+  // no longer holds the query back on its own.
+  const activity = useMachineActivityState(machineId, peopleQuery.data, activeTab === "activity");
 
   if (machineQuery.isPending) {
     return <PageLoader label="Loading machine" />;
@@ -248,13 +257,21 @@ export function MachineDetailPage() {
         </div>
       )}
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as DetailTab)}>
-        <TabsList>
-          <TabsTrigger value="properties">Properties</TabsTrigger>
-          <TabsTrigger value="manifest">Manifest</TabsTrigger>
-          <TabsTrigger value="compliance">Compliance</TabsTrigger>
-          <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
-          <TabsTrigger value="activity">Activity</TabsTrigger>
-        </TabsList>
+        {/* The tab row doubles as the active tab's toolbar. Activity's search and
+            filters sit opposite the pills rather than above its table: they act on
+            what the tab below shows, and a second full-width bar between the tabs
+            and the table pushed the data itself further down the page. Only the
+            active tab may fill this slot, and only Activity does today. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <TabsList>
+            <TabsTrigger value="properties">Properties</TabsTrigger>
+            <TabsTrigger value="manifest">Manifest</TabsTrigger>
+            <TabsTrigger value="compliance">Compliance</TabsTrigger>
+            <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
+            <TabsTrigger value="activity">Activity</TabsTrigger>
+          </TabsList>
+          {activeTab === "activity" && <MachineActivityToolbar state={activity} />}
+        </div>
 
         <TabsContent value="properties">
           <Card>
@@ -463,7 +480,7 @@ export function MachineDetailPage() {
         </TabsContent>
 
         <TabsContent value="activity">
-          <MachineActivityTab machineId={machineId} people={peopleQuery.data} />
+          <MachineActivityPanel state={activity} />
         </TabsContent>
       </Tabs>
       <UpgradeMachineDialog machine={machine} open={upgradeOpen} onOpenChange={setUpgradeOpen} />{" "}

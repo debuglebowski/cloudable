@@ -189,9 +189,15 @@ export const MACHINE_ACTIVITY_PAGE_SIZE = 50;
  * timeline and narrowed in the browser: on an org with several machines, most
  * of any org-wide page belongs to other machines, so client-side narrowing
  * showed an arbitrary slice of this machine's history.
+ *
+ * `enabled` exists because the caller sits above the tab it feeds — the filter
+ * toolbar renders in the detail page's tab row, so this hook can no longer rely
+ * on Radix unmounting an inactive tab to keep it from firing. Without it every
+ * visit to a machine would fetch activity nobody asked to see.
  */
-export function useMachineActivity(machineId: string) {
+export function useMachineActivity(machineId: string, enabled = true) {
   return useInfiniteQuery({
+    enabled,
     queryKey: auditKeys.machineTimeline(machineId),
     queryFn: ({ pageParam }) =>
       fetchEvidencePage({
