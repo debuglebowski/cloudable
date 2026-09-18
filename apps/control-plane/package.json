@@ -24,7 +24,7 @@
     "@cloudable/events": "workspace:*",
     "@cloudable/schema": "workspace:*",
     "@cloudable/session-token": "workspace:*",
-    "@better-auth/sso": "1.7.2",
+    "@better-auth/sso": "1.7.5",
     "@effect/platform": "0.97.1",
     "@effect/platform-bun": "0.91.2",
     "better-auth": "1.7.2",
