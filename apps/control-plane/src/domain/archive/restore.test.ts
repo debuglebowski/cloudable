@@ -18,7 +18,10 @@ import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { ApprovalService, settingKeyFor } from "../../services/ApprovalService";
 import { EventBus } from "../../services/EventBus";
-import type { ProvisioningServiceTag } from "../../services/ProvisioningService";
+import {
+  type ProvisioningService,
+  ProvisioningServiceTag,
+} from "../../services/ProvisioningService";
 import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { MachineService } from "../machine/MachineService";
 import { restoreSnapshot } from "./restore";
@@ -298,6 +301,61 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
     expect(row?.state).toBe("provisioning");
     expect(row?.archivedAt).toBeNull();
+  });
+
+  test("the restore reaches the provider with the snapshot's own disk id, not some other snapshot's", async () => {
+    const org = await seedOrg();
+    await setRestoreApprovalMode(org.id, "none");
+    const machine = await seedMachine(org.id);
+    const snapshot = await seedCapturedSnapshot(machine.id);
+    // A second snapshot of the same machine, so "it restored something" cannot pass for
+    // "it restored the right thing".
+    const decoy = await seedCapturedSnapshot(machine.id);
+    expect(decoy.id).not.toBe(snapshot.id);
+
+    const asked: string[] = [];
+    const recordingService = {
+      restoreDataDisk: ({
+        machineId,
+        dataDiskSnapshotId,
+      }: { machineId: string; dataDiskSnapshotId: string }) => {
+        asked.push(dataDiskSnapshotId);
+        return Effect.succeed({ machineId, state: "provisioning" as const, externalId: "vm-1" });
+      },
+      create: () => Effect.die("not used in this test"),
+      snapshot: () => Effect.die("not used in this test"),
+      grantSnapshotRead: () => Effect.die("not used in this test"),
+      revokeSnapshotRead: () => Effect.die("not used in this test"),
+      snapshotDiskExists: () => Effect.die("not used in this test"),
+      deleteSnapshotDisk: () => Effect.die("not used in this test"),
+      archive: () => Effect.die("not used in this test"),
+      reconcile: () => Effect.die("not used in this test"),
+      reimage: () => Effect.die("not used in this test"),
+      restart: () => Effect.die("not used in this test"),
+    } as unknown as ProvisioningService;
+    const recording = Layer.succeed(ProvisioningServiceTag, recordingService);
+
+    const dbLayer = Layer.succeed(Db, db);
+    await Effect.runPromise(
+      Effect.provide(
+        restoreSnapshot({
+          snapshotId: snapshot.id,
+          mode: "data",
+          target: onto(machine.id),
+          requestedByPersonId: crypto.randomUUID(),
+          reason: "restore the right disk",
+        }),
+        Layer.mergeAll(
+          dbLayer,
+          Layer.provide(EventBus.Default, dbLayer),
+          Layer.provide(ApprovalService.Default, dbLayer),
+          recording,
+          MachineService.Default.pipe(Layer.provide(Layer.merge(dbLayer, recording))),
+        ),
+      ),
+    );
+
+    expect(asked).toEqual([`test-snap-${snapshot.id}`]);
   });
 
   test("a restore into a NEW machine creates one and never touches the machine it came from", async () => {

@@ -101,6 +101,26 @@ describe.skipIf(!azureConfigured)(
       // changes the machine's agent would re-attest as something else.
       expect(restarted.externalId).toBe(created.externalId);
 
+      // Capture BEFORE the teardown, the same order `createSnapshot` uses — archive
+      // deletes the disks this copies.
+      const captured = await run(
+        Effect.gen(function* () {
+          const provisioning = yield* ProvisioningServiceTag;
+          return yield* provisioning.snapshot({
+            machineId,
+            provider: "azure",
+            externalId: created.externalId,
+            scope: "full",
+            snapshotId: crypto.randomUUID(),
+            quiesce: false,
+          });
+        }),
+      );
+      const capturedDataDisk = captured.disks.find((disk) => disk.kind === "data");
+      expect(capturedDataDisk).toBeDefined();
+      // The real provisioned size, not a placeholder — a restore sizes the new disk from it.
+      expect(captured.sizeBytes).toBeGreaterThan(0);
+
       const archived = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
@@ -108,7 +128,55 @@ describe.skipIf(!azureConfigured)(
         }),
       );
       expect(archived.state).toBe("archived");
-    }, 600_000);
+
+      // The case this whole feature exists for: the machine's VM, both disks, NIC and
+      // public IP are gone, and a restore has to rebuild it around the captured data disk.
+      // Nothing resolves any more, so this also exercises the adapter probing for what
+      // exists rather than being told.
+      const restored = await run(
+        Effect.gen(function* () {
+          const provisioning = yield* ProvisioningServiceTag;
+          return yield* provisioning.restoreDataDisk({
+            machineId,
+            orgId: "integration-check",
+            provider: "azure",
+            region: "eastus",
+            sizeSku: "Standard_B1s",
+            image: "ubuntu-22.04",
+            externalId: null,
+            dataDiskSnapshotId: (capturedDataDisk as { externalId: string }).externalId,
+          });
+        }),
+      );
+      expect(restored.state).toBe("provisioning");
+      expect(restored.externalId).toContain("/providers/Microsoft.Compute/virtualMachines/");
+    }, 900_000);
+
+    test("restoreDataDisk refuses a snapshot id that names nothing, rather than building an empty machine", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const provisioning = yield* ProvisioningServiceTag;
+          return yield* Effect.either(
+            provisioning.restoreDataDisk({
+              machineId: crypto.randomUUID(),
+              orgId: "integration-check",
+              provider: "azure",
+              region: "eastus",
+              sizeSku: "Standard_B1s",
+              image: "ubuntu-22.04",
+              externalId: null,
+              dataDiskSnapshotId: "not-an-arm-resource-id",
+            }),
+          );
+        }),
+      );
+      // Fails at step 0, before anything is created or destroyed.
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect(result.left).toBeInstanceOf(ProvisioningError);
+        expect(result.left.reason).toBe("not_found");
+      }
+    }, 60_000);
 
     test("restart on an unknown machine fails with not_found, not a false success", async () => {
       const result = await run(
