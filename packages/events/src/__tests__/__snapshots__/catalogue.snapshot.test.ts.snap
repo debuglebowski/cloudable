@@ -52,7 +52,6 @@ exports[`event type catalogue is append-only 1`] = `
   "snapshot.expired",
   "snapshot.legal_hold_cleared",
   "snapshot.legal_hold_set",
-  "snapshot.record_corrected",
   "snapshot.restored",
 ]
 `;

@@ -80,34 +80,6 @@ export type SnapshotEvent =
       };
     })
   | (EventEnvelope & {
-      /**
-       * A snapshot row was corrected to name copies that already existed at the provider.
-       *
-       * Only ever emitted by a one-off repair, never in normal operation. Rows written
-       * before the control plane recorded ids say they captured nothing while the copies
-       * sit in the subscription, so the console shows an archive as holding no data when
-       * it holds some. Correcting the row changes what the product claims about real
-       * data, and a change like that is not allowed to be invisible — this is the record
-       * of who changed it and to what.
-       *
-       * The snapshot itself is untouched: this names copies that were always there, it
-       * does not create, move or destroy anything.
-       */
-      type: "snapshot.record_corrected";
-      payload: {
-        /** The ids written into `capturedDisks`, read back from the provider. */
-        capturedDiskExternalIds: string[];
-        /** Total across those disks, as the provider reports it. */
-        sizeBytes: number;
-        /** Set when the correction also had to withdraw a claim — a `full`-scope row
-         * whose data disk was destroyed by the old archive path keeps its surviving OS
-         * disk but stops claiming to hold data. Null when nothing was withdrawn. */
-        withdrewClaim: string | null;
-        /** Why this row was corrected, for an auditor reading it cold. */
-        reason: string;
-      };
-    })
-  | (EventEnvelope & {
       type: "snapshot.legal_hold_set";
       payload: { reason: string };
     })

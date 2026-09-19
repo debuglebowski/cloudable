@@ -255,8 +255,6 @@ function summarize(row: RawEventRow): string {
       return `${event.payload.missingDiskExternalIds.length} of ${event.payload.recordedDiskCount} disk(s) this snapshot recorded were missing at the provider, with retention open until ${event.payload.expiresAt}. The data is gone early; the record is not.`;
     case "snapshot.expired":
       return `Snapshot created ${event.payload.createdAt} expired after its ${event.payload.retentionDays}-day retention window.`;
-    case "snapshot.record_corrected":
-      return `Snapshot record corrected to name ${event.payload.capturedDiskExternalIds.length} provider copy/copies it already had but never recorded${event.payload.withdrewClaim ? `, and to withdraw a claim: ${event.payload.withdrewClaim}` : ""}. ${event.payload.reason}`;
     case "snapshot.legal_hold_set":
       return `A legal hold was placed on a snapshot: ${event.payload.reason}.`;
     case "snapshot.legal_hold_cleared":
@@ -363,7 +361,6 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "snapshot.created":
     case "snapshot.restored":
     case "snapshot.data_missing":
-    case "snapshot.record_corrected":
     case "snapshot.expired":
     case "snapshot.legal_hold_set":
     case "snapshot.legal_hold_cleared":
