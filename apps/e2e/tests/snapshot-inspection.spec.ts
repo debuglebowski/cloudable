@@ -42,7 +42,14 @@ let email = "";
 let orgId = "";
 let personId = "";
 let authUserId = "";
-let liveMachineId = "";
+/** Machine ids by role. Every test drives a machine's own Snapshots tab now: the Archive
+ * page is a read-only fleet overview and carries no actions at all. */
+const ids: Record<keyof typeof NAMES, string> = {
+  owned: "",
+  orphaned: "",
+  empty: "",
+  live: "",
+};
 
 test.beforeAll(async () => {
   const { client, db } = connect();
@@ -105,11 +112,14 @@ test.beforeAll(async () => {
     };
 
     const disk = [{ kind: "data", externalId: `e2e-${randomUUID()}`, sizeBytes: 1024 }];
-    await snapshot((await machine(NAMES.owned, personId)).id, disk);
-    await snapshot((await machine(NAMES.orphaned, null)).id, disk);
-    await snapshot((await machine(NAMES.empty, personId)).id, []);
-    liveMachineId = (await machine(NAMES.live, personId, true)).id;
-    await snapshot(liveMachineId, disk, "manual");
+    ids.owned = (await machine(NAMES.owned, personId)).id;
+    await snapshot(ids.owned, disk);
+    ids.orphaned = (await machine(NAMES.orphaned, null)).id;
+    await snapshot(ids.orphaned, disk);
+    ids.empty = (await machine(NAMES.empty, personId)).id;
+    await snapshot(ids.empty, []);
+    ids.live = (await machine(NAMES.live, personId, true)).id;
+    await snapshot(ids.live, disk, "manual");
   } finally {
     await client.end();
   }
@@ -138,20 +148,25 @@ test.beforeEach(async ({ page }) => {
   await expect(page).toHaveURL("/");
 });
 
-const openMenuFor = async (page: import("@playwright/test").Page, machineName: string) => {
-  await page.goto("/archive");
-  await expect(page.getByRole("heading", { name: "Archive" })).toBeVisible();
-  const row = page.getByRole("row").filter({ hasText: machineName });
-  await row.getByRole("button", { name: "Snapshot actions" }).click();
+/** The snapshot row on a machine's own Snapshots tab, located by its trigger badge.
+ * Each seeded machine has exactly one snapshot, so the badge identifies it uniquely. */
+const snapshotRow = async (
+  page: import("@playwright/test").Page,
+  machineId: string,
+  trigger: "Archive" | "Manual" = "Archive",
+) => {
+  await page.goto(`/machines/${machineId}`);
+  await page.getByRole("tab", { name: "Snapshots" }).click();
+  return page.getByRole("row").filter({ hasText: trigger });
 };
 
 test("the owner can browse their own archived machine's files", async ({ page }) => {
   test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH on the control plane");
 
-  await openMenuFor(page, NAMES.owned);
-  await page.getByRole("menuitem", { name: "Browse files" }).click();
+  const row = await snapshotRow(page, ids.owned);
+  await row.getByRole("button", { name: "Browse files" }).click();
 
-  await expect(page).toHaveURL(/\/archive\/inspections\//);
+  await expect(page).toHaveURL(/\/inspections\//);
   // The page says what it is showing, rather than leaving /etc to be discovered missing.
   await expect(page.getByText(/persistent disk/)).toBeVisible();
   // Real contents of the checked-in ext4 fixture, read through the whole stack.
@@ -161,9 +176,9 @@ test("the owner can browse their own archived machine's files", async ({ page })
 test("nothing can be changed from a snapshot", async ({ page }) => {
   test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH on the control plane");
 
-  await openMenuFor(page, NAMES.owned);
-  await page.getByRole("menuitem", { name: "Browse files" }).click();
-  await expect(page).toHaveURL(/\/archive\/inspections\//);
+  const row = await snapshotRow(page, ids.owned);
+  await row.getByRole("button", { name: "Browse files" }).click();
+  await expect(page).toHaveURL(/\/inspections\//);
 
   // A snapshot has no write path at all on the server, so offering these would be
   // offering something that cannot happen.
@@ -179,9 +194,9 @@ test("a file too large to read inline can still be downloaded", async ({ page })
   // file is as likely to be a 40 MiB archive as a text note, and `read` refuses anything
   // over 1 MiB or containing a NUL because it feeds an editor. Without download, neither
   // could be recovered at all.
-  await openMenuFor(page, NAMES.owned);
-  await page.getByRole("menuitem", { name: "Browse files" }).click();
-  await expect(page).toHaveURL(/\/archive\/inspections\//);
+  const snapshot = await snapshotRow(page, ids.owned);
+  await snapshot.getByRole("button", { name: "Browse files" }).click();
+  await expect(page).toHaveURL(/\/inspections\//);
 
   await page.getByRole("tab", { name: "Table" }).click();
   const row = page.getByRole("row").filter({ hasText: "big.bin" });
@@ -195,37 +210,57 @@ test("a file too large to read inline can still be downloaded", async ({ page })
 test("an offboarded machine's snapshot is refused, with what to do about it", async ({ page }) => {
   // The case the gate exists for: offboarding cleared the owner, and the live-access gate
   // would read that null owner as "allow anyone in the org".
-  await openMenuFor(page, NAMES.orphaned);
-  await page.getByRole("menuitem", { name: "Browse files" }).click();
+  const row = await snapshotRow(page, ids.orphaned);
+  await row.getByRole("button", { name: "Browse files" }).click();
 
-  await expect(page).not.toHaveURL(/\/archive\/inspections\//);
+  await expect(page).not.toHaveURL(/\/inspections\//);
   await expect(page.getByText(/Request elevated access/)).toBeVisible();
 });
 
 test("a snapshot that captured nothing greys the action out rather than hiding it", async ({
   page,
 }) => {
-  await openMenuFor(page, NAMES.empty);
-  const item = page.getByRole("menuitem", { name: "Browse files" });
-  await expect(item).toBeVisible();
-  await expect(item).toBeDisabled();
+  const row = await snapshotRow(page, ids.empty);
+  const button = row.getByRole("button", { name: "Browse files" });
+  await expect(button).toBeVisible();
+  await expect(button).toBeDisabled();
 });
 
 test("a manual snapshot is browsable from the machine's own Snapshots tab", async ({ page }) => {
   test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH on the control plane");
 
-  // The Archive page cannot reach this row: it lists archived machines and picks each
-  // one's archive-trigger snapshot, and this is a manual snapshot of a RUNNING machine.
-  // Before the tab had its own button, a snapshot someone took on purpose could be
-  // restored from the console but never opened.
-  await page.goto(`/machines/${liveMachineId}`);
-  await page.getByRole("tab", { name: "Snapshots" }).click();
-
-  const row = page.getByRole("row").filter({ hasText: "Manual" });
+  // A manual snapshot of a RUNNING machine — a row the Archive page never listed even
+  // when it had actions, because it only ever showed one archive-trigger snapshot per
+  // archived machine.
+  const row = await snapshotRow(page, ids.live, "Manual");
   await row.getByRole("button", { name: "Browse files" }).click();
 
-  await expect(page).toHaveURL(/\/archive\/inspections\//);
+  await expect(page).toHaveURL(/\/inspections\//);
   // Real contents of the checked-in ext4 fixture, same as the archived-machine path --
   // proving the tab's button reaches the same reader, not just the same route.
   await expect(page.getByText("notes.txt").first()).toBeVisible();
+});
+
+test("the Archive page is an overview and offers no actions", async ({ page }) => {
+  // It governs nothing now: no Browse files, no legal hold, no row menu. Both of those
+  // moved to a machine's Snapshots tab, which lists every snapshot rather than only the
+  // one archiving took -- a manual or upgrade snapshot is retained and billed the same
+  // way and could never be held from here.
+  await page.goto("/archive");
+  await expect(page.getByRole("heading", { name: "Archive" })).toBeVisible();
+  const row = page.getByRole("row").filter({ hasText: NAMES.owned });
+  await expect(row).toBeVisible();
+
+  await expect(row.getByRole("button", { name: "Snapshot actions" })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Browse files" })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: /legal hold/i })).toHaveCount(0);
+  // Still an overview: the retention clock and the hold state are readable here.
+  await expect(row.getByText(/days left/)).toBeVisible();
+  await expect(row.getByText("Not held")).toBeVisible();
+});
+
+test("legal hold can be placed from a machine's Snapshots tab", async ({ page }) => {
+  const row = await snapshotRow(page, ids.owned);
+  await row.getByRole("button", { name: "Place legal hold" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
 });

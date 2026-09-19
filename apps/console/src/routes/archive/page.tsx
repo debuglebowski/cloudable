@@ -1,31 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import {
-  Archive,
-  Calendar,
-  Clock,
-  FolderSearch,
-  Lock,
-  LockOpen,
-  MoreHorizontal,
-  Scale,
-  Server,
-} from "lucide-react";
-import { useState } from "react";
+import { Archive, Calendar, Clock, Lock, LockOpen, Scale, Server } from "lucide-react";
 
 import { type ArchivedSnapshot, useArchivedSnapshots } from "@/api/archive";
 import { type Machine, listMachines, machinesKeys } from "@/api/machines";
 import { PageLoader } from "@/components/page-loader";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   Table,
@@ -37,11 +19,12 @@ import {
 } from "@/components/ui/table";
 import { ARCHIVED_MACHINE_STATES } from "@/routes/machines/machine-state";
 
-import { LegalHoldDialog } from "./legal-hold-dialog";
 import { RetentionStatus, formatDate, formatSnapshotSize } from "./snapshot-format";
-import { useInspectSnapshot } from "./use-inspect-snapshot";
 
-/** Read-only — placing/clearing a hold is a menu action now, not a button on this cell. */
+/** Read-only, and the only kind of legal-hold control this page has. Placing and clearing
+ * a hold lives on a machine's own Snapshots tab, where every snapshot is listed rather
+ * than just the one archiving took — a manual or upgrade snapshot is retained and billed
+ * exactly like an archive one, and could never be put on hold from here. */
 function LegalHoldStatus({ legalHold }: { legalHold: boolean }) {
   return legalHold ? (
     <Badge variant="secondary">
@@ -72,8 +55,6 @@ export function ArchivePage() {
     isLoading: snapshotsLoading,
     isError: snapshotsError,
   } = useArchivedSnapshots();
-  const [legalHoldTarget, setLegalHoldTarget] = useState<ArchivedSnapshot | null>(null);
-  const { inspect, isPending: inspectPending } = useInspectSnapshot();
 
   const isLoading = machinesQuery.isPending || snapshotsLoading;
   const isError = machinesQuery.isError || snapshotsError;
@@ -97,8 +78,10 @@ export function ArchivePage() {
       <div className="flex shrink-0 flex-col gap-1">
         <h1 className="text-xl font-semibold">Archive</h1>
         <p className="max-w-prose text-sm text-muted-foreground">
-          Machines are archived, never deleted. This page governs retention and legal hold across
-          the fleet — restoring an archived machine happens from its own machine page.
+          Machines are archived, never deleted. This is the fleet overview: which machines are
+          archived, and where each one stands against its retention clock. Everything you can do to
+          a snapshot — browse it, restore it, hold it — happens on a machine's own Snapshots tab,
+          which lists all of them rather than only the one archiving took.
         </p>
       </div>
 
@@ -141,9 +124,6 @@ export function ArchivePage() {
                       Legal hold
                     </span>
                   </TableHead>
-                  <TableHead className="w-10">
-                    <span className="sr-only">Actions</span>
-                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -181,44 +161,6 @@ export function ArchivePage() {
                         <span className="text-sm text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
-                      {snapshot && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" aria-label="Snapshot actions">
-                              <MoreHorizontal />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent>
-                            {/* Greyed WITH the reason, never hidden — the rule
-                                `sub-state.ts` states and the reason `restoreUnavailableReason`
-                                is carried through the wire at all. An action that vanishes
-                                tells someone nothing about why. */}
-                            <DropdownMenuItem
-                              disabled={snapshot.subState !== "restorable" || inspectPending}
-                              title={snapshot.restoreUnavailableReason ?? undefined}
-                              onSelect={() => inspect(snapshot.id)}
-                            >
-                              <FolderSearch />
-                              Browse files
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => setLegalHoldTarget(snapshot)}>
-                              {snapshot.legalHold ? (
-                                <>
-                                  <LockOpen />
-                                  Clear legal hold
-                                </>
-                              ) : (
-                                <>
-                                  <Lock />
-                                  Place legal hold
-                                </>
-                              )}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -226,13 +168,6 @@ export function ArchivePage() {
           )}
         </CardContent>
       </Card>
-
-      <LegalHoldDialog
-        snapshot={legalHoldTarget}
-        onOpenChange={(open) => {
-          if (!open) setLegalHoldTarget(null);
-        }}
-      />
     </div>
   );
 }

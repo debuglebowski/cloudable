@@ -14,8 +14,8 @@ import { useSearch } from "@tanstack/react-router";
  * here can write.
  */
 export function SnapshotFilesPage() {
-  const { sessionId } = useParams({ from: "/archive/inspections/$sessionId" });
-  const { root } = useSearch({ from: "/archive/inspections/$sessionId" });
+  const { sessionId } = useParams({ from: "/inspections/$sessionId" });
+  const { root } = useSearch({ from: "/inspections/$sessionId" });
   const session = useSnapshotInspection(sessionId);
 
   return (

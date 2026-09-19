@@ -268,7 +268,7 @@ be implicit and tied to whether someone happened to navigate away.
 | :--- | :--- | :--- |
 | `/access/sessions/$sessionId/terminal` | `components/terminal/terminal-session.tsx` | machine page "Connect" (fresh mint), Access page row (rejoin) |
 | `/access/sessions/$sessionId/files` | `components/files/file-browser.tsx` | machine page "Files" (fresh mint), Access page row (rejoin) |
-| `/archive/inspections/$sessionId` | `routes/archive/snapshot-files-page.tsx` | Archive page "Browse files" |
+| `/inspections/$sessionId` | `routes/archive/snapshot-files-page.tsx` | A machine's Snapshots tab, "Browse files" |
 
 The machine page mints via `useMintSession({ targetMachineId, method })` and navigates.
 No button checks the access-method policy locally — the server's own `method_disabled`

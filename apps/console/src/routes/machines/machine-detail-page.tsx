@@ -7,6 +7,8 @@ import {
   Disc,
   FolderSearch,
   History,
+  Lock,
+  LockOpen,
   type LucideIcon,
   MapPin,
   User,
@@ -36,6 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LegalHoldDialog } from "@/routes/archive/legal-hold-dialog";
 import { RestoreDialog } from "@/routes/archive/restore-dialog";
 import { RetentionStatus, formatDate, formatSnapshotSize } from "@/routes/archive/snapshot-format";
 import { useInspectSnapshot } from "@/routes/archive/use-inspect-snapshot";
@@ -139,6 +142,10 @@ export function MachineDetailPage() {
   const checksQuery = useComplianceChecks();
   const snapshotsQuery = useMachineSnapshots(machineId);
   const { inspect, isPending: inspectPending } = useInspectSnapshot();
+  // Legal hold moved here from the Archive page, which could only ever reach the one
+  // snapshot archiving took. Retention applies to every snapshot, so the control belongs
+  // where every snapshot is listed.
+  const [legalHoldTarget, setLegalHoldTarget] = useState<ArchivedSnapshot | null>(null);
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -482,6 +489,20 @@ export function MachineDetailPage() {
                               <FolderSearch />
                               Browse files
                             </Button>
+                            {/* Icon-only to keep three controls in one cell; the label is
+                                on aria-label, and RetentionStatus already renders "Legal
+                                hold" in the Retention column when one is on, so the state
+                                is readable without opening anything. */}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={
+                                snapshot.legalHold ? "Clear legal hold" : "Place legal hold"
+                              }
+                              onClick={() => setLegalHoldTarget(snapshot)}
+                            >
+                              {snapshot.legalHold ? <LockOpen /> : <Lock />}
+                            </Button>
                             {snapshot.subState === "restorable" ? (
                               <RestoreDialog snapshot={snapshot} />
                             ) : (
@@ -518,6 +539,12 @@ export function MachineDetailPage() {
       <BrowseFilesDialog machine={machine} open={filesOpen} onOpenChange={setFilesOpen} />
       <RestartMachineDialog machine={machine} open={restartOpen} onOpenChange={setRestartOpen} />
       <ArchiveMachineDialog machine={machine} open={archiveOpen} onOpenChange={setArchiveOpen} />
+      <LegalHoldDialog
+        snapshot={legalHoldTarget}
+        onOpenChange={(open) => {
+          if (!open) setLegalHoldTarget(null);
+        }}
+      />
     </div>
   );
 }

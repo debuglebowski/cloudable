@@ -24,7 +24,7 @@ export function useInspectSnapshot() {
     openInspection.mutate(snapshotId, {
       onSuccess: (session) => {
         void navigate({
-          to: "/archive/inspections/$sessionId",
+          to: "/inspections/$sessionId",
           params: { sessionId: session.sessionId },
           // The server decides the root (the machine's home directory), so it rides in
           // the query string rather than being re-derived client-side.
