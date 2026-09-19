@@ -15,6 +15,9 @@ interface FakeMachineEntry {
   status: MachineStatus;
   /** Declared at `create()` time — see `MachineDescriptor.packages`. */
   declaredPackages: ReadonlyArray<string>;
+  /** The snapshot disk this machine was last restored from, if ever. Exposed so a test can
+   * assert the restore used the snapshot it was asked for, not merely that one happened. */
+  restoredFromDiskId?: string;
 }
 
 export interface FakeProvisioningOptions {
@@ -264,6 +267,21 @@ export const makeFakeProvisioningServiceLive = (
           return settled.status;
         });
 
+      const restoreDataDisk: ProvisioningService["restoreDataDisk"] = (desc) =>
+        Effect.gen(function* () {
+          const existing = yield* require(desc.machineId);
+          // Records WHICH snapshot disk it was asked for. A fake that ignored it would
+          // pass a test that restored entirely the wrong snapshot — the same reason
+          // `snapshot` above returns sizes that differ per disk instead of a constant.
+          const restored: FakeMachineEntry = {
+            ...existing,
+            status: { ...existing.status, state: "provisioning" },
+            restoredFromDiskId: desc.dataDiskSnapshotId,
+          };
+          yield* Ref.update(state, (map) => new Map(map).set(desc.machineId, restored));
+          return restored.status;
+        });
+
       const restart: ProvisioningService["restart"] = (machineId: string, _provider) =>
         Effect.gen(function* () {
           const existing = yield* require(machineId);
@@ -282,6 +300,7 @@ export const makeFakeProvisioningServiceLive = (
         revokeSnapshotRead,
         snapshotDiskExists,
         deleteSnapshotDisk,
+        restoreDataDisk,
         archive,
         reconcile,
         reimage,

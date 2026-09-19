@@ -107,6 +107,7 @@ describe("refreshMachineStatus", () => {
         // result so an unexpected call fails loudly instead of passing silently.
         snapshotDiskExists: () => Effect.die("not used in this test"),
         deleteSnapshotDisk: () => Effect.die("not used in this test"),
+        restoreDataDisk: () => Effect.die("not used in this test"),
         // `createSnapshot` calls this to measure the copy. A provider with nothing readable
         // answers not_found, and the measurement is skipped — which is this fake exactly.
         grantSnapshotRead: () => Effect.fail(new ProvisioningError({ reason: "not_found" })),

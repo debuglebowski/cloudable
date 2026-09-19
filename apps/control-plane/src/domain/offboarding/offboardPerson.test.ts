@@ -112,6 +112,7 @@ function buildTestLayers(opts: {
     create: () => Effect.die("not used in this test"),
     snapshotDiskExists: () => Effect.die("not used in this test"),
     deleteSnapshotDisk: () => Effect.die("not used in this test"),
+    restoreDataDisk: () => Effect.die("not used in this test"),
     grantSnapshotRead: () => Effect.die("not used in this test"),
     revokeSnapshotRead: () => Effect.die("not used in this test"),
     archive: (machineId) =>

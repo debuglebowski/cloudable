@@ -71,6 +71,20 @@ export interface MachineDescriptor {
    * machine-level overrides yet, so this is the org (+ template) manifest.
    */
   packages?: ReadonlyArray<string>;
+  /**
+   * A snapshot's captured DATA disk (`CapturedDisk.externalId`, a full ARM snapshot
+   * resource id) to build this machine's data disk from, instead of an empty one.
+   *
+   * This is how "restore into a new machine" works: the machine is created normally —
+   * same catalog validation, same fresh OS from `image`, same new identity — and only
+   * `/home` comes from the snapshot. The OS disk is NEVER cloned, so a restored machine
+   * inherits no host keys or on-disk identity from the one it came from.
+   *
+   * Nothing else in the guest needs to change: `homeVolumeSection` skips `mkfs` when
+   * `blkid` finds a filesystem, reads the `.cloudable-home-volume` marker, and adopts the
+   * disk's own uid/gid — logic written for reimage that covers this unchanged.
+   */
+  dataDiskSourceSnapshotId?: string;
 }
 
 /**
@@ -78,6 +92,49 @@ export interface MachineDescriptor {
  * in `ProvisioningService.fake.ts` / the PR description for why a fourth
  * port method was added instead of composing `archive` + `create`.
  */
+/**
+ * Overwrite an EXISTING machine's data disk with a copy of a snapshot's, and bring the
+ * machine back on a fresh OS disk from `image`.
+ *
+ * Distinct from `MachineDescriptor.dataDiskSourceSnapshotId`, which builds a brand-new
+ * machine: this one targets a machine that already has a row, and may or may not still
+ * have infrastructure — a live machine has all of it, one that `archive()` tore down has
+ * none. The adapter probes rather than being told which, deliberately: `machines.state`
+ * and provider reality demonstrably disagree (see this adapter's own note on the
+ * 2026-09-12 incident where a row read archived while its VM was still running), and a
+ * caller-side branch on state would reconfigure a live machine's OS disk.
+ */
+export interface RestoreDataDiskDescriptor {
+  machineId: string;
+  orgId: string;
+  provider: Provider;
+  region: string | null;
+  sizeSku: string;
+  /** The machine's own DECLARED image (`machines.image`). Never the snapshot's OS — that
+   * is not cloned here, ever. */
+  image: string;
+  /** Required in practice, optional only to match `MachineDescriptor`. A machine whose
+   * infrastructure `archive()` deleted has no VM left to resolve names from, so its
+   * replacement is named by `namesFor(machineId, name)` — omitting it takes the id-only
+   * branch and silently renames every resource of a revived machine. */
+  name?: string;
+  /** Re-declared into the replacement VM's cloud-init. `reimage` builds its descriptor
+   * without these and therefore emits an empty `CLOUDABLE_PACKAGES=`; this must not copy
+   * that. */
+  packages?: ReadonlyArray<string>;
+  /** The machine's current `externalResourceId`, `null` if unknown — same contract and
+   * same tag-based self-healing as `archive`/`reconcile`/`restart`/`reimage`. */
+  externalId: string | null;
+  /** `CapturedDisk.externalId` of the snapshot's `kind: "data"` entry. Exactly one disk;
+   * an `os` entry is never read here.
+   *
+   * No size or region passed alongside it, deliberately: the adapter reads both off the
+   * snapshot resource itself before it destroys anything. `capturedDisks[].sizeBytes` is
+   * the PROVISIONED size of the source disk and can exceed this build's default, and a
+   * size taken from the row is a re-derivation nothing re-checks. */
+  dataDiskSnapshotId: string;
+}
+
 export interface ReimageDescriptor {
   machineId: string;
   orgId: string;
@@ -313,6 +370,20 @@ export interface ProvisioningService {
     externalId: string | null,
   ): Effect.Effect<MachineStatus, ProvisioningError>;
   reimage(desc: ReimageDescriptor): Effect.Effect<MachineStatus, ProvisioningError>;
+  /**
+   * Put a snapshot's data disk back onto an existing machine. See
+   * `RestoreDataDiskDescriptor`.
+   *
+   * Named `restoreDataDisk`, not `restore`: only the data disk is restored. `config` and
+   * `full` restore modes have nothing behind them (no config is captured; secret bindings
+   * are unimplemented) and are refused in `domain/archive/restore.ts` long before they
+   * could reach this port.
+   *
+   * Not `archive` + `create` and not `reimage`: the first restarts the retention clock and
+   * carries archive-lifecycle meaning, and the second deliberately PRESERVES the data disk
+   * this operation exists to replace.
+   */
+  restoreDataDisk(desc: RestoreDataDiskDescriptor): Effect.Effect<MachineStatus, ProvisioningError>;
   restart(
     machineId: string,
     provider: Provider,

@@ -54,6 +54,7 @@ export const SwitchableProvisioningServiceLive: Layer.Layer<ProvisioningServiceT
       reconcile: (machineId, provider, externalId) =>
         implFor(provider).reconcile(machineId, provider, externalId),
       reimage: (desc) => implFor(desc.provider).reimage(desc),
+      restoreDataDisk: (desc) => implFor(desc.provider).restoreDataDisk(desc),
       restart: (machineId, provider, externalId) =>
         implFor(provider).restart(machineId, provider, externalId),
     } satisfies ProvisioningService;

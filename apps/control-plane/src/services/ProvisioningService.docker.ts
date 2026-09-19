@@ -469,4 +469,15 @@ export const makeDockerProvisioningServiceLive = (options: {
     // Succeeding here is not the false claim it would be on azure — nothing was ever
     // created for this delete to miss.
     deleteSnapshotDisk: () => Effect.void,
+    // A docker machine captures no disks, so there is never a snapshot to restore from.
+    // `provider_error`, not `not_found`: `not_found` is the reason callers read as "the
+    // resource is already gone", which here would let a restore report success over a
+    // machine it never touched.
+    restoreDataDisk: () =>
+      Effect.fail(
+        new ProvisioningError({
+          reason: "provider_error",
+          cause: "docker machines capture no disks; there is nothing to restore",
+        }),
+      ),
   } satisfies ProvisioningService);

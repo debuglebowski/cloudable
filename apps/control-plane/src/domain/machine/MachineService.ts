@@ -75,6 +75,16 @@ export interface CreateMachineInput {
   ownerPersonId: string;
   templateId?: string | null;
   actorPersonId?: string | null;
+  /**
+   * Build this machine's data disk from a snapshot's captured DATA disk
+   * (`CapturedDisk.externalId`) instead of an empty volume — the "restore into a new
+   * machine" path (`domain/archive/restore.ts`).
+   *
+   * Everything else about the create is unchanged: same catalog validation, same fresh OS
+   * from `image`, same generated name, same new attestation identity. Only `/home` comes
+   * from the snapshot, and the OS disk is never cloned.
+   */
+  dataDiskSourceSnapshotId?: string;
 }
 
 export interface ListMachinesInput {
@@ -461,6 +471,9 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             image: machine.image,
             name: machine.name,
             packages,
+            ...(input.dataDiskSourceSnapshotId === undefined
+              ? {}
+              : { dataDiskSourceSnapshotId: input.dataDiskSourceSnapshotId }),
           })
           .pipe(
             Effect.map((status) =>

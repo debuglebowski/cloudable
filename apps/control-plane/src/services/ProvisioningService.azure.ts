@@ -631,17 +631,80 @@ const createNetworking = (
     );
   });
 
+/**
+ * Reads a captured snapshot back off the provider: proves it still exists, and reports the
+ * size and location a disk copied from it will need.
+ *
+ * Always called BEFORE anything is created or destroyed. A restore that discovers its
+ * source is gone half-way through has already deleted the machine it was restoring, and
+ * `capturedDisks[].sizeBytes` is the provisioned size recorded at capture time, which
+ * nothing re-checks against the object itself.
+ */
+const readSnapshotSource = (
+  clients: ArmClients,
+  diskExternalId: string,
+): Effect.Effect<{ id: string; sizeBytes: number; location: string }, ProvisioningError> =>
+  Effect.gen(function* () {
+    const name = parseSnapshotNameFromResourceId(diskExternalId);
+    if (!name) {
+      return yield* Effect.fail(
+        new ProvisioningError({
+          reason: "not_found",
+          cause: `cannot parse a snapshot name from disk id ${diskExternalId}`,
+        }),
+      );
+    }
+    const found = yield* runArm(() =>
+      clients.compute.snapshots.get(config.azureMachinesResourceGroup, name),
+    );
+    if (!found.id) {
+      return yield* Effect.fail(
+        new ProvisioningError({ reason: "not_found", cause: `snapshot ${name} has no id` }),
+      );
+    }
+    return {
+      id: found.id,
+      sizeBytes: found.diskSizeBytes ?? 0,
+      location: found.location ?? "",
+    };
+  });
+
+/**
+ * The machine's persistent disk, at the canonical `${base}-data` name.
+ *
+ * `sourceSnapshot`, when given, makes this a COPY of a snapshot's data disk instead of an
+ * empty volume — the same `createOption: "Copy"` shape `snapshotOf` uses in the other
+ * direction. That is the entire mechanic behind restore: the OS is always fresh from the
+ * image, and only `/home` comes back.
+ *
+ * The name is load-bearing and must stay canonical. `dataDiskIdFor` below SYNTHESIZES this
+ * disk's id from the derived name, and `reimage` attaches by it, `archive` deletes by it,
+ * and `snapshot` captures by it. A restored disk parked under any other name would break
+ * all three silently: a later upgrade would attach the wrong disk, an archive would leave
+ * the restored one billing for ever, and a snapshot would capture pre-restore data while
+ * reporting success. Managed disks cannot be renamed, so there is no "temp name, then
+ * swap" available either.
+ */
 const createDataDisk = (
   clients: ArmClients,
   resourceGroup: string,
   location: string,
   names: ReturnType<typeof namesFor>,
+  sourceSnapshot?: { id: string; sizeBytes: number },
 ) =>
   runArm(() =>
     clients.compute.disks.beginCreateOrUpdateAndWait(resourceGroup, names.dataDisk, {
       location,
-      diskSizeGB: DATA_DISK_SIZE_GB,
-      creationData: { createOption: "Empty" },
+      // A snapshot can be larger than this build's default — `DATA_DISK_SIZE_GB` is what
+      // new machines get, not a ceiling, and a disk cannot be created smaller than the
+      // snapshot it copies. Taking the max rather than the snapshot's size alone keeps a
+      // restored machine from silently shrinking below what a fresh one would have.
+      diskSizeGB: sourceSnapshot
+        ? Math.max(DATA_DISK_SIZE_GB, Math.ceil(sourceSnapshot.sizeBytes / 1024 ** 3))
+        : DATA_DISK_SIZE_GB,
+      creationData: sourceSnapshot
+        ? { createOption: "Copy", sourceResourceId: sourceSnapshot.id }
+        : { createOption: "Empty" },
       // StandardSSD, not Premium — desc.sizeSku is free text (passed straight
       // through to hardwareProfile.vmSize), and not every VM size supports
       // premium storage. StandardSSD works with all of them.
@@ -761,11 +824,20 @@ const service: ProvisioningService = {
         region,
         names,
       );
+      // A restore into a NEW machine differs from an ordinary create in exactly one
+      // place: this disk is a copy of a snapshot's rather than an empty volume. The
+      // snapshot is read first so its real size is known before anything is built, and so
+      // a source that has since been deleted fails here rather than half-way through.
+      const dataDiskSource = desc.dataDiskSourceSnapshotId
+        ? yield* readSnapshotSource(clients, desc.dataDiskSourceSnapshotId)
+        : undefined;
+
       const dataDisk = yield* createDataDisk(
         clients,
         config.azureMachinesResourceGroup,
         region,
         names,
+        dataDiskSource,
       );
 
       const vm = yield* runArm(() =>
@@ -1109,6 +1181,137 @@ const service: ProvisioningService = {
         }),
       );
 
+      return {
+        machineId: desc.machineId,
+        state: "provisioning",
+        externalId: vm.id ?? null,
+      } satisfies MachineStatus;
+    }),
+
+  restoreDataDisk: (desc) =>
+    Effect.gen(function* () {
+      const imageReference = imageReferenceFor(desc.image);
+      if (!imageReference) {
+        return yield* Effect.fail(
+          new ProvisioningError({
+            reason: "provider_error",
+            cause: `Azure adapter only supports "ubuntu-XX.YY" images, got: ${desc.image}`,
+          }),
+        );
+      }
+      if (!desc.region) {
+        return yield* Effect.fail(
+          new ProvisioningError({ reason: "provider_error", cause: "azure requires a region" }),
+        );
+      }
+      const region = desc.region;
+      const clients = yield* getClients();
+      const rg = config.azureMachinesResourceGroup;
+
+      // STEP 0, before anything is created or destroyed. If the source is gone, or is in
+      // another region (a disk cannot be copied across one), this is where the restore
+      // stops — while the machine it would have replaced is still intact.
+      const source = yield* readSnapshotSource(clients, desc.dataDiskSnapshotId);
+      if (source.location && source.location.toLowerCase() !== region.toLowerCase()) {
+        return yield* Effect.fail(
+          new ProvisioningError({
+            reason: "provider_error",
+            cause: `snapshot is in ${source.location}, machine is in ${region}; a managed disk cannot be created from a snapshot in another region`,
+          }),
+        );
+      }
+
+      // Probe, never assume. A live machine resolves; one whose infrastructure `archive`
+      // tore down does not, and falls back to the names `create` would have minted. The
+      // caller is deliberately not the thing that decides which — see this method's doc
+      // comment on the port.
+      const resolved = yield* Effect.either(
+        resolveVmNames(clients, rg, desc.machineId, desc.externalId),
+      );
+      const names =
+        resolved._tag === "Right" ? resolved.right.names : namesFor(desc.machineId, desc.name);
+
+      // Teardown. Each step tolerates its own target being already gone, so the same
+      // sequence serves a running machine and an archived one with nothing left.
+      //
+      // The OS disk goes too, and that is not incidental: `/etc/fstab` names the OLD data
+      // disk by UUID, and `homeVolumeSection`'s `mountpoint -q /home` guard makes
+      // cloud-init skip itself on any boot after the first. Swapping the disk under a
+      // surviving OS would leave a machine that boots, never mounts /home (`nofail`),
+      // never starts the tunnel daemon (`RequiresMountsFor=/home`) — and has no inbound
+      // access to repair it. A fresh OS disk is a genuine first boot, so fstab is
+      // rewritten for the new disk and its uid/gid are adopted.
+      yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.virtualMachines.beginDeleteAndWait(rg, names.vm)),
+      );
+      yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.disks.beginDeleteAndWait(rg, names.osDisk)),
+      );
+      // Point of no return: the machine's current /home stops existing here. The caller
+      // takes a pre-overwrite snapshot before reaching this, for exactly that reason.
+      yield* tolerateAlreadyGone(
+        runArm(() => clients.compute.disks.beginDeleteAndWait(rg, names.dataDisk)),
+      );
+
+      const dataDisk = yield* createDataDisk(clients, rg, region, names, source);
+
+      // Reuse the NIC and public IP when they survived. Recreating them would move a live
+      // machine to a different address for what was asked to be a data restore; an
+      // archived machine has neither and gets new ones.
+      const existingNic = yield* tolerateAlreadyGone(
+        runArm(() => clients.network.networkInterfaces.get(rg, names.nic)),
+      );
+      const nic = existingNic ?? (yield* createNetworking(clients, rg, region, names));
+
+      const vm = yield* runArm(() =>
+        clients.compute.virtualMachines.beginCreateOrUpdateAndWait(rg, names.vm, {
+          location: region,
+          tags: { "cloudable-machine-id": desc.machineId, "cloudable-org-id": desc.orgId },
+          identity: { type: "SystemAssigned" },
+          hardwareProfile: { vmSize: desc.sizeSku },
+          storageProfile: {
+            imageReference,
+            osDisk: {
+              name: names.osDisk,
+              createOption: "FromImage",
+              managedDisk: { storageAccountType: "Standard_LRS" },
+            },
+            dataDisks: [
+              {
+                lun: DATA_DISK_LUN,
+                createOption: "Attach",
+                managedDisk: { id: dataDisk.id as string },
+              },
+            ],
+          },
+          osProfile: {
+            computerName: names.computerName,
+            adminUsername: MACHINE_OS_USER,
+            adminPassword: throwawayAdminPassword(),
+            // `packages` carried through, unlike `reimage`, whose synthetic descriptor
+            // omits them and leaves every reimaged machine with an empty
+            // CLOUDABLE_PACKAGES.
+            customData: cloudInitFor(
+              {
+                machineId: desc.machineId,
+                orgId: desc.orgId,
+                provider: "azure",
+                region,
+                sizeSku: desc.sizeSku,
+                image: desc.image,
+                ...(desc.name === undefined ? {} : { name: desc.name }),
+                ...(desc.packages === undefined ? {} : { packages: desc.packages }),
+              },
+              DATA_DISK_LUN,
+            ),
+          },
+          networkProfile: { networkInterfaces: [{ id: nic.id as string }] },
+        }),
+      );
+
+      // "provisioning", not "running": ARM returns once the deployment exists, not once
+      // cloud-init has mounted /home and the agent has attested. The agent's own check-in
+      // promotes it (`MachineDirectory.markVerified`).
       return {
         machineId: desc.machineId,
         state: "provisioning",
