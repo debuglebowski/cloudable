@@ -269,13 +269,21 @@ export const makeFakeProvisioningServiceLive = (
 
       const restoreDataDisk: ProvisioningService["restoreDataDisk"] = (desc) =>
         Effect.gen(function* () {
-          const existing = yield* require(desc.machineId);
+          // Deliberately does NOT require the machine to already be known. Restoring onto
+          // an archived machine is the main case, and an archived machine has no
+          // infrastructure left at all — the real adapter rebuilds it from nothing. A
+          // fake that insisted on a prior entry would fail exactly the case that matters.
+          const existing = (yield* Ref.get(state)).get(desc.machineId);
           // Records WHICH snapshot disk it was asked for. A fake that ignored it would
           // pass a test that restored entirely the wrong snapshot — the same reason
           // `snapshot` above returns sizes that differ per disk instead of a constant.
           const restored: FakeMachineEntry = {
-            ...existing,
-            status: { ...existing.status, state: "provisioning" },
+            declaredPackages: existing?.declaredPackages ?? [],
+            status: {
+              machineId: desc.machineId,
+              state: "provisioning",
+              externalId: existing?.status.externalId ?? `fake-${desc.machineId}`,
+            },
             restoredFromDiskId: desc.dataDiskSnapshotId,
           };
           yield* Ref.update(state, (map) => new Map(map).set(desc.machineId, restored));

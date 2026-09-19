@@ -118,9 +118,10 @@ export interface RestoreDataDiskDescriptor {
    * replacement is named by `namesFor(machineId, name)` — omitting it takes the id-only
    * branch and silently renames every resource of a revived machine. */
   name?: string;
-  /** Re-declared into the replacement VM's cloud-init. `reimage` builds its descriptor
-   * without these and therefore emits an empty `CLOUDABLE_PACKAGES=`; this must not copy
-   * that. */
+  /** Accepted for symmetry with `MachineDescriptor`, and normally omitted: cloud-init
+   * puts these in `CLOUDABLE_PACKAGES` on the agent's systemd unit, which nothing reads,
+   * and the manifest is a permission list that nothing converges a machine towards
+   * (invariant 4). A restored machine installs nothing on boot. */
   packages?: ReadonlyArray<string>;
   /** The machine's current `externalResourceId`, `null` if unknown — same contract and
    * same tag-based self-healing as `archive`/`reconcile`/`restart`/`reimage`. */

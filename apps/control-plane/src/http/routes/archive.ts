@@ -8,7 +8,11 @@ import {
   InvalidRestoreApprovalError,
   MachineAlreadyArchivedError,
   MachineNotFoundError,
+  RestoreFailedError,
+  RestoreModeUnsupportedError,
   RestoreNotApprovedError,
+  RestoreSourceIncompatibleError,
+  RestoreTargetNotConfirmedError,
   SnapshotDataMissingError,
   SnapshotDiskNotReadableError,
   SnapshotEmptyError,
@@ -44,16 +48,37 @@ const ArchiveMachineSuccess = Schema.Struct({
 
 // `requestedByPersonId` is gone from the wire — derived from
 // `CurrentUserTag.personId` in the handler, not trusted from the client.
+// What the restore lands on. A tagged union on the wire for the same reason the domain
+// models it as one: "restore into a new machine" and "overwrite this machine" are
+// different operations, and a shape where both or neither could be filled in invites a
+// client to mean something it did not.
+const RestoreTargetPayload = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("new_machine"),
+    // Required. The owner is never inferred from the snapshot's original machine — see
+    // `RestoreTarget` in domain/archive/restore.ts.
+    ownerPersonId: Schema.String,
+    name: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("existing_machine"),
+    machineId: Schema.String,
+    confirmDestroysData: Schema.optional(Schema.Boolean),
+  }),
+);
+
 const RestoreSnapshotPayload = Schema.Struct({
   mode: RestoreMode,
-  targetMachineId: Schema.String,
+  target: RestoreTargetPayload,
   reason: Schema.String,
   confirmSecretBindings: Schema.optional(Schema.Boolean),
 });
 
 const RestoreSnapshotSuccess = Schema.Struct({
   snapshotId: Schema.String,
-  targetMachineId: Schema.String,
+  /** Null while a new-machine restore is still pending: the machine is not created until
+   * the restore that would create it has been approved. */
+  targetMachineId: Schema.NullOr(Schema.String),
   mode: RestoreMode,
   approvalId: Schema.String,
   approvalStatus: ApprovalStatus,
@@ -235,6 +260,16 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .addError(SnapshotEmptyError, { status: 409 })
       .addError(SnapshotDataMissingError, { status: 409 })
       .addError(FullRestoreNotAcknowledgedError, { status: 400 })
+      // 400: the request asked for something this build does not implement (`config`,
+      // `full`) or did not acknowledge destroying a live machine's data.
+      .addError(RestoreModeUnsupportedError, { status: 400 })
+      .addError(RestoreTargetNotConfirmedError, { status: 400 })
+      // 409: the snapshot and the target cannot go together — wrong region, no data disk,
+      // a non-azure or un-restorable machine.
+      .addError(RestoreSourceIncompatibleError, { status: 409 })
+      // 502: approved and attempted, and the provider failed. Ours to explain, not the
+      // caller's to fix — and deliberately not a success.
+      .addError(RestoreFailedError, { status: 502 })
       .addError(RestoreNotApprovedError, { status: 403 }),
   )
   .add(
@@ -252,6 +287,7 @@ export const ArchiveGroup = HttpApiGroup.make("archive")
       .addError(SnapshotExpiredError, { status: 409 })
       .addError(SnapshotEmptyError, { status: 409 })
       .addError(SnapshotDataMissingError, { status: 409 })
+      .addError(RestoreFailedError, { status: 502 })
       .addError(RestoreNotApprovedError, { status: 403 }),
   )
   .add(

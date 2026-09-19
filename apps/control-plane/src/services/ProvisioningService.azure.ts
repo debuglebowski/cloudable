@@ -1288,9 +1288,6 @@ const service: ProvisioningService = {
             computerName: names.computerName,
             adminUsername: MACHINE_OS_USER,
             adminPassword: throwawayAdminPassword(),
-            // `packages` carried through, unlike `reimage`, whose synthetic descriptor
-            // omits them and leaves every reimaged machine with an empty
-            // CLOUDABLE_PACKAGES.
             customData: cloudInitFor(
               {
                 machineId: desc.machineId,

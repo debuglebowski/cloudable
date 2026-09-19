@@ -1,6 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as schema from "@cloudable/schema";
-import { machines, orgs, settingValues, snapshots } from "@cloudable/schema";
+import {
+  events,
+  integrations,
+  machines,
+  orgs,
+  people,
+  providerCatalogEntries,
+  settingValues,
+  snapshots,
+} from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
@@ -11,6 +20,7 @@ import { ApprovalService, settingKeyFor } from "../../services/ApprovalService";
 import { EventBus } from "../../services/EventBus";
 import type { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
+import { MachineService } from "../machine/MachineService";
 import { restoreSnapshot } from "./restore";
 import { createSnapshot } from "./snapshot";
 
@@ -30,7 +40,9 @@ import { createSnapshot } from "./snapshot";
 describe("restoreSnapshot — approval escalation floor (requires Postgres)", () => {
   let sql: ReturnType<typeof postgres>;
   let db: PostgresJsDatabase<typeof schema>;
-  let TestLayer: Layer.Layer<Db | EventBus | ApprovalService | ProvisioningServiceTag>;
+  let TestLayer: Layer.Layer<
+    Db | EventBus | ApprovalService | ProvisioningServiceTag | MachineService
+  >;
 
   beforeAll(() => {
     sql = postgres(config.databaseUrl);
@@ -45,6 +57,10 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
       // answers "not_found" — the one reason createSnapshot tolerates — and the rows land
       // with no captured disks, which is the truth for a machine with no infrastructure.
       FakeProvisioningServiceLive,
+      // A restore that lands on a NEW machine goes through `MachineService.create`, so it
+      // has to be real here rather than stubbed — the point of these tests is that the
+      // restore reaches the machine, not that it reaches a double.
+      MachineService.Default.pipe(Layer.provide(Layer.merge(dbLayer, FakeProvisioningServiceLive))),
     );
   });
 
@@ -53,8 +69,17 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
   });
 
   const run = <A, E>(
-    effect: Effect.Effect<A, E, Db | EventBus | ApprovalService | ProvisioningServiceTag>,
+    effect: Effect.Effect<
+      A,
+      E,
+      Db | EventBus | ApprovalService | ProvisioningServiceTag | MachineService
+    >,
   ) => Effect.runPromise(Effect.provide(effect, TestLayer));
+
+  /** Most tests restore onto the machine the snapshot came from, which is the ordinary
+   * case. Archived, so it needs no `confirmDestroysData` — a machine whose disks are gone
+   * has nothing left to destroy. */
+  const onto = (machineId: string) => ({ kind: "existing_machine", machineId }) as const;
 
   /**
    * A snapshot that actually captured something.
@@ -86,20 +111,56 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     return org;
   }
 
-  async function seedMachine(orgId: string) {
+  async function seedMachine(
+    orgId: string,
+    state: "running" | "archived_restorable" = "archived_restorable",
+  ) {
     const [machine] = await db
       .insert(machines)
       .values({
         orgId,
         name: "m1",
-        provider: "fake",
+        // `azure` because a restore refuses any other provider: only azure captures
+        // disks. The provisioning port itself is the fake, so nothing reaches a cloud.
+        provider: "azure",
         region: "eastus",
         sizeSku: "Standard_B2s",
         image: "ubuntu-24.04",
+        state,
       })
       .returning();
     if (!machine) throw new Error("seed failed");
     return machine;
+  }
+
+  /**
+   * What `MachineService.create` requires before it will build anything: the org must have
+   * azure enabled, the size and region must be in the synced catalog, and the owner must
+   * be a real person row (`machines.owner_person_id` has a live FK).
+   *
+   * Seeded rather than stubbed because a restore into a new machine goes through the whole
+   * of `create` — its catalog validation included. A test that bypassed it would not be
+   * exercising the path that runs in production.
+   */
+  async function seedCreatePrerequisites(orgId: string) {
+    await db
+      .insert(integrations)
+      .values({ orgId, kind: "cloud", provider: "azure", identifier: "azure" });
+    for (const [kind, code] of [
+      ["region", "eastus"],
+      ["sku", "Standard_B2s"],
+    ] as const) {
+      await db
+        .insert(providerCatalogEntries)
+        .values({ provider: "azure", kind, code, displayName: code, architecture: "x64" })
+        .onConflictDoNothing();
+    }
+    const [person] = await db
+      .insert(people)
+      .values({ orgId, email: `person-${crypto.randomUUID()}@example.com`, role: "member" })
+      .returning();
+    if (!person) throw new Error("seed failed");
+    return person;
   }
 
   /** Sets the ONE real gate — `ApprovalService`'s own `approval_mode:snapshot_restore`
@@ -123,25 +184,26 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
       }),
     );
 
-  test("the exact regression: mode 'full' is NOT auto-approved even when the org's snapshot_restore mode is 'none' — it still requires dual sign-off", async () => {
+  test("the regression, re-anchored: an org's 'none' policy cannot auto-approve a restore that destroys a live machine's data", async () => {
     const org = await seedOrg();
     await setRestoreApprovalMode(org.id, "none");
-    const machine = await seedMachine(org.id);
-    const snapshot = await seedCapturedSnapshot(machine.id);
+    const source = await seedMachine(org.id);
+    const snapshot = await seedCapturedSnapshot(source.id);
+    const live = await seedMachine(org.id, "running");
 
     const result = await run(
       restoreSnapshot({
         snapshotId: snapshot.id,
-        mode: "full",
-        targetMachineId: machine.id,
+        mode: "data",
+        target: { kind: "existing_machine", machineId: live.id, confirmDestroysData: true },
         requestedByPersonId: crypto.randomUUID(),
-        reason: "full restore attempted under a none-mode org policy",
-        confirmSecretBindings: true,
+        reason: "overwrite a running machine under a none-mode org policy",
       }),
     );
 
-    // The bug: this used to come back "approved" / restored: true with zero human
-    // review, purely because the org's shared setting was "none".
+    // The original bug was `mode: "full"` auto-approving under a "none" org setting. That
+    // mode is now refused outright, so the same shape is tested where it still bites: the
+    // destructive target. An org cannot configure its way below two approvers for this.
     expect(result.approvalStatus).toBe("pending");
     expect(result.restored).toBe(false);
 
@@ -151,29 +213,67 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     expect(approval.status).toBe("pending");
   });
 
-  test("mode 'config' floors at 'single' even when the org's snapshot_restore mode is 'none'", async () => {
+  test("overwriting a machine that still has data is refused without an explicit acknowledgement", async () => {
+    const org = await seedOrg();
+    await setRestoreApprovalMode(org.id, "none");
+    const source = await seedMachine(org.id);
+    const snapshot = await seedCapturedSnapshot(source.id);
+    const live = await seedMachine(org.id, "running");
+
+    const result = await run(
+      Effect.either(
+        restoreSnapshot({
+          snapshotId: snapshot.id,
+          mode: "data",
+          // No `confirmDestroysData` — the same request shape that is perfectly safe
+          // against an archived machine.
+          target: { kind: "existing_machine", machineId: live.id },
+          requestedByPersonId: crypto.randomUUID(),
+          reason: "overwrite a running machine without acknowledging it",
+        }),
+      ),
+    );
+
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") expect(result.left._tag).toBe("RestoreTargetNotConfirmedError");
+
+    // And it refused BEFORE requesting an approval — nobody is asked to sign off on a
+    // request that then rejects itself.
+    const approvals = await db.select().from(events).where(eq(events.orgId, org.id));
+    expect(approvals.some((e) => e.type === "snapshot.restored")).toBe(false);
+  });
+
+  test("modes with nothing behind them refuse, rather than writing a restore that did not happen", async () => {
     const org = await seedOrg();
     await setRestoreApprovalMode(org.id, "none");
     const machine = await seedMachine(org.id);
     const snapshot = await seedCapturedSnapshot(machine.id);
 
-    const result = await run(
-      restoreSnapshot({
-        snapshotId: snapshot.id,
-        mode: "config",
-        targetMachineId: machine.id,
-        requestedByPersonId: crypto.randomUUID(),
-        reason: "config restore attempted under a none-mode org policy",
-      }),
-    );
+    for (const mode of ["config", "full"] as const) {
+      const result = await run(
+        Effect.either(
+          restoreSnapshot({
+            snapshotId: snapshot.id,
+            mode,
+            target: onto(machine.id),
+            requestedByPersonId: crypto.randomUUID(),
+            reason: `${mode} restore`,
+            confirmSecretBindings: true,
+          }),
+        ),
+      );
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") expect(result.left._tag).toBe("RestoreModeUnsupportedError");
+    }
 
-    expect(result.approvalStatus).toBe("pending");
-    const approval = await approvalStatusOf(result.approvalId, org.id);
-    expect(approval.mode).toBe("single");
-    expect(approval.requiredApprovals).toBe(1);
+    // The whole point: both used to pass the approval gate and publish `snapshot.restored`
+    // over a machine nothing had touched. No config is captured and no secret binding is
+    // ever written, so neither could have done anything.
+    const published = await db.select().from(events).where(eq(events.orgId, org.id));
+    expect(published.some((e) => e.type === "snapshot.restored")).toBe(false);
   });
 
-  test("mode 'data' is NOT escalated: the org's own 'none' policy is honored unmodified, auto-approving", async () => {
+  test("mode 'data' onto an archived machine is NOT escalated: the org's own 'none' policy is honored unmodified, auto-approving", async () => {
     const org = await seedOrg();
     await setRestoreApprovalMode(org.id, "none");
     const machine = await seedMachine(org.id);
@@ -183,7 +283,7 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
       restoreSnapshot({
         snapshotId: snapshot.id,
         mode: "data",
-        targetMachineId: machine.id,
+        target: onto(machine.id),
         requestedByPersonId: crypto.randomUUID(),
         reason: "data restore attempted under a none-mode org policy",
       }),
@@ -191,42 +291,48 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
 
     expect(result.approvalStatus).toBe("approved");
     expect(result.restored).toBe(true);
+
+    // `restored: true` now means the provider was actually asked to put the disk back —
+    // it used to mean only that an approval resolved. The machine leaves
+    // `archived_restorable`, which nothing else in the system will ever do for it.
+    const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
+    expect(row?.state).toBe("provisioning");
+    expect(row?.archivedAt).toBeNull();
   });
 
-  test("mode 'full' still requires BOTH sign-offs when the org's mode is already 'dual' — the floor never lowers what the org itself configured", async () => {
+  test("a restore into a NEW machine creates one and never touches the machine it came from", async () => {
     const org = await seedOrg();
-    await setRestoreApprovalMode(org.id, "dual");
-    const machine = await seedMachine(org.id);
-    const snapshot = await seedCapturedSnapshot(machine.id);
-    const approverA = crypto.randomUUID();
-    const approverB = crypto.randomUUID();
+    await setRestoreApprovalMode(org.id, "none");
+    const source = await seedMachine(org.id);
+    const snapshot = await seedCapturedSnapshot(source.id);
+    const owner = (await seedCreatePrerequisites(org.id)).id;
 
     const result = await run(
       restoreSnapshot({
         snapshotId: snapshot.id,
-        mode: "full",
-        targetMachineId: machine.id,
+        mode: "data",
+        target: { kind: "new_machine", ownerPersonId: owner, name: "restored-one" },
         requestedByPersonId: crypto.randomUUID(),
-        reason: "full restore under an already-dual org policy",
-        confirmSecretBindings: true,
+        reason: "restore into a new machine",
       }),
     );
-    expect(result.approvalStatus).toBe("pending");
 
-    await run(
-      Effect.gen(function* () {
-        const approvalService = yield* ApprovalService;
-        yield* approvalService.decide(result.approvalId, org.id, approverA, "approved");
-      }),
-    );
-    expect((await approvalStatusOf(result.approvalId, org.id)).status).toBe("pending");
+    expect(result.restored).toBe(true);
+    expect(result.targetMachineId).not.toBe(source.id);
 
-    await run(
-      Effect.gen(function* () {
-        const approvalService = yield* ApprovalService;
-        yield* approvalService.decide(result.approvalId, org.id, approverB, "approved");
-      }),
-    );
-    expect((await approvalStatusOf(result.approvalId, org.id)).status).toBe("approved");
+    const [created] = await db
+      .select()
+      .from(machines)
+      .where(eq(machines.id, result.targetMachineId as string));
+    expect(created?.ownerPersonId).toBe(owner);
+    expect(created?.name).toBe("restored-one");
+    // Shape is inherited from the machine the snapshot came from — the person is asking
+    // for that machine back, not for a chance to re-pick its size.
+    expect(created?.sizeSku).toBe(source.sizeSku);
+    expect(created?.image).toBe(source.image);
+
+    // The source is untouched. This is what makes restoring a LIVE machine safe.
+    const [untouched] = await db.select().from(machines).where(eq(machines.id, source.id));
+    expect(untouched?.state).toBe("archived_restorable");
   });
 });

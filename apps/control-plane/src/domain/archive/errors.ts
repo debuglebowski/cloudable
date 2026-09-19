@@ -72,6 +72,55 @@ export class FullRestoreNotAcknowledgedError extends Schema.TaggedError<FullRest
   { snapshotId: Schema.String },
 ) {}
 
+/**
+ * The restore mode asked for has no implementation behind it.
+ *
+ * `config` and `full` were reachable and did nothing: both went through the approval gate
+ * and wrote `snapshot.restored` while touching neither the machine nor a cloud API. That
+ * is the same false record the expiry sweep used to write, so they refuse instead.
+ *
+ * `config` fails on the CAPTURE side, not the restore side — `docs/spec.md` says a
+ * snapshot holds "volume data plus machine desired state and configuration", and
+ * `containsConfig` is hardcoded true on every row, but the `snapshots` table stores no
+ * config at all. `full` additionally means reattaching secret bindings, and nothing in
+ * this build ever writes a secret binding.
+ */
+export class RestoreModeUnsupportedError extends Schema.TaggedError<RestoreModeUnsupportedError>()(
+  "RestoreModeUnsupportedError",
+  { snapshotId: Schema.String, mode: Schema.String, reason: Schema.String },
+) {}
+
+/** Overwriting a machine that still has a data disk destroys what is on it. Like
+ * `confirmSecretBindings`, the acknowledgement is explicit, separate, and never inferred
+ * from the rest of the request — a restore aimed at an archived machine (which has no
+ * disks to lose) does not need it, so reusing that request shape against a live one must
+ * not silently escalate into destroying a running machine's /home. */
+export class RestoreTargetNotConfirmedError extends Schema.TaggedError<RestoreTargetNotConfirmedError>()(
+  "RestoreTargetNotConfirmedError",
+  { snapshotId: Schema.String, targetMachineId: Schema.String, state: Schema.String },
+) {}
+
+/** The snapshot cannot serve this restore, or the target cannot receive it: no captured
+ * DATA disk, a region mismatch (a managed disk cannot be copied across regions), a
+ * non-azure target, or a machine in a state that is not safe to tear down. Distinct from
+ * `SnapshotEmptyError`, which means the row captured nothing at all. */
+export class RestoreSourceIncompatibleError extends Schema.TaggedError<RestoreSourceIncompatibleError>()(
+  "RestoreSourceIncompatibleError",
+  { snapshotId: Schema.String, reason: Schema.String },
+) {}
+
+/**
+ * The restore was approved and the provider work then failed.
+ *
+ * Distinct from every other error here: the approval was legitimate and the attempt was
+ * real. The machine is recorded as `error` with what went wrong, no `snapshot.restored` is
+ * written, and the restore request is deliberately left un-completed so it can be retried.
+ */
+export class RestoreFailedError extends Schema.TaggedError<RestoreFailedError>()(
+  "RestoreFailedError",
+  { snapshotId: Schema.String, targetMachineId: Schema.NullOr(Schema.String) },
+) {}
+
 /** The approval gating this restore was denied or expired before a decision. */
 export class RestoreNotApprovedError extends Schema.TaggedError<RestoreNotApprovedError>()(
   "RestoreNotApprovedError",

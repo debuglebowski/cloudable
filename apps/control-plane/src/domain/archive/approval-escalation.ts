@@ -33,8 +33,33 @@ export type RestoreMode = "data" | "config" | "full";
  * independently gated by requiring an explicit `confirmSecretBindings` acknowledgement
  * before an approval is even requested.
  */
-export function resolveRestoreApprovalFloor(mode: RestoreMode): ApprovalMode {
-  if (mode === "full") return "dual";
-  if (mode === "config") return "single";
-  return "none";
+/**
+ * What the restore is aimed at. A second axis on top of `mode`, because the mode says what
+ * is written back and this says what it lands on — and overwriting a machine that is
+ * running is destructive in a way neither of the other two are.
+ *
+ *   - `"new_machine"`      — nothing existing is touched.
+ *   - `"archived_machine"` — its disks are already gone (`archive()` deleted them), so
+ *                            there is nothing left to destroy.
+ *   - `"live_machine"`     — its current data disk is destroyed and replaced.
+ */
+export type RestoreTargetKind = "new_machine" | "archived_machine" | "live_machine";
+
+const RANK: Record<ApprovalMode, number> = { none: 0, single: 1, dual: 2 };
+
+/** The stronger of two floors. Floors only ever clamp UP. */
+const strongest = (a: ApprovalMode, b: ApprovalMode): ApprovalMode => (RANK[a] >= RANK[b] ? a : b);
+
+// `target` is required, deliberately un-defaulted: a default would have to pick either the
+// safest or the most destructive kind, and both are wrong to assume on a caller's behalf.
+export function resolveRestoreApprovalFloor(
+  mode: RestoreMode,
+  target: RestoreTargetKind,
+): ApprovalMode {
+  const byMode: ApprovalMode = mode === "full" ? "dual" : mode === "config" ? "single" : "none";
+  // Destroying a running machine's data is at least as serious as a config restore, and
+  // the org cannot configure its way below that. An archived target destroys nothing and
+  // a new machine touches nothing existing, so both keep the mode's own floor.
+  const byTarget: ApprovalMode = target === "live_machine" ? "dual" : "none";
+  return strongest(byMode, byTarget);
 }

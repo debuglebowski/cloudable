@@ -12,6 +12,7 @@ import { EventBus } from "../../services/EventBus";
 import type { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { isDbReachable } from "../../testing/db-reachable";
+import { MachineService } from "../machine/MachineService";
 import { InvalidRestoreApprovalError, MachineNotFoundError, SnapshotNotFoundError } from "./errors";
 import { fetchMachine, fetchSnapshot } from "./queries";
 import { restoreSnapshot, resumeRestore } from "./restore";
@@ -28,7 +29,9 @@ const dbReachable = await isDbReachable(databaseUrl);
 describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)", () => {
   let sql: ReturnType<typeof postgres>;
   let db: PostgresJsDatabase<typeof schema>;
-  let TestLayer: Layer.Layer<Db | EventBus | ApprovalService | ProvisioningServiceTag>;
+  let TestLayer: Layer.Layer<
+    Db | EventBus | ApprovalService | ProvisioningServiceTag | MachineService
+  >;
 
   beforeAll(() => {
     sql = postgres(databaseUrl);
@@ -43,6 +46,8 @@ describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)"
       // answers "not_found" — the one reason createSnapshot tolerates — and the rows land
       // with no captured disks, which is the truth for a machine with no infrastructure.
       FakeProvisioningServiceLive,
+      // Restoring into a new machine goes through `MachineService.create`.
+      MachineService.Default.pipe(Layer.provide(Layer.merge(dbLayer, FakeProvisioningServiceLive))),
     );
   });
 
@@ -51,8 +56,15 @@ describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)"
   });
 
   const run = <A, E>(
-    effect: Effect.Effect<A, E, Db | EventBus | ApprovalService | ProvisioningServiceTag>,
+    effect: Effect.Effect<
+      A,
+      E,
+      Db | EventBus | ApprovalService | ProvisioningServiceTag | MachineService
+    >,
   ) => Effect.runPromise(Effect.provide(effect, TestLayer));
+
+  /** Archived, so no `confirmDestroysData` is needed — nothing is left to destroy. */
+  const onto = (machineId: string) => ({ kind: "existing_machine", machineId }) as const;
 
   /**
    * A snapshot that actually captured something.
@@ -76,7 +88,11 @@ describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)"
   }
 
   const runFail = <A, E>(
-    effect: Effect.Effect<A, E, Db | EventBus | ApprovalService | ProvisioningServiceTag>,
+    effect: Effect.Effect<
+      A,
+      E,
+      Db | EventBus | ApprovalService | ProvisioningServiceTag | MachineService
+    >,
   ) => Effect.runPromise(Effect.provide(Effect.flip(effect), TestLayer));
 
   async function seedOrg() {
@@ -97,10 +113,13 @@ describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)"
       .values({
         orgId,
         name: "m1",
-        provider: "fake",
+        // `azure` and archived: a restore refuses any other provider, and an archived
+        // target needs no destroy-acknowledgement. The port is still the fake.
+        provider: "azure",
         region: "eastus",
         sizeSku: "Standard_B2s",
         image: "ubuntu-24.04",
+        state: "archived_restorable",
       })
       .returning();
     if (!machine) throw new Error("seed failed");
@@ -172,7 +191,7 @@ describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)"
       restoreSnapshot({
         snapshotId: snapshot.id,
         mode: "data",
-        targetMachineId: foreignTargetMachine.id,
+        target: onto(foreignTargetMachine.id),
         requestedByPersonId: crypto.randomUUID(),
         reason: "attempting a cross-tenant restore",
       }),
@@ -190,7 +209,7 @@ describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)"
       restoreSnapshot({
         snapshotId: snapshot.id,
         mode: "data",
-        targetMachineId: targetMachine.id,
+        target: onto(targetMachine.id),
         requestedByPersonId: crypto.randomUUID(),
         reason: "legitimate same-org restore",
       }),
@@ -215,7 +234,7 @@ describe.skipIf(!dbReachable)("archive — tenant isolation (requires Postgres)"
       restoreSnapshot({
         snapshotId: snapshot.id,
         mode: "data",
-        targetMachineId: targetMachine.id,
+        target: onto(targetMachine.id),
         requestedByPersonId,
         reason: "resume test",
       }),

@@ -29,8 +29,14 @@ export type SnapshotEvent =
       type: "snapshot.restored";
       payload: {
         mode: "data" | "config" | "full";
+        /** The machine that ended up with the data — for a new-machine restore, the
+         * machine that was just created for it, never the one the snapshot came from. */
         targetMachineId: string;
         approvalId: string;
+        /** Whether this restore provisioned a machine or overwrote one that existed.
+         * "Put back onto their machine" and "built them a new one" are different events
+         * to anyone reading the record, and the target id alone does not say which. */
+        createdNewMachine?: boolean;
       };
     })
   | (EventEnvelope & {

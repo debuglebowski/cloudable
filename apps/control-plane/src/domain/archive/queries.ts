@@ -163,7 +163,13 @@ export const listSnapshotsByOrg = (
 export interface RestoreRequestInput {
   approvalId: string;
   snapshotId: string;
-  targetMachineId: string;
+  targetKind: "new_machine" | "existing_machine";
+  /** Null for a pending new-machine restore — the machine is not created until the
+   * restore that creates it has been approved. Filled in on resume. */
+  targetMachineId: string | null;
+  ownerPersonId: string | null;
+  newMachineName: string | null;
+  confirmDestroysData: boolean;
   mode: RestoreMode;
   confirmSecretBindings: boolean;
   requestedByPersonId: string;
@@ -204,8 +210,12 @@ export const findRestoreRequest = (
 /** Idempotency guard for `resumeRestore` — set once `snapshot.restored` has actually
  * been published for this request, so a repeated `sync` call finds `completedAt`
  * already set and returns the prior result instead of publishing a second event. */
+/** `restoredMachineId` is recorded alongside the completion because a new-machine restore
+ * did not know its target when the request was saved — without it the row would never say
+ * what the restore actually landed on. */
 export const markRestoreRequestCompleted = (
   approvalId: string,
+  restoredMachineId?: string,
 ): Effect.Effect<void, ArchiveDbError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
@@ -213,7 +223,10 @@ export const markRestoreRequestCompleted = (
       () =>
         db
           .update(restoreRequests)
-          .set({ completedAt: new Date() })
+          .set({
+            completedAt: new Date(),
+            ...(restoredMachineId === undefined ? {} : { targetMachineId: restoredMachineId }),
+          })
           .where(eq(restoreRequests.approvalId, approvalId)),
       "mark_restore_request_completed",
     );

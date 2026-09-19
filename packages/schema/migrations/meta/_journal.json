@@ -134,6 +134,13 @@
       "when": 1789574143965,
       "tag": "0018_happy_medusa",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789856641104,
+      "tag": "0019_smooth_wolfsbane",
+      "breakpoints": true
     }
   ]
 }

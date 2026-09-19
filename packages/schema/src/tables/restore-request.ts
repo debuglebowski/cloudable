@@ -17,7 +17,27 @@ export const restoreRequests = pgTable("restore_requests", {
     .primaryKey()
     .references(() => approvals.id),
   snapshotId: uuid("snapshot_id").notNull(),
-  targetMachineId: uuid("target_machine_id").notNull(),
+  // Which kind of target the request named. Restoring into a NEW machine and restoring
+  // ONTO an existing one are different operations with different blast radii, and the
+  // resumed restore has to know which was approved — not re-decide it from whichever
+  // columns happen to be populated.
+  targetKind: text("target_kind", { enum: ["new_machine", "existing_machine"] })
+    .notNull()
+    .default("existing_machine"),
+  // Nullable since `target_kind: "new_machine"`: the machine does not exist yet and must
+  // not be created for a restore nobody has approved. Filled in by `resumeRestore` once
+  // the machine is real, so the row still records what the restore actually landed on.
+  targetMachineId: uuid("target_machine_id"),
+  // Only for `target_kind: "new_machine"`. The owner is never inferred from the snapshot's
+  // original machine — a common restore is recovering an offboarded person's data, and
+  // that owner is exactly the one who should not get the new machine (invariant 3: exactly
+  // one owner, always a person).
+  ownerPersonId: uuid("owner_person_id"),
+  newMachineName: text("new_machine_name"),
+  // The same explicit acknowledgement as `confirm_secret_bindings`, for the other
+  // destructive thing a restore can do: overwriting a machine that still has a data disk.
+  // Required at request time for a non-archived target, replayed unchanged on resume.
+  confirmDestroysData: boolean("confirm_destroys_data").notNull().default(false),
   mode: text("mode", { enum: ["data", "config", "full"] }).notNull(),
   // Persists the SAME explicit confirmation the original caller gave at request
   // time — never fabricated or defaulted here (see restore.ts). Replaying it

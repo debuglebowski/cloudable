@@ -103,7 +103,25 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
         return yield* restoreSnapshot({
           snapshotId: path.snapshotId,
           mode: payload.mode,
-          targetMachineId: payload.targetMachineId,
+          // Mapped field by field rather than passed through: the wire schema's optional
+          // properties are `T | undefined`, and the domain's are genuinely absent. Under
+          // `exactOptionalPropertyTypes` those are different types, and spreading an
+          // explicit `undefined` into the union would defeat the point of modelling it as
+          // one.
+          target:
+            payload.target.kind === "new_machine"
+              ? {
+                  kind: "new_machine" as const,
+                  ownerPersonId: payload.target.ownerPersonId,
+                  ...(payload.target.name === undefined ? {} : { name: payload.target.name }),
+                }
+              : {
+                  kind: "existing_machine" as const,
+                  machineId: payload.target.machineId,
+                  ...(payload.target.confirmDestroysData === undefined
+                    ? {}
+                    : { confirmDestroysData: payload.target.confirmDestroysData }),
+                },
           requestedByPersonId: currentUser.personId,
           reason: payload.reason,
           confirmSecretBindings: payload.confirmSecretBindings,
