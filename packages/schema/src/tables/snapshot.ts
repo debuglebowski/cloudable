@@ -69,7 +69,13 @@ export const snapshots = pgTable("snapshots", {
     .notNull()
     .default(sql`'[]'::jsonb`),
   containsData: boolean("contains_data").notNull().default(true),
-  containsConfig: boolean("contains_config").notNull().default(true),
+  // Whether the snapshot holds the machine's desired state and configuration. Defaults
+  // FALSE because nothing captures it: the column was hardcoded `true` on every row while
+  // no configuration was ever recorded, so the console and CLI labelled all thirteen
+  // production snapshots "data+config". `mode: "config"` restores refuse for the same
+  // reason. Flip the default back when `createSnapshot` actually serialises the resolved
+  // settings and manifest into the row.
+  containsConfig: boolean("contains_config").notNull().default(false),
   legalHold: boolean("legal_hold").notNull().default(false),
   legalHoldReason: text("legal_hold_reason"),
   retentionDays: integer("retention_days").notNull(),

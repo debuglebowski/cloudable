@@ -103,9 +103,10 @@ const measureFromSnapshot = (
 };
 
 /**
- * Captures a point-in-time snapshot of a machine: volume data AND its desired
- * state/configuration (`containsData`/`containsConfig` both default `true`).
- * Region is inherited from the machine's own region.
+ * Captures a point-in-time snapshot of a machine's volume data. NOT its desired state or
+ * configuration, despite `docs/spec.md` describing a snapshot as holding both — nothing
+ * captures those, which is why `containsConfig` is written `false` and a `mode: "config"`
+ * restore refuses. Region is inherited from the machine's own region.
  * `retentionDays` comes from org policy (`resolveSetting()`, default 30,
  * org-configurable — see `org-policy.ts`); `expiresAt` is computed from it. Emits
  * `snapshot.created`.
@@ -255,10 +256,20 @@ export const createSnapshot = (
               scope,
               capturedDisks: [...captured.disks],
               // False when the provider copied nothing, so the console stops labelling an
-              // empty record "data+config". `containsConfig` stays true regardless: the
-              // machine's desired state lives in this database, not on either disk.
+              // empty record as holding data.
               containsData: captured.disks.length > 0,
-              containsConfig: true,
+              // FALSE, because nothing captures configuration. This was hardcoded `true`
+              // on the reasoning that "the machine's desired state lives in this database,
+              // not on either disk" — but the database holds the state the machine has
+              // NOW, not the state it had when the snapshot was taken, and a restore from
+              // that is not a restore. Every snapshot in production has been claiming to
+              // hold configuration that was never recorded anywhere.
+              //
+              // `docs/spec.md` does say a snapshot should hold "volume data plus machine
+              // desired state and configuration". The gap is the capture, not this flag:
+              // serialise the resolved settings and manifest into the row and this becomes
+              // a real `true`, and `mode: "config"` becomes buildable with it.
+              containsConfig: false,
               retentionDays,
               expiresAt,
               // A machine under legal hold (`machines.legalHold`) must produce a

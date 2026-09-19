@@ -80,10 +80,10 @@ export class FullRestoreNotAcknowledgedError extends Schema.TaggedError<FullRest
  * is the same false record the expiry sweep used to write, so they refuse instead.
  *
  * `config` fails on the CAPTURE side, not the restore side — `docs/spec.md` says a
- * snapshot holds "volume data plus machine desired state and configuration", and
- * `containsConfig` is hardcoded true on every row, but the `snapshots` table stores no
- * config at all. `full` additionally means reattaching secret bindings, and nothing in
- * this build ever writes a secret binding.
+ * snapshot holds "volume data plus machine desired state and configuration", but the
+ * `snapshots` table stores no config at all. `containsConfig` now says so rather than
+ * claiming otherwise. `full` additionally means reattaching secret bindings, and nothing
+ * in this build ever writes a secret binding.
  */
 export class RestoreModeUnsupportedError extends Schema.TaggedError<RestoreModeUnsupportedError>()(
   "RestoreModeUnsupportedError",

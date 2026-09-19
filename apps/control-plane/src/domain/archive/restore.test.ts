@@ -246,6 +246,20 @@ describe("restoreSnapshot — approval escalation floor (requires Postgres)", ()
     expect(approvals.some((e) => e.type === "snapshot.restored")).toBe(false);
   });
 
+  test("a snapshot does not claim to hold configuration it never captured", async () => {
+    const org = await seedOrg();
+    const machine = await seedMachine(org.id);
+    const snapshot = await seedCapturedSnapshot(machine.id);
+
+    const [row] = await db.select().from(snapshots).where(eq(snapshots.id, snapshot.id));
+    // Hardcoded `true` for this column's whole life, which is why every production
+    // snapshot rendered as "data+config" in the console and the CLI. Nothing captures
+    // configuration, and a `mode: "config"` restore refuses for exactly that reason — so
+    // the product was asserting a snapshot held config AND that config could not be
+    // restored from it.
+    expect(row?.containsConfig).toBe(false);
+  });
+
   test("modes with nothing behind them refuse, rather than writing a restore that did not happen", async () => {
     const org = await seedOrg();
     await setRestoreApprovalMode(org.id, "none");

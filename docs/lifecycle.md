@@ -163,8 +163,17 @@ gone, or the docker adapter, which has no disks to copy. Such a row can neither 
 restored from nor deleted at expiry, and `containsData` is false to say so. Every row
 written before this change has an empty array.
 
-`containsConfig` stays true regardless of scope: the machine's desired state lives in this
-database, not on either disk.
+`containsConfig` is **false** on every row, because nothing captures configuration. It used
+to be hardcoded `true` on the reasoning that "the machine's desired state lives in this
+database, not on either disk" — but the database holds the state a machine has NOW, not the
+state it had when the snapshot was taken, so there was never anything a restore could read.
+Every snapshot in production was labelled `data+config` in the console and the CLI on the
+strength of that.
+
+`docs/spec.md` does describe a snapshot as holding "volume data **plus** machine desired
+state and configuration". That remains unbuilt: the gap is the capture, not the flag.
+Serialising the resolved settings and manifest into the row makes this a real `true` and
+makes `mode: "config"` buildable at the same time.
 
 **`quiesce` — whether the machine was stopped first.** Archive stops the machine and gets
 a clean copy. An upgrade cannot — the machine has to stay up until `reimage` replaces
@@ -287,11 +296,10 @@ itself once `/home` is a mountpoint, so only a genuine first boot rewrites it.
 `config` and `full` are refused with `RestoreModeUnsupportedError`. Neither could ever have
 done anything:
 
-- **`config`** — the gap is on the *capture* side. This document and `docs/spec.md` both say
-  a snapshot holds "volume data plus machine desired state and configuration", and
-  `containsConfig` is hardcoded `true` on every row, but the `snapshots` table stores no
-  configuration at all. Fixing it means capturing it, which only helps snapshots taken
-  afterwards.
+- **`config`** — the gap is on the *capture* side. `docs/spec.md` says a snapshot holds
+  "volume data plus machine desired state and configuration", and the `snapshots` table
+  stores no configuration at all. `containsConfig` now says so rather than claiming
+  otherwise. Fixing it means capturing it, which only helps snapshots taken afterwards.
 - **`full`** — reattaches secret bindings, and nothing in this build ever writes a secret
   binding.
 
