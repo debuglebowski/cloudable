@@ -1,6 +1,6 @@
 import { machines, snapshots } from "@cloudable/schema";
 import { and, eq, inArray, isNull, lt } from "drizzle-orm";
-import { Effect } from "effect";
+import { type Context, Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { EventBus, type EventBusError } from "../../services/EventBus";
@@ -135,6 +135,38 @@ const measureFromSnapshot = (
  * deleted a machine's OS disk immediately after recording a backup of it that had never
  * been taken.
  */
+/**
+ * Destroys copies that were made but never recorded, after the write that would have
+ * recorded them failed.
+ *
+ * Best-effort by construction: the caller is already failing, and the original error is
+ * the one worth reporting. A delete that also fails is logged with the id, which is the
+ * only thing that makes the leak findable afterwards — so the log line carries the
+ * external id, not just a count.
+ *
+ * Never touches anything but the disks this one call captured.
+ */
+const rollbackCapturedDisks = (
+  provisioning: Context.Tag.Service<ProvisioningServiceTag>,
+  provider: "azure" | "docker" | "fake",
+  disks: ReadonlyArray<CapturedDisk>,
+  snapshotId: string,
+): Effect.Effect<void> =>
+  Effect.forEach(
+    disks,
+    (disk) =>
+      provisioning
+        .deleteSnapshotDisk({ provider, diskExternalId: disk.externalId })
+        .pipe(
+          Effect.catchAll((cause) =>
+            Effect.logError(
+              `snapshot ${snapshotId}: its row failed to write and ${disk.externalId} could not be cleaned up (${cause.reason}) — this disk is now orphaned at the provider`,
+            ),
+          ),
+        ),
+    { discard: true },
+  );
+
 export const createSnapshot = (
   machineId: string,
   trigger: SnapshotTrigger,
@@ -183,62 +215,81 @@ export const createSnapshot = (
         ),
       );
 
-    const measuredFromDisk =
-      measuredUsedBytes(machine.volumeUsage, scope) === undefined
-        ? yield* measureFromSnapshot(snapshotId, machine.provider, captured.disks)
-        : undefined;
+    // From here until a row is written, the copies exist at the provider and nothing in
+    // the database names them. A failure inside that window used to leak them for good:
+    // the provider call is deliberately first (a row must only ever exist for a copy that
+    // was really made), so a DB error after it left an Azure snapshot no query could find
+    // and no expiry sweep could ever delete. That is how orphans are made, and it was the
+    // one remaining way to make a new one.
+    //
+    // `tapErrorCause`, not `tapError`, so an unexpected defect compensates too — a leak is
+    // just as permanent either way. The original error still propagates untouched; callers
+    // like `upgradeMachine` depend on seeing it.
+    const snapshot = yield* Effect.gen(function* () {
+      const measuredFromDisk =
+        measuredUsedBytes(machine.volumeUsage, scope) === undefined
+          ? yield* measureFromSnapshot(snapshotId, machine.provider, captured.disks)
+          : undefined;
 
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + retentionDays * DAY_MS);
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + retentionDays * DAY_MS);
 
-    const inserted = yield* dbTry(
-      () =>
-        db
-          .insert(snapshots)
-          .values({
-            id: snapshotId,
-            orgId: machine.orgId,
-            machineId,
-            trigger,
-            region: machine.region,
-            // The real total the provider reported, and the ids to aim a restore or an
-            // expiry deletion at. Both were previously a hardcoded placeholder and
-            // nothing at all, respectively.
-            sizeBytes: captured.sizeBytes,
-            // The agent's own measurement first: it saw the live machine and covers every
-            // disk in scope. Reading the copy is the fallback, and covers the machines
-            // whose agent never reported at all.
-            usedBytes: measuredUsedBytes(machine.volumeUsage, scope) ?? measuredFromDisk ?? null,
-            scope,
-            capturedDisks: [...captured.disks],
-            // False when the provider copied nothing, so the console stops labelling an
-            // empty record "data+config". `containsConfig` stays true regardless: the
-            // machine's desired state lives in this database, not on either disk.
-            containsData: captured.disks.length > 0,
-            containsConfig: true,
-            retentionDays,
-            expiresAt,
-            // A machine under legal hold (`machines.legalHold`) must produce a
-            // snapshot that is ALSO under hold — otherwise the hold is silently
-            // defeated the moment the machine is archived (invariant: "Retention
-            // is honoured" fails when a snapshot outlives its retention window
-            // without a legal hold — a snapshot that never inherited the hold in
-            // the first place would incorrectly pass that check). The machine
-            // itself carries no hold *reason*, only the boolean flag, so the
-            // inherited reason is a fixed, honest statement of provenance rather
-            // than fabricating detail the source of truth never had.
-            legalHold: machine.legalHold,
-            legalHoldReason: machine.legalHold
-              ? "Inherited from machine legal hold at archive time"
-              : null,
-          })
-          .returning(),
-      "insert_snapshot",
+      const inserted = yield* dbTry(
+        () =>
+          db
+            .insert(snapshots)
+            .values({
+              id: snapshotId,
+              orgId: machine.orgId,
+              machineId,
+              trigger,
+              region: machine.region,
+              // The real total the provider reported, and the ids to aim a restore or an
+              // expiry deletion at. Both were previously a hardcoded placeholder and
+              // nothing at all, respectively.
+              sizeBytes: captured.sizeBytes,
+              // The agent's own measurement first: it saw the live machine and covers every
+              // disk in scope. Reading the copy is the fallback, and covers the machines
+              // whose agent never reported at all.
+              usedBytes: measuredUsedBytes(machine.volumeUsage, scope) ?? measuredFromDisk ?? null,
+              scope,
+              capturedDisks: [...captured.disks],
+              // False when the provider copied nothing, so the console stops labelling an
+              // empty record "data+config". `containsConfig` stays true regardless: the
+              // machine's desired state lives in this database, not on either disk.
+              containsData: captured.disks.length > 0,
+              containsConfig: true,
+              retentionDays,
+              expiresAt,
+              // A machine under legal hold (`machines.legalHold`) must produce a
+              // snapshot that is ALSO under hold — otherwise the hold is silently
+              // defeated the moment the machine is archived (invariant: "Retention
+              // is honoured" fails when a snapshot outlives its retention window
+              // without a legal hold — a snapshot that never inherited the hold in
+              // the first place would incorrectly pass that check). The machine
+              // itself carries no hold *reason*, only the boolean flag, so the
+              // inherited reason is a fixed, honest statement of provenance rather
+              // than fabricating detail the source of truth never had.
+              legalHold: machine.legalHold,
+              legalHoldReason: machine.legalHold
+                ? "Inherited from machine legal hold at archive time"
+                : null,
+            })
+            .returning(),
+        "insert_snapshot",
+      );
+      const row = inserted[0];
+      if (!row) {
+        return yield* Effect.fail(
+          new ArchiveDbError({ reason: "insert_snapshot_returned_no_row" }),
+        );
+      }
+      return row;
+    }).pipe(
+      Effect.tapErrorCause(() =>
+        rollbackCapturedDisks(provisioning, machine.provider, captured.disks, snapshotId),
+      ),
     );
-    const snapshot = inserted[0];
-    if (!snapshot) {
-      return yield* Effect.fail(new ArchiveDbError({ reason: "insert_snapshot_returned_no_row" }));
-    }
 
     yield* publishOrDie(
       eventBus.publish([

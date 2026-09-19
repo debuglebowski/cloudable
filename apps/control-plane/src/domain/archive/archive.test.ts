@@ -11,6 +11,7 @@ import { EventBus } from "../../services/EventBus";
 import type { ProvisioningService } from "../../services/ProvisioningService";
 import { ProvisioningError, ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { archiveMachine } from "./archive";
+import { createSnapshot } from "./snapshot";
 
 /**
  * Regression coverage for a real, already-live bug found while fixing the
@@ -160,5 +161,52 @@ describe("archiveMachine — threads externalResourceId to the provisioning port
       { op: "snapshot", machineId: machine.id, provider: "azure", externalId: null },
       { op: "archive", machineId: machine.id, provider: "azure", externalId: null },
     ]);
+  });
+
+  test("a copy whose row fails to write is destroyed, not left orphaned", async () => {
+    const machine = await seedOrgAndMachine("/subscriptions/x/.../virtualMachines/cldm-m1-abc123");
+
+    const deleted: string[] = [];
+    const { provisioning } = spyProvisioning();
+    const recording: ProvisioningService = {
+      ...provisioning,
+      deleteSnapshotDisk: ({ diskExternalId }) => {
+        deleted.push(diskExternalId);
+        return Effect.void;
+      },
+    };
+
+    // Everything real except the insert. `createSnapshot` copies the disks at the provider
+    // BEFORE writing the row (deliberately — a row must only exist for a copy that was
+    // really made), so this is the window where a database failure used to strand an Azure
+    // snapshot nothing could name, find, or ever expire.
+    const brokenDb = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === "insert") {
+          return () => {
+            throw new Error("simulated insert failure");
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as typeof db;
+
+    const dbLayer = Layer.succeed(Db, brokenDb);
+    const testLayer = Layer.mergeAll(
+      dbLayer,
+      Layer.succeed(ProvisioningServiceTag, recording),
+      Layer.provide(EventBus.Default, Layer.succeed(Db, db)),
+    );
+
+    const result = await Effect.runPromise(
+      Effect.either(Effect.provide(createSnapshot(machine.id, "manual"), testLayer)),
+    );
+
+    // The original failure still reaches the caller — `upgradeMachine` aborts an upgrade on
+    // exactly this, and a rollback that swallowed it would let a reimage follow a snapshot
+    // that never happened.
+    expect(result._tag).toBe("Left");
+    // And the copy it made is gone rather than orphaned.
+    expect(deleted).toEqual(["snap-1"]);
   });
 });
