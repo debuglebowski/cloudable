@@ -1,17 +1,31 @@
 import type { ArchivedSnapshot } from "@/api/archive";
 
 /** Caps the retention bar so it reads as a compact table-cell indicator, not a
- * full-width bar stretching to fill the column. */
-const RETENTION_BAR_MAX_WIDTH = "max-w-[96px]";
+ * full-width bar stretching to fill the column. 112px, not 96: the longest label this
+ * renders is "365 days left", measured at 93px plus 16px of padding, which left three
+ * pixels of headroom and would have clipped outright on a longer retention. */
+const RETENTION_BAR_MAX_WIDTH = "max-w-[112px]";
 
-/** Fill/text pair per urgency tone — both light enough that the overlaid label stays
- * legible whether it sits over the filled or unfilled part of the bar. Mirrors the same
- * ok/drift/stale vocabulary `Badge`'s own variants use, just as a fill instead of a flat
- * chip background. */
+/**
+ * Track/fill/text triple per urgency tone.
+ *
+ * The whole pill is the pale `-soft` colour and the progress is a tint of the saturated
+ * one laid over it, so the label sits on a light background along its entire length.
+ * That is the point: the label is centred and the fill stops at `percent`, so any word
+ * long enough to cross the fill boundary sits on two different backgrounds at once.
+ * This used to be `bg-muted` under a `-soft` fill, whose comment claimed both were
+ * "light enough that the overlaid label stays legible" — in dark mode `--muted` is 15%
+ * lightness against a 29% text colour, so "21 days left" rendered as "21 days l" with
+ * the rest swallowed by the track.
+ *
+ * Keeping the pill light in BOTH themes is deliberate and matches `Badge`: the `-soft`
+ * pairs are self-contained chip colours that index.css intentionally does not redefine
+ * for dark mode, so they read as the same accent pill against a dark card as a light one.
+ */
 const RETENTION_BAR_TONE = {
-  ok: { fill: "bg-ok-soft", text: "text-ok" },
-  drift: { fill: "bg-drift-soft", text: "text-drift" },
-  stale: { fill: "bg-stale-soft", text: "text-stale" },
+  ok: { track: "bg-ok-soft", fill: "bg-ok/15", text: "text-ok" },
+  drift: { track: "bg-drift-soft", fill: "bg-drift/15", text: "text-drift" },
+  stale: { track: "bg-stale-soft", fill: "bg-stale/20", text: "text-stale" },
 } as const;
 
 /**
@@ -30,11 +44,11 @@ function RetentionBar({
   percent: number;
   tone: keyof typeof RETENTION_BAR_TONE;
 }) {
-  const { fill, text } = RETENTION_BAR_TONE[tone];
+  const { track, fill, text } = RETENTION_BAR_TONE[tone];
   return (
     // biome-ignore lint/a11y/useFocusableInteractive: a read-only status indicator, same as Radix's own Progress — never meant to receive keyboard focus.
     <div
-      className={`relative h-6 w-full overflow-hidden rounded-full bg-muted ${RETENTION_BAR_MAX_WIDTH}`}
+      className={`relative h-6 w-full overflow-hidden rounded-full ${track} ${RETENTION_BAR_MAX_WIDTH}`}
       role="progressbar"
       aria-valuenow={Math.round(percent)}
       aria-valuemin={0}
@@ -46,7 +60,7 @@ function RetentionBar({
         style={{ width: `${percent}%` }}
       />
       <span
-        className={`relative z-10 flex h-full items-center justify-center px-2 text-xs font-medium ${text}`}
+        className={`relative z-10 flex h-full items-center justify-center whitespace-nowrap px-2 text-xs font-medium ${text}`}
       >
         {label}
       </span>
