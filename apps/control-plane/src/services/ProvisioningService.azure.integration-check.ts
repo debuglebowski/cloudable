@@ -72,6 +72,35 @@ describe.skipIf(!azureConfigured)(
       expect(["running", "error"]).toContain(reconciled.state);
       expect(reconciled.externalId).toBe(created.externalId);
 
+      // Restart needs a VM that is actually up, and Azure takes its time getting there.
+      // Polled rather than slept at: a fixed wait either flakes or is always too long.
+      let powerState = reconciled.state;
+      for (let attempt = 0; attempt < 10 && powerState !== "running"; attempt++) {
+        await Bun.sleep(15_000);
+        powerState = (
+          await run(
+            Effect.gen(function* () {
+              const provisioning = yield* ProvisioningServiceTag;
+              return yield* provisioning.reconcile(machineId, "azure", created.externalId);
+            }),
+          )
+        ).state;
+      }
+      expect(powerState).toBe("running");
+
+      // The operation azure could not do at all until now — it failed with
+      // "not implemented" while the console's Restart button was fully wired.
+      const restarted = await run(
+        Effect.gen(function* () {
+          const provisioning = yield* ProvisioningServiceTag;
+          return yield* provisioning.restart(machineId, "azure", created.externalId);
+        }),
+      );
+      expect(restarted.state).toBe("running");
+      // Same VM, same identity: a reboot must not mint new infrastructure. If this ever
+      // changes the machine's agent would re-attest as something else.
+      expect(restarted.externalId).toBe(created.externalId);
+
       const archived = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
@@ -80,6 +109,20 @@ describe.skipIf(!azureConfigured)(
       );
       expect(archived.state).toBe("archived");
     }, 600_000);
+
+    test("restart on an unknown machine fails with not_found, not a false success", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const provisioning = yield* ProvisioningServiceTag;
+          return yield* Effect.either(provisioning.restart(crypto.randomUUID(), "azure", null));
+        }),
+      );
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect(result.left).toBeInstanceOf(ProvisioningError);
+        expect(result.left.reason).toBe("not_found");
+      }
+    }, 30_000);
 
     test("reconcile on an unknown machine fails with not_found", async () => {
       // externalId: null and a machineId nothing was ever tagged with —

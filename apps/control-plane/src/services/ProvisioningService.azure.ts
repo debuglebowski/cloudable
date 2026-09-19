@@ -1116,10 +1116,44 @@ const service: ProvisioningService = {
       } satisfies MachineStatus;
     }),
 
-  // Not this session's file — a concurrent change owns `restart`, left
-  // exactly as found.
-  restart: () =>
-    Effect.fail(new ProvisioningError({ reason: "provider_error", cause: "not implemented" })),
+  /**
+   * Reboot in place. The guest OS is asked to shut down and the VM comes back on the same
+   * hardware, keeping its disks, NIC, public IP and — the part that matters for this
+   * product — its managed identity, so the agent re-attests as the same machine.
+   *
+   * Deliberately `restart`, not `deallocate` + `start`: deallocation releases the compute
+   * and, on a VM with a dynamic public IP, releases the address too, so the machine would
+   * come back reachable at a different one. It also bills differently and takes minutes
+   * rather than seconds.
+   *
+   * Every other provider had this and azure did not — it failed with "not implemented"
+   * while the console's Restart button, its route, handler, domain logic and
+   * `machine.stopped`/`machine.started` events were all real. On a production deployment
+   * the button could only ever error.
+   *
+   * A VM that is deallocated cannot be restarted and Azure says so; that error is passed
+   * through rather than translated into a success. `restartMachine` already gates on the
+   * machine being `running`, but that is the control plane's view of the world and this is
+   * the provider's, which is the one that decides.
+   */
+  restart: (machineId: string, _provider, externalId) =>
+    Effect.gen(function* () {
+      const clients = yield* getClients();
+      const rg = config.azureMachinesResourceGroup;
+      const { names, resourceId } = yield* resolveVmNames(clients, rg, machineId, externalId);
+
+      yield* runArm(() => clients.compute.virtualMachines.beginRestartAndWait(rg, names.vm));
+
+      // `beginRestartAndWait` returns once Azure considers the reboot complete, so the VM
+      // is running again by here. Not re-read with `instanceView`: the state this returns
+      // is what the operation just established, and a second call would only introduce a
+      // window where a transitional reading contradicts a reboot that did succeed.
+      return {
+        machineId,
+        state: "running",
+        externalId: resourceId,
+      } satisfies MachineStatus;
+    }),
 };
 
 export const AzureProvisioningServiceLive = Layer.succeed(ProvisioningServiceTag, service);
