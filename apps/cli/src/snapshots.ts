@@ -10,7 +10,7 @@ import { oneOf, parseArgs, positiveInt, readSpec, required, requiredFlag } from 
 import { authenticatedApiBytes, authenticatedApiRequest, postJson, query } from "./http-client";
 import { dash, printEmpty, printFields, printJson, printTable, shortTime } from "./output";
 import { usageFor } from "./program";
-import { machineId } from "./resolve";
+import { machineId, personId } from "./resolve";
 
 interface SnapshotView {
   id: string;
@@ -36,7 +36,7 @@ interface SnapshotView {
 
 interface RestoreResult {
   snapshotId: string;
-  targetMachineId: string;
+  targetMachineId: string | null;
   mode: "data" | "config" | "full";
   approvalId: string;
   approvalStatus: "pending" | "approved" | "rejected" | "expired";
@@ -176,13 +176,13 @@ export async function runSnapshotsCostCommand(argv: ReadonlyArray<string>): Prom
 
 export async function runSnapshotsRestoreCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "snapshots restore <snapshotId> --mode data|config|full --target <machine> --reason <reason> [--confirm-secret-bindings]",
+    "snapshots restore <snapshotId> --mode data [--target <machine> [--confirm-destroys-data] | --new-machine --owner <person> [--name <name>]] --reason <reason>",
   );
   const args = parseArgs(
     argv,
     readSpec({
-      values: ["mode", "target", "reason"],
-      booleans: ["confirm-secret-bindings"],
+      values: ["mode", "target", "reason", "owner", "name"],
+      booleans: ["confirm-secret-bindings", "new-machine", "confirm-destroys-data"],
     }),
   );
   const snapshotId = required(args, 0, "a snapshot id", usage);
@@ -191,13 +191,33 @@ export async function runSnapshotsRestoreCommand(argv: ReadonlyArray<string>): P
     ["data", "config", "full"] as const,
     "mode",
   );
-  const targetMachineId = await machineId(requiredFlag(args, "target", usage));
+
+  // Exactly one target, and it must be stated. Defaulting either way would be wrong:
+  // guessing the snapshot's own machine can destroy a running machine's data, and
+  // guessing a new machine silently provisions one nobody asked for.
+  const wantsNew = args.booleans.has("new-machine");
+  const wantsExisting = args.flags.target !== undefined;
+  if (wantsNew === wantsExisting) {
+    throw new Error(`Pass exactly one of --new-machine or --target <machine>.\n\n${usage}`);
+  }
+
+  const target = wantsNew
+    ? {
+        kind: "new_machine" as const,
+        ownerPersonId: await personId(requiredFlag(args, "owner", usage)),
+        ...(args.flags.name ? { name: args.flags.name } : {}),
+      }
+    : {
+        kind: "existing_machine" as const,
+        machineId: await machineId(requiredFlag(args, "target", usage)),
+        ...(args.booleans.has("confirm-destroys-data") ? { confirmDestroysData: true } : {}),
+      };
 
   const result = await authenticatedApiRequest<RestoreResult>(
     `/api/v1/archive/snapshots/${snapshotId}/restore`,
     postJson({
       mode,
-      targetMachineId,
+      target,
       reason: requiredFlag(args, "reason", usage),
       ...(args.booleans.has("confirm-secret-bindings") ? { confirmSecretBindings: true } : {}),
     }),
@@ -208,7 +228,7 @@ export async function runSnapshotsRestoreCommand(argv: ReadonlyArray<string>): P
   }
   printFields([
     ["snapshot", result.snapshotId],
-    ["target", result.targetMachineId],
+    ["target", result.targetMachineId ?? "(new machine, once approved)"],
     ["mode", result.mode],
     ["approval", result.approvalId],
     ["approval status", result.approvalStatus],

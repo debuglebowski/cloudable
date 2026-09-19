@@ -24,6 +24,10 @@ export type RestoreMode = "data" | "config" | "full";
  * configured that; `"full"` is the only mode with an exact, unconditional guarantee —
  * always `"dual"`, regardless of org configuration.
  */
+/** Mirrors `resolveRestoreApprovalFloor`'s target axis: overwriting a machine that is
+ * still running is always dual, whatever the mode or the org's own policy. */
+export const RESTORE_TARGET_APPROVAL_FLOOR = "dual" as const;
+
 export const RESTORE_MODE_APPROVAL: Record<RestoreMode, "none" | "single" | "dual"> = {
   data: "none",
   config: "single",
@@ -164,9 +168,16 @@ export function useSetLegalHold() {
   });
 }
 
+/** What the restore lands on — mirrors `RestoreTarget` in
+ * `apps/control-plane/src/domain/archive/restore.ts`. */
+export type RestoreTarget =
+  | { kind: "new_machine"; ownerPersonId: string; name?: string }
+  | { kind: "existing_machine"; machineId: string; confirmDestroysData?: boolean };
+
 export interface RestoreSnapshotInput {
   snapshotId: string;
   mode: RestoreMode;
+  target: RestoreTarget;
   /** Every restore is backed by an approval object — reason is "required free text, never
    * optional" — the real endpoint rejects an empty reason regardless of mode. */
   reason: string;
@@ -174,7 +185,9 @@ export interface RestoreSnapshotInput {
 
 interface RestoreSnapshotResponseWire {
   snapshotId: string;
-  targetMachineId: string;
+  /** Null while a new-machine restore is pending: the machine is not created until the
+   * restore that creates it is approved. */
+  targetMachineId: string | null;
   mode: RestoreMode;
   approvalId: string;
   approvalStatus: "pending" | "approved" | "rejected" | "expired";
@@ -183,23 +196,19 @@ interface RestoreSnapshotResponseWire {
 
 export function useRestoreSnapshot() {
   return useMutation({
-    mutationFn: async (input: RestoreSnapshotInput) => {
-      const snapshots = await fetchArchivedSnapshots();
-      const snapshot = snapshots.find((s) => s.id === input.snapshotId);
-      if (!snapshot) throw new Error(`Snapshot ${input.snapshotId} not found`);
-      return apiPost<RestoreSnapshotResponseWire>(
+    // The target comes from the caller now. It used to be derived here — always the
+    // machine the snapshot was taken from — which quietly made every restore the
+    // destructive kind, with no way to ask for anything else.
+    mutationFn: async (input: RestoreSnapshotInput) =>
+      apiPost<RestoreSnapshotResponseWire>(
         `/api/v1/archive/snapshots/${input.snapshotId}/restore`,
         {
           mode: input.mode,
-          // Restoring onto the same machine record the snapshot was taken from — the
-          // dialog has no "restore to a different machine" picker, and that's the
-          // common case (disposable machines, reimage-in-place).
-          targetMachineId: snapshot.machineId,
+          target: input.target,
           reason: input.reason,
           ...(input.mode === "full" ? { confirmSecretBindings: true } : {}),
         },
-      );
-    },
+      ),
     onSuccess: (result) => {
       toast.success(
         result.approvalStatus === "approved" && result.restored

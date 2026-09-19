@@ -36,9 +36,28 @@ export interface ArchiveMachineResponse {
   retentionExpiresAt: string;
 }
 
+/** What a restore lands on. A union, not optional fields: restoring into a new machine and
+ * overwriting an existing one are different operations with different blast radii. */
+export type RestoreTarget =
+  | {
+      kind: "new_machine";
+      /** Required, and never inferred from the snapshot's original machine — a common
+       * restore recovers an offboarded person's data, and that former owner is exactly
+       * who should not receive the new machine. */
+      ownerPersonId: string;
+      name?: string | undefined;
+    }
+  | {
+      kind: "existing_machine";
+      machineId: string;
+      /** Required, and must be `true`, when the target still has a data disk to lose —
+       * i.e. any state but archived. Never defaulted. */
+      confirmDestroysData?: boolean | undefined;
+    };
+
 export interface RestoreSnapshotRequest {
   mode: RestoreMode;
-  targetMachineId: string;
+  target: RestoreTarget;
   reason: string;
   /** Required, and must be `true`, when `mode` is `"full"` — an explicit
    * acknowledgement that secret bindings will be reattached. Never defaulted. */
@@ -47,7 +66,9 @@ export interface RestoreSnapshotRequest {
 
 export interface RestoreSnapshotResponse {
   snapshotId: string;
-  targetMachineId: string;
+  /** Null only while a new-machine restore is pending approval: the machine is not created
+   * until the restore that creates it has been approved. */
+  targetMachineId: string | null;
   mode: RestoreMode;
   approvalId: string;
   approvalStatus: ApprovalStatus;

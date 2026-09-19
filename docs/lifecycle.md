@@ -20,10 +20,24 @@ wire types in `packages/contracts/src/domains/archive.ts`.
                                                                              └───────────────────┘
 ```
 
-`machines.state` only ever moves in this direction — there is no code path back to
-`live`. A restore (see below) writes data/config back onto a machine; it never flips
-`machines.state`. `machines` rows are never deleted: the two archived
-states, `archivedAt`, and the full event history are permanent.
+There is exactly one path back: **a restore onto an archived machine un-archives it**
+(`domain/archive/perform-restore.ts`'s `claimMachineForRestore` sets `provisioning` and
+clears `archivedAt`). Nothing else does, and nothing unattended is allowed to —
+`status-refresh` refuses with `archived_requires_restore` precisely because reviving a
+machine is approval-gated work, not something a background pass decides.
+
+That transition is not optional. Every other writer keys off the archived states —
+`markVerified` will not promote an archived row, status-refresh takes its
+`already_archived` no-op branch, the compliance checks exclude it, offboarding skips it —
+so a machine rebuilt from a snapshot and left reading `archived_restorable` would run,
+bill and serve sessions while governed by nothing.
+
+`archiveMachine` remains one-way as an *operation*: archiving an already-archived machine
+still fails. `machines` rows are never deleted: the two archived states, `archivedAt`, and
+the full event history are permanent.
+
+This paragraph used to say a restore "never flips `machines.state`", which was true only
+because restore did not do anything at all.
 
 `archiveMachine(machineId, approvalId?)` (`domain/archive/archive.ts`) drives the `live →
 archived_restorable` transition:
@@ -236,20 +250,59 @@ a caller reused a request shape.
   further. Completing the restore once that decision later lands is out of this unit's
   scope — see "What this unit does not do" below.
 
-**What "performing the restore" means in this build:** this unit validates eligibility
-(not expired, acknowledgement present for `"full"`), enforces the approval gate, and
-writes the permanent audit record that the restore happened. It does **not** reach into a
-cloud API to reattach a volume or reapply configuration — `ProvisioningService` has no
-restore-specific operation in this build (see `apps/control-plane/src/services/
-ProvisioningService.ts`), and adding one is out of this unit's file scope. The mechanical
-reattachment is desired-state work for the reconciliation loop once `targetMachineId`'s
-desired state reflects the restored snapshot.
+**What "performing the restore" means:** the provider work, then the record — in that
+order, and only in that order. `restoreSnapshot` validates eligibility, enforces the
+approval gate, calls `ProvisioningService`, and writes `snapshot.restored` **only if that
+succeeded**. A failure records the machine as `error` with the reason, leaves the restore
+request un-completed so it can be retried, and writes no event.
 
-**What this unit does not do:** complete a restore asynchronously once a `"pending"`
-approval is later decided. `ApprovalService.decide()` exists but nothing in this build
-calls `restoreSnapshot()` again on a grant — that requires either a webhook/callback from
-`ApprovalService` or a poller, neither of which exists yet. This is an explicit,
-documented gap for a future unit to close, not a silent limitation.
+For a long time this paragraph said the opposite: the unit "does not reach into a cloud
+API", and the mechanical work was "desired-state work for the reconciliation loop". That
+loop no longer exists — it was removed when invariant 10 became "no background loop
+mutates a machine" — and in the meantime every restore wrote a permanent audit record that
+a machine had got its data back while nothing touched the machine.
+
+### Targets
+
+A restore names what it lands on:
+
+| Target | What happens | Approval floor |
+| :-- | :-- | :-- |
+| `new_machine` | A machine is provisioned with `/home` from the snapshot. Nothing existing is touched. Requires an explicit `ownerPersonId` — never inherited from the snapshot's original machine, since a common restore recovers an offboarded person's data. | the mode's own floor |
+| `existing_machine`, archived | Its VM, disks, NIC and IP were deleted by `archive()`, so they are rebuilt. The row un-archives. | the mode's own floor |
+| `existing_machine`, live | Its current data disk is **destroyed** and replaced. Requires `confirmDestroysData: true`. | always `dual` |
+
+Restoring into a new machine is what makes a live machine's snapshot useful: you get a
+parallel machine rather than an overwrite.
+
+The OS disk is always fresh from the catalog image — never cloned from the snapshot — so a
+restored machine inherits no host keys or on-disk identity. That is also what makes the
+data disk swap work at all: `/etc/fstab` names the old disk by UUID and cloud-init skips
+itself once `/home` is a mountpoint, so only a genuine first boot rewrites it.
+`homeVolumeSection` then adopts the restored disk rather than reformatting it, because
+`blkid` finds a filesystem and the `.cloudable-home-volume` marker is already there.
+
+### Only `data` works
+
+`config` and `full` are refused with `RestoreModeUnsupportedError`. Neither could ever have
+done anything:
+
+- **`config`** — the gap is on the *capture* side. This document and `docs/spec.md` both say
+  a snapshot holds "volume data plus machine desired state and configuration", and
+  `containsConfig` is hardcoded `true` on every row, but the `snapshots` table stores no
+  configuration at all. Fixing it means capturing it, which only helps snapshots taken
+  afterwards.
+- **`full`** — reattaches secret bindings, and nothing in this build ever writes a secret
+  binding.
+
+Both used to pass the approval gate — `full` at dual sign-off — and write
+`snapshot.restored`.
+
+**Resuming a pending restore:** `resumeRestore(approvalId, orgId)`
+(`POST /api/v1/archive/restores/:approvalId/sync`, `cloudable snapshots restore-sync`)
+picks up a restore whose approval was decided later, and does the same provider work in
+the same order. A new-machine restore creates its machine **here**, not at request time:
+provisioning one for a restore nobody had approved is exactly what the gate is for.
 
 ## Where a machine's files live — and the one-off migration
 

@@ -2,12 +2,17 @@ import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 import { ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
 import { useId, useState } from "react";
 
+import { useQuery } from "@tanstack/react-query";
+
 import {
   type ArchivedSnapshot,
   RESTORE_MODE_APPROVAL,
   type RestoreMode,
+  type RestoreTarget,
   useRestoreSnapshot,
 } from "@/api/archive";
+import { listMachines, machinesKeys } from "@/api/machines";
+import { listPeople, peopleKeys } from "@/api/people";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,7 +27,15 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { ARCHIVED_MACHINE_STATES } from "@/routes/machines/machine-state";
 
 interface RestoreModeOption {
   mode: RestoreMode;
@@ -30,6 +43,9 @@ interface RestoreModeOption {
   description: string;
   badgeVariant: BadgeProps["variant"];
   icon: typeof ShieldOff;
+  /** Set when the mode cannot run at all. Greyed out WITH the reason shown, never hidden —
+   * the same posture `sub-state.ts` takes for an unrestorable snapshot. */
+  unavailable?: string;
 }
 
 const APPROVAL_BADGE_VARIANT: Record<
@@ -62,7 +78,7 @@ const RESTORE_MODE_OPTIONS: RestoreModeOption[] = [
   {
     mode: "data",
     label: "Data only",
-    description: "Reattach volume data to a new machine. Configuration is left untouched.",
+    description: "Put the snapshot's /home back. The OS is always rebuilt fresh from the image.",
     badgeVariant: approvalBadgeVariantFor("data"),
     icon: ShieldOff,
   },
@@ -72,6 +88,7 @@ const RESTORE_MODE_OPTIONS: RestoreModeOption[] = [
     description: "Restore machine desired state and configuration. Volume data is not restored.",
     badgeVariant: approvalBadgeVariantFor("config"),
     icon: ShieldCheck,
+    unavailable: "Snapshots do not capture configuration, so there is nothing to restore from.",
   },
   {
     mode: "full",
@@ -80,8 +97,12 @@ const RESTORE_MODE_OPTIONS: RestoreModeOption[] = [
       "Restores data, configuration, and secret bindings. Never happens silently — this is deliberately the hardest mode to reach.",
     badgeVariant: approvalBadgeVariantFor("full"),
     icon: ShieldAlert,
+    unavailable:
+      "Secret bindings are not implemented, so a full restore has nothing extra to reattach.",
   },
 ];
+
+type TargetKind = "new_machine" | "existing_machine";
 
 export interface RestoreDialogProps {
   snapshot: ArchivedSnapshot;
@@ -90,22 +111,60 @@ export interface RestoreDialogProps {
 /** Restore-mode picker with visibly escalating friction. */
 export function RestoreDialog({ snapshot }: RestoreDialogProps) {
   const ackId = useId();
+  const destroyAckId = useId();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<RestoreMode>("data");
+  const [targetKind, setTargetKind] = useState<TargetKind>("new_machine");
+  const [ownerPersonId, setOwnerPersonId] = useState("");
+  const [newMachineName, setNewMachineName] = useState("");
+  const [confirmDestroys, setConfirmDestroys] = useState(false);
   const [reason, setReason] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [confirmingFull, setConfirmingFull] = useState(false);
   const restore = useRestoreSnapshot();
+
+  // Only fetched while the dialog is open — an owner picker nobody has opened should not
+  // cost a request on every row of the Archive page.
+  const peopleQuery = useQuery({
+    queryKey: peopleKeys.list(),
+    queryFn: listPeople,
+    enabled: open,
+  });
+  const machinesQuery = useQuery({
+    queryKey: machinesKeys.list(),
+    queryFn: listMachines,
+    enabled: open,
+  });
+
+  const targetMachine = machinesQuery.data?.find((m) => m.id === snapshot.machineId);
+  // Unknown counts as live. Overwriting something we cannot see the state of is the case
+  // that deserves the extra confirmation, not the one that skips it.
+  const targetIsLive = targetMachine ? !ARCHIVED_MACHINE_STATES.has(targetMachine.state) : true;
+  const activePeople = (peopleQuery.data ?? []).filter((person) => person.active);
 
   // Every restore is backed by an approval object regardless of mode (reason is
   // required free text, never optional) — the real endpoint rejects an empty
   // reason even for data-only restores, unlike the mock this replaced.
   // "Requested by" is the signed-in session, not a picker (server derives it).
   const requiresAck = mode === "full";
-  const canProceed = reason.trim().length > 0 && (!requiresAck || acknowledged);
+  const modeUnavailable = RESTORE_MODE_OPTIONS.find((o) => o.mode === mode)?.unavailable;
+  // Overwriting a machine that still has a data disk destroys what is on it, so the
+  // acknowledgement is required — exactly as the server requires it. An archived machine
+  // has nothing left to lose and needs none.
+  const needsDestroyAck = targetKind === "existing_machine" && targetIsLive;
+  const canProceed =
+    reason.trim().length > 0 &&
+    !modeUnavailable &&
+    (!requiresAck || acknowledged) &&
+    (!needsDestroyAck || confirmDestroys) &&
+    (targetKind !== "new_machine" || ownerPersonId.length > 0);
 
   function reset() {
     setMode("data");
+    setTargetKind("new_machine");
+    setOwnerPersonId("");
+    setNewMachineName("");
+    setConfirmDestroys(false);
     setReason("");
     setAcknowledged(false);
     setConfirmingFull(false);
@@ -126,8 +185,20 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
       setConfirmingFull(true);
       return;
     }
+    const target: RestoreTarget =
+      targetKind === "new_machine"
+        ? {
+            kind: "new_machine",
+            ownerPersonId,
+            ...(newMachineName.trim() ? { name: newMachineName.trim() } : {}),
+          }
+        : {
+            kind: "existing_machine",
+            machineId: snapshot.machineId,
+            ...(needsDestroyAck ? { confirmDestroysData: true } : {}),
+          };
     restore.mutate(
-      { snapshotId: snapshot.id, mode, reason: reason.trim() },
+      { snapshotId: snapshot.id, mode, target, reason: reason.trim() },
       { onSuccess: () => handleOpenChange(false) },
     );
   }
@@ -161,6 +232,84 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
         {!confirmingFull && (
           <RadioGroupPrimitive.Root
             className="flex flex-col gap-2"
+            aria-label="Restore target"
+            value={targetKind}
+            onValueChange={(value) => setTargetKind(value as TargetKind)}
+          >
+            <RadioGroupPrimitive.Item
+              value="new_machine"
+              className={cn(
+                "flex flex-col gap-1.5 rounded-md border p-3 text-left transition-colors",
+                "border-border hover:bg-muted/50",
+                "data-[state=checked]:border-primary data-[state=checked]:bg-accent data-[state=checked]:hover:bg-accent",
+              )}
+            >
+              <span className="text-sm font-medium">Into a new machine</span>
+              <p className="text-xs text-muted-foreground">
+                Provisions a machine with this snapshot's /home. Nothing existing is touched.
+              </p>
+            </RadioGroupPrimitive.Item>
+            <RadioGroupPrimitive.Item
+              value="existing_machine"
+              className={cn(
+                "flex flex-col gap-1.5 rounded-md border p-3 text-left transition-colors",
+                "border-border hover:bg-muted/50",
+                "data-[state=checked]:border-primary data-[state=checked]:bg-accent data-[state=checked]:hover:bg-accent",
+              )}
+            >
+              <span className="flex items-center justify-between gap-2 text-sm font-medium">
+                Onto {snapshot.machineName}
+                {targetIsLive && <Badge variant="destructive">Destroys current data</Badge>}
+              </span>
+              <p className="text-xs text-muted-foreground">
+                {targetIsLive
+                  ? "This machine is still running. Its current /home is destroyed and replaced."
+                  : "This machine is archived — its disks are already gone, so nothing is lost."}
+              </p>
+            </RadioGroupPrimitive.Item>
+          </RadioGroupPrimitive.Root>
+        )}
+
+        {!confirmingFull && targetKind === "new_machine" && (
+          <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="restore-owner">
+                Owner <Badge variant="outline">required</Badge>
+              </Label>
+              <Select value={ownerPersonId} onValueChange={setOwnerPersonId}>
+                <SelectTrigger id="restore-owner">
+                  <SelectValue
+                    placeholder={peopleQuery.isLoading ? "Loading people…" : "Select a person"}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {activePeople.map((person) => (
+                    <SelectItem key={person.id} value={person.id}>
+                      {person.email}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Never inherited from the archived machine — restoring an offboarded person's data is
+                exactly when the old owner is the wrong answer.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="restore-new-name">Name</Label>
+              <Input
+                id="restore-new-name"
+                value={newMachineName}
+                onChange={(e) => setNewMachineName(e.target.value)}
+                placeholder="Leave blank to auto-generate"
+              />
+            </div>
+          </div>
+        )}
+
+        {!confirmingFull && (
+          <RadioGroupPrimitive.Root
+            className="flex flex-col gap-2"
             aria-label="Restore mode"
             value={mode}
             onValueChange={(value) => selectMode(value as RestoreMode)}
@@ -171,10 +320,12 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
                 <RadioGroupPrimitive.Item
                   key={option.mode}
                   value={option.mode}
+                  disabled={option.unavailable !== undefined}
                   className={cn(
                     "flex flex-col gap-1.5 rounded-md border p-3 text-left transition-colors",
                     "border-border hover:bg-muted/50",
                     "data-[state=checked]:border-primary data-[state=checked]:bg-accent data-[state=checked]:hover:bg-accent",
+                    "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent",
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -185,10 +336,30 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
                     <Badge variant={option.badgeVariant}>{approvalLabelFor(option.mode)}</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">{option.description}</p>
+                  {option.unavailable && (
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Unavailable — {option.unavailable}
+                    </p>
+                  )}
                 </RadioGroupPrimitive.Item>
               );
             })}
           </RadioGroupPrimitive.Root>
+        )}
+
+        {!confirmingFull && needsDestroyAck && (
+          <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive/5 p-3 text-sm">
+            <Checkbox
+              id={destroyAckId}
+              className="mt-0.5"
+              checked={confirmDestroys}
+              onCheckedChange={(checked) => setConfirmDestroys(checked === true)}
+            />
+            <Label htmlFor={destroyAckId} className="font-normal text-destructive">
+              I understand this destroys {snapshot.machineName}'s current /home and replaces it with
+              this snapshot's. This requires dual approval.
+            </Label>
+          </div>
         )}
 
         {!confirmingFull && (

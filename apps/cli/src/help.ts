@@ -261,18 +261,29 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       },
       {
         name: "restore",
-        summary: "Restore a snapshot onto a machine",
+        summary: "Restore a snapshot into a new machine, or onto an existing one",
         args: "<snapshotId>",
         options: [
-          { flag: "--mode data|config|full", description: "What to restore (required)" },
-          { flag: "--target <machine>", description: "Machine to restore onto (required)" },
-          { flag: "--reason <reason>", description: "Why (required)" },
+          { flag: "--mode data", description: "What to restore (required)" },
           {
-            flag: "--confirm-secret-bindings",
-            description: "Acknowledge that a full restore rebinds secrets",
+            flag: "--new-machine",
+            description: "Restore into a new machine, leaving everything existing alone",
           },
+          { flag: "--owner <person>", description: "Who owns the new machine (required with it)" },
+          { flag: "--name <name>", description: "Name for the new machine (optional)" },
+          { flag: "--target <machine>", description: "Or: an existing machine to restore onto" },
+          {
+            flag: "--confirm-destroys-data",
+            description: "Required when that machine still has data to lose",
+          },
+          { flag: "--reason <reason>", description: "Why (required)" },
         ],
-        notes: ["Approval gated. It may come back pending; `restore-sync` finishes it."],
+        notes: [
+          "Pass exactly one of --new-machine or --target.",
+          "Restoring into a new machine is the non-destructive option, and the only way to restore a running machine's snapshot without overwriting it.",
+          "Only --mode data works. config and full are refused: nothing captures configuration, and secret bindings do not exist.",
+          "Approval gated. It may come back pending; `restore-sync` finishes it.",
+        ],
       },
       {
         name: "restore-sync",
