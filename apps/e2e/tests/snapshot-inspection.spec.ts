@@ -120,6 +120,17 @@ test.beforeAll(async () => {
     await snapshot(ids.empty, []);
     ids.live = (await machine(NAMES.live, personId, true)).id;
     await snapshot(ids.live, disk, "manual");
+
+    // An open session on the live machine, so its Sessions tab has something to list.
+    // No daemon is behind it -- attaching would fail -- but every assertion here is about
+    // the console listing and addressing the session, not about the wire.
+    await db.insert(schema.sessions).values({
+      orgId,
+      machineId: ids.live,
+      personId,
+      method: "terminal",
+      osUser: "cloudable",
+    });
   } finally {
     await client.end();
   }
@@ -263,4 +274,34 @@ test("legal hold can be placed from a machine's Snapshots tab", async ({ page })
   const row = await snapshotRow(page, ids.owned);
   await row.getByRole("button", { name: "Place legal hold" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+});
+
+test("a machine's Sessions tab lists who is connected to it", async ({ page }) => {
+  await page.goto(`/machines/${ids.live}`);
+  await page.getByRole("tab", { name: "Sessions" }).click();
+
+  // Narrowed to the terminal row on purpose: the browse tests above leave `snapshot_files`
+  // sessions on this same machine, and those belong in this list too -- an inspection is a
+  // real session that can be terminated. Matching on the email alone finds both.
+  const row = page.getByRole("row").filter({ hasText: email }).filter({ hasText: "terminal" });
+  await expect(row).toBeVisible();
+  await expect(row.getByRole("button", { name: "Terminate" })).toBeVisible();
+  // Rejoining an existing session, so a link rather than a fresh mint.
+  await expect(row.getByRole("link", { name: "Connect" })).toBeVisible();
+});
+
+test("a session page says which machine it is on", async ({ page }) => {
+  // The whole point of moving these under /machines: arriving from a machine used to land
+  // on /access/sessions/... under a breadcrumb reading "Access / Terminal", linking back
+  // to a page the person had never been on.
+  await page.goto(`/machines/${ids.live}`);
+  await page.getByRole("tab", { name: "Sessions" }).click();
+  await page.getByRole("link", { name: "Connect" }).first().click();
+
+  await expect(page).toHaveURL(new RegExp(`/machines/${ids.live}/sessions/[^/]+/terminal`));
+  // Scoped to `main`: the sidebar has its own "Machines" link, and the breadcrumb is the
+  // one being asserted.
+  const crumb = page.getByRole("main");
+  await expect(crumb.getByRole("link", { name: "Machines" })).toBeVisible();
+  await expect(crumb.getByRole("link", { name: NAMES.live })).toBeVisible();
 });

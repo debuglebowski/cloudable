@@ -266,8 +266,8 @@ be implicit and tied to whether someone happened to navigate away.
 
 | Route | Component | Entry points |
 | :--- | :--- | :--- |
-| `/access/sessions/$sessionId/terminal` | `components/terminal/terminal-session.tsx` | machine page "Connect" (fresh mint), Access page row (rejoin) |
-| `/access/sessions/$sessionId/files` | `components/files/file-browser.tsx` | machine page "Files" (fresh mint), Access page row (rejoin) |
+| `/machines/$machineId/sessions/$sessionId/terminal` | `components/terminal/terminal-session.tsx` | machine page "Connect" (fresh mint), Access page row or the machine's Sessions tab (rejoin) |
+| `/machines/$machineId/sessions/$sessionId/files` | `components/files/file-browser.tsx` | machine page "Files" (fresh mint), Access page row or the machine's Sessions tab (rejoin) |
 | `/inspections/$sessionId` | `routes/archive/snapshot-files-page.tsx` | A machine's Snapshots tab, "Browse files" |
 
 The machine page mints via `useMintSession({ targetMachineId, method })` and navigates.
@@ -277,10 +277,19 @@ sometimes be wrong in the permissive direction. That matters most for the snapsh
 where wrong-in-the-permissive-direction means offering a departed colleague's home directory
 to someone who cannot open it.
 
-**The snapshot route is not under `/access`**, because the thing it reads is not a machine:
-it is an archived machine's disk snapshot, reached from Archive, and it mints through
-`POST /api/v1/archive/snapshots/:id/inspections` rather than through `mintSession`. There is
-no daemon on the other end and no session token — see `docs/access.md` §4c.
+**The two machine sessions live under `/machines/$machineId`, not `/access`.** Both are
+opened on a machine — its "Connect" and "Files" buttons mint one, and the Access page and
+the machine's own Sessions tab rejoin one that exists — so a `/access/...` URL described a
+route through the console nobody had taken, and the breadcrumb read `Access / Terminal`
+and linked back to a page the person had never been on. `machineId` rides in the path so
+`SessionBreadcrumb` can say `Machines / <name> / Terminal` without first resolving the
+session. Access keeps the fleet-wide list: "who is connected right now, anywhere" is asked
+under time pressure and must not require walking machines.
+
+**The snapshot route is under neither**, because the thing it reads is not a machine: it is
+an archived machine's disk snapshot, reached from a machine's Snapshots tab, and it mints
+through `POST /api/v1/archive/snapshots/:id/inspections` rather than through `mintSession`.
+There is no daemon on the other end and no session token — see `docs/access.md` §4c.
 
 `components/session/transport.ts` holds what both legs share: `attachUrl`, the
 `ConnectionState` union, and the binary-safe base64 helpers. Those helpers exist specifically

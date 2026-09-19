@@ -46,8 +46,8 @@ export function ConnectTerminalDialog({ machine, open, onOpenChange }: ConnectTe
         onSuccess: (session) => {
           handleOpenChange(false);
           void navigate({
-            to: "/access/sessions/$sessionId/terminal",
-            params: { sessionId: session.sessionId },
+            to: "/machines/$machineId/sessions/$sessionId/terminal",
+            params: { machineId: machine.id, sessionId: session.sessionId },
           });
         },
       },

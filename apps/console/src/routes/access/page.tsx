@@ -292,8 +292,8 @@ export function AccessPage() {
                           {session.method === "terminal" && (
                             <Button type="button" variant="outline" size="sm" asChild>
                               <Link
-                                to="/access/sessions/$sessionId/terminal"
-                                params={{ sessionId: session.id }}
+                                to="/machines/$machineId/sessions/$sessionId/terminal"
+                                params={{ machineId: session.machineId, sessionId: session.id }}
                               >
                                 Connect
                               </Link>
@@ -302,8 +302,8 @@ export function AccessPage() {
                           {session.method === "files" && (
                             <Button type="button" variant="outline" size="sm" asChild>
                               <Link
-                                to="/access/sessions/$sessionId/files"
-                                params={{ sessionId: session.id }}
+                                to="/machines/$machineId/sessions/$sessionId/files"
+                                params={{ machineId: session.machineId, sessionId: session.id }}
                               >
                                 Browse
                               </Link>

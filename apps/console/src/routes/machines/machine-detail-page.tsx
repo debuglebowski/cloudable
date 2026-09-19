@@ -52,6 +52,7 @@ import {
   useMachineActivityState,
 } from "./machine-activity-tab";
 import { MachineManifestTab } from "./machine-manifest-tab";
+import { MachineSessionsTab } from "./machine-sessions-tab";
 import {
   ARCHIVED_MACHINE_STATES,
   MACHINE_STATE_BADGE_VARIANT,
@@ -95,7 +96,7 @@ function PropertyRow({
   );
 }
 
-type DetailTab = "properties" | "manifest" | "compliance" | "snapshots" | "activity";
+type DetailTab = "properties" | "manifest" | "compliance" | "sessions" | "snapshots" | "activity";
 
 // Stable (non-index) keys for the six-check loading skeleton — this app's six v1 checks
 // never reorder, but a plain array index survives biome's own line-wrapping less reliably
@@ -286,6 +287,7 @@ export function MachineDetailPage() {
             <TabsTrigger value="properties">Properties</TabsTrigger>
             <TabsTrigger value="manifest">Manifest</TabsTrigger>
             <TabsTrigger value="compliance">Compliance</TabsTrigger>
+            <TabsTrigger value="sessions">Sessions</TabsTrigger>
             <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
           </TabsList>
@@ -528,6 +530,10 @@ export function MachineDetailPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="sessions">
+          <MachineSessionsTab machineId={machineId} />
         </TabsContent>
 
         <TabsContent value="activity">

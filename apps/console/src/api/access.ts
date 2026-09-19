@@ -36,6 +36,10 @@ export interface LiveCertificate {
 export interface ActiveSession {
   id: string;
   personName: string;
+  /** Needed to address the session's own page, which lives under the machine now
+   * (`/machines/$machineId/sessions/$sessionId/...`), and to filter this list down to one
+   * machine for its Sessions tab. It was on the wire all along and dropped in the map. */
+  machineId: string;
   machineName: string;
   method: SessionMethod;
   osUser: string;
@@ -140,6 +144,7 @@ async function fetchActiveSessions(): Promise<ActiveSession[]> {
   return res.sessions.map((s) => ({
     id: s.id,
     personName: people.find((p) => p.id === s.personId)?.email ?? s.personId,
+    machineId: s.machineId,
     machineName: s.machineName,
     method: s.method,
     osUser: s.osUser,
@@ -184,6 +189,18 @@ export function useActiveSessions() {
   return useQuery({
     queryKey: accessKeys.sessions(),
     queryFn: fetchActiveSessions,
+  });
+}
+
+/** One machine's live sessions, sharing `useActiveSessions()`'s cache entry via `select`
+ * rather than issuing a second fetch — the same shape `useMachineSnapshots` uses. The
+ * fleet-wide list stays on the Access page: "who is connected right now, anywhere" is a
+ * question you ask under time pressure and must not have to walk machines to answer. */
+export function useMachineSessions(machineId: string) {
+  return useQuery({
+    queryKey: accessKeys.sessions(),
+    queryFn: fetchActiveSessions,
+    select: (sessions) => sessions.filter((s) => s.machineId === machineId),
   });
 }
 

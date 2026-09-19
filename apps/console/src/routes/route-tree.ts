@@ -1,6 +1,6 @@
 import { createRootRoute, createRoute } from "@tanstack/react-router";
 
-import { accessRoute, accessSessionFilesRoute, accessSessionTerminalRoute } from "./access/route";
+import { accessRoute } from "./access/route";
 import { approvalsRoute } from "./approvals/route";
 import { archiveInspectionRoute, archiveRoute } from "./archive/route";
 import { auditRoute } from "./audit/route";
@@ -8,7 +8,12 @@ import { cliAuthRoute } from "./cli-auth/route";
 import { IndexPage } from "./index";
 import { integrationsRoute } from "./integrations/route";
 import { loginRoute } from "./login/route";
-import { machinesDetailRoute, machinesListRoute } from "./machines/route";
+import {
+  machineSessionFilesRoute,
+  machineSessionTerminalRoute,
+  machinesDetailRoute,
+  machinesListRoute,
+} from "./machines/route";
 import { organisationRoute } from "./organisation/route";
 import { peopleRoute } from "./people/route";
 import { RootLayout } from "./root";
@@ -46,14 +51,14 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   machinesListRoute,
   machinesDetailRoute,
+  machineSessionTerminalRoute,
+  machineSessionFilesRoute,
   peopleRoute,
   approvalsRoute,
   auditRoute,
   archiveRoute,
   archiveInspectionRoute,
   accessRoute,
-  accessSessionTerminalRoute,
-  accessSessionFilesRoute,
   integrationsRoute,
   organisationRoute,
   loginRoute,

@@ -50,8 +50,8 @@ export function BrowseFilesDialog({ machine, open, onOpenChange }: BrowseFilesDi
         onSuccess: (session) => {
           handleOpenChange(false);
           void navigate({
-            to: "/access/sessions/$sessionId/files",
-            params: { sessionId: session.sessionId },
+            to: "/machines/$machineId/sessions/$sessionId/files",
+            params: { machineId: machine.id, sessionId: session.sessionId },
           });
         },
       },
