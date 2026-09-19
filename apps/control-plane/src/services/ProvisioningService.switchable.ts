@@ -48,6 +48,7 @@ export const SwitchableProvisioningServiceLive: Layer.Layer<ProvisioningServiceT
       grantSnapshotRead: (input) => implFor(input.provider).grantSnapshotRead(input),
       revokeSnapshotRead: (input) => implFor(input.provider).revokeSnapshotRead(input),
       snapshotDiskExists: (input) => implFor(input.provider).snapshotDiskExists(input),
+      deleteSnapshotDisk: (input) => implFor(input.provider).deleteSnapshotDisk(input),
       archive: (machineId, provider, externalId) =>
         implFor(provider).archive(machineId, provider, externalId),
       reconcile: (machineId, provider, externalId) =>

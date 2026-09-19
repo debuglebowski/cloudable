@@ -66,16 +66,30 @@ The sweep **is** built: `expiry/daemon.ts` runs `expireOverdueSnapshots` on a 60
 leader-elected loop, over the candidates `computeExpirySweepCandidates(now?)` returns
 (every snapshot where `expiresAt < now`, `expiredAt IS NULL`, `legalHold = false`).
 
-What it does **not** do is hard-delete anything in Azure. It sets `expiredAt` and
-publishes `snapshot.expired`, and that is all. So a snapshot past its retention window
-reads as expired in the console and in evidence while the managed-disk snapshot is still
-sitting in the subscription. Check #5 ("retention is honoured",
-`compliance/checks/retention-honoured.ts`) treats `snapshot.expired` as proof that
-"hard-deletion happened on schedule" — it is not, and the check goes green over a
-deletion that never happened. Closing that needs a provisioning-side delete and a
-recorded provider id per snapshot to aim it at; neither exists yet. Known gap, and a
-real one — this paragraph previously claimed the whole sweep was unbuilt, which was
-also false.
+It hard-deletes too. For each candidate the sweep calls
+`ProvisioningService.deleteSnapshotDisk` for every id in `snapshots.capturedDisks`, and
+only once all of them succeeded does it set `expiredAt` and publish `snapshot.expired`.
+The event carries `deletedDiskExternalIds`, so the evidence names what was destroyed
+instead of asserting that something was.
+
+Deletion comes **first** deliberately. Check #5 ("retention is honoured",
+`compliance/checks/retention-honoured.ts`) reads `expiredAt` as proof that hard-deletion
+happened on schedule, so the event can only be written after the thing it attests to
+actually occurred. For a long time it was not: the sweep set `expiredAt` and deleted
+nothing, the console told people the volume data was gone, and the check went green over
+a deletion that never happened.
+
+A snapshot whose disks could not all be destroyed is **left overdue** — not expired, no
+event — and retried on the next pass, so the check correctly stays red while data that
+should be gone is still there. `deleteSnapshotDisk` is idempotent for exactly this
+reason: a retry after a partial pass re-runs the disks that already succeeded.
+
+Rows with an empty `capturedDisks` (written before snapshots captured real ids — six
+exist in production) expire with `deletedDiskExternalIds: []`. Nothing is destroyed
+because nothing was recorded to aim a delete at, and the event says so rather than
+implying a deletion. Whether an orphaned managed-disk snapshot exists behind any of them
+is not something the control plane can answer; that needs a one-off reconciliation
+against the subscription, by disk name.
 
 ## Legal hold
 

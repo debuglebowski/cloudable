@@ -16,6 +16,13 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * schedule, so its absence — `expiredAt IS NULL` — past the `expiresAt`
  * deadline is the failure signal. `legalHold = true` is a documented
  * exception (per spec), not a violation, so those snapshots are excluded.
+ *
+ * That reading of `expiredAt` is only sound because the expiry sweep destroys the
+ * captured disks BEFORE setting it, and leaves the row untouched when a delete fails
+ * (`domain/archive/snapshot.ts`). It was not always: the sweep used to set `expiredAt`
+ * and delete nothing, which made this check pass over data still sitting at the
+ * provider. If that ordering is ever changed, this check silently becomes a lie —
+ * it has no independent way to tell that the data is really gone.
  */
 export const retentionHonouredCheck: ComplianceCheck = {
   id: CHECK_ID,

@@ -279,6 +279,29 @@ export interface ProvisioningService {
     provider: Provider;
     diskExternalId: string;
   }): Effect.Effect<boolean, ProvisioningError>;
+  /**
+   * Destroy one captured disk at the provider, permanently.
+   *
+   * This is what makes retention expiry real. The sweep in
+   * `domain/archive/snapshot.ts` used to set `expiredAt` and stop there: the console
+   * said the volume data was hard-deleted, compliance check #5 read
+   * `snapshot.expired` as proof that it had been, and the managed-disk snapshots sat
+   * in the subscription indefinitely. A check that goes green over a deletion that
+   * never happened is worse than one that fails.
+   *
+   * Idempotent, like `revokeSnapshotRead`: a disk already gone is the state the caller
+   * wanted, so it succeeds rather than erroring. That matters because the sweep retries
+   * — a pass that deleted two of three disks and failed must be able to run again
+   * without the two successes turning into errors the second time.
+   *
+   * Deletes the COPY, never the live disk it was copied from. The ids in
+   * `snapshots.capturedDisks` only ever name snapshot objects, and the caller passes
+   * nothing else.
+   */
+  deleteSnapshotDisk(input: {
+    provider: Provider;
+    diskExternalId: string;
+  }): Effect.Effect<void, ProvisioningError>;
   archive(
     machineId: string,
     provider: Provider,

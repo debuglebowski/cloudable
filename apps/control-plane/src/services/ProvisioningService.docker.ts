@@ -464,4 +464,9 @@ export const makeDockerProvisioningServiceLive = (options: {
     // Nothing was ever captured, so nothing can still exist. Reached only if a docker
     // machine somehow has a row naming a disk, which would itself be the bug.
     snapshotDiskExists: () => Effect.succeed(false),
+    // Same reasoning as `snapshotDiskExists`: a docker machine captures no disks, so
+    // there is never anything to destroy and "already gone" is the honest outcome.
+    // Succeeding here is not the false claim it would be on azure — nothing was ever
+    // created for this delete to miss.
+    deleteSnapshotDisk: () => Effect.void,
   } satisfies ProvisioningService);

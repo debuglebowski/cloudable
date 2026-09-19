@@ -85,6 +85,11 @@ export const makeFakeProvisioningServiceLive = (
     ProvisioningServiceTag,
     Effect.gen(function* () {
       const state = yield* Ref.make(new Map<string, FakeMachineEntry>());
+      // Disk ids destroyed by `deleteSnapshotDisk`. Tracked rather than ignored so a
+      // test can assert that expiry actually deleted something: the bug this whole path
+      // exists to close was a sweep that reported deletion and performed none, which a
+      // no-op fake would reproduce exactly.
+      const deletedDisks = yield* Ref.make(new Set<string>());
 
       const require = (machineId: string): Effect.Effect<FakeMachineEntry, ProvisioningError> =>
         Effect.gen(function* () {
@@ -197,10 +202,18 @@ export const makeFakeProvisioningServiceLive = (
       const revokeSnapshotRead: ProvisioningService["revokeSnapshotRead"] = () => Effect.void;
 
       const snapshotDiskExists: ProvisioningService["snapshotDiskExists"] = ({ diskExternalId }) =>
-        Effect.succeed(
-          options.snapshotImages?.has(diskExternalId) === true ||
-            options.fallbackSnapshotImage != null,
-        );
+        Effect.gen(function* () {
+          // A deleted disk is gone, whatever image the options still map it to — expiry
+          // and the integrity sweep read the same provider, so they have to agree.
+          if ((yield* Ref.get(deletedDisks)).has(diskExternalId)) return false;
+          return (
+            options.snapshotImages?.has(diskExternalId) === true ||
+            options.fallbackSnapshotImage != null
+          );
+        });
+
+      const deleteSnapshotDisk: ProvisioningService["deleteSnapshotDisk"] = ({ diskExternalId }) =>
+        Ref.update(deletedDisks, (ids) => new Set(ids).add(diskExternalId));
 
       const archive: ProvisioningService["archive"] = (machineId: string, _provider) =>
         Effect.gen(function* () {
@@ -268,6 +281,7 @@ export const makeFakeProvisioningServiceLive = (
         grantSnapshotRead,
         revokeSnapshotRead,
         snapshotDiskExists,
+        deleteSnapshotDisk,
         archive,
         reconcile,
         reimage,

@@ -75,9 +75,16 @@ export const snapshots = pgTable("snapshots", {
   retentionDays: integer("retention_days").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  // Set by the expiry sweep (`expiry/daemon.ts`). NOTE: the sweep sets this and emits
-  // `snapshot.expired`; it does NOT yet delete anything at the provider — see
-  // `docs/lifecycle.md`. So this means "past retention", not "data destroyed".
+  // Set by the expiry sweep (`expiry/daemon.ts`) only AFTER every disk in
+  // `capturedDisks` was destroyed at the provider, so this really does mean "data
+  // destroyed on schedule" and not merely "past retention" — which is what it used to
+  // mean, while the console and check #5 both read it as the former. A snapshot whose
+  // disks could not all be deleted stays null here and is retried. See
+  // `docs/lifecycle.md`.
+  //
+  // The exception is a row that captured nothing: there is no id to aim a delete at, so
+  // it is expired without anything being destroyed and its `snapshot.expired` event
+  // carries an empty `deletedDiskExternalIds`.
   expiredAt: timestamp("expired_at", { withTimezone: true }),
   // When the integrity sweep first found that a disk in `capturedDisks` no longer
   // exists at the provider. Distinct from `expiredAt` in the way that matters most:

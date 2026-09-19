@@ -925,6 +925,34 @@ const service: ProvisioningService = {
       return found !== null;
     }),
 
+  deleteSnapshotDisk: ({ diskExternalId }) =>
+    Effect.gen(function* () {
+      const clients = yield* getClients();
+      const name = parseSnapshotNameFromResourceId(diskExternalId);
+      // Unlike `snapshotDiskExists` and `revokeSnapshotRead`, an id we cannot parse is
+      // an ERROR here, not a benign default. Those two can fall back to a safe answer;
+      // this one cannot, because the caller writes "deleted" into the audit record on
+      // success. Returning success over an id we never resolved would put exactly the
+      // false claim back that this operation exists to remove.
+      if (!name) {
+        return yield* Effect.fail(
+          new ProvisioningError({
+            reason: "provider_error",
+            cause: `cannot parse a snapshot name from disk id ${diskExternalId}`,
+          }),
+        );
+      }
+
+      // `tolerateAlreadyGone`: a snapshot already deleted is the outcome we wanted, and
+      // the sweep retries whole rows — a pass that deleted one disk of two and then
+      // failed must be able to run again without its own earlier success erroring.
+      yield* tolerateAlreadyGone(
+        runArm(() =>
+          clients.compute.snapshots.beginDeleteAndWait(config.azureMachinesResourceGroup, name),
+        ),
+      );
+    }),
+
   revokeSnapshotRead: ({ diskExternalId }) =>
     Effect.gen(function* () {
       const clients = yield* getClients();

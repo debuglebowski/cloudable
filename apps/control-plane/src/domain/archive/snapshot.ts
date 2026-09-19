@@ -368,68 +368,119 @@ export const computeExpirySweepCandidates = (now: Date = new Date(), orgId?: str
   });
 
 /**
- * The actual expiry sweep: flips `expiredAt` on every overdue, non-legal-hold snapshot and
- * publishes `snapshot.expired` for each. Before this, `computeExpirySweepCandidates`
- * was a real, tested query with no caller anywhere — nothing ever actually set
- * `expiredAt`, so "Archived, expired" never happened and every snapshot past its
- * retention window just sat there indefinitely as "restorable".
+ * The actual expiry sweep: destroys every captured disk at the provider, then flips
+ * `expiredAt` and publishes `snapshot.expired` for each overdue, non-legal-hold snapshot.
  *
- * KNOWN GAP, and a real one: this sets `expiredAt` and publishes `snapshot.expired`. It
- * does NOT delete anything at the provider. `getSnapshotSubState` /
- * `restoreUnavailableReason` (sub-state.ts) derive restore-availability purely from
- * `expiredAt`, so setting it is enough to make restore correctly unavailable — but the
- * managed-disk snapshots stay in the subscription, past their retention window, while
- * the console and the evidence export both read as expired.
+ * DELETION COMES FIRST, and the row is only marked expired once it succeeded. For a long
+ * time this set `expiredAt` and stopped there: the managed-disk snapshots stayed in the
+ * subscription past their retention window while the console told people the volume data
+ * had been hard-deleted, and compliance check #5 read `snapshot.expired` as proof that it
+ * had. The check went green over a deletion that never happened, which is worse than a
+ * check that fails. Ordering it this way means the event can only ever be written after
+ * the thing it attests to actually occurred.
  *
- * Compliance check #5 ("retention is honoured") treats `snapshot.expired` as proof that
- * "hard-deletion happened on schedule". It is not. The check goes green over a deletion
- * that never happened, which is worse than a check that fails.
+ * A row whose disks could not all be destroyed is LEFT ALONE — not expired, no event —
+ * and retried next pass. It keeps reading as overdue, so check #5 correctly stays red
+ * while data that should be gone is still there. Deleting is idempotent
+ * (`ProvisioningService.deleteSnapshotDisk`), so a retry after a partial pass re-runs the
+ * disks that already succeeded without erroring on them.
  *
- * The comment here used to say "this build has no real disk to hard-delete (no live
- * Azure account)". That was false: the azure adapter has been provisioning production
- * machines for some time. What was actually missing was a provider-side delete and a
- * recorded id to aim it at. `snapshots.capturedDisks` now carries those ids for every
- * snapshot taken from this point on, so closing this needs a `ProvisioningService`
- * delete operation and a call to it from here.
+ * Rows that captured nothing (`capturedDisks: []`, written before snapshots became real —
+ * six exist in production) are expired with `deletedDiskExternalIds: []`. There is no id
+ * to aim a delete at, so nothing is destroyed and the event says so rather than implying
+ * a deletion. Restore is genuinely unavailable for them either way: the control plane
+ * cannot name the data to restore from it any more than it can to delete it.
  *
  * The record itself (id, machine, timestamps) is never touched beyond `expiredAt` —
  * "the record and full audit history persist permanently" per spec.
  */
 export const expireOverdueSnapshots = (
   now: Date = new Date(),
-): Effect.Effect<number, ArchiveDbError, Db | EventBus> =>
+): Effect.Effect<number, ArchiveDbError, Db | EventBus | ProvisioningServiceTag> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const eventBus = yield* EventBus;
+    const provisioning = yield* ProvisioningServiceTag;
 
     const candidates = yield* computeExpirySweepCandidates(now);
     if (candidates.length === 0) return 0;
 
-    const ids = candidates.map((snapshot) => snapshot.id);
-    yield* dbTry(
-      () => db.update(snapshots).set({ expiredAt: now }).where(inArray(snapshots.id, ids)),
-      "expire_overdue_snapshots",
+    // `computeExpirySweepCandidates` is shared with compliance check #5 and returns
+    // snapshot columns only; the provider lives on the machine. Fetched in one query
+    // here rather than by widening that shared primitive for this caller alone.
+    const machineIds = [...new Set(candidates.map((snapshot) => snapshot.machineId))];
+    const providerRows = yield* dbTry(
+      () =>
+        db
+          .select({ id: machines.id, provider: machines.provider })
+          .from(machines)
+          .where(inArray(machines.id, machineIds)),
+      "select_expiry_sweep_providers",
     );
+    const providerFor = new Map(providerRows.map((row) => [row.id, row.provider]));
 
-    yield* publishOrDie(
-      eventBus.publish(
-        candidates.map((snapshot) => ({
-          ...makeEnvelope({
-            orgId: snapshot.orgId,
-            machineId: snapshot.machineId,
-            correlationId: ulid(),
-            ...SYSTEM_ACTOR,
-          }),
-          type: "snapshot.expired" as const,
-          payload: {
-            createdAt: snapshot.createdAt.toISOString(),
-            retentionDays: snapshot.retentionDays,
+    let expired = 0;
+    for (const snapshot of candidates) {
+      const provider = providerFor.get(snapshot.machineId);
+      if (!provider) {
+        // The machine row is gone but its snapshot is not (invariant 6 archives machines
+        // rather than deleting them, so this is a real anomaly). Without a provider there
+        // is nothing to dispatch a delete to, and expiring the row would claim a deletion
+        // that could not have been attempted.
+        yield* Effect.logError(
+          `expiry: snapshot ${snapshot.id} has no machine row (${snapshot.machineId}); cannot delete its disks`,
+        );
+        continue;
+      }
+
+      const deleted: string[] = [];
+      let failed = false;
+      for (const disk of snapshot.capturedDisks) {
+        const outcome = yield* provisioning
+          .deleteSnapshotDisk({ provider, diskExternalId: disk.externalId })
+          .pipe(
+            Effect.as(true),
+            Effect.catchAll((cause) =>
+              Effect.logError(
+                `expiry: failed to delete disk ${disk.externalId} of snapshot ${snapshot.id}: ${cause.reason}`,
+              ).pipe(Effect.as(false)),
+            ),
+          );
+        if (outcome) deleted.push(disk.externalId);
+        else failed = true;
+      }
+
+      // Partial success is not success. Leave the row overdue and try the whole thing
+      // again next pass rather than recording an expiry over data still sitting there.
+      if (failed) continue;
+
+      yield* dbTry(
+        () => db.update(snapshots).set({ expiredAt: now }).where(eq(snapshots.id, snapshot.id)),
+        "expire_overdue_snapshot",
+      );
+
+      yield* publishOrDie(
+        eventBus.publish([
+          {
+            ...makeEnvelope({
+              orgId: snapshot.orgId,
+              machineId: snapshot.machineId,
+              correlationId: ulid(),
+              ...SYSTEM_ACTOR,
+            }),
+            type: "snapshot.expired",
+            payload: {
+              createdAt: snapshot.createdAt.toISOString(),
+              retentionDays: snapshot.retentionDays,
+              deletedDiskExternalIds: deleted,
+            },
           },
-        })),
-      ),
-    );
+        ]),
+      );
+      expired++;
+    }
 
-    return candidates.length;
+    return expired;
   });
 
 /**

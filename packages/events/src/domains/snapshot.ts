@@ -34,8 +34,29 @@ export type SnapshotEvent =
       };
     })
   | (EventEnvelope & {
+      /**
+       * A snapshot passed its retention window: its captured disks were destroyed at the
+       * provider and the row was marked expired.
+       *
+       * This is check #5's evidence that hard-deletion happened on schedule, so the sweep
+       * writes it only AFTER the provider deletes succeeded — it used to be written over
+       * a deletion that never happened at all.
+       */
       type: "snapshot.expired";
-      payload: { createdAt: string; retentionDays: number };
+      payload: {
+        createdAt: string;
+        retentionDays: number;
+        /**
+         * The disk ids actually destroyed, so the evidence names what was deleted rather
+         * than asserting that something was.
+         *
+         * Empty means nothing was destroyed because nothing was recorded to destroy — a
+         * row written before snapshots captured real ids. Empty NEVER means a delete was
+         * skipped or failed: a snapshot whose disks could not all be destroyed is not
+         * expired and gets no event.
+         */
+        deletedDiskExternalIds: string[];
+      };
     })
   | (EventEnvelope & {
       /**

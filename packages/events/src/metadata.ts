@@ -201,7 +201,8 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2 | 3; desc
     },
     "snapshot.expired": {
       tier: 1,
-      description: "A snapshot passed its retention window and expired.",
+      description:
+        "A snapshot passed its retention window: its captured disks were destroyed at the provider and the record was marked expired.",
     },
     "snapshot.data_missing": {
       tier: 1,
