@@ -1,6 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { Clock, Cloud, Cpu, Disc, History, type LucideIcon, MapPin, User } from "lucide-react";
+import {
+  Clock,
+  Cloud,
+  Cpu,
+  Disc,
+  FolderSearch,
+  History,
+  type LucideIcon,
+  MapPin,
+  User,
+} from "lucide-react";
 import { useState } from "react";
 
 import { type ArchivedSnapshot, useMachineSnapshots } from "@/api/archive";
@@ -28,6 +38,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RestoreDialog } from "@/routes/archive/restore-dialog";
 import { RetentionStatus, formatDate, formatSnapshotSize } from "@/routes/archive/snapshot-format";
+import { useInspectSnapshot } from "@/routes/archive/use-inspect-snapshot";
 
 import { ArchiveMachineDialog } from "./archive-machine-dialog";
 import { BrowseFilesDialog } from "./browse-files-dialog";
@@ -127,6 +138,7 @@ export function MachineDetailPage() {
   // per-machine endpoint of their own.
   const checksQuery = useComplianceChecks();
   const snapshotsQuery = useMachineSnapshots(machineId);
+  const { inspect, isPending: inspectPending } = useInspectSnapshot();
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -416,7 +428,7 @@ export function MachineDetailPage() {
                       </TableHead>
                       <TableHead>Retention</TableHead>
                       <TableHead>Size</TableHead>
-                      <TableHead className="text-right">Restore</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -453,16 +465,34 @@ export function MachineDetailPage() {
                           {formatSnapshotSize(snapshot)}
                         </TableCell>
                         <TableCell className="text-right">
-                          {snapshot.subState === "restorable" ? (
-                            <RestoreDialog snapshot={snapshot} />
-                          ) : (
-                            <span
-                              className="text-xs text-muted-foreground"
+                          <div className="flex items-center justify-end gap-2">
+                            {/* This tab is the only place manual and upgrade snapshots
+                                are listed — the Archive page shows one archive-trigger
+                                snapshot per archived machine — so without this button a
+                                snapshot someone took on purpose could not be opened from
+                                the console at all. Greyed WITH the reason rather than
+                                hidden, the rule `sub-state.ts` states. */}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={snapshot.subState !== "restorable" || inspectPending}
                               title={snapshot.restoreUnavailableReason ?? undefined}
+                              onClick={() => inspect(snapshot.id)}
                             >
-                              {SNAPSHOT_UNAVAILABLE_LABEL[snapshot.subState]}
-                            </span>
-                          )}
+                              <FolderSearch />
+                              Browse files
+                            </Button>
+                            {snapshot.subState === "restorable" ? (
+                              <RestoreDialog snapshot={snapshot} />
+                            ) : (
+                              <span
+                                className="text-xs text-muted-foreground"
+                                title={snapshot.restoreUnavailableReason ?? undefined}
+                              >
+                                {SNAPSHOT_UNAVAILABLE_LABEL[snapshot.subState]}
+                              </span>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}

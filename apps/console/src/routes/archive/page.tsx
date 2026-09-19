@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
   Archive,
   Calendar,
@@ -13,11 +13,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import {
-  type ArchivedSnapshot,
-  useArchivedSnapshots,
-  useOpenSnapshotInspection,
-} from "@/api/archive";
+import { type ArchivedSnapshot, useArchivedSnapshots } from "@/api/archive";
 import { type Machine, listMachines, machinesKeys } from "@/api/machines";
 import { PageLoader } from "@/components/page-loader";
 import { TableHeaderIcon } from "@/components/table-header-icon";
@@ -43,6 +39,7 @@ import { ARCHIVED_MACHINE_STATES } from "@/routes/machines/machine-state";
 
 import { LegalHoldDialog } from "./legal-hold-dialog";
 import { RetentionStatus, formatDate, formatSnapshotSize } from "./snapshot-format";
+import { useInspectSnapshot } from "./use-inspect-snapshot";
 
 /** Read-only — placing/clearing a hold is a menu action now, not a button on this cell. */
 function LegalHoldStatus({ legalHold }: { legalHold: boolean }) {
@@ -76,28 +73,7 @@ export function ArchivePage() {
     isError: snapshotsError,
   } = useArchivedSnapshots();
   const [legalHoldTarget, setLegalHoldTarget] = useState<ArchivedSnapshot | null>(null);
-  const navigate = useNavigate();
-  const openInspection = useOpenSnapshotInspection();
-
-  /**
-   * Whether this person may look is the server's answer, not a prediction made here.
-   * Same rule `browse-files-dialog.tsx` follows for live machines, and it matters more
-   * here: guessing wrong in the permissive direction would mean offering a departed
-   * person's home directory to someone who cannot open it, and the refusal would arrive
-   * only after they had clicked. The error toast carries the reason and what to do —
-   * request an elevation.
-   */
-  const inspect = (snapshot: ArchivedSnapshot) => {
-    openInspection.mutate(snapshot.id, {
-      onSuccess: (session) => {
-        void navigate({
-          to: "/archive/inspections/$sessionId",
-          params: { sessionId: session.sessionId },
-          search: { root: session.rootPath },
-        });
-      },
-    });
-  };
+  const { inspect, isPending: inspectPending } = useInspectSnapshot();
 
   const isLoading = machinesQuery.isPending || snapshotsLoading;
   const isError = machinesQuery.isError || snapshotsError;
@@ -219,11 +195,9 @@ export function ArchivePage() {
                                 is carried through the wire at all. An action that vanishes
                                 tells someone nothing about why. */}
                             <DropdownMenuItem
-                              disabled={
-                                snapshot.subState !== "restorable" || openInspection.isPending
-                              }
+                              disabled={snapshot.subState !== "restorable" || inspectPending}
                               title={snapshot.restoreUnavailableReason ?? undefined}
-                              onSelect={() => inspect(snapshot)}
+                              onSelect={() => inspect(snapshot.id)}
                             >
                               <FolderSearch />
                               Browse files

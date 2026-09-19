@@ -32,12 +32,17 @@ const NAMES = {
   owned: `insp-owned-${suffix}`,
   orphaned: `insp-orphaned-${suffix}`,
   empty: `insp-empty-${suffix}`,
+  // A RUNNING machine holding a manual snapshot. The Archive page lists archived machines
+  // and picks each one's archive-trigger snapshot, so this row appears only on the
+  // machine's own Snapshots tab -- the case that had no way into the browser at all.
+  live: `insp-live-${suffix}`,
 };
 
 let email = "";
 let orgId = "";
 let personId = "";
 let authUserId = "";
+let liveMachineId = "";
 
 test.beforeAll(async () => {
   const { client, db } = connect();
@@ -66,7 +71,7 @@ test.beforeAll(async () => {
     if (!res.ok) throw new Error(`sign-up failed: ${res.status} ${await res.text()}`);
     authUserId = ((await res.json()) as { user: { id: string } }).user.id;
 
-    const machine = async (name: string, ownerPersonId: string | null) => {
+    const machine = async (name: string, ownerPersonId: string | null, live = false) => {
       const [row] = await db
         .insert(schema.machines)
         .values({
@@ -77,18 +82,22 @@ test.beforeAll(async () => {
           sizeSku: "Standard_B2s",
           image: "ubuntu-24.04",
           ownerPersonId,
-          state: "archived_restorable",
-          archivedAt: new Date(),
+          state: live ? "running" : "archived_restorable",
+          archivedAt: live ? null : new Date(),
         })
         .returning();
       if (!row) throw new Error("seed failed");
       return row;
     };
-    const snapshot = async (machineId: string, disks: unknown[]) => {
+    const snapshot = async (
+      machineId: string,
+      disks: unknown[],
+      trigger: "archive" | "manual" = "archive",
+    ) => {
       await db.insert(schema.snapshots).values({
         orgId,
         machineId,
-        trigger: "archive",
+        trigger,
         retentionDays: 30,
         expiresAt: new Date(Date.now() + 20 * 86_400_000),
         capturedDisks: disks as never,
@@ -99,6 +108,8 @@ test.beforeAll(async () => {
     await snapshot((await machine(NAMES.owned, personId)).id, disk);
     await snapshot((await machine(NAMES.orphaned, null)).id, disk);
     await snapshot((await machine(NAMES.empty, personId)).id, []);
+    liveMachineId = (await machine(NAMES.live, personId, true)).id;
+    await snapshot(liveMachineId, disk, "manual");
   } finally {
     await client.end();
   }
@@ -198,4 +209,23 @@ test("a snapshot that captured nothing greys the action out rather than hiding i
   const item = page.getByRole("menuitem", { name: "Browse files" });
   await expect(item).toBeVisible();
   await expect(item).toBeDisabled();
+});
+
+test("a manual snapshot is browsable from the machine's own Snapshots tab", async ({ page }) => {
+  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH on the control plane");
+
+  // The Archive page cannot reach this row: it lists archived machines and picks each
+  // one's archive-trigger snapshot, and this is a manual snapshot of a RUNNING machine.
+  // Before the tab had its own button, a snapshot someone took on purpose could be
+  // restored from the console but never opened.
+  await page.goto(`/machines/${liveMachineId}`);
+  await page.getByRole("tab", { name: "Snapshots" }).click();
+
+  const row = page.getByRole("row").filter({ hasText: "Manual" });
+  await row.getByRole("button", { name: "Browse files" }).click();
+
+  await expect(page).toHaveURL(/\/archive\/inspections\//);
+  // Real contents of the checked-in ext4 fixture, same as the archived-machine path --
+  // proving the tab's button reaches the same reader, not just the same route.
+  await expect(page.getByText("notes.txt").first()).toBeVisible();
 });
