@@ -209,6 +209,11 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2 | 3; desc
       description:
         "A disk a snapshot recorded was found missing at the provider while its retention window was still open.",
     },
+    "snapshot.record_corrected": {
+      tier: 1,
+      description:
+        "A snapshot record was corrected to name provider copies it already had but never recorded.",
+    },
     "snapshot.legal_hold_set": {
       tier: 1,
       description: "A legal hold was placed on a snapshot, suspending its retention expiry.",
