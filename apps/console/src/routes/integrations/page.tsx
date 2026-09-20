@@ -113,7 +113,7 @@ export function IntegrationsPage() {
               <IntegrationCard
                 title="Microsoft Entra ID"
                 icon={MicrosoftLogo}
-                description="SCIM 2.0 + SAML against your Entra tenant. Optional — without one, People stays Cloudable's fully editable system of record."
+                description="SAML sign-in against your Entra tenant. Optional — without one, People stays Cloudable's fully editable system of record. Directory sync is not wired up: people are managed here either way."
                 integration={idp}
                 connectForm={<IdpConnectDialog />}
                 onDisconnect={handleDisconnect}
@@ -191,6 +191,7 @@ export function IntegrationsPage() {
                 title={SECRET_STORE_PROVIDER_LABEL.azure_key_vault}
                 icon={AzureLogo}
                 description="Point at your own vault by URL."
+                comingSoon="Cloudable does not inject secrets yet — connecting a store would not do anything."
                 integration={azureKeyVault}
                 connectForm={
                   <SecretStoreConnectDialog
@@ -213,6 +214,7 @@ export function IntegrationsPage() {
                 title={SECRET_STORE_PROVIDER_LABEL["1password"]}
                 icon={OnePasswordLogo}
                 description="Point at your own vault by URL."
+                comingSoon="Cloudable does not inject secrets yet — connecting a store would not do anything."
                 integration={onePassword}
                 connectForm={
                   <SecretStoreConnectDialog

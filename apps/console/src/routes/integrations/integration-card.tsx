@@ -22,6 +22,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 export interface IntegrationCardProps<K extends IntegrationKind> {
   title: string;
@@ -43,6 +44,15 @@ export interface IntegrationCardProps<K extends IntegrationKind> {
   /** Extra footer action shown alongside Disconnect once connected — e.g. Azure's
    * "Configure" catalog dialog. Omitted for every card that doesn't need one. */
   secondaryAction?: ReactNode;
+  /** Set when the integration cannot do anything yet, with the reason. The card renders
+   * that reason instead of a connect form — greyed out WITH the reason stated, never
+   * hidden, the same posture `sub-state.ts` takes for an unrestorable snapshot and the
+   * restore dialog takes for the modes that refuse.
+   *
+   * Takes precedence over `integration`: the connect endpoint still exists, so an org may
+   * already have a row for something inert, and "Connected" would be the wrong word for
+   * it. */
+  comingSoon?: string;
 }
 
 /** One connection card: connected state + disconnect, or the kind-specific connect form. */
@@ -55,9 +65,10 @@ export function IntegrationCard<K extends IntegrationKind>({
   onDisconnect,
   children,
   secondaryAction,
+  comingSoon,
 }: IntegrationCardProps<K>) {
   return (
-    <Card className="flex flex-col">
+    <Card className={cn("flex flex-col", comingSoon && "opacity-75")}>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           {/* min-w-0 + truncate on the title: at this card's width (three per
@@ -72,14 +83,22 @@ export function IntegrationCard<K extends IntegrationKind>({
             </span>
             <CardTitle className="truncate">{title}</CardTitle>
           </div>
-          <Badge variant={integration ? "ok" : "secondary"} dot={!integration} className="shrink-0">
-            {integration ? "Connected" : "Not connected"}
+          <Badge
+            variant={integration && !comingSoon ? "ok" : "secondary"}
+            dot={!comingSoon && !integration}
+            className="shrink-0"
+          >
+            {comingSoon ? "Soon" : integration ? "Connected" : "Not connected"}
           </Badge>
         </div>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-2 text-sm">
-        {integration ? (
+        {comingSoon ? (
+          // The reason, not "Not connected." — a card that says only "not connected"
+          // reads as an invitation to connect it.
+          <p className="text-muted-foreground">{comingSoon}</p>
+        ) : integration ? (
           <>
             {children(integration)}
             <span className="text-xs text-muted-foreground">
@@ -93,7 +112,13 @@ export function IntegrationCard<K extends IntegrationKind>({
         )}
       </CardContent>
       <CardFooter className="gap-2">
-        {integration?.managedByConfig ? (
+        {comingSoon ? (
+          // Disabled rather than omitted: an empty footer reads as a layout bug, and the
+          // affordance being visibly inert is the point.
+          <Button variant="outline" size="sm" disabled>
+            Connect
+          </Button>
+        ) : integration?.managedByConfig ? (
           // No Disconnect: there is no row to remove, and the deployment
           // would keep authenticating against the configured provider
           // regardless — a button that appears to work and changes nothing is
