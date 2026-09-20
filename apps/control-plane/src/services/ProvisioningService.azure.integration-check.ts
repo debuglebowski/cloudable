@@ -14,6 +14,18 @@ import { AzureProvisioningServiceLive } from "./ProvisioningService.azure";
 //
 //   AZURE_SUBSCRIPTION_ID=... AZURE_MACHINES_RESOURCE_GROUP=... \
 //   AZURE_MACHINES_SUBNET_ID=... bun test ProvisioningService.azure.integration-check.ts
+/**
+ * The region every resource this test creates lands in. It MUST match the region of
+ * `AZURE_MACHINES_SUBNET_ID`'s vnet — a NIC cannot reference a subnet in another region,
+ * and Azure rejects the whole create with `InvalidResourceReference`.
+ *
+ * This was hardcoded `eastus`, which meant the test could only ever have passed against a
+ * deployment whose machines vnet happened to be there. `config.azureMachinesLocation` is
+ * the same knob the control plane itself uses to override a machine's region, so the
+ * deployment's own answer is the right one to take.
+ */
+const REGION = config.azureMachinesLocation ?? "eastus";
+
 const azureConfigured =
   config.azureSubscriptionId !== null && config.azureMachinesSubnetId !== null;
 
@@ -25,6 +37,10 @@ describe.skipIf(!azureConfigured)(
     const run = <A, E>(effect: Effect.Effect<A, E, ProvisioningServiceTag>) =>
       Effect.runPromise(Effect.provide(effect, AzureProvisioningServiceLive));
 
+    // 600s, not bun's 5s default for hooks. Tearing a machine down is a deallocate plus
+    // five ARM deletes and takes minutes — at the default this hook times out every run
+    // and leaks a VM, its two disks, a NIC and a public IP, which is how this check left
+    // a live machine behind the first time it was run against a real subscription.
     afterAll(async () => {
       // Best-effort cleanup regardless of test outcome — archive() tears
       // down every resource create() made (VM, both disks, NIC, public IP).
@@ -36,7 +52,7 @@ describe.skipIf(!azureConfigured)(
           yield* provisioning.archive(machineId, "azure", null);
         }),
       ).catch(() => {});
-    });
+    }, 600_000);
 
     test("create provisions a real VM; reconcile and archive see the real state", async () => {
       const created = await run(
@@ -46,7 +62,7 @@ describe.skipIf(!azureConfigured)(
             machineId,
             orgId: "integration-check",
             provider: "azure",
-            region: "eastus",
+            region: REGION,
             sizeSku: "Standard_B1s",
             image: "ubuntu-22.04",
             packages: [],
@@ -133,6 +149,63 @@ describe.skipIf(!azureConfigured)(
       // public IP are gone, and a restore has to rebuild it around the captured data disk.
       // Nothing resolves any more, so this also exercises the adapter probing for what
       // exists rather than being told.
+      // The operation nothing triggers deliberately: the expiry sweep calls it on a timer,
+      // so it is the one destructive path with no human in the loop to notice it failing.
+      // Exercised here against a real captured snapshot before the restore consumes it.
+      const osDisk = captured.disks.find((disk) => disk.kind === "os");
+      expect(osDisk).toBeDefined();
+      const osDiskId = (osDisk as { externalId: string }).externalId;
+
+      expect(
+        await run(
+          Effect.gen(function* () {
+            const provisioning = yield* ProvisioningServiceTag;
+            return yield* provisioning.snapshotDiskExists({
+              provider: "azure",
+              diskExternalId: osDiskId,
+            });
+          }),
+        ),
+      ).toBe(true);
+
+      await run(
+        Effect.gen(function* () {
+          const provisioning = yield* ProvisioningServiceTag;
+          return yield* provisioning.deleteSnapshotDisk({
+            provider: "azure",
+            diskExternalId: osDiskId,
+          });
+        }),
+      );
+
+      // Actually gone at the provider — the whole point. `expireOverdueSnapshots` marks a
+      // row expired on the strength of this returning without error, and compliance check
+      // #5 reads that as proof the data was destroyed on schedule.
+      expect(
+        await run(
+          Effect.gen(function* () {
+            const provisioning = yield* ProvisioningServiceTag;
+            return yield* provisioning.snapshotDiskExists({
+              provider: "azure",
+              diskExternalId: osDiskId,
+            });
+          }),
+        ),
+      ).toBe(false);
+
+      // Idempotent. The sweep retries whole rows, so a pass that deleted two disks of
+      // three and then failed must be able to run again without its own earlier successes
+      // erroring the second time.
+      await run(
+        Effect.gen(function* () {
+          const provisioning = yield* ProvisioningServiceTag;
+          return yield* provisioning.deleteSnapshotDisk({
+            provider: "azure",
+            diskExternalId: osDiskId,
+          });
+        }),
+      );
+
       const restored = await run(
         Effect.gen(function* () {
           const provisioning = yield* ProvisioningServiceTag;
@@ -140,7 +213,7 @@ describe.skipIf(!azureConfigured)(
             machineId,
             orgId: "integration-check",
             provider: "azure",
-            region: "eastus",
+            region: REGION,
             sizeSku: "Standard_B1s",
             image: "ubuntu-22.04",
             externalId: null,
@@ -161,7 +234,7 @@ describe.skipIf(!azureConfigured)(
               machineId: crypto.randomUUID(),
               orgId: "integration-check",
               provider: "azure",
-              region: "eastus",
+              region: REGION,
               sizeSku: "Standard_B1s",
               image: "ubuntu-22.04",
               externalId: null,
