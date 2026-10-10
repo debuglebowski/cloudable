@@ -148,6 +148,13 @@
       "when": 1789857902705,
       "tag": "0020_curly_red_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791669014212,
+      "tag": "0021_nostalgic_bushwacker",
+      "breakpoints": true
     }
   ]
 }

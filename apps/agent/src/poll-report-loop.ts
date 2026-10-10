@@ -4,6 +4,7 @@ import { applyPackageActions, declaredPackageVersions } from "./apply-packages";
 import { AttestationRejectedError, attest, clearCachedSession } from "./attestation";
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
+import { readHardeningBaseline } from "./hardening-baseline";
 import { ApiError } from "./http-client";
 import { listInstalledPackages } from "./installed-packages";
 import { listOpenPorts } from "./open-ports";
@@ -198,6 +199,7 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
           ]);
         // Synchronous and cheap (two statfs calls), so it stays out of the Promise.all.
         const volumeUsage = readAllVolumeUsage();
+        const hardeningBaseline = readHardeningBaseline();
         await reportObservedState(session.bearerToken, {
           agentVersion: AGENT_VERSION,
           observedAt: new Date().toISOString(),
@@ -207,6 +209,8 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
             : {}),
           openPorts,
           configState: { runningAccessMethods },
+          // Omitted when there is no stamp. The control plane records that as "no baseline".
+          ...(hardeningBaseline ? { hardeningBaseline } : {}),
           // Reported as observed state. What these outcomes mean, and what
           // gets written about them, is the control plane's call (invariant 12).
           ...(actionResults.length > 0 ? { actionResults } : {}),

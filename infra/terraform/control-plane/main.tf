@@ -953,6 +953,13 @@ resource "azurerm_role_definition" "machine_operator" {
       "Microsoft.Compute/virtualMachines/deallocate/action",
       "Microsoft.Compute/virtualMachines/restart/action",
       "Microsoft.Compute/virtualMachines/instanceView/read",
+      # Installing optional malware protection (security.malwareProtection) adds one VM
+      # extension, explicitly, as a step of an audited create/reimage/restore, instead of
+      # leaving it to the subscription's automatic agent install. Never deleted on its
+      # own: it goes with the VM. Role definition edits are applied by hand as Owner
+      # (CI cannot write them) and take about 30 minutes to propagate.
+      "Microsoft.Compute/virtualMachines/extensions/read",
+      "Microsoft.Compute/virtualMachines/extensions/write",
       "Microsoft.Compute/disks/read",
       "Microsoft.Compute/disks/write",
       "Microsoft.Compute/disks/delete",

@@ -76,6 +76,7 @@ Read the relevant file before working in that area.
 | `docs/access.md`      | Web terminal, SSH certificates, session tokens                 |
 | `docs/lifecycle.md`   | Archive, snapshots, restore, offboarding, break-glass          |
 | `docs/compliance.md`  | Events → checks → controls, the six v1 checks, evidence export |
+| `docs/hardening.md`   | Machine security baseline, exceptions, malware protection, evidence table |
 | `docs/events.md`      | Full event catalogue                                           |
 | `docs/frontend.md`    | Console structure, design tokens, LineageGutter                |
 | `docs/spec.md`        | Reasoning behind every decision. Read when you need *why*      |

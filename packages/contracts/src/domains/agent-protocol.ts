@@ -156,6 +156,12 @@ export interface AgentReportRequest {
     /** The root filesystem — what a "full" snapshot adds on top. */
     readonly root?: { readonly usedBytes: number; readonly totalBytes: number };
   };
+  /**
+   * The security baseline label read from the machine's own stamp file
+   * (`HARDENING_STAMP_PATH`). Absent means the machine carries none: it predates the
+   * baseline, or its baseline failed. Never "none" on the wire; the export says that.
+   */
+  readonly hardeningBaseline?: string;
   /** Outcomes for actions collected since the last report. Absent when none ran. */
   readonly actionResults?: readonly PackageActionResult[];
 }

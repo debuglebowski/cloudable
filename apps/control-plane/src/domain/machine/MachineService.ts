@@ -10,6 +10,7 @@ import { EventBus } from "../../services/EventBus";
 import { type ProvisioningError, ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { UBUNTU_IMAGES } from "../../services/ProvisioningService.azure";
 import { isProviderEnabled } from "../integrations/integrations";
+import { readMalwareProtectionWith } from "../organisation/malware-protection";
 import { generateDefaultMachineName } from "./default-name";
 import {
   InvalidCursorError,
@@ -457,6 +458,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         // check-in (`MachineDirectory.markVerified`) both promote "provisioning" to
         // "running" later — see their own doc comments. This DB write's job is only
         // to record the state Azure reported *right now*, honestly.
+        const malwareProtection = yield* readMalwareProtectionWith(db, machine.orgId);
         const provisioningOutcome: {
           state: "running" | "provisioning" | "error";
           error: string | null;
@@ -471,6 +473,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             image: machine.image,
             name: machine.name,
             packages,
+            malwareProtection,
             ...(input.dataDiskSourceSnapshotId === undefined
               ? {}
               : { dataDiskSourceSnapshotId: input.dataDiskSourceSnapshotId }),

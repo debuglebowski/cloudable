@@ -8,6 +8,7 @@ import { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import type { ProvisioningError, SnapshotScope } from "../../services/ProvisioningService";
 import type { ArchiveDbError, MachineNotFoundError } from "../archive/errors";
 import { createSnapshot } from "../archive/snapshot";
+import { readMalwareProtection } from "../organisation/malware-protection";
 import { computeNextEligibleAt } from "./backoff";
 import { restoreSnapshot } from "./snapshot-port";
 import { UpgradeError, type UpgradeOutcome, type UpgradeResult, driftViewUrl } from "./types";
@@ -297,6 +298,7 @@ export const upgradeMachine = (
     const snapshot = snapshotOutcome.right;
 
     // --- 2. apply (reimage) -----------------------------------------------
+    const malwareProtection = yield* readMalwareProtection(orgId);
     const reimageOutcome = yield* Effect.either(
       provisioning.reimage({
         machineId,
@@ -305,6 +307,7 @@ export const upgradeMachine = (
         region: machine.region,
         sizeSku: machine.sizeSku,
         targetImage,
+        malwareProtection,
         externalId: machine.externalResourceId,
       }),
     );

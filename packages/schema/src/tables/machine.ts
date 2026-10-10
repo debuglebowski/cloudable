@@ -73,6 +73,14 @@ export const machines = pgTable("machines", {
    */
   volumeUsage: jsonb("volume_usage"),
   /**
+   * The security baseline label the machine's agent last reported from its own stamp file
+   * (see `HARDENING_STAMP_PATH` in contracts). Null means no baseline: the machine predates
+   * it, its first-boot baseline failed, or it has not reported yet. Overwritten each report,
+   * so a stamp that disappears reads as none rather than as the last thing it once said.
+   * Read by the asset inventory export as `hardening_baseline`.
+   */
+  hardeningBaseline: text("hardening_baseline"),
+  /**
    * The package names the agent reported at its most recent check-in, as a
    * JSON array of strings. Overwritten each report — this is current state,
    * not history; history is the event log.

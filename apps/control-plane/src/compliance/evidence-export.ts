@@ -129,6 +129,7 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
           name: machines.name,
           state: machines.state,
           provider: machines.provider,
+          hardeningBaseline: machines.hardeningBaseline,
           ownerEmail: people.email,
         })
         .from(machines)
@@ -176,6 +177,7 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
         "encryption_status",
         "drift_status",
         "patch_status",
+        "hardening_baseline",
       ],
       rows.map((machine) => [
         machine.id,
@@ -207,6 +209,10 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
           if (!latest) return "never_upgraded";
           return latest.outcome === "success" ? "up_to_date" : "upgrade_failed";
         })(),
+        // What the machine's own stamp file said at its last report (docs/hardening.md).
+        // "none" is an answer, not a gap: no stamp means the baseline was never applied
+        // or did not finish, and an auditor reading the column should see exactly that.
+        machine.hardeningBaseline ?? "none",
       ]),
     );
   });

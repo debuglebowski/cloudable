@@ -26,6 +26,7 @@ import {
   type CapturedDisk,
   type MachineDescriptor,
   type MachineStatus,
+  type MalwareProtection,
   ProvisioningError,
   type ProvisioningService,
   ProvisioningServiceTag,
@@ -34,6 +35,7 @@ import {
   type SnapshotReadGrant,
   type SnapshotResult,
 } from "./ProvisioningService";
+import { hardeningSection } from "./hardening";
 
 const DATA_DISK_SIZE_GB = 64;
 const DATA_DISK_LUN = 0;
@@ -410,6 +412,8 @@ set -euo pipefail
 
 ${homeVolumeSection(dataDiskLun)}
 
+${hardeningSection()}
+
 mkdir -p /opt/cloudable
 ARCH=$(uname -m)
 [ "$ARCH" = "aarch64" ] && ARCH=arm64 || ARCH=x64
@@ -474,7 +478,7 @@ systemctl enable --now cloudable-tunnel-daemon
   return Buffer.from(script, "utf-8").toString("base64");
 }
 
-interface ArmClients {
+export interface ArmClients {
   compute: ComputeManagementClient;
   network: NetworkManagementClient;
   subscriptionId: string;
@@ -712,6 +716,66 @@ const createDataDisk = (
     }),
   );
 
+/**
+ * The Microsoft Defender for Endpoint extension, as the cloud provider's own automatic
+ * install would deploy it.
+ *
+ * Installed here, explicitly, when an organisation asks for it (`security.malwareProtection`),
+ * so the install is a step of an audited provisioning action instead of something the
+ * subscription does behind Cloudable's back. The subscription-side auto-provisioning has to
+ * be turned off for this to be the only path; that lives in the deploy repository and is
+ * described in `docs/hardening.md`.
+ *
+ * The public settings below are what Microsoft's own deployment sends, written from
+ * Microsoft's published behaviour and NOT yet exercised against a real subscription from
+ * this repository. Treat a failure here as the first thing to check on a first live run.
+ */
+export const DEFENDER_EXTENSION = {
+  name: "MDE.Linux",
+  publisher: "Microsoft.Azure.AzureDefenderForServers",
+  type: "MDE.Linux",
+  typeHandlerVersion: "1.0",
+} as const;
+
+export function defenderExtensionFor(location: string, vmResourceId: string) {
+  return {
+    location,
+    publisher: DEFENDER_EXTENSION.publisher,
+    typePropertiesType: DEFENDER_EXTENSION.type,
+    typeHandlerVersion: DEFENDER_EXTENSION.typeHandlerVersion,
+    autoUpgradeMinorVersion: true,
+    settings: { azureResourceId: vmResourceId, forceReOnboarding: false, vNextEnabled: true },
+  };
+}
+
+/** No-op unless the organisation asked for Defender. A failure fails the whole action:
+ * an org that chose protection must not end up with an unprotected machine that looks fine. */
+export const installProtectionIfRequested = (
+  clients: ArmClients,
+  resourceGroup: string,
+  vmName: string,
+  location: string,
+  vmResourceId: string | undefined,
+  protection: MalwareProtection | undefined,
+): Effect.Effect<void, ProvisioningError> =>
+  protection === "defender"
+    ? vmResourceId
+      ? runArm(() =>
+          clients.compute.virtualMachineExtensions.beginCreateOrUpdateAndWait(
+            resourceGroup,
+            vmName,
+            DEFENDER_EXTENSION.name,
+            defenderExtensionFor(location, vmResourceId),
+          ),
+        ).pipe(Effect.asVoid)
+      : Effect.fail(
+          new ProvisioningError({
+            reason: "provider_error",
+            cause: "cannot install malware protection: the VM has no resource id",
+          }),
+        )
+    : Effect.void;
+
 const dataDiskIdFor = (
   clients: ArmClients,
   resourceGroup: string,
@@ -873,6 +937,15 @@ const service: ProvisioningService = {
             networkProfile: { networkInterfaces: [{ id: nic.id as string }] },
           },
         ),
+      );
+
+      yield* installProtectionIfRequested(
+        clients,
+        config.azureMachinesResourceGroup,
+        names.vm,
+        region,
+        vm.id,
+        desc.malwareProtection,
       );
 
       return {
@@ -1181,6 +1254,15 @@ const service: ProvisioningService = {
         }),
       );
 
+      yield* installProtectionIfRequested(
+        clients,
+        rg,
+        names.vm,
+        region,
+        vm.id,
+        desc.malwareProtection,
+      );
+
       return {
         machineId: desc.machineId,
         state: "provisioning",
@@ -1309,6 +1391,15 @@ const service: ProvisioningService = {
       // "provisioning", not "running": ARM returns once the deployment exists, not once
       // cloud-init has mounted /home and the agent has attested. The agent's own check-in
       // promotes it (`MachineDirectory.markVerified`).
+      yield* installProtectionIfRequested(
+        clients,
+        rg,
+        names.vm,
+        region,
+        vm.id,
+        desc.malwareProtection,
+      );
+
       return {
         machineId: desc.machineId,
         state: "provisioning",

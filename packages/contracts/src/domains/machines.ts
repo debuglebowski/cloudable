@@ -30,6 +30,21 @@ export const MACHINE_OS_USER = "cloudable";
  */
 export const MACHINE_PERSISTENT_VOLUME_PATH = "/home";
 
+/**
+ * Where a machine records which security baseline its first boot applied.
+ *
+ * The provisioner writes it (`services/hardening.ts`) and the agent reads it, so the
+ * path lives here for the same reason `MACHINE_PERSISTENT_VOLUME_PATH` does. The file
+ * is JSON; the agent reads only `baseline`.
+ */
+export const HARDENING_STAMP_PATH = "/etc/cloudable/hardening.json";
+
+/**
+ * What a baseline label looks like. Both ends enforce it: the agent before it reports,
+ * the control plane before it stores, because the value ends up in an audit export.
+ */
+export const HARDENING_BASELINE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
 export type MachineState =
   | "provisioning"
   | "running"

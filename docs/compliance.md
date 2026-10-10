@@ -92,7 +92,8 @@ Status, computed purely from `COMPLIANCE_CHECKS` (no DB access needed for this e
 Two named exports:
 
 - `GET /api/v1/compliance/exports/findings.csv` — same underlying open-findings data as the main export, narrower columns: `control, check, machine_id, severity, open_since`.
-- `GET /api/v1/compliance/exports/asset-inventory.csv` — one row per machine in the org: `machine_id, machine_name, owner, state, encryption_status, drift_status, patch_status`.
+- `GET /api/v1/compliance/exports/asset-inventory.csv` — one row per machine in the org: `machine_id, machine_name, owner, state, encryption_status, drift_status, patch_status, hardening_baseline`.
+  - `hardening_baseline` is the security baseline label the machine's own agent last reported (`cis-ubuntu-l1-v1`), or `none`. See `docs/hardening.md` for what the label means, the exceptions, and the rest of the evidence table.
   - `encryption_status` is `"encrypted_at_rest"` for `provider: "azure"` machines (Azure managed disks are encrypted at rest by Storage Service Encryption unconditionally, never opted out of) and `"unknown"` for Docker/Fake, which have no such platform guarantee. `patch_status` is derived from the machine's own `upgrade_attempts` history: `"up_to_date"` (latest attempt succeeded), `"upgrade_failed"` (latest attempt rolled back/aborted), or `"never_upgraded"` (no attempt on record) — this reflects OS-image patch level, not live per-package OS-patch telemetry, which nothing in this build collects yet (see `evidence-export.ts`).
   - `drift_status` comes from the `no-undeclared-software` check (unit 8) when it's registered in `COMPLIANCE_CHECKS`: `"drifted"` if that check has an open finding for the machine, `"clean"` otherwise. Reports `"unknown"` for every machine if that check isn't registered yet, rather than guessing.
 

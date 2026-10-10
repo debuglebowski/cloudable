@@ -162,7 +162,7 @@ describe("evidence-export (live DB)", () => {
     expect(activeOwnerRow?.severity).not.toBe(reportingRow?.severity);
   });
 
-  test("assetInventoryCsv derives encryption_status from provider and patch_status from upgrade history", async () => {
+  test("assetInventoryCsv derives encryption_status from provider, patch_status from upgrade history, and hardening_baseline from the reported stamp", async () => {
     const orgId = await freshOrg();
 
     // Fake machine, never upgraded: no platform encryption guarantee, and no
@@ -198,6 +198,7 @@ describe("evidence-export (live DB)", () => {
           image: "ubuntu-24.04",
           state: "running",
           lastVerifiedAt: new Date(),
+          hardeningBaseline: "cis-ubuntu-l1-v1",
         })
         .returning(),
     );
@@ -247,16 +248,16 @@ describe("evidence-export (live DB)", () => {
     const [header, ...lines] = csv.trim().split("\r\n");
 
     expect(header).toBe(
-      "machine_id,machine_name,owner,state,encryption_status,drift_status,patch_status",
+      "machine_id,machine_name,owner,state,encryption_status,drift_status,patch_status,hardening_baseline",
     );
     expect(lines).toHaveLength(3);
 
     const line = (machineId: string) => lines.find((l) => l?.startsWith(`${machineId},`));
     expect(line(neverUpgraded.id)).toContain(",unknown,");
-    expect(line(neverUpgraded.id)?.endsWith(",never_upgraded")).toBe(true);
+    expect(line(neverUpgraded.id)?.endsWith(",never_upgraded,none")).toBe(true);
     expect(line(upToDate.id)).toContain(",encrypted_at_rest,");
-    expect(line(upToDate.id)?.endsWith(",up_to_date")).toBe(true);
+    expect(line(upToDate.id)?.endsWith(",up_to_date,cis-ubuntu-l1-v1")).toBe(true);
     expect(line(upgradeFailed.id)).toContain(",unknown,");
-    expect(line(upgradeFailed.id)?.endsWith(",upgrade_failed")).toBe(true);
+    expect(line(upgradeFailed.id)?.endsWith(",upgrade_failed,none")).toBe(true);
   });
 });

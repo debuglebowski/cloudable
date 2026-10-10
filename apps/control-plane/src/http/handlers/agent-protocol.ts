@@ -4,6 +4,7 @@ import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import { MachineService } from "../../domain/machine/MachineService";
+import { recordHardeningBaseline } from "../../domain/machine/hardening-baseline";
 import {
   applyActionResults,
   collectPendingActions,
@@ -281,6 +282,8 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
 
         const db = yield* Db;
         const machineService = yield* MachineService;
+
+        yield* recordHardeningBaseline(db, machine.id, payload.hardeningBaseline);
 
         // Persist the inventory. The baseline — what the image shipped with —
         // fills itself on the first report that arrives and is never rewritten;

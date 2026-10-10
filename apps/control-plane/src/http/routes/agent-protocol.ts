@@ -1,3 +1,4 @@
+import { HARDENING_BASELINE_PATTERN } from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 
@@ -91,6 +92,11 @@ const ReportPayload = Schema.Struct({
       ),
       root: Schema.optional(Schema.Struct({ usedBytes: Schema.Number, totalBytes: Schema.Number })),
     }),
+  ),
+  // The label from the machine's own stamp file. Validated against the same pattern the
+  // agent applies, because it is written to a column that an audit export prints.
+  hardeningBaseline: Schema.optional(
+    Schema.String.pipe(Schema.pattern(HARDENING_BASELINE_PATTERN)),
   ),
   actionResults: Schema.optional(Schema.Array(PackageActionResult)),
 });

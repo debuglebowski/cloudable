@@ -38,6 +38,15 @@ export class ProvisioningError extends Data.TaggedError("ProvisioningError")<{
 /** Which backend a call dispatches to — see `ProvisioningService.switchable.ts`. */
 export type Provider = "azure" | "docker" | "fake";
 
+/**
+ * Optional endpoint malware protection an organisation can ask for. `none` is the
+ * default: nothing is installed and nothing is reported. `defender` installs Microsoft
+ * Defender for Endpoint through the cloud provider's VM extension when the machine is
+ * built. Read from the org setting `security.malwareProtection` by the caller, so the
+ * adapter stays free of the database.
+ */
+export type MalwareProtection = "none" | "defender";
+
 export interface MachineDescriptor {
   machineId: string;
   orgId: string;
@@ -71,6 +80,8 @@ export interface MachineDescriptor {
    * machine-level overrides yet, so this is the org (+ template) manifest.
    */
   packages?: ReadonlyArray<string>;
+  /** See `MalwareProtection`. Absent means `none`. */
+  malwareProtection?: MalwareProtection;
   /**
    * A snapshot's captured DATA disk (`CapturedDisk.externalId`, a full ARM snapshot
    * resource id) to build this machine's data disk from, instead of an empty one.
@@ -123,6 +134,8 @@ export interface RestoreDataDiskDescriptor {
    * and the manifest is a permission list that nothing converges a machine towards
    * (invariant 4). A restored machine installs nothing on boot. */
   packages?: ReadonlyArray<string>;
+  /** See `MalwareProtection`. Absent means `none`. */
+  malwareProtection?: MalwareProtection;
   /** The machine's current `externalResourceId`, `null` if unknown — same contract and
    * same tag-based self-healing as `archive`/`reconcile`/`restart`/`reimage`. */
   externalId: string | null;
@@ -143,6 +156,8 @@ export interface ReimageDescriptor {
   region: string | null;
   sizeSku: string;
   targetImage: string;
+  /** See `MalwareProtection`. Absent means `none`. */
+  malwareProtection?: MalwareProtection;
   /** The machine's current `externalResourceId` — reimage isn't a new logical
    * machine, so both finding the old VM to delete AND naming its replacement
    * reuse the identity this resolves to (see `ProvisioningService.azure.ts`'s

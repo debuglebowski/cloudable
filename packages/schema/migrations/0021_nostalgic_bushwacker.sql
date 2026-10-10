@@ -1,0 +1,1 @@
+ALTER TABLE "machines" ADD COLUMN "hardening_baseline" text;

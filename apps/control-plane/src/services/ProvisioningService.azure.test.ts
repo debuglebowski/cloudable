@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
 import { config } from "../config";
 import {
+  type ArmClients,
+  DEFENDER_EXTENSION,
   classifyAzureError,
   cloudInitFor,
+  defenderExtensionFor,
   imageReferenceFor,
+  installProtectionIfRequested,
   machineStateForPowerState,
   namesFor,
   parseVmNameFromResourceId,
@@ -294,6 +299,118 @@ describe("cloudInitFor", () => {
     // victory.
     const script = decode();
     expect(script.indexOf("sync")).toBeLessThan(script.indexOf('> "/home/$MARKER"'));
+  });
+});
+
+describe("cloudInitFor baseline", () => {
+  const script = () =>
+    Buffer.from(
+      cloudInitFor(
+        {
+          machineId: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          orgId: "org-1",
+          provider: "azure",
+          region: "eastus",
+          sizeSku: "Standard_B2s",
+        },
+        0,
+      ),
+      "base64",
+    ).toString("utf-8");
+
+  test("applies the baseline after /home is set up and before anything is downloaded", () => {
+    const text = script();
+    const home = text.indexOf("setup_home_volume");
+    const harden = text.indexOf("cloudable-harden");
+    const download = text.indexOf("_internal/binaries");
+    expect(home).toBeGreaterThan(-1);
+    expect(harden).toBeGreaterThan(home);
+    expect(download).toBeGreaterThan(harden);
+  });
+
+  test("is still valid bash with the baseline inside it", () => {
+    const result = Bun.spawnSync(["bash", "-n"], { stdin: new TextEncoder().encode(script()) });
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
+  });
+});
+
+describe("defenderExtensionFor", () => {
+  test("describes the Microsoft Defender for Endpoint Linux extension on the VM's region", () => {
+    const ext = defenderExtensionFor(
+      "eastus",
+      "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm",
+    );
+    expect(DEFENDER_EXTENSION.name).toBe("MDE.Linux");
+    expect(ext.location).toBe("eastus");
+    expect(ext.publisher).toBe("Microsoft.Azure.AzureDefenderForServers");
+    expect(ext.typePropertiesType).toBe("MDE.Linux");
+    expect(ext.settings.azureResourceId).toContain("virtualMachines/vm");
+  });
+});
+
+describe("installProtectionIfRequested", () => {
+  const vmId = "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm";
+
+  function fakeClients() {
+    const calls: unknown[][] = [];
+    const clients = {
+      compute: {
+        virtualMachineExtensions: {
+          beginCreateOrUpdateAndWait: async (...args: unknown[]) => {
+            calls.push(args);
+            return {};
+          },
+        },
+      },
+    } as unknown as ArmClients;
+    return { clients, calls };
+  }
+
+  test("installs nothing when the org did not ask, or when nothing is set", async () => {
+    for (const protection of [undefined, "none"] as const) {
+      const { clients, calls } = fakeClients();
+      await Effect.runPromise(
+        installProtectionIfRequested(clients, "rg", "vm", "eastus", vmId, protection),
+      );
+      expect(calls).toHaveLength(0);
+    }
+  });
+
+  test("installs the Defender extension on the named VM when the org asked", async () => {
+    const { clients, calls } = fakeClients();
+    await Effect.runPromise(
+      installProtectionIfRequested(clients, "rg", "vm", "eastus", vmId, "defender"),
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(["rg", "vm", "MDE.Linux", defenderExtensionFor("eastus", vmId)]);
+  });
+
+  test("fails rather than leave an unprotected machine when the VM has no resource id", async () => {
+    const { clients, calls } = fakeClients();
+    const result = await Effect.runPromise(
+      Effect.either(
+        installProtectionIfRequested(clients, "rg", "vm", "eastus", undefined, "defender"),
+      ),
+    );
+    expect(result._tag).toBe("Left");
+    expect(calls).toHaveLength(0);
+  });
+
+  test("fails the action when the extension install fails", async () => {
+    const clients = {
+      compute: {
+        virtualMachineExtensions: {
+          beginCreateOrUpdateAndWait: async () => {
+            throw new Error("extension rejected");
+          },
+        },
+      },
+    } as unknown as ArmClients;
+    const result = await Effect.runPromise(
+      Effect.either(installProtectionIfRequested(clients, "rg", "vm", "eastus", vmId, "defender")),
+    );
+    expect(result._tag).toBe("Left");
   });
 });
 

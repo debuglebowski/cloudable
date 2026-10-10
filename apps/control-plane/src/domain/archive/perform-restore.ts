@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { MachineService } from "../machine/MachineService";
+import { readMalwareProtection } from "../organisation/malware-protection";
 import type { MachineRow } from "./queries";
 import { dbTry } from "./queries";
 import type { SnapshotRow } from "./snapshot";
@@ -139,6 +140,7 @@ export const performRestoreOntoMachine = (
 ): Effect.Effect<string | null, never, Db | ProvisioningServiceTag> =>
   Effect.gen(function* () {
     const provisioning = yield* ProvisioningServiceTag;
+    const malwareProtection = yield* readMalwareProtection(machine.orgId);
 
     const status = yield* provisioning
       .restoreDataDisk({
@@ -153,6 +155,7 @@ export const performRestoreOntoMachine = (
         // unit and read by nothing, and the manifest is a permission list that nothing
         // converges a machine towards (invariant 4) — so a restored machine installs
         // nothing on boot, same as a reimaged one. A person asks per package.
+        malwareProtection,
         externalId: machine.externalResourceId,
         dataDiskSnapshotId: dataDisk.externalId,
       })
