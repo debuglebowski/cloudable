@@ -83,7 +83,7 @@ Read the relevant file before working in that area.
 
 ## Not in v1
 
-No templates. No Tailscale. No AWS or GCP. No billing. No idle suspend. Six compliance checks, not more.
+No templates. No Tailscale. No AWS or GCP. No billing. No idle suspend. No full command capture. Six compliance checks, not more.
 
 Never build: SSH public key upload, per-machine passwords or 2FA codes, shared machines, auto-correcting drift, code-server, application hosting.
 

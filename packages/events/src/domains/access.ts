@@ -2,11 +2,6 @@ import type { EventEnvelope } from "../envelope";
 
 /**
  * Access events: certificates, sessions, and time-boxed elevation.
- *
- * NOTE: `access.command_recorded` is intentionally NOT part of this
- * catalogue. Per spec it lives in a separate high-volume store — the
- * `accessCommandRecorded` table in `@cloudable/schema` — and is referenced
- * by correlationId rather than being modeled as an append-only event here.
  */
 export type AccessEvent =
   | (EventEnvelope & {

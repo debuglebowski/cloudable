@@ -19,7 +19,6 @@ interface EvidenceRecord {
   machineId: string | null;
   correlationId: string;
   summary: string;
-  commandRecording: { correlationId: string; count: number } | null;
 }
 
 export async function runEventsCommand(argv: ReadonlyArray<string>): Promise<void> {

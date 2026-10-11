@@ -28,7 +28,7 @@ const ApprovalActionType = Schema.Literal(
   "offboarding",
 );
 const ApprovalMode = Schema.Literal("none", "single", "dual");
-const LoggingTier = Schema.Literal(1, 2, 3);
+const LoggingTier = Schema.Literal(1, 2);
 const RetentionLocation = Schema.Literal("customer", "cloudable_sweden_central");
 
 const ApprovalModes = Schema.Record({ key: ApprovalActionType, value: ApprovalMode });

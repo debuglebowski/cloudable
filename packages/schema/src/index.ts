@@ -10,7 +10,6 @@ export * from "./tables/machine-package";
 export * from "./tables/machine-package-action";
 export * from "./tables/approval";
 export * from "./tables/events";
-export * from "./tables/access-command-recorded";
 export * from "./tables/certificate";
 export * from "./tables/session";
 export * from "./tables/snapshot";

@@ -4,7 +4,7 @@ import { CurrentUserAuthentication } from "../http/middleware/auth";
 
 /**
  * Wire schema for the normalised evidence projection. Kept in
- * lockstep with `./projection.ts`'s `EvidenceRecord`/`CommandRecordingRef`/
+ * lockstep with `./projection.ts`'s `EvidenceRecord`/
  * `EvidenceExtensions` TypeScript shapes by hand — there's exactly one of
  * each in this unit, so a codegen step would be more machinery than the
  * duplication it removes.
@@ -12,11 +12,6 @@ import { CurrentUserAuthentication } from "../http/middleware/auth";
 const ActorSchema = Schema.Struct({
   type: Schema.Literal("person", "system", "agent", "idp"),
   id: Schema.String,
-});
-
-const CommandRecordingRefSchema = Schema.Struct({
-  correlationId: Schema.String,
-  count: Schema.Number,
 });
 
 // `EvidenceExtensions` (./projection.ts) is a union of small string-only
@@ -39,7 +34,6 @@ export const EvidenceRecordSchema = Schema.Struct({
   correlationId: Schema.String,
   summary: Schema.String,
   extensions: Schema.optional(EvidenceExtensionsSchema),
-  commandRecording: Schema.NullOr(CommandRecordingRefSchema),
 });
 
 export const EvidencePageSchema = Schema.Struct({

@@ -23,7 +23,7 @@ import { listMachines, machineId, personId } from "./resolve";
 /** The runtime response carries two fields the contracts copy has not caught up with. */
 type MachineSummaryWire = MachineSummary & { lastError: string | null };
 type MachineDetailWire = MachineDetail &
-  MachineSummaryWire & { loggingTier?: { tier: 1 | 2 | 3; source: string } };
+  MachineSummaryWire & { loggingTier?: { tier: 1 | 2; source: string } };
 
 interface RestartResponse {
   machineId: string;

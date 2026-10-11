@@ -78,7 +78,7 @@ function approvalModes(values: ReadonlyArray<string>): Record<string, string> {
 
 export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "org update [--name <name>] [--logging-tier 1|2|3] [--retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode>]",
+    "org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode>]",
   );
   const args = parseArgs(
     argv,
@@ -92,9 +92,7 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
   const payload: Record<string, unknown> = {};
   if (args.flags.name) payload.name = args.flags.name;
   if (args.flags["logging-tier"]) {
-    payload.loggingTier = Number(
-      oneOf(args.flags["logging-tier"], ["1", "2", "3"], "logging-tier"),
-    );
+    payload.loggingTier = Number(oneOf(args.flags["logging-tier"], ["1", "2"], "logging-tier"));
   }
   if (args.flags["retention-days"]) {
     payload.retentionDefaultDays = positiveInt(args.flags["retention-days"], "retention-days");

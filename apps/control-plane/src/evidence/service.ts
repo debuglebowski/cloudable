@@ -1,6 +1,6 @@
 import type * as schema from "@cloudable/schema";
-import { events, accessCommandRecorded } from "@cloudable/schema";
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { events } from "@cloudable/schema";
+import { and, desc, eq, lt } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Data, Effect } from "effect";
 import { type EvidenceRecord, projectEvent } from "./projection";
@@ -43,11 +43,6 @@ export const EVIDENCE_MAX_PAGE_LIMIT = 100;
  * console's per-machine Activity view needs *that machine's* newest events, and
  * paging an org-wide feed until enough of them turn up is not the same thing.
  * `events_org_machine_id_idx` covers this predicate and the id ordering below.
- *
- * `access.command_recorded` rows (tier-3 shell capture, a separate
- * high-volume table — see `@cloudable/schema`) are looked up by
- * `correlationId` for the page's events and attached as a count/pointer,
- * never merged into the returned rows themselves.
  */
 export const queryEvidencePage = (
   db: DbHandle,
@@ -81,29 +76,7 @@ export const queryEvidencePage = (
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
 
-    const correlationIds = [...new Set(page.map((row) => row.correlationId))];
-    const commandRecordingCounts =
-      correlationIds.length === 0
-        ? new Map<string, number>()
-        : yield* Effect.tryPromise({
-            try: async () => {
-              const matches = await db
-                .select({ correlationId: accessCommandRecorded.correlationId })
-                .from(accessCommandRecorded)
-                .where(inArray(accessCommandRecorded.correlationId, correlationIds));
-              const counts = new Map<string, number>();
-              for (const match of matches) {
-                counts.set(match.correlationId, (counts.get(match.correlationId) ?? 0) + 1);
-              }
-              return counts;
-            },
-            catch: (cause) =>
-              new EvidenceQueryError({ reason: "command_recording_lookup_failed", cause }),
-          });
-
-    const data = page.map((row) =>
-      projectEvent(row, commandRecordingCounts.get(row.correlationId) ?? 0),
-    );
+    const data = page.map((row) => projectEvent(row));
 
     return {
       data,

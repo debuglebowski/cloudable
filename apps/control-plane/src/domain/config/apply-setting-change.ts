@@ -5,6 +5,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
+import { LOGGING_TIER_KEY, isLoggingTier } from "../../logging/settings";
 import { EventBus } from "../../services/EventBus";
 import { TunnelServer } from "../../tunnel/server";
 import { machineSettingChangedEvent } from "../machine/events";
@@ -16,6 +17,7 @@ import {
 } from "../machine/settings";
 import {
   InvalidScopeError,
+  InvalidSettingValueError,
   MachineNotFoundError,
   PinnedSettingError,
   SettingWriteError,
@@ -45,6 +47,7 @@ export interface ApplySettingChangeResult {
 
 export type ApplySettingChangeError =
   | InvalidScopeError
+  | InvalidSettingValueError
   | MachineNotFoundError
   | PinnedSettingError
   | SettingWriteError;
@@ -85,6 +88,15 @@ export const applySettingChange = (
     if (input.scopeType === "org" && input.scopeId !== input.orgId) {
       return yield* Effect.fail(
         new InvalidScopeError({ message: "an org-scope edit's scopeId must equal orgId" }),
+      );
+    }
+
+    if (input.key === LOGGING_TIER_KEY && !isLoggingTier(input.value)) {
+      return yield* Effect.fail(
+        new InvalidSettingValueError({
+          key: input.key,
+          message: "logging tier must be 1 or 2",
+        }),
       );
     }
 

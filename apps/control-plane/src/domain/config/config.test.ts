@@ -17,7 +17,7 @@ import { MachineService } from "../machine/MachineService";
 import { ACCESS_METHODS_ENABLED_KEY } from "../machine/settings";
 import { updateOrgSettings } from "../organisation/settings";
 import { applySettingChange } from "./apply-setting-change";
-import { PinnedSettingError } from "./errors";
+import { InvalidSettingValueError, PinnedSettingError } from "./errors";
 
 // This suite runs against a real Postgres — the behaviour under test is the
 // interaction between `settingValues`, `machines.desiredStateVersion`, and
@@ -178,6 +178,46 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
   }
 
   describe("applySettingChange", () => {
+    test("rejects logging tier 3 (it does not exist) at org and machine scope, writing nothing", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+
+      for (const [scopeType, scopeId] of [
+        ["org", org.id],
+        ["machine", machine.id],
+      ] as const) {
+        const result = await run(
+          Effect.either(
+            applySettingChange({
+              orgId: org.id,
+              scopeType,
+              scopeId,
+              key: "logging_tier",
+              value: 3,
+              actorType: "person",
+              actorId: "person-1",
+              correlationId: crypto.randomUUID(),
+            }),
+          ),
+        );
+        expect(result._tag).toBe("Left");
+        if (result._tag === "Left") expect(result.left).toBeInstanceOf(InvalidSettingValueError);
+      }
+
+      const rows = await db
+        .select()
+        .from(settingValues)
+        .where(
+          and(
+            eq(settingValues.key, "logging_tier"),
+            inArray(settingValues.scopeId, [org.id, machine.id]),
+          ),
+        );
+      expect(rows).toHaveLength(0);
+      const orgEvents = await db.select().from(events).where(eq(events.orgId, org.id));
+      expect(orgEvents).toHaveLength(0);
+    });
+
     test("editing an org-scope setting is inert: no machine or reconcile side-effects", async () => {
       const org = await seedOrg();
       const machine = await seedMachine(org.id);
@@ -552,7 +592,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       await run(
         updateOrgSettings({
           orgId: orgA.id,
-          loggingTier: 3,
+          loggingTier: 1,
           actor: { actorType: "person", actorId: "person-1" },
         }),
       );
@@ -565,7 +605,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
           scopeType: "org",
           scopeId: orgB.id,
           key: "logging_tier",
-          value: 3,
+          value: 1,
           actorType: "person",
           actorId: "person-1",
           correlationId: crypto.randomUUID(),
@@ -580,7 +620,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       expect(eventA?.payload).toEqual({
         key: "logging_tier",
         previous: null,
-        current: 3,
+        current: 1,
         level: "org",
       });
     });

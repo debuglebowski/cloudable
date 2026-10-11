@@ -1,5 +1,4 @@
 import { relations } from "drizzle-orm";
-import { accessCommandRecorded } from "./tables/access-command-recorded";
 import { approvalDecisions, approvals } from "./tables/approval";
 import { certificates } from "./tables/certificate";
 import { complianceFindingState } from "./tables/compliance-finding-state";
@@ -60,7 +59,6 @@ export const machinesRelations = relations(machines, ({ one, many }) => ({
   sessions: many(sessions),
   snapshots: many(snapshots),
   elevations: many(elevations),
-  accessCommandRecords: many(accessCommandRecorded),
   events: many(events),
   upgradeAttempts: many(upgradeAttempts),
 }));
@@ -177,13 +175,6 @@ export const eventsRelations = relations(events, ({ one }) => ({
   }),
   machine: one(machines, {
     fields: [events.machineId],
-    references: [machines.id],
-  }),
-}));
-
-export const accessCommandRecordedRelations = relations(accessCommandRecorded, ({ one }) => ({
-  machine: one(machines, {
-    fields: [accessCommandRecorded.machineId],
     references: [machines.id],
   }),
 }));

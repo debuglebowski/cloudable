@@ -16,7 +16,7 @@ export interface OrgWire {
   id: string;
   name: string;
   approvalModes: Record<string, "none" | "single" | "dual">;
-  loggingTier: 1 | 2 | 3;
+  loggingTier: 1 | 2;
   loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   retentionLocation: "customer" | "cloudable_sweden_central";

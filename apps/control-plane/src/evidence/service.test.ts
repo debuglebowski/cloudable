@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type * as schema from "@cloudable/schema";
-import { events, accessCommandRecorded } from "@cloudable/schema";
+import { events } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
@@ -21,15 +21,7 @@ afterAll(async () => {
 });
 
 const testOrgIds: string[] = [];
-const testCorrelationIds: string[] = [];
 afterEach(async () => {
-  while (testCorrelationIds.length > 0) {
-    const correlationId = testCorrelationIds.pop();
-    if (correlationId)
-      await db
-        .delete(accessCommandRecorded)
-        .where(eq(accessCommandRecorded.correlationId, correlationId));
-  }
   while (testOrgIds.length > 0) {
     const orgId = testOrgIds.pop();
     if (orgId) await cleanupOrgRows(db, orgId);
@@ -109,36 +101,6 @@ describe("queryEvidencePage", () => {
     expect(page2.data.map((r) => r.id)).toEqual(["01J0000000000000000001AAA"]);
     expect(page2.pageInfo.hasMore).toBe(false);
     expect(page2.pageInfo.nextCursor).toBeNull();
-  });
-
-  test("references access_command_recorded by correlationId without merging it into the row", async () => {
-    const orgId = freshOrgId();
-    const correlationId = crypto.randomUUID();
-    testCorrelationIds.push(correlationId);
-    await insertRawEvent(orgId, "01J0000000000000000002AAA", correlationId);
-
-    await db.insert(accessCommandRecorded).values([
-      {
-        id: crypto.randomUUID(),
-        machineId: crypto.randomUUID(),
-        osUser: "ubuntu",
-        command: "ls -la",
-        occurredAt: new Date(),
-        correlationId,
-      },
-      {
-        id: crypto.randomUUID(),
-        machineId: crypto.randomUUID(),
-        osUser: "ubuntu",
-        command: "whoami",
-        occurredAt: new Date(),
-        correlationId,
-      },
-    ]);
-
-    const page = await Effect.runPromise(queryEvidencePage(db, { orgId }));
-    expect(page.data).toHaveLength(1);
-    expect(page.data[0]?.commandRecording).toEqual({ correlationId, count: 2 });
   });
 
   test("scopes strictly to the requested org", async () => {

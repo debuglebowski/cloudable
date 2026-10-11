@@ -155,6 +155,20 @@
       "when": 1791669014212,
       "tag": "0021_nostalgic_bushwacker",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791703426580,
+      "tag": "0022_drop_access_command_recorded",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791703427019,
+      "tag": "0023_logging_tier_3_to_2",
+      "breakpoints": true
     }
   ]
 }

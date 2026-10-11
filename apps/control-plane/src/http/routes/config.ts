@@ -2,6 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import {
   InvalidScopeError,
+  InvalidSettingValueError,
   MachineNotFoundError,
   PinnedSettingError,
   SettingWriteError,
@@ -66,6 +67,7 @@ export const ConfigGroup = HttpApiGroup.make("config")
       .setPayload(PatchSettingPayload)
       .addSuccess(PatchSettingResponse)
       .addError(InvalidScopeError, { status: 400 })
+      .addError(InvalidSettingValueError, { status: 400 })
       .addError(MachineNotFoundError, { status: 404 })
       .addError(PinnedSettingError, { status: 409 })
       .addError(SettingWriteError, { status: 500 }),
@@ -79,6 +81,7 @@ export const ConfigGroup = HttpApiGroup.make("config")
       .setPayload(ImportConfigPayload)
       .addSuccess(ImportConfigResponse)
       .addError(InvalidScopeError, { status: 400 })
+      .addError(InvalidSettingValueError, { status: 400 })
       .addError(MachineNotFoundError, { status: 404 })
       .addError(PinnedSettingError, { status: 409 })
       .addError(SettingWriteError, { status: 500 }),

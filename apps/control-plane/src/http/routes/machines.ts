@@ -89,7 +89,7 @@ const machineSummarySchema = Schema.Struct(machineSummaryFields);
 // else — `source` is "org" when the machine has no override of its own,
 // "machine" when it does (never "template" in v1 — the layer is inert).
 const effectiveLoggingTierSchema = Schema.Struct({
-  tier: Schema.Literal(1, 2, 3),
+  tier: Schema.Literal(1, 2),
   source: manifestScopeSchema,
 });
 

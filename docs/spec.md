@@ -125,7 +125,7 @@ Two separate daemons. Different trust levels, different failure domains.
 
 ### 8.2 Tunnel daemon
 - Reverse tunnel over an outbound connection for interactive sessions
-- **TLS pass-through by default.** The control plane does not terminate
+- **The control plane can see web terminal traffic.** Browser TLS terminates at the control plane (see §11.1).
 - **Must terminate live sessions on policy change**, not merely refuse new ones
 
 See `docs/agents.md` for implementation detail.
@@ -303,9 +303,8 @@ Per-template tier; cost follows.
 
 1. **Metadata only** — provisioning, auth, lifecycle
 2. **Session-level** — connections, elevations, config changes
-3. **Full command capture**
 
-**Tier 3 has a stated consequence sold at purchase: Cloudable is on the plaintext path.** Tiers 1 and 2 are honest because the tunnel passes TLS through.
+Full command capture is not offered. Nothing records the commands run in a session.
 
 **Retention location:** customer-controlled or Cloudable-held. Cloudable-held logs reside in **Sweden Central** — single org-wide value, no per-machine setting. Residency changes are a DPA matter, not a toggle.
 
@@ -539,7 +538,7 @@ Indexed on `(org_id, type, occurred_at)`.
 
 The tier column in `docs/events.md` is the **minimum** logging tier at which an event is emitted. Tier 1 events are always emitted regardless of configuration — they are the compliance floor, and disabling them would make the checks unanswerable.
 
-> ⚠️ **`access.command_recorded` should not share a table with everything else.** At tier 3 it is orders of magnitude higher volume than the rest of the catalogue combined, and a single high-churn event type will dominate the index that every compliance check depends on. Separate store (`accessCommandRecorded` in `packages/schema`), same envelope, referenced by `correlation_id`.
+There is no per-command event and no per-command table. Session start, end and denial are recorded; what was typed inside a session is not.
 
 ### What is not an event
 

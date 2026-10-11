@@ -42,6 +42,14 @@ export class InvalidScopeError extends Schema.TaggedError<InvalidScopeError>("In
   },
 ) {}
 
+/** A setting's value is not one the setting accepts (e.g. a logging tier that does not exist). */
+export class InvalidSettingValueError extends Schema.TaggedError<InvalidSettingValueError>(
+  "InvalidSettingValueError",
+)("InvalidSettingValueError", {
+  key: Schema.String,
+  message: Schema.String,
+}) {}
+
 /** An unexpected failure writing to the database or publishing the resulting event. */
 export class SettingWriteError extends Schema.TaggedError<SettingWriteError>("SettingWriteError")(
   "SettingWriteError",

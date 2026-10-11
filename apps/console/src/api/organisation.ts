@@ -24,8 +24,7 @@ export type ApprovalActionType =
 /** Matches `approvals.mode`. */
 export type ApprovalMode = "none" | "single" | "dual";
 
-/** Tier 3 puts Cloudable on the plaintext path — stated, not hidden. */
-export type LoggingTier = 1 | 2 | 3;
+export type LoggingTier = 1 | 2;
 
 /** Matches `logging/settings.ts`'s `RetentionLocation` — the real setting values,
  * not the more verbose names this page's mock previously invented. */
@@ -60,7 +59,6 @@ export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
 export const LOGGING_TIER_LABELS: Record<LoggingTier, string> = {
   1: "Tier 1 — metadata only",
   2: "Tier 2 — session-level",
-  3: "Tier 3 — full command capture",
 };
 
 export const RETENTION_LOCATION_LABELS: Record<RetentionLocation, string> = {

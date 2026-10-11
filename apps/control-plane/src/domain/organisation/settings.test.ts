@@ -70,7 +70,7 @@ async function seedMachine(orgId: string): Promise<string> {
 const run = (orgId: string) =>
   Effect.runPromise(Effect.provideService(getOrgSettings(orgId), Db, db));
 
-const seedMachineOverride = (machineId: string, tier: 1 | 2 | 3) =>
+const seedMachineOverride = (machineId: string, tier: 1 | 2) =>
   db.insert(settingValues).values({
     scopeType: "machine",
     scopeId: machineId,
@@ -93,7 +93,7 @@ describe("getOrgSettings — loggingTierOverrideCount", () => {
     const overriddenMachine = await seedMachine(orgId);
     await seedMachine(orgId); // a second machine with no override of its own
 
-    await seedMachineOverride(overriddenMachine, 3);
+    await seedMachineOverride(overriddenMachine, 2);
 
     const settings = await run(orgId);
     expect(settings.loggingTierOverrideCount).toBe(1);

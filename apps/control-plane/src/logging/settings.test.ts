@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import type * as schema from "@cloudable/schema";
 import { events, settingValues } from "@cloudable/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
 import { cleanupOrgRows, connectTestDb } from "../test-support/db";
@@ -65,9 +66,9 @@ describe("logging settings", () => {
 
   test("set/get round-trips a logging tier", async () => {
     const orgId = freshOrgId();
-    await Effect.runPromise(setOrgLoggingTier(db, orgId, 3, testActor));
+    await Effect.runPromise(setOrgLoggingTier(db, orgId, 1, testActor));
     const tier = await Effect.runPromise(getOrgLoggingTier(db, orgId));
-    expect(tier).toBe(3);
+    expect(tier).toBe(1);
   });
 
   test("set/get round-trips a retention location", async () => {
@@ -82,11 +83,11 @@ describe("logging settings", () => {
   test("re-setting a tier replaces the previous value rather than accumulating rows", async () => {
     const orgId = freshOrgId();
     await Effect.runPromise(setOrgLoggingTier(db, orgId, 1, testActor));
-    await Effect.runPromise(setOrgLoggingTier(db, orgId, 3, testActor));
+    await Effect.runPromise(setOrgLoggingTier(db, orgId, 2, testActor));
 
     const rows = await db.select().from(settingValues).where(eq(settingValues.scopeId, orgId));
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.value).toBe(3);
+    expect(rows[0]?.value).toBe(2);
   });
 
   test("retention location has no per-machine override: a machine-scoped row is never read by getOrgRetentionLocation", async () => {
@@ -115,7 +116,7 @@ describe("logging settings", () => {
   test("changing a setting records an org.setting_changed event (tier 1, always audited)", async () => {
     const orgId = freshOrgId();
     await Effect.runPromise(setOrgLoggingTier(db, orgId, 1, testActor));
-    await Effect.runPromise(setOrgLoggingTier(db, orgId, 3, testActor));
+    await Effect.runPromise(setOrgLoggingTier(db, orgId, 2, testActor));
 
     const rows = await db.select().from(events).where(eq(events.orgId, orgId));
     expect(rows).toHaveLength(2);
@@ -128,19 +129,19 @@ describe("logging settings", () => {
       (row) => row.payload as { key: string; previous: unknown; current: unknown; level: string },
     );
     expect(payloads.every((p) => p.key === "logging_tier" && p.level === "org")).toBe(true);
-    expect(payloads.map((p) => p.current).sort()).toEqual([1, 3]);
+    expect(payloads.map((p) => p.current).sort()).toEqual([1, 2]);
   });
 
   test("the recorded event's previous/current reflect the actual transition, including the default as 'previous'", async () => {
     const orgId = freshOrgId();
     // No prior setting_values row — the recorded "previous" should be DEFAULT_LOGGING_TIER.
-    await Effect.runPromise(setOrgLoggingTier(db, orgId, 3, testActor));
+    await Effect.runPromise(setOrgLoggingTier(db, orgId, 1, testActor));
 
     const rows = await db.select().from(events).where(eq(events.orgId, orgId));
     expect(rows).toHaveLength(1);
     const payload = rows[0]?.payload as { previous: unknown; current: unknown };
     expect(payload.previous).toBe(DEFAULT_LOGGING_TIER);
-    expect(payload.current).toBe(3);
+    expect(payload.current).toBe(1);
   });
 });
 
@@ -158,10 +159,10 @@ describe("getEffectiveLoggingTier — machine-level override", () => {
     const orgId = freshOrgId();
     const machineId = crypto.randomUUID();
     testMachineScopeIds.push(machineId);
-    await Effect.runPromise(setOrgLoggingTier(db, orgId, 3, testActor));
+    await Effect.runPromise(setOrgLoggingTier(db, orgId, 1, testActor));
 
     const resolved = await Effect.runPromise(getEffectiveLoggingTier(db, { orgId, machineId }));
-    expect(resolved).toEqual({ tier: 3, source: "org" });
+    expect(resolved).toEqual({ tier: 1, source: "org" });
   });
 
   test("a machine-scoped row wins over the org value, with source 'machine'", async () => {
@@ -173,12 +174,12 @@ describe("getEffectiveLoggingTier — machine-level override", () => {
       scopeType: "machine",
       scopeId: machineId,
       key: LOGGING_TIER_KEY,
-      value: 3,
+      value: 2,
       source: "machine",
     });
 
     const resolved = await Effect.runPromise(getEffectiveLoggingTier(db, { orgId, machineId }));
-    expect(resolved).toEqual({ tier: 3, source: "machine" });
+    expect(resolved).toEqual({ tier: 2, source: "machine" });
   });
 
   test("a machine-scoped row wins even when the org has never configured a tier at all", async () => {
@@ -207,7 +208,7 @@ describe("getEffectiveLoggingTier — machine-level override", () => {
       scopeType: "machine",
       scopeId: overriddenMachine,
       key: LOGGING_TIER_KEY,
-      value: 3,
+      value: 1,
       source: "machine",
     });
 
@@ -217,7 +218,47 @@ describe("getEffectiveLoggingTier — machine-level override", () => {
     const plain = await Effect.runPromise(
       getEffectiveLoggingTier(db, { orgId, machineId: plainMachine }),
     );
-    expect(overridden).toEqual({ tier: 3, source: "machine" });
+    expect(overridden).toEqual({ tier: 1, source: "machine" });
     expect(plain).toEqual({ tier: 2, source: "org" });
+  });
+});
+
+describe("logging tier 3 removal", () => {
+  test("migration 0023 turns a stored 3 into 2 at org and machine scope and leaves 1 and 2 alone", async () => {
+    const orgScope = crypto.randomUUID();
+    const machineScope = crypto.randomUUID();
+    const untouched = crypto.randomUUID();
+    testMachineScopeIds.push(orgScope, machineScope, untouched);
+    await db.insert(settingValues).values([
+      { scopeType: "org", scopeId: orgScope, key: LOGGING_TIER_KEY, value: 3, source: "org" },
+      {
+        scopeType: "machine",
+        scopeId: machineScope,
+        key: LOGGING_TIER_KEY,
+        value: 3,
+        source: "machine",
+      },
+      { scopeType: "org", scopeId: untouched, key: LOGGING_TIER_KEY, value: 1, source: "org" },
+      // Another key that happens to hold 3 must not be touched.
+      { scopeType: "org", scopeId: untouched, key: "other_setting", value: 3, source: "org" },
+    ]);
+
+    const migration = readFileSync(
+      new URL(
+        "../../../../packages/schema/migrations/0023_logging_tier_3_to_2.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    await db.execute(sql.raw(migration));
+
+    const storedValue = async (scopeId: string, key: string) =>
+      (await db.select().from(settingValues).where(eq(settingValues.scopeId, scopeId))).find(
+        (row) => row.key === key,
+      )?.value;
+    expect(await storedValue(orgScope, LOGGING_TIER_KEY)).toBe(2);
+    expect(await storedValue(machineScope, LOGGING_TIER_KEY)).toBe(2);
+    expect(await storedValue(untouched, LOGGING_TIER_KEY)).toBe(1);
+    expect(await storedValue(untouched, "other_setting")).toBe(3);
   });
 });

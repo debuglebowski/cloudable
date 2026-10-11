@@ -36,10 +36,10 @@ const isPackageManifestKey = (key: unknown): boolean =>
 /**
  * Filters a batch of events against each event's *effective* configured
  * logging tier. Tier-1 events are the compliance floor and are
- * never dropped, regardless of configuration. A tier-2/3 event is dropped
+ * never dropped, regardless of configuration. A tier-2 event is dropped
  * when the effective tier is below that event's minimum tier.
  *
- * A batch with no tier-2/3 event at all (the common case — e.g. a plain
+ * A batch with no tier-2 event at all (the common case — e.g. a plain
  * `machine.created` + `machine.owner_assigned` pair) short-circuits before
  * any tier lookup, so it never touches the DB for this at all.
  *
@@ -49,7 +49,7 @@ const isPackageManifestKey = (key: unknown): boolean =>
  * (`getEffectiveLoggingTier`, the org → machine chain every other setting
  * resolves through). An org-scoped event (`event.machineId` is `null`) is
  * checked against the plain org default (`getOrgLoggingTier`) — there is
- * no machine to resolve a chain against. Every tier-2/3 event type in the
+ * no machine to resolve a chain against. Every tier-2 event type in the
  * catalogue today happens to carry a `machineId` (see
  * `packages/events/src/metadata.ts`), but this still resolves the org path
  * defensively in case a future org-scoped event is ever given tier > 1.

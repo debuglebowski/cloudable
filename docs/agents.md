@@ -330,8 +330,8 @@ reason the two are separate processes at all.
 - A reverse tunnel over an outbound connection, carrying interactive
   sessions (web terminal, SSH) to the control plane's tunnel endpoint —
   same pull/outbound-only posture as the control agent.
-- **TLS pass-through by default** — the control plane does not terminate
-  the session's TLS itself.
+- **The control plane can see web terminal traffic.** Browser TLS
+  terminates at the control plane (see `docs/access.md`).
 - **Must terminate live sessions on a policy change**, not merely refuse
   new ones: if access is revoked or an elevation expires mid-session, the
   daemon has to actually kill the open connection, not just stop admitting

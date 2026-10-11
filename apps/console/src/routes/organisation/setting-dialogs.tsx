@@ -70,7 +70,7 @@ export function ApprovalModeDialog({
   );
 }
 
-const LOGGING_TIERS: LoggingTier[] = [1, 2, 3];
+const LOGGING_TIERS: LoggingTier[] = [1, 2];
 
 export interface LoggingTierDialogProps {
   open: boolean;
@@ -79,7 +79,6 @@ export interface LoggingTierDialogProps {
   onSave: (tier: LoggingTier) => void | Promise<void>;
 }
 
-/** Tier 3's plaintext-path consequence is stated here too, not just on the page. */
 export function LoggingTierDialog({
   open,
   currentTier,
@@ -112,15 +111,6 @@ export function LoggingTierDialog({
               />
               <Label htmlFor={`${id}-${candidate}`} className="font-normal">
                 {LOGGING_TIER_LABELS[candidate]}
-                {candidate === 3 && (
-                  <>
-                    {" — "}
-                    <span className="font-medium text-drift">
-                      Cloudable is on the plaintext path.
-                    </span>{" "}
-                    Tiers 1 and 2 stay off it; the tunnel passes TLS through untouched.
-                  </>
-                )}
               </Label>
             </div>
           ))}

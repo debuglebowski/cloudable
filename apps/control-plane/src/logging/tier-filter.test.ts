@@ -125,7 +125,7 @@ describe("filterByLoggingTier", () => {
   test("tier-1 events are never dropped, even for a machine whose own override is below tier 1's requirement", async () => {
     const orgId = freshOrgId();
     const machineId = freshMachineId();
-    await seedTier("org", orgId, 3);
+    await seedTier("org", orgId, 2);
     await seedTier("machine", machineId, 1);
 
     const result = await run([tier1Event(orgId, machineId)]);
@@ -151,8 +151,8 @@ describe("filterByLoggingTier", () => {
 
     // Org default would drop a tier-2 event...
     await seedTier("org", orgId, 1);
-    // ...but this machine has its own override raising it to tier 3.
-    await seedTier("machine", overriddenMachine, 3);
+    // ...but this machine has its own override raising it to tier 2.
+    await seedTier("machine", overriddenMachine, 2);
 
     const result = await run([
       tier2Event(orgId, overriddenMachine),
@@ -210,7 +210,7 @@ describe("filterByLoggingTier", () => {
     await seedTier("org", orgId, 1);
     // A machine in the same org has a much higher override — the
     // machineId:null branch must not accidentally pick this up.
-    await seedTier("machine", otherMachine, 3);
+    await seedTier("machine", otherMachine, 2);
 
     // No tier-2+ event type is ever org-scoped in the real catalogue (see
     // `filterByLoggingTier`'s doc comment), so this only exercises that the

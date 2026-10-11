@@ -404,7 +404,7 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         summary: "Change org settings",
         options: [
           { flag: "--name <name>", description: "Organisation name" },
-          { flag: "--logging-tier 1|2|3", description: "Default logging tier" },
+          { flag: "--logging-tier 1|2", description: "Default logging tier" },
           { flag: "--retention-days <n>", description: "Default retention in days" },
           {
             flag: "--retention-location customer|cloudable_sweden_central",

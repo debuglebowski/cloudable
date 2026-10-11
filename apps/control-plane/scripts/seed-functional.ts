@@ -73,7 +73,6 @@ const RESET_TABLES = [
   schema.notifications,
   schema.restoreRequests,
   schema.events,
-  schema.accessCommandRecorded,
   schema.settingValues,
 ];
 

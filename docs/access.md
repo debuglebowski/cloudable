@@ -381,10 +381,8 @@ configuration flag anywhere in this build — it falls directly out of the shape
 browser's terminal talks HTTPS to the control plane's own domain (there is no public endpoint on
 any machine to connect to instead), so the control plane is unavoidably an
 intermediary that sees the (decrypted) session bytes, regardless of what logging tier is
-configured. Tier 1/2 logging tiers are honest specifically *because* the tunnel passes the
-session's TLS through rather than re-encrypting; tier 3 (full command capture) is the tier whose
-sold consequence is "Cloudable is on the plaintext path" — this is the same
-structural fact stated two ways, not two different claims to keep consistent by hand.
+configured. Logging records session start, end and denial; it does not record the commands run
+inside a session.
 
 ## 4b. File sessions (`method: "files"`)
 
@@ -426,8 +424,7 @@ That is a deliberate choice, not a gap. The same edit made with `vi` in the web 
 nothing, so a per-write event here would produce a record that *looks* complete to an auditor
 and is not: it would cover only the edits that happened to go through this interface. A
 partial trail presented as a whole one is worse than an honest session-level trail. Per-operation
-capture belongs with `access.command_recorded` (tier 3, its own table, deliberately outside the
-catalogue) if and when that is built, and should cover both surfaces at once.
+capture does not exist for either surface. If it is ever built it should cover both at once.
 
 ### Authorization is per-method
 

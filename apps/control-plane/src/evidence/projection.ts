@@ -36,17 +36,6 @@ export interface EvidenceActor {
 }
 
 /**
- * A pointer into the separate, high-volume `access_command_recorded` store
- * (tier-3 shell capture) — never merged into the normalised evidence
- * stream itself, given that table's write volume. `null` when no command
- * recordings share this event's correlationId.
- */
-export interface CommandRecordingRef {
-  correlationId: string;
-  count: number;
-}
-
-/**
  * Cloud-specific detail, exposed as extensions alongside the normalised
  * contract. Populated only for the `cloud.*` event domain — the
  * one place Cloudable's Azure-specific vocabulary (subscription ids,
@@ -82,11 +71,10 @@ export interface EvidenceRecord {
   summary: string;
   /** Cloud-domain detail only — `undefined` for every other event type. */
   extensions?: EvidenceExtensions;
-  commandRecording: CommandRecordingRef | null;
 }
 
 /** Projects one raw `events` row into the normalised evidence shape. */
-export function projectEvent(row: RawEventRow, commandRecordingCount = 0): EvidenceRecord {
+export function projectEvent(row: RawEventRow): EvidenceRecord {
   const extensions = extensionsFor(row);
   return {
     id: row.id,
@@ -103,10 +91,6 @@ export function projectEvent(row: RawEventRow, commandRecordingCount = 0): Evide
     // never explicitly set to `undefined`, so a non-cloud event must leave
     // the key out entirely rather than present-with-`undefined`.
     ...(extensions !== undefined ? { extensions } : {}),
-    commandRecording:
-      commandRecordingCount > 0
-        ? { correlationId: row.correlationId, count: commandRecordingCount }
-        : null,
   };
 }
 

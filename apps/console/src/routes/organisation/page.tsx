@@ -158,13 +158,6 @@ export function OrganisationPage() {
               <ul className="flex flex-col gap-1 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
                 <li>Tier 1 — metadata only: provisioning, auth, lifecycle.</li>
                 <li>Tier 2 — session-level: connections, elevations, config changes.</li>
-                <li>
-                  Tier 3 — full command capture.{" "}
-                  <span className="font-medium text-drift">
-                    Cloudable is on the plaintext path at tier 3.
-                  </span>{" "}
-                  Tiers 1 and 2 stay off it — the tunnel passes TLS through untouched.
-                </li>
               </ul>
             </CardContent>
           </Card>

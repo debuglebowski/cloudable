@@ -35,32 +35,11 @@ describe("evidence projection", () => {
       machineId: null,
       correlationId: "corr-1",
       summary: 'Machine "dev-box" was declared (eastus, Standard_B2s, ubuntu-24.04).',
-      commandRecording: null,
     });
     // Non-cloud event: the `extensions` key is left out entirely, not
     // present-with-`undefined` (see the `exactOptionalPropertyTypes` note
     // in `./projection.ts`).
     expect(record).not.toHaveProperty("extensions");
-  });
-
-  test("attaches a commandRecording pointer without embedding raw command data", () => {
-    const row = baseRow({
-      type: "access.session_started",
-      actorType: "person",
-      payload: { method: "terminal", osUser: "ubuntu" },
-    });
-
-    const record = projectEvent(row, 42);
-
-    expect(record.commandRecording).toEqual({ correlationId: "corr-1", count: 42 });
-    // The projection is a pointer (correlationId + count), never the raw
-    // command rows themselves — never merged into the stream.
-    expect(record).not.toHaveProperty("commands");
-  });
-
-  test("omits commandRecording when no command rows share the correlationId", () => {
-    const record = projectEvent(baseRow({}), 0);
-    expect(record.commandRecording).toBeNull();
   });
 
   test("machine.drift_detected summarises undeclared package/port counts", () => {

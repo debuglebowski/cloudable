@@ -44,17 +44,14 @@ type DbHandle = PostgresJsDatabase<typeof schema>;
 export const LOGGING_TIER_KEY = LOGGING_TIER_SETTING_KEY;
 export const RETENTION_LOCATION_KEY = "retention_location";
 
-export type LoggingTier = 1 | 2 | 3;
+export type LoggingTier = 1 | 2;
 export type RetentionLocation = "customer" | "cloudable_sweden_central";
 
 /**
  * Default logging tier for an org that hasn't configured one yet.
  *
- * Tier 2 (session-level), not tier 3: tier 3 (full command capture) has a
- * stated consequence sold at purchase — Cloudable sits on the plaintext
- * path — and must be an explicit org decision, never a silent
- * default. Tier 1 alone would silently under-log relative to what most
- * orgs actually want out of the box.
+ * Tier 2 (session-level), not tier 1: tier 1 alone would silently
+ * under-log relative to what most orgs actually want out of the box.
  */
 export const DEFAULT_LOGGING_TIER: LoggingTier = 2;
 
@@ -136,16 +133,15 @@ export interface EffectiveLoggingTier {
  * matching `getOrgLoggingTier`'s own default, just with a `source`
  * attached.
  *
- * A row whose stored `value` isn't one of 1/2/3 (only reachable through
- * the generic settings-import path — the UI only ever writes 1/2/3) is
+ * A row whose stored `value` isn't one of 1/2 (e.g. a legacy value left
+ * by hand-edited data — the write paths reject anything else) is
  * treated as though it weren't there, falling through to the next scope
  * down the chain rather than resolving to a bad value: every caller of
  * this function (the tier filter, the machine detail HTTP response) needs
  * a real `LoggingTier`, not whatever a hand-edited import document
  * happened to contain.
  */
-const isLoggingTier = (value: unknown): value is LoggingTier =>
-  value === 1 || value === 2 || value === 3;
+export const isLoggingTier = (value: unknown): value is LoggingTier => value === 1 || value === 2;
 
 export const getEffectiveLoggingTier = (
   db: DbHandle,
