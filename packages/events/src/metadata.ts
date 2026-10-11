@@ -28,6 +28,11 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
     tier: 1,
     description: "An IdP, cloud, or secret store integration was removed from the org.",
   },
+  "org.events_expired": {
+    tier: 1,
+    description:
+      "The retention sweep deleted events older than the org's retention window. Carries the cutoff and a count, nothing else.",
+  },
 
   // --- person --- (tier 1: identity and access lifecycle is always audited)
   "person.added": {

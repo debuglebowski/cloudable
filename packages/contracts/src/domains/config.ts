@@ -19,6 +19,19 @@ export type SettingScopeType = "org" | "machine";
  */
 export const LOGGING_TIER_SETTING_KEY = "logging_tier";
 
+/**
+ * How long an org keeps its events before the retention sweep deletes them.
+ * Org scope only. Shared so the console validates against the same floor the
+ * control plane enforces instead of carrying its own copy of the number.
+ *
+ * The floor is fixed in code, not configurable: a window short enough to
+ * delete the evidence a compliance check reads would defeat the point of
+ * keeping events at all.
+ */
+export const EVENTS_RETENTION_SETTING_KEY = "events.retentionDays";
+export const EVENTS_RETENTION_DEFAULT_DAYS = 365;
+export const EVENTS_RETENTION_MIN_DAYS = 90;
+
 // `orgId`/`actor` are gone from every request below: the server derives
 // both from the caller's session (`CurrentUserTag`) — every config change
 // is now necessarily a real person acting through the console, not a

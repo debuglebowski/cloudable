@@ -15,9 +15,10 @@ import { TunnelServer } from "../../tunnel/server";
 import { TunnelSignal } from "../../tunnel/signal";
 import { MachineService } from "../machine/MachineService";
 import { ACCESS_METHODS_ENABLED_KEY } from "../machine/settings";
-import { updateOrgSettings } from "../organisation/settings";
+import { getOrgSettings, updateOrgSettings } from "../organisation/settings";
+import { EVENTS_RETENTION_DAYS_KEY, EVENTS_RETENTION_INVALID_REASON } from "../retention/policy";
 import { applySettingChange } from "./apply-setting-change";
-import { InvalidSettingValueError, PinnedSettingError } from "./errors";
+import { InvalidScopeError, InvalidSettingValueError, PinnedSettingError } from "./errors";
 
 // This suite runs against a real Postgres — the behaviour under test is the
 // interaction between `settingValues`, `machines.desiredStateVersion`, and
@@ -216,6 +217,54 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       expect(rows).toHaveLength(0);
       const orgEvents = await db.select().from(events).where(eq(events.orgId, org.id));
       expect(orgEvents).toHaveLength(0);
+    });
+
+    test("event retention takes a whole number of days at or above the floor, at org scope only, and writes nothing otherwise", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+      const attempt = (scopeType: "org" | "machine", scopeId: string, value: unknown) =>
+        run(
+          Effect.either(
+            applySettingChange({
+              orgId: org.id,
+              scopeType,
+              scopeId,
+              key: EVENTS_RETENTION_DAYS_KEY,
+              value,
+              actorType: "person",
+              actorId: "person-1",
+              correlationId: crypto.randomUUID(),
+            }),
+          ),
+        );
+
+      for (const bad of [89, 0, -5, 120.5, "365", null]) {
+        const result = await attempt("org", org.id, bad);
+        expect(result._tag).toBe("Left");
+        if (result._tag === "Left") expect(result.left).toBeInstanceOf(InvalidSettingValueError);
+      }
+      // The sweep reads the org row only, so a machine row would look active and do nothing.
+      const onMachine = await attempt("machine", machine.id, 365);
+      expect(onMachine._tag).toBe("Left");
+      if (onMachine._tag === "Left") expect(onMachine.left).toBeInstanceOf(InvalidScopeError);
+
+      const keyRows = () =>
+        db
+          .select()
+          .from(settingValues)
+          .where(
+            and(
+              eq(settingValues.key, EVENTS_RETENTION_DAYS_KEY),
+              inArray(settingValues.scopeId, [org.id, machine.id]),
+            ),
+          );
+      expect(await keyRows()).toHaveLength(0);
+      expect(await db.select().from(events).where(eq(events.orgId, org.id))).toHaveLength(0);
+
+      const accepted = await attempt("org", org.id, 90);
+      expect(accepted._tag).toBe("Right");
+      const [row] = await keyRows();
+      expect(row?.value).toBe(90);
     });
 
     test("editing an org-scope setting is inert: no machine or reconcile side-effects", async () => {
@@ -687,6 +736,53 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       const rows = await db.select().from(events).where(eq(events.orgId, org.id));
       const keys = rows.map((r) => (r.payload as { key: string }).key).sort();
       expect(keys).toEqual(["approval_mode:break_glass", "archive.retentionDays"]);
+    });
+  });
+
+  describe("event retention in the org settings view", () => {
+    const actor = { actorType: "person", actorId: "person-1" } as const;
+
+    test("defaults to 365, round-trips, leaves the snapshot window alone, and rejects a value below the floor with nothing written", async () => {
+      const org = await seedOrg();
+
+      expect((await run(getOrgSettings(org.id))).eventRetentionDays).toBe(365);
+
+      const updated = await run(
+        updateOrgSettings({ orgId: org.id, eventRetentionDays: 180, actor }),
+      );
+      expect(updated.eventRetentionDays).toBe(180);
+      // A separate setting: the snapshot window keeps its own default.
+      expect(updated.retentionDefaultDays).toBe(30);
+
+      const error = await run(
+        updateOrgSettings({ orgId: org.id, eventRetentionDays: 60, actor }).pipe(Effect.flip),
+      );
+      expect(error).toMatchObject({ reason: EVENTS_RETENTION_INVALID_REASON });
+      expect((await run(getOrgSettings(org.id))).eventRetentionDays).toBe(180);
+
+      const rows = await db.select().from(events).where(eq(events.orgId, org.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.type).toBe("org.setting_changed");
+      expect(rows[0]?.payload).toEqual({
+        key: EVENTS_RETENTION_DAYS_KEY,
+        previous: null,
+        current: 180,
+        level: "org",
+      });
+    });
+
+    test("shows the window the sweep will really apply when a stored value is below the floor", async () => {
+      const org = await seedOrg();
+      // Written around validation, as a hand-edited row would be.
+      await db.insert(settingValues).values({
+        scopeType: "org",
+        scopeId: org.id,
+        key: EVENTS_RETENTION_DAYS_KEY,
+        value: 5,
+        source: "org",
+      });
+
+      expect((await run(getOrgSettings(org.id))).eventRetentionDays).toBe(90);
     });
   });
 

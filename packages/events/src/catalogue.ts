@@ -30,6 +30,7 @@ export const EVENT_TYPES = [
   "org.setting_changed",
   "org.integration_connected",
   "org.integration_removed",
+  "org.events_expired",
 
   // --- person ---
   "person.added",

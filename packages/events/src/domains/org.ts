@@ -25,4 +25,19 @@ export type OrgEvent =
   | (EventEnvelope & {
       type: "org.integration_removed";
       payload: { kind: "idp" | "cloud" | "secret_store"; identifier: string };
+    })
+  | (EventEnvelope & {
+      type: "org.events_expired";
+      /**
+       * Written by the retention sweep each time it deletes events for an org. The
+       * only trace a deletion leaves, so it carries counts and the cutoff only —
+       * never anything copied from the events it removed.
+       */
+      payload: {
+        /** Events older than this (ISO 8601) were eligible. */
+        cutoff: string;
+        /** The org's retention window, in days, when the sweep ran. */
+        retentionDays: number;
+        deletedCount: number;
+      };
     });

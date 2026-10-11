@@ -23,6 +23,7 @@ import { OrgPackageManifestCard } from "./org-package-manifest-card";
 import {
   ApprovalModeDialog,
   ControlOverrideDialog,
+  EventRetentionDialog,
   LoggingTierDialog,
   RetentionDaysDialog,
   RetentionLocationDialog,
@@ -45,6 +46,7 @@ export function OrganisationPage() {
   const [editingApproval, setEditingApproval] = useState<ApprovalActionType | null>(null);
   const [editingLoggingTier, setEditingLoggingTier] = useState(false);
   const [editingRetentionDays, setEditingRetentionDays] = useState(false);
+  const [editingEventRetention, setEditingEventRetention] = useState(false);
   const [editingRetentionLocation, setEditingRetentionLocation] = useState(false);
   const [editingControlId, setEditingControlId] = useState<string | null>(null);
 
@@ -170,10 +172,16 @@ export function OrganisationPage() {
             </CardHeader>
             <CardContent className="flex flex-col">
               <SettingRow
-                label="Default retention"
+                label="Snapshot retention"
                 value={`${settings.retentionDefaultDays} days`}
                 source="org"
                 onOverride={() => setEditingRetentionDays(true)}
+              />
+              <SettingRow
+                label="Event retention"
+                value={`${settings.eventRetentionDays} days`}
+                source="org"
+                onOverride={() => setEditingEventRetention(true)}
               />
               <SettingRow
                 label="Log retention location"
@@ -258,6 +266,14 @@ export function OrganisationPage() {
         onOpenChange={setEditingRetentionDays}
         onSave={async (days) => {
           await update.mutateAsync({ retentionDefaultDays: days });
+        }}
+      />
+      <EventRetentionDialog
+        open={editingEventRetention}
+        currentDays={settings.eventRetentionDays}
+        onOpenChange={setEditingEventRetention}
+        onSave={async (days) => {
+          await update.mutateAsync({ eventRetentionDays: days });
         }}
       />
       <RetentionLocationDialog

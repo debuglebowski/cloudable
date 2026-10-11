@@ -19,6 +19,7 @@ export interface OrgWire {
   loggingTier: 1 | 2;
   loggingTierOverrideCount: number;
   retentionDefaultDays: number;
+  eventRetentionDays: number;
   retentionLocation: "customer" | "cloudable_sweden_central";
 }
 

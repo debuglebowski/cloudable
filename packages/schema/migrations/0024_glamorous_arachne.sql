@@ -1,0 +1,2 @@
+CREATE INDEX "events_org_occurred_idx" ON "events" USING btree ("org_id","occurred_at");--> statement-breakpoint
+CREATE INDEX "events_org_correlation_idx" ON "events" USING btree ("org_id","correlation_id");

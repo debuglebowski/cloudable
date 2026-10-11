@@ -10,6 +10,7 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `org.setting_changed` | 1 | An org- or machine-level default setting was changed. |
 | `org.integration_connected` | 1 | An IdP, cloud, or secret store integration was connected to the org. |
 | `org.integration_removed` | 1 | An IdP, cloud, or secret store integration was removed from the org. |
+| `org.events_expired` | 1 | The retention sweep deleted events older than the org's retention window. Carries the cutoff and a count, nothing else. |
 
 ## Person
 

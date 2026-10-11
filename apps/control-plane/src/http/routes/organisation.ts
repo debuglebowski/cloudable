@@ -42,6 +42,7 @@ const OrgSettingsResource = Schema.Struct({
   // see `domain/organisation/settings.ts`'s `OrgSettingsView` doc comment.
   loggingTierOverrideCount: Schema.Number,
   retentionDefaultDays: Schema.Number,
+  eventRetentionDays: Schema.Number,
   retentionLocation: RetentionLocation,
 });
 
@@ -50,6 +51,7 @@ const UpdateOrgSettingsPayload = Schema.Struct({
   approvalModes: Schema.optional(Schema.partial(ApprovalModes)),
   loggingTier: Schema.optional(LoggingTier),
   retentionDefaultDays: Schema.optional(Schema.Number),
+  eventRetentionDays: Schema.optional(Schema.Number),
   retentionLocation: Schema.optional(RetentionLocation),
 });
 

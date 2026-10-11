@@ -137,6 +137,8 @@ function summarize(row: RawEventRow): string {
       return `A ${event.payload.kind} integration ("${event.payload.identifier}") was connected.`;
     case "org.integration_removed":
       return `A ${event.payload.kind} integration ("${event.payload.identifier}") was removed.`;
+    case "org.events_expired":
+      return `${event.payload.deletedCount} event(s) older than ${event.payload.cutoff} were deleted under the org's ${event.payload.retentionDays}-day event retention window.`;
 
     case "person.added":
       return `${event.payload.email} was added to the org (${event.payload.source}).`;
@@ -310,6 +312,7 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "org.setting_changed":
     case "org.integration_connected":
     case "org.integration_removed":
+    case "org.events_expired":
     case "person.added":
     case "person.activated":
     case "person.deactivated":

@@ -16,6 +16,11 @@ import {
   webTerminalEnabledOf,
 } from "../machine/settings";
 import {
+  EVENTS_RETENTION_DAYS_KEY,
+  MIN_EVENTS_RETENTION_DAYS,
+  isValidEventsRetentionDays,
+} from "../retention/policy";
+import {
   InvalidScopeError,
   InvalidSettingValueError,
   MachineNotFoundError,
@@ -98,6 +103,26 @@ export const applySettingChange = (
           message: "logging tier must be 1 or 2",
         }),
       );
+    }
+
+    // Event retention is org-wide: the sweep reads only the org-scope row, so a
+    // machine-scope row would sit in the settings page looking active while doing
+    // nothing. And the floor is enforced here, on every write path (this endpoint, the
+    // Git import and the org settings page), not just the one the console uses.
+    if (input.key === EVENTS_RETENTION_DAYS_KEY) {
+      if (input.scopeType !== "org") {
+        return yield* Effect.fail(
+          new InvalidScopeError({ message: "event retention can only be set for the org" }),
+        );
+      }
+      if (!isValidEventsRetentionDays(input.value)) {
+        return yield* Effect.fail(
+          new InvalidSettingValueError({
+            key: input.key,
+            message: `event retention must be a whole number of days, at least ${MIN_EVENTS_RETENTION_DAYS}`,
+          }),
+        );
+      }
     }
 
     // Machine-scope: resolve the machine, verify tenancy, and (for the

@@ -10,6 +10,7 @@ import {
   getOrgSettings,
   updateOrgSettings,
 } from "../../domain/organisation/settings";
+import { EVENTS_RETENTION_INVALID_REASON } from "../../domain/retention/policy";
 import { Api } from "../api";
 import { CurrentUserTag } from "../middleware/auth";
 
@@ -21,6 +22,7 @@ const VALIDATION_REASONS = new Set([
   "org_not_found",
   "org_name_required",
   "retention_days_must_be_a_positive_integer",
+  EVENTS_RETENTION_INVALID_REASON,
 ]);
 
 const rethrowInfraAsDefect = (e: OrgSettingsError) =>
@@ -50,6 +52,7 @@ export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handl
           approvalModes: payload.approvalModes,
           loggingTier: payload.loggingTier,
           retentionDefaultDays: payload.retentionDefaultDays,
+          eventRetentionDays: payload.eventRetentionDays,
           retentionLocation: payload.retentionLocation,
           // The authenticated caller, never a name they chose for themselves. This is the
           // actor on a permanent `organisation.updated` event.

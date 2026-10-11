@@ -15,8 +15,8 @@ wire types in `packages/contracts/src/domains/archive.ts`.
 │ provisioning      │ ────────────▶│ archived_restorable │ ───────────────▶│ archived_expired   │
 │ running           │               │ (retention clock    │  (not built in   │ (volume data hard- │
 │ stopped           │               │  running)           │   this unit —    │  deleted; record   │
-│ error             │               │                     │   see below)     │  + audit history   │
-└──────────────────┘               └────────────────────┘                  │  permanent)        │
+│ error             │               │                     │   see below)     │  permanent; events │
+└──────────────────┘               └────────────────────┘                  │  see below)        │
                                                                              └───────────────────┘
 ```
 
@@ -33,8 +33,8 @@ so a machine rebuilt from a snapshot and left reading `archived_restorable` woul
 bill and serve sessions while governed by nothing.
 
 `archiveMachine` remains one-way as an *operation*: archiving an already-archived machine
-still fails. `machines` rows are never deleted: the two archived states, `archivedAt`, and
-the full event history are permanent.
+still fails. `machines` rows are never deleted: the two archived states and `archivedAt`
+are permanent. The machine's events are not: they age out under event retention (below).
 
 This paragraph used to say a restore "never flips `machines.state`", which was true only
 because restore did not do anything at all.
@@ -120,6 +120,55 @@ never evaluated. This renders as a **documented exception**, not an error: the s
 stays fully visible and restorable, just permanently exempt from the sweep until cleared.
 Clearing a hold does **not** recompute `expiresAt` — the original retention window
 resumes as if the hold had paused it, not reset it.
+
+## Event retention
+
+Snapshots are not the only thing with a clock. Events are deleted once they are older than
+the org's **event retention window**: setting `events.retentionDays`, org scope only,
+**default 365**, never below **90**. It is separate from `archive.retentionDays` above,
+which is how long a snapshot's volume data lives. Constants and validation:
+`domain/retention/policy.ts`. The window is edited on the org settings page (Retention
+tab), with `cloudable org update --event-retention-days <n>`, or through the generic
+settings endpoint; all three go through the same validation, so the floor holds on every
+path. A stored value below the floor, written some other way, is raised to the floor when
+the sweep reads it, so a bad row can never turn the sweep into a mass delete.
+
+The sweep is `expireEventsPastRetention` (`domain/retention/sweep.ts`), run by the expiry
+daemon (`expiry/daemon.ts`) under its leader lock once an hour. The window is measured in
+months, so a faster clock would only add cost. Each run deletes at most 50,000 events per
+org, oldest first, so a backlog drains over successive passes. Three rules decide what is
+eligible:
+
+- **Older than the window.** `occurred_at` before `now - retentionDays`.
+- **A correlation group goes as a unit.** Everything one operation produced shares a
+  `correlationId`, and the compliance checks read those events together (check #4 looks for
+  the `approval.granted` that shares an elevation's correlation id). An event is held back
+  while any event in its group is still inside the window, so a check never sees an
+  operation cut in half at the cutoff. A caller-supplied correlation id that is reused for
+  every call keeps its whole group alive; every id the control plane generates is fresh per
+  operation.
+- **Legal hold.** An event of a machine that has a snapshot under legal hold is kept, and so
+  is the rest of its group. A hold exists to preserve evidence, so the machine's history
+  must not age out underneath it. Org-level events (no machine) are not covered by a
+  machine's hold on their own. Clearing the hold makes the events eligible again on the
+  next run.
+
+Each run that deletes something records it in the same transaction as `org.events_expired`
+(tier 1): the cutoff, the window in force and a count, never anything from the deleted
+rows. A deletion with no record would leave an auditor looking at a gap they cannot
+explain; a record with no deletion would claim something that did not happen. That record
+is itself an event, so it expires on the same schedule as the rest.
+
+What this means for the rest of the product:
+
+- The evidence export and the compliance checks see only events still inside the window. An
+  auditor's look-back is bounded by it, which is the reason it is configurable.
+- Check #1 (`access-revoked-on-offboarding`) reads `machine.offboarded` events. Once an
+  offboarding has aged out it is no longer a subject of the check. SSH certificates are
+  valid for about 8 hours, so nothing relevant outlasts the 90-day floor.
+- Machine records, snapshots, certificates and approvals are rows in their own tables and
+  are not affected.
+- The machine's own activity feed (the Activity view) starts at the oldest surviving event.
 
 ## Taking a snapshot on purpose
 

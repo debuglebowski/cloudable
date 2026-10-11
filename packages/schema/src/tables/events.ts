@@ -2,12 +2,12 @@ import { index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-o
 import { actorTypeEnum } from "../shared";
 
 // ---------------------------------------------------------------------------
-// APPEND-ONLY. Do not call .update() or .delete() against this table, ever,
-// from anywhere outside this package's own tooling (e.g. a retention/expiry
-// job). Events are the evidence trail the whole product is built on —
-// no updates, no deletes, retention is expiry. The control plane derives
-// audit state from this stream — mutating a row after the fact would
-// falsify history.
+// APPEND-ONLY. Do not call .update() against this table, ever. The one
+// permitted .delete() is the retention sweep (`domain/retention/sweep.ts`),
+// which removes events older than an org's retention window and records
+// that it did so as `org.events_expired`. Events are the evidence trail the
+// whole product is built on, and the control plane derives audit state from
+// this stream — mutating a row after the fact would falsify history.
 //
 // `type` values are a public interface: additive only, never
 // renamed or removed. See `packages/events` for the catalogue and its
@@ -38,5 +38,11 @@ export const events = pgTable(
     // leads with `type`, which that query doesn't constrain. `id` trails so the
     // ordering comes off the index instead of a sort.
     index("events_org_machine_id_idx").on(table.orgId, table.machineId, table.id),
+    // The retention sweep: "this org's events older than the cutoff, oldest first".
+    // Neither index above leads with a bare time range.
+    index("events_org_occurred_idx").on(table.orgId, table.occurredAt),
+    // The sweep deletes a correlation group as a unit, so it asks "does any other
+    // event in this group still sit inside the window?" per candidate.
+    index("events_org_correlation_idx").on(table.orgId, table.correlationId),
   ],
 );

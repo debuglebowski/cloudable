@@ -4,6 +4,7 @@ import type { Db } from "../db/layer";
 import { releaseIdleInspections } from "../domain/archive/inspection-registry";
 import { detectMissingSnapshotData, expireOverdueSnapshots } from "../domain/archive/snapshot";
 import { expireOverdueElevations } from "../domain/elevation/ElevationService";
+import { expireEventsPastRetention } from "../domain/retention/sweep";
 import { expireOverdueApprovals } from "../services/ApprovalService";
 import type { EventBus } from "../services/EventBus";
 import type { ProvisioningServiceTag } from "../services/ProvisioningService";
@@ -64,6 +65,14 @@ const SWEEP_INTERVAL = Duration.seconds(60);
  * is proportional to the healthy snapshots — which is exactly the set that never changes.
  */
 const INTEGRITY_SWEEP_INTERVAL = Duration.minutes(30);
+
+/**
+ * Event retention also keeps a slow clock, for the opposite reason: it is cheap per run
+ * but gains nothing from being frequent. The window is measured in months, so an event
+ * that lingers an extra hour past it changes nothing, while a minute-by-minute scan of a
+ * large, growing table would be pure cost.
+ */
+const EVENT_RETENTION_SWEEP_INTERVAL = Duration.hours(1);
 
 /** Same rationale as `status-refresh/daemon.ts`'s keepalive: `pg_advisory_lock` never
  * pushes a "you lost it" notification, so the only way to notice a silently dropped
@@ -130,6 +139,10 @@ const runSweep = <R>(
  * right behaviour for a check whose whole job is noticing drift. */
 let lastIntegritySweep = 0;
 
+/** Same pattern for event retention. On restart it runs once straight away, which is
+ * harmless: it only ever deletes what is already past its window. */
+let lastEventRetentionSweep = 0;
+
 const runSweepPass: Effect.Effect<
   void,
   never,
@@ -149,6 +162,13 @@ const runSweepPass: Effect.Effect<
   if (Date.now() - lastIntegritySweep >= Duration.toMillis(INTEGRITY_SWEEP_INTERVAL)) {
     lastIntegritySweep = Date.now();
     yield* runSweep("snapshots with missing data", detectMissingSnapshotData());
+  }
+  // Under the leader lock for the same reason the integrity sweep is: two replicas
+  // deleting the same events would each publish `org.events_expired` for them, and that
+  // record is permanent.
+  if (Date.now() - lastEventRetentionSweep >= Duration.toMillis(EVENT_RETENTION_SWEEP_INTERVAL)) {
+    lastEventRetentionSweep = Date.now();
+    yield* runSweep("events past their retention window", expireEventsPastRetention());
   }
 });
 

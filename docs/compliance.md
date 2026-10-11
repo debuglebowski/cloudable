@@ -31,7 +31,7 @@ Checks 1–5 belong to other feature units and are registered into `COMPLIANCE_C
 
 `apps/control-plane/src/compliance/checks/machines-reporting.ts`.
 
-Deliberately **not** an event query. Every other check can reasonably ask "what happened, ever?" over the append-only event log. This one can't: a machine that has *stopped* emitting anything is exactly the failure mode an events-only query would miss — the last event it ever produced would look identical whether it stopped one minute ago or one year ago. So `evaluate` reads `machines` directly:
+Deliberately **not** an event query. Every other check can reasonably ask "what happened, within the retention window?" over the event log (events older than the org's event retention window are deleted; see `docs/lifecycle.md`, "Event retention"). This one can't: a machine that has *stopped* emitting anything is exactly the failure mode an events-only query would miss — the last event it ever produced would look identical whether it stopped one minute ago or one year ago. So `evaluate` reads `machines` directly:
 
 ```
 state NOT IN ('archived_restorable', 'archived_expired')

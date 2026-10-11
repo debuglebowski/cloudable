@@ -1,3 +1,4 @@
+import { EVENTS_RETENTION_DEFAULT_DAYS, EVENTS_RETENTION_MIN_DAYS } from "@cloudable/contracts";
 import { useId } from "react";
 
 import { CONTROL_STATUSES, CONTROL_STATUS_LABELS, type ControlStatus } from "@/api/compliance";
@@ -127,7 +128,7 @@ export interface RetentionDaysDialogProps {
   onSave: (days: number) => void | Promise<void>;
 }
 
-/** Retention default, org-configurable. Whole days only. */
+/** Snapshot data retention, org-configurable. Whole days only. */
 export function RetentionDaysDialog({
   open,
   currentDays,
@@ -140,8 +141,8 @@ export function RetentionDaysDialog({
     <ValueEditDialog<number>
       open={open}
       currentValue={currentDays}
-      title="Default retention"
-      description="Applies org-wide unless a template overrides it."
+      title="Snapshot retention"
+      description="How long a snapshot's volume data is kept before it is deleted."
       onOpenChange={onOpenChange}
       onSave={onSave}
       isValid={(days) => Number.isInteger(days) && days >= 1}
@@ -157,6 +158,52 @@ export function RetentionDaysDialog({
             value={days}
             onChange={(event) => setDays(Number(event.target.value))}
           />
+        </div>
+      )}
+    </ValueEditDialog>
+  );
+}
+
+export interface EventRetentionDialogProps {
+  open: boolean;
+  currentDays: number;
+  onOpenChange: (open: boolean) => void;
+  onSave: (days: number) => void | Promise<void>;
+}
+
+/** How long events are kept. Whole days, never below the floor the control plane enforces. */
+export function EventRetentionDialog({
+  open,
+  currentDays,
+  onOpenChange,
+  onSave,
+}: EventRetentionDialogProps) {
+  const inputId = useId();
+
+  return (
+    <ValueEditDialog<number>
+      open={open}
+      currentValue={currentDays}
+      title="Event retention"
+      description="Events older than this are deleted for good, and compliance checks and the evidence export only see what is kept. A machine with a snapshot under legal hold keeps its events."
+      onOpenChange={onOpenChange}
+      onSave={onSave}
+      isValid={(days) => Number.isInteger(days) && days >= EVENTS_RETENTION_MIN_DAYS}
+    >
+      {(days, setDays) => (
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={inputId}>Retention days</Label>
+          <Input
+            id={inputId}
+            type="number"
+            step={1}
+            min={EVENTS_RETENTION_MIN_DAYS}
+            value={days}
+            onChange={(event) => setDays(Number(event.target.value))}
+          />
+          <p className="text-xs text-muted-foreground">
+            Minimum {EVENTS_RETENTION_MIN_DAYS} days. Default {EVENTS_RETENTION_DEFAULT_DAYS}.
+          </p>
         </div>
       )}
     </ValueEditDialog>

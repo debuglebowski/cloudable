@@ -40,6 +40,7 @@ exports[`event type catalogue is append-only 1`] = `
   "machine.state_reported",
   "machine.stopped",
   "org.created",
+  "org.events_expired",
   "org.integration_connected",
   "org.integration_removed",
   "org.setting_changed",

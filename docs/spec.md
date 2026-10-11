@@ -12,7 +12,7 @@ the reference for "why does it work this way."
 Violating any of these breaks a stated customer promise. They are not preferences.
 
 1. **No cloud credential is ever stored.** Federation only. Client secrets are never acceptable.
-2. **Events are append-only.** No updates, no deletes. Retention is expiry, not mutation.
+2. **Events are append-only.** No updates. The only delete is the retention sweep, which removes events older than the org's retention window (default 365 days, never below 90). Retention is expiry, not mutation.
 3. **A machine has exactly one owner, and the owner is a person.** No shared, team-owned or unowned machines.
 4. **Nothing installs or removes software unasked.** A person asks, per package, and the request,
    its outcome and its failures are all recorded. The package manifest is a *permission* list —
@@ -244,7 +244,7 @@ A confirmation dialog is self-approval and is not an approval.
 
 ### Archived sub-states
 - **Archived, restorable** — volume detached and snapshotted, retention clock running, restore available subject to approval
-- **Archived, expired** — clock elapsed, volume data hard-deleted. **Record and full audit history persist permanently.** Restore greyed out with a stated reason, never hidden
+- **Archived, expired** — clock elapsed, volume data hard-deleted. **The machine record persists permanently.** Its events age out with the rest of the org's under event retention (§17), unless a snapshot of the machine is under legal hold. Restore greyed out with a stated reason, never hidden
 
 Retention default 30 days, org-configurable. **Legal hold** flag exempts a volume from expiry and renders as a documented exception, not an error. Snapshot region inherits the machine's region.
 
@@ -306,7 +306,15 @@ Per-template tier; cost follows.
 
 Full command capture is not offered. Nothing records the commands run in a session.
 
-**Retention location:** customer-controlled or Cloudable-held. Cloudable-held logs reside in **Sweden Central** — single org-wide value, no per-machine setting. Residency changes are a DPA matter, not a toggle.
+**Retention location:** customer-controlled or Cloudable-held — single org-wide value, no per-machine setting. Residency changes are a DPA matter, not a toggle.
+
+**Event retention.** Events are deleted once they are older than the org's event retention window: **365 days by default, configurable per org, never below 90**. The floor is fixed in code. It is a different setting from snapshot retention (§14), which governs volume data.
+
+- Deleted, not redacted. Redacting would need a maintained list of personal fields for every event type, and the result would still be a trail tied to the machine's owner, so it would be pseudonymisation rather than erasure. Expiry removes the row.
+- A correlation group expires as a unit, because the compliance checks read an operation's events together. An event is held back while any event from the same operation is still inside the window.
+- A machine with a snapshot under legal hold keeps its events, and so does the rest of any operation that touched it. Org-level events are not covered by a machine's hold.
+- Each sweep that deletes something records `org.events_expired` (tier 1) with the cutoff, the window and a count. The record and the deletion commit together, and it carries nothing from the deleted rows.
+- Consequence for evidence: an evidence export and the compliance checks see only what is still inside the window. A control that needs a longer look-back needs a longer window.
 
 **Volume control:** log state *changes*, not state confirmations. Successful no-op reconciles from thousands of agents polling every 30s will otherwise dominate everything else.
 
@@ -556,6 +564,8 @@ Reads and page views. Successful no-op reconciles. Poll requests. Anything emitt
 | Elevated access was approved | `access.elevation_granted`, `approval.granted`, `approval.denied` |
 | Retention is honoured | `snapshot.created`, `snapshot.expired`, `snapshot.legal_hold_set` |
 | Machines are reporting | **Current state, not events** — see below |
+
+> The events behind each check are only those still inside the org's event retention window (§17).
 
 > ⚠️ **"Machines are reporting" is not a query over the event stream.** It reads `last_verified_at` on the machine row, because the absence of an event is not itself an event and a healthy machine emits nothing. Checks read current state *or* events; most read events.
 

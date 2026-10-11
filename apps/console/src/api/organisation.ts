@@ -38,7 +38,10 @@ export interface OrgSettings {
   /** How many of this org's machines have their own logging-tier override — read-only,
    * feeds `LineageGutter`'s "N machines override this" badge. Not sent on update. */
   loggingTierOverrideCount: number;
+  /** How long a snapshot's volume data is kept. */
   retentionDefaultDays: number;
+  /** How long events are kept before the retention sweep deletes them. */
+  eventRetentionDays: number;
   retentionLocation: RetentionLocation;
 }
 

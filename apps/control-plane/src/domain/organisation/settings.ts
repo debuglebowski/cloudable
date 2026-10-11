@@ -17,6 +17,12 @@ import type { EventBus } from "../../services/EventBus";
 import type { TunnelServer } from "../../tunnel/server";
 import { DEFAULT_RETENTION_DAYS, RETENTION_DAYS_KEY } from "../archive/org-policy";
 import { applySettingChange } from "../config/apply-setting-change";
+import {
+  EVENTS_RETENTION_DAYS_KEY,
+  EVENTS_RETENTION_INVALID_REASON,
+  effectiveEventsRetentionDays,
+  isValidEventsRetentionDays,
+} from "../retention/policy";
 
 /**
  * Aggregate read/write for the Organisation page (approval mode per action type,
@@ -69,7 +75,10 @@ export interface OrgSettingsView {
   loggingTier: LoggingTier;
   /** How many of this org's machines have their own machine-level logging-tier override. Purely informational — the org page has nothing to do about a machine's override besides know it exists; see the machine detail page for the actual override control. */
   loggingTierOverrideCount: number;
+  /** How long a snapshot's volume data lives (`archive.retentionDays`). */
   retentionDefaultDays: number;
+  /** How long the org's events live before the retention sweep deletes them. */
+  eventRetentionDays: number;
   retentionLocation: RetentionLocation;
 }
 
@@ -147,6 +156,12 @@ export const getOrgSettings = (
     const loggingTierOverrideCount = loggingTierOverrideRows[0]?.count ?? 0;
     const retentionDefaultDays =
       (yield* readOrgScopedSetting<number>(orgId, RETENTION_DAYS_KEY)) ?? DEFAULT_RETENTION_DAYS;
+    // Through `effectiveEventsRetentionDays`, not a bare default: show the window the
+    // sweep will really apply, including the floor, rather than a stored number it
+    // would quietly override.
+    const eventRetentionDays = effectiveEventsRetentionDays(
+      yield* readOrgScopedSetting<number>(orgId, EVENTS_RETENTION_DAYS_KEY),
+    );
     const retentionLocation =
       (yield* readOrgScopedSetting<RetentionLocation>(orgId, RETENTION_LOCATION_KEY)) ??
       DEFAULT_RETENTION_LOCATION;
@@ -161,6 +176,7 @@ export const getOrgSettings = (
       loggingTier,
       loggingTierOverrideCount,
       retentionDefaultDays,
+      eventRetentionDays,
       retentionLocation,
     };
   });
@@ -171,6 +187,7 @@ export interface UpdateOrgSettingsInput {
   approvalModes?: { [K in ApprovalActionType]?: ApprovalMode | undefined } | undefined;
   loggingTier?: LoggingTier | undefined;
   retentionDefaultDays?: number | undefined;
+  eventRetentionDays?: number | undefined;
   retentionLocation?: RetentionLocation | undefined;
   actor: SettingChangeActor;
 }
@@ -255,6 +272,12 @@ export const updateOrgSettings = (
         new OrgSettingsError({ reason: "retention_days_must_be_a_positive_integer" }),
       );
     }
+    if (
+      input.eventRetentionDays !== undefined &&
+      !isValidEventsRetentionDays(input.eventRetentionDays)
+    ) {
+      return yield* Effect.fail(new OrgSettingsError({ reason: EVENTS_RETENTION_INVALID_REASON }));
+    }
 
     if (trimmedName !== undefined) {
       yield* dbTry(
@@ -291,6 +314,16 @@ export const updateOrgSettings = (
         input.orgId,
         RETENTION_DAYS_KEY,
         input.retentionDefaultDays,
+        input.actor,
+        correlationId,
+      );
+    }
+
+    if (input.eventRetentionDays !== undefined) {
+      yield* writeOrgSetting(
+        input.orgId,
+        EVENTS_RETENTION_DAYS_KEY,
+        input.eventRetentionDays,
         input.actor,
         correlationId,
       );

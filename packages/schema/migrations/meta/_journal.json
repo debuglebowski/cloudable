@@ -169,6 +169,13 @@
       "when": 1791703427019,
       "tag": "0023_logging_tier_3_to_2",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791705077191,
+      "tag": "0024_glamorous_arachne",
+      "breakpoints": true
     }
   ]
 }

@@ -41,7 +41,8 @@ function printOrg(org: OrgWire): void {
     ["name", org.name],
     ["id", org.id],
     ["logging tier", `${org.loggingTier}${overrideNote(org.loggingTierOverrideCount)}`],
-    ["retention", `${org.retentionDefaultDays} days`],
+    ["snapshot retention", `${org.retentionDefaultDays} days`],
+    ["event retention", `${org.eventRetentionDays} days`],
     ["retention location", org.retentionLocation],
   ]);
   console.log("\napproval modes:");
@@ -78,12 +79,18 @@ function approvalModes(values: ReadonlyArray<string>): Record<string, string> {
 
 export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode>]",
+    "org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--event-retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode>]",
   );
   const args = parseArgs(
     argv,
     readSpec({
-      values: ["name", "logging-tier", "retention-days", "retention-location"],
+      values: [
+        "name",
+        "logging-tier",
+        "retention-days",
+        "event-retention-days",
+        "retention-location",
+      ],
       repeatable: ["approval-mode"],
     }),
   );
@@ -97,6 +104,14 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
   if (args.flags["retention-days"]) {
     payload.retentionDefaultDays = positiveInt(args.flags["retention-days"], "retention-days");
   }
+  if (args.flags["event-retention-days"]) {
+    // The control plane enforces the 90-day floor and says so; this only rejects
+    // what is not a whole number at all.
+    payload.eventRetentionDays = positiveInt(
+      args.flags["event-retention-days"],
+      "event-retention-days",
+    );
+  }
   if (args.flags["retention-location"]) {
     payload.retentionLocation = oneOf(
       args.flags["retention-location"],
@@ -106,7 +121,7 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
   }
   if (Object.keys(modes).length > 0) payload.approvalModes = modes;
 
-  if (Object.keys(payload).length === 2) throw new UsageError(`nothing to change\n\n${usage}`);
+  if (Object.keys(payload).length === 0) throw new UsageError(`nothing to change\n\n${usage}`);
 
   const org = await authenticatedApiRequest<OrgWire>("/api/v1/organisation", patchJson(payload));
   if (args.booleans.has("json")) {

@@ -405,7 +405,11 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         options: [
           { flag: "--name <name>", description: "Organisation name" },
           { flag: "--logging-tier 1|2", description: "Default logging tier" },
-          { flag: "--retention-days <n>", description: "Default retention in days" },
+          { flag: "--retention-days <n>", description: "Snapshot data retention in days" },
+          {
+            flag: "--event-retention-days <n>",
+            description: "Event retention in days (default 365, minimum 90)",
+          },
           {
             flag: "--retention-location customer|cloudable_sweden_central",
             description: "Where snapshots live",

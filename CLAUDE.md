@@ -23,7 +23,7 @@ The buyer answers the auditor. This is not a developer productivity tool.
 Never violate these. If one seems wrong, stop and say so — do not work around it.
 
 1. No cloud credential is ever stored. Federation only, never client secrets.
-2. Events are append-only. No updates, no deletes. Retention is expiry.
+2. Events are append-only. No updates. The only delete is the retention sweep, which removes events older than the org's retention window.
 3. A machine has exactly one owner, always a person. No shared or unowned machines.
 4. Nothing installs or removes software unasked. A person asks, per package, and it is recorded.
 5. Drift is flagged, never auto-corrected.
