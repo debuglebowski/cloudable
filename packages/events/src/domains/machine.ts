@@ -134,4 +134,58 @@ export type MachineEvent =
       // the machine domain — additive only.
       type: "machine.first_seen";
       payload: { agentVersion: string };
+    })
+  | (EventEnvelope & {
+      /**
+       * A vulnerability scan finished and its findings were stored.
+       *
+       * Derived by the control plane from what the agent reported (invariant 12),
+       * never submitted by the agent. Carries counts, not the findings: the findings
+       * are current state in `machine_vulnerabilities`. `newCriticalAndHigh` names
+       * the Critical and High CVE ids that appeared since the last scan, capped at 100,
+       * so the event alone answers "when did we first see this one".
+       */
+      type: "machine.vulnerability_scan_completed";
+      payload: {
+        scanId: string;
+        scanner: string;
+        scannerVersion: string;
+        /** When the vulnerability database the scan ran against was built. Null when unknown. */
+        dbBuiltAt: string | null;
+        counts: { critical: number; high: number; medium: number; low: number; unknown: number };
+        newFindings: number;
+        resolvedFindings: number;
+        /** True when the machine had more findings than the report cap and the rest were dropped. */
+        truncated: boolean;
+        newCriticalAndHigh: string[];
+      };
+    })
+  | (EventEnvelope & {
+      /**
+       * A scan started and did not produce findings. `reason` is one of the agent's
+       * fixed failure reasons (for example `db_unavailable`), never free text from the
+       * machine, so a failure can be grouped and counted.
+       */
+      type: "machine.vulnerability_scan_failed";
+      payload: {
+        scanId: string;
+        scanner: string;
+        scannerVersion: string | null;
+        reason: string;
+      };
+    })
+  | (EventEnvelope & {
+      /**
+       * The scanner was put on a machine, or replaced by another version.
+       *
+       * Part of the closed list of components Cloudable installs itself (see
+       * `docs/agents.md`). An admin asked for it by turning scanning on for the org;
+       * this records what that did on this machine.
+       */
+      type: "machine.scanner_installed";
+      payload: {
+        scanner: string;
+        version: string;
+        previousVersion: string | null;
+      };
     });

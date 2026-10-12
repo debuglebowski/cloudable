@@ -22,9 +22,9 @@ export interface CheckRef {
 
 /**
  * Cloudable's own default control taxonomy — the controls it is itself
- * audited against: access management and asset management. This is the
- * DEFAULT only — an org can override a specific control's status on top of
- * it (see `applyControlOverrides` below); it never replaces this computation.
+ * audited against: access management, asset management and technical vulnerability
+ * management. This is the DEFAULT only — an org can override a specific control's status on top
+ * of it (see `applyControlOverrides` below); it never replaces this computation.
  *
  * `id` is exactly the string checks put in
  * `ComplianceCheck.controlRefs` — see `registry.ts` for what's actually
@@ -35,6 +35,11 @@ export interface CheckRef {
 const IN_SCOPE_CONTROLS: readonly ControlDefinition[] = [
   { id: "access-management", label: "Access management", framework: "ISO 27001 A.9" },
   { id: "asset-management", label: "Asset management", framework: "ISO 27001 A.8" },
+  {
+    id: "vulnerability-management",
+    label: "Technical vulnerability management",
+    framework: "ISO 27001 A.12.6",
+  },
 ];
 
 /**

@@ -14,10 +14,13 @@ no inbound access ever. One binary, compiled per-arch via
 On boot it attests its identity, then loops: poll for work, perform any package
 actions it was handed, report observed state, sleep, repeat.
 
-The agent observes, with one exception: `apply-packages.ts` installs and removes
+The agent observes, with two exceptions. `apply-packages.ts` installs and removes
 packages. It never decides to — it performs actions the control plane handed it,
 each requested by a person. There is no local convergence towards the manifest,
-and the allowed list it receives is a permission, not an instruction.
+and the allowed list it receives is a permission, not an instruction. And
+`vulnerability-scan/` downloads and runs the vulnerability scanner, but only while
+an admin has scanning switched on for the org (see "Components Cloudable installs
+itself" below and `docs/vulnerability-scanning.md`).
 
 ### Attestation
 
@@ -115,6 +118,17 @@ makes the `304` safe. `packages` is what the machine is *allowed* to have.
 `UPDATE ... RETURNING` claims and returns the rows, so two polls racing cannot
 hand the same install out twice.
 
+`settings` is what the org has configured that the agent acts on. It is empty unless
+something applies. Today the one key is `vulnerabilityScan`, present only while the org has
+vulnerability scanning on: the schedule, where to pull the vulnerability database from, and the
+scanner build to install with its hash. The agent validates every field before acting on it,
+because it acts as root. Changing one of those settings bumps `desiredStateVersion` for every
+live machine in the org, so the `304` stops and the agent reads the new value. The ETag is the
+version with the bundled scanner's version appended (`"12+scanner-0.75.0"`) when the image carries
+one, so a control plane that ships a different scanner gives every machine one fresh answer
+carrying the new release. An agent keeps the last settings it was given and keeps acting on them
+across `304`s.
+
 **Report** persists `machines.last_verified_at` and derives events
 *server-side* from the observed-state diff — the agent never submits audit
 events: a user with root on their own machine
@@ -123,6 +137,14 @@ person the compliance checks exist to catch. Today that derivation is
 intentionally simple:
 
 - `last_verified_at` was `NULL` → `machine.first_seen`.
+- A `scanner` field (the vulnerability scanner as installed on the machine) that differs from
+  what was last stored → `machine.scanner_installed`, with the previous version. The agent never
+  says "I installed it"; it reports what is on disk and the control plane notices the change.
+- A `vulnerabilityScan` field (the result of a finished scan) → the scan, its findings and a
+  `machine.vulnerability_scan_completed` or `_failed` event, all in one transaction. The agent
+  keeps a result until a report is acknowledged and sends it again if it was not, and `scanId`
+  makes the repeat harmless. If the control plane cannot store it, the report fails so the agent
+  sends it again. See `docs/vulnerability-scanning.md`.
 - Otherwise, an **in-memory**, per-process diff of `installedPackages` /
   `openPorts` / `configState.runningAccessMethods` against the previous
   report → `machine.state_reported` if anything changed, nothing if it
@@ -192,6 +214,33 @@ its normal poll interval, same as if this channel didn't exist at all) —
 revisit before wiring a real caller in a multi-replica deployment: either
 pin the control plane to one replica, or replace this in-memory map with
 something shared across replicas (e.g. Postgres `LISTEN`/`NOTIFY`).
+
+### Components Cloudable installs itself
+
+Invariant 4 says nothing installs or removes software unasked. This is the closed list of
+exceptions: Cloudable's own components, which a governed machine needs in order to be governed.
+Anything not in this table is covered by the invariant as written: a person asks, per package,
+and it is recorded.
+
+| Component | Put on the machine by | Asked for by | Recorded as |
+| :--- | :--- | :--- | :--- |
+| Control agent | cloud-init at provisioning, downloaded from `/_internal/binaries/` | Creating the machine | The machine's creation events; `machine.first_seen` carries the agent version |
+| Tunnel daemon | cloud-init at provisioning, same route | Creating the machine | The machine's creation events |
+| Vulnerability scanner (Trivy) | The agent, after a poll says scanning is on | An admin turning vulnerability scanning on for the org | `org.setting_changed` for `security.vulnerabilityScan.enabled`, with who and when; `machine.scanner_installed` for each machine, on install and on every update |
+
+Rules for the scanner row, which exist so this does not become a back door:
+
+- It installs only while the org setting is on. Turning the setting off stops all scanning and
+  fetching but removes nothing: the files stay on the machine.
+- It comes only from the control plane's own image, never from the internet. The agent checks the
+  download against the SHA-256 the poll gave it and discards a mismatch.
+- An update follows the control plane: a control plane that ships a newer scanner hands the new
+  release to every machine that has scanning on, and each update is recorded.
+- It is not a package. It does not appear in the package manifest, and the undeclared-software
+  check does not see it.
+
+Adding a component to this list is a deliberate change to this table, to `CLAUDE.md` and to
+`docs/spec.md`.
 
 ### Tunnel-signal channel (CP → agent, deliberately not `wake`)
 

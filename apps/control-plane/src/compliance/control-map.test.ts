@@ -41,6 +41,18 @@ describe("computeControlMap", () => {
     ).toBe(true);
   });
 
+  test("vulnerability management is an in-scope control, evidenced by the registered check", () => {
+    const empty = computeControlMap([]).find((c) => c.id === "vulnerability-management");
+    expect(empty?.framework).toBe("ISO 27001 A.12.6");
+    expect(empty?.status).toBe("manual_action_required");
+    expect(OVERRIDABLE_CONTROL_IDS.has("vulnerability-management")).toBe(true);
+
+    const map = computeControlMap();
+    const control = map.find((c) => c.id === "vulnerability-management");
+    expect(control?.status).toBe("implemented");
+    expect(control?.evidencedByCheckIds).toEqual(["vulnerabilities-remediated"]);
+  });
+
   test("a check can evidence multiple controls", () => {
     const map = computeControlMap([
       { id: "multi-control-check", controlRefs: ["access-management", "asset-management"] },

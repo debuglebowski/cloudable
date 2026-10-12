@@ -98,3 +98,24 @@ test("a bare `help` asks for help after a command, but is not a flag at the root
   expect(wantsHelp("--help")).toBe(true);
   expect(wantsHelp("list")).toBe(false);
 });
+
+test("the scanning commands are in the registry and say what they do", () => {
+  const update = renderCommandHelp(resolve(["org", "update"]).chain);
+  for (const flag of [
+    "--vulnerability-scan",
+    "--scan-days",
+    "--scan-time",
+    "--remediation-critical",
+    "--remediation-high",
+    "--vuln-db-repository",
+  ]) {
+    expect(update).toContain(flag);
+  }
+  expect(update).toContain("installs the scanner on every machine in the org");
+
+  expect(renderCommandHelp(resolve(["org", "vulnerability-scan"]).chain)).toContain(
+    "No findings does not mean a machine is secure",
+  );
+  expect(renderCommandHelp(resolve(["machines", "vulnerabilities"]).chain)).toContain("--all");
+  expect(renderCommandHelp(resolve(["export", "vulnerabilities"]).chain)).toContain("--output");
+});

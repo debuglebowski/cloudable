@@ -159,6 +159,16 @@ rows. A deletion with no record would leave an auditor looking at a gap they can
 explain; a record with no deletion would claim something that did not happen. That record
 is itself an event, so it expires on the same schedule as the rest.
 
+Vulnerability scan data follows the same window, in the same hourly run
+(`domain/vulnerability-scan/retention.ts`). Resolved findings older than the window are
+deleted, counted from when they were resolved. Scan records older than the window are deleted
+too, except a machine's latest completed scan, which decides whether the machine counts as
+scanned. A finding that is still open is never deleted, however old. A machine with a snapshot
+under legal hold keeps all of it, by the same definition of "held" the event rules use. This
+writes no event of its own: these rows are bookkeeping, and the record of each scan is the
+`machine.vulnerability_scan_completed` event, which expires on the event rules above. See
+`docs/vulnerability-scanning.md`.
+
 What this means for the rest of the product:
 
 - The evidence export and the compliance checks see only events still inside the window. An
@@ -167,7 +177,7 @@ What this means for the rest of the product:
   offboarding has aged out it is no longer a subject of the check. SSH certificates are
   valid for about 8 hours, so nothing relevant outlasts the 90-day floor.
 - Machine records, snapshots, certificates and approvals are rows in their own tables and
-  are not affected.
+  are not affected. Vulnerability findings and scan records are the exception, as above.
 - The machine's own activity feed (the Activity view) starts at the oldest surviving event.
 
 ## Taking a snapshot on purpose

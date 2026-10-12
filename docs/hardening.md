@@ -118,12 +118,23 @@ visible in the Defender portal, not in Cloudable.
 | Which machines were built with protection | Cloudable records no per-machine event for the install. A machine created, reimaged or restored after the setting changed was built with it, and the extension write on the VM is in Azure's Activity Log | `cloudable events` for the dates; the Azure portal for the extension |
 | Protection running on a machine | Not in Cloudable. The Defender portal for the subscription | Defender portal |
 | Encryption at rest, drift, patch status | Existing columns of the same asset inventory | Same export |
+| Who turned vulnerability scanning on, and when it was scheduled | `org.setting_changed` events for the `security.vulnerabilityScan.*` keys | `cloudable events` |
+| The scanner was installed on a machine, and which version | `machine.scanner_installed` events (version and previous version) | `cloudable events` |
+| Where each machine stands on scanning | `vulnerability_scan_status`, `last_scan_at`, `open_critical` and `open_high` columns of the asset inventory | `cloudable export asset-inventory` |
+| Known vulnerabilities per machine: package, severity, fixed version, first seen, fix available since, resolved when | One row per finding, open and resolved, kept for the event retention window | `cloudable export vulnerabilities`, or `GET /api/v1/compliance/exports/vulnerabilities.csv` |
+| Each scan, its counts and the age of the vulnerability database it used | `machine.vulnerability_scan_completed` and `machine.vulnerability_scan_failed` events | `cloudable events` |
+| Scans are on schedule and fixes are on time | The `vulnerabilities-remediated` compliance check, under the `vulnerability-management` control | `cloudable export findings`, or the compliance page |
+
+Vulnerability scanning is described in `docs/vulnerability-scanning.md`, including what it does
+not cover.
 
 ## Not built yet
 
 Listed so nobody reads their absence as an oversight.
 
-- A weekly vulnerability scan of every machine (Trivy), and its findings as a native check.
+- Vulnerability scanning of libraries people install for their own projects, and of container
+  images. The vulnerability scan covers operating system packages only; see
+  `docs/vulnerability-scanning.md`.
 - An operator-triggered security update, and "updates due" measured against the operator's
   remediation deadlines. Until it exists, patching is whatever the distro does on its own.
 - A compliance check for malware protection, and Defender health read back into Cloudable.

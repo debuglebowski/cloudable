@@ -1,3 +1,5 @@
+import type { InstalledScanner, VulnerabilityScanReport } from "./vulnerability-scan";
+
 /**
  * Wire types for the control agent protocol: attest, poll,
  * report, and the optional wake fast path. Plain TS types, not Effect
@@ -80,6 +82,12 @@ export interface DesiredStateResponse {
    * from an undeclared one locally.
    */
   readonly packages: readonly string[];
+  /**
+   * Org settings the agent acts on, keyed by name. Empty unless something applies.
+   * Today the one key is `vulnerabilityScan` (`VulnerabilityScanConfig`), present only
+   * while an admin has scanning turned on for the org. The agent treats any key it does
+   * not know as absent and validates the ones it does, because the value is acted on as root.
+   */
   readonly settings: Readonly<Record<string, unknown>>;
   readonly pendingActions: readonly PendingPackageAction[];
 }
@@ -164,6 +172,17 @@ export interface AgentReportRequest {
   readonly hardeningBaseline?: string;
   /** Outcomes for actions collected since the last report. Absent when none ran. */
   readonly actionResults?: readonly PackageActionResult[];
+  /**
+   * The vulnerability scanner as installed on this machine. Absent when none is. The
+   * control plane compares it with what it last stored and records
+   * `machine.scanner_installed` when it changed; the agent never says "I installed it".
+   */
+  readonly scanner?: InstalledScanner;
+  /**
+   * The result of a scan that finished since the last acknowledged report. Sent again on
+   * the next report if this one is not acknowledged; `scanId` makes that safe.
+   */
+  readonly vulnerabilityScan?: VulnerabilityScanReport;
 }
 
 export interface AgentReportResponse {

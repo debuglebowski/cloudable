@@ -1,8 +1,15 @@
-import { machines, people, upgradeAttempts } from "@cloudable/schema";
+import { machineVulnerabilities, machines, people, upgradeAttempts } from "@cloudable/schema";
 import { desc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../db/layer";
 import type { ComplianceSeverity } from "../domain/compliance/types";
+import {
+  latestCompletedScans,
+  openFindingsFor,
+  toLastCompleted,
+} from "../domain/vulnerability-scan/queries";
+import { readVulnerabilityScanSettings } from "../domain/vulnerability-scan/settings";
+import { machineScanStatus } from "../domain/vulnerability-scan/status";
 import { computeControlMap } from "./control-map";
 import { toCsv } from "./csv";
 import { evaluateAllChecks } from "./evaluate-all";
@@ -168,6 +175,16 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
       }
     }
 
+    // Vulnerability scanning, from the same rules the console and the compliance check use.
+    // "disabled" is an answer, not a gap: the org has not switched scanning on.
+    const scanSettings = yield* readVulnerabilityScanSettings(db, orgId).pipe(Effect.orDie);
+    const machineIds = rows.map((machine) => machine.id);
+    const lastScans = yield* latestCompletedScans(db, machineIds).pipe(Effect.orDie);
+    const openFindings = yield* openFindingsFor(db, machineIds).pipe(Effect.orDie);
+    const openBySeverity = (machineId: string, severity: string): number =>
+      openFindings.filter((row) => row.machineId === machineId && row.severity === severity).length;
+    const exportedAt = new Date();
+
     return toCsv(
       [
         "machine_id",
@@ -178,6 +195,10 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
         "drift_status",
         "patch_status",
         "hardening_baseline",
+        "vulnerability_scan_status",
+        "last_scan_at",
+        "open_critical",
+        "open_high",
       ],
       rows.map((machine) => [
         machine.id,
@@ -213,6 +234,77 @@ export const assetInventoryCsv = (orgId: string): Effect.Effect<string, never, D
         // "none" is an answer, not a gap: no stamp means the baseline was never applied
         // or did not finish, and an auditor reading the column should see exactly that.
         machine.hardeningBaseline ?? "none",
+        machineScanStatus({
+          enabled: scanSettings.enabled,
+          scanDays: scanSettings.scanDays,
+          machineState: machine.state,
+          lastCompleted: toLastCompleted(lastScans.get(machine.id)),
+          now: exportedAt,
+        }),
+        lastScans.get(machine.id)?.finishedAt.toISOString() ?? "",
+        openBySeverity(machine.id, "critical"),
+        openBySeverity(machine.id, "high"),
+      ]),
+    );
+  });
+
+/**
+ * The vulnerabilities export: one row per finding, open and resolved, for every machine in the
+ * org. Resolved findings are kept for as long as the org's event retention window, which is what
+ * lets an auditor see how long a vulnerability took to fix, not only what is open today.
+ *
+ * Findings of a machine that has since been archived are included. The record of what was found
+ * and when it was fixed does not stop being evidence because the machine was archived.
+ */
+export const vulnerabilitiesCsv = (orgId: string): Effect.Effect<string, never, Db> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const now = new Date();
+    const rows = yield* Effect.promise(() =>
+      db
+        .select({
+          machineId: machines.id,
+          machineName: machines.name,
+          finding: machineVulnerabilities,
+        })
+        .from(machineVulnerabilities)
+        .innerJoin(machines, eq(machineVulnerabilities.machineId, machines.id))
+        .where(eq(machines.orgId, orgId))
+        .orderBy(machines.name, machineVulnerabilities.vulnerabilityId),
+    );
+
+    return toCsv(
+      [
+        "machine_id",
+        "machine_name",
+        "vulnerability_id",
+        "package",
+        "ecosystem",
+        "installed_version",
+        "fixed_version",
+        "severity",
+        "status",
+        "first_seen_at",
+        "open_days",
+        "fix_available_since",
+        "last_seen_at",
+        "resolved_at",
+      ],
+      rows.map(({ machineId, machineName, finding }) => [
+        machineId,
+        machineName,
+        finding.vulnerabilityId,
+        finding.packageName,
+        finding.ecosystem,
+        finding.installedVersion,
+        finding.fixedVersion ?? "",
+        finding.severity,
+        finding.resolvedAt ? "resolved" : "open",
+        finding.firstSeenAt.toISOString(),
+        ageInDays(finding.firstSeenAt, finding.resolvedAt ?? now),
+        finding.fixAvailableSince?.toISOString() ?? "",
+        finding.lastSeenAt.toISOString(),
+        finding.resolvedAt?.toISOString() ?? "",
       ]),
     );
   });

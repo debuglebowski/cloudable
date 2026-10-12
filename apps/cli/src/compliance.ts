@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // `cloudable compliance *` and `cloudable export *` — the auditor's surface.
 //
-// Checks, not tests. Each of the six checks reads the append-only event log and
+// Checks, not tests. Each check reads the append-only event log or current state and
 // maps to the controls it evidences (docs/compliance.md). An override records
 // that a control is met by something outside this system; it does not change
 // what the events say.
@@ -165,3 +165,6 @@ export const runExportAssetInventoryCommand = (argv: ReadonlyArray<string>) =>
 
 export const runExportFindingsCommand = (argv: ReadonlyArray<string>) =>
   exportCsv(argv, "/api/v1/compliance/exports/findings.csv", "findings.csv");
+
+export const runExportVulnerabilitiesCommand = (argv: ReadonlyArray<string>) =>
+  exportCsv(argv, "/api/v1/compliance/exports/vulnerabilities.csv", "vulnerabilities.csv");

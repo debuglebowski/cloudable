@@ -283,6 +283,15 @@ function EvidenceExportView() {
           >
             Open findings CSV
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={downloadExport.isPending}
+            onClick={() => downloadExport.mutate(AUDIT_EXPORTS.vulnerabilities)}
+          >
+            Vulnerabilities CSV
+          </Button>
         </div>
       </div>
 

@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+
 import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
 
 /**
@@ -88,4 +90,16 @@ export async function setPersonActive(id: string, active: boolean): Promise<Pers
     }
     throw err;
   }
+}
+
+/**
+ * Who the signed-in person is, including their role. Used to tell someone, before they try, that
+ * a setting is read-only for them. The control plane decides for real on every change.
+ */
+export function useMe() {
+  return useQuery({
+    queryKey: [...peopleKeys.all, "me"] as const,
+    queryFn: () => apiGet<Person>("/api/v1/me"),
+    staleTime: 60_000,
+  });
 }

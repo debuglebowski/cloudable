@@ -176,6 +176,13 @@
       "when": 1791705077191,
       "tag": "0024_glamorous_arachne",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791818923097,
+      "tag": "0025_vulnerability_scanning",
+      "breakpoints": true
     }
   ]
 }

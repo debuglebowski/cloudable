@@ -114,6 +114,14 @@ export const machines = pgTable("machines", {
    * handful of them.
    */
   declaredPackageVersions: jsonb("declared_package_versions"),
+  /**
+   * The vulnerability scanner the agent last reported as installed, and its version. Both null
+   * until one is. Overwritten each report so a scanner that has gone reads as none; the control
+   * plane compares the reported version with this column to derive `machine.scanner_installed`.
+   * The scans themselves live in `machine_vulnerability_scans`.
+   */
+  scanner: text("scanner"),
+  scannerVersion: text("scanner_version"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   legalHold: boolean("legal_hold").notNull().default(false),

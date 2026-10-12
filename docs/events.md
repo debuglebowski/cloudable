@@ -44,6 +44,9 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `machine.package_action_requested` | 1 | A person asked for a package to be installed or removed on a machine. |
 | `machine.package_action_completed` | 1 | A package install or removal completed on a machine. |
 | `machine.package_action_failed` | 1 | A package install or removal failed on a machine, or was collected by the agent and never reported back. |
+| `machine.vulnerability_scan_completed` | 1 | A vulnerability scan of a machine finished. Carries counts and the new Critical and High CVE ids; the findings themselves are current state, not events. |
+| `machine.vulnerability_scan_failed` | 1 | A vulnerability scan of a machine started and produced no findings, with the reason (for example the vulnerability database was unreachable). |
+| `machine.scanner_installed` | 1 | The vulnerability scanner was installed on a machine, or replaced by another version. An admin asked for it by turning scanning on for the org. |
 
 ## Access
 

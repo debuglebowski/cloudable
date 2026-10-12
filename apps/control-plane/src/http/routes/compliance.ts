@@ -122,4 +122,9 @@ export const ComplianceGroup = HttpApiGroup.make("compliance")
     HttpApiEndpoint.get("findingsCsv", "/api/v1/compliance/exports/findings.csv")
       .addSuccess(Csv)
       .middleware(CurrentUserAuthentication),
+  )
+  .add(
+    HttpApiEndpoint.get("vulnerabilitiesCsv", "/api/v1/compliance/exports/vulnerabilities.csv")
+      .addSuccess(Csv)
+      .middleware(CurrentUserAuthentication),
   );

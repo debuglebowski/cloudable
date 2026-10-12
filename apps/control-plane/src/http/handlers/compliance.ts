@@ -13,6 +13,7 @@ import {
   collectOpenFindingsByControl,
   findingsByControlCsv,
   openFindingsCsv,
+  vulnerabilitiesCsv,
 } from "../../compliance/evidence-export";
 import { ageInDays, medianAgeInDays } from "../../compliance/finding-store";
 import { DbLive } from "../../db/layer";
@@ -105,6 +106,9 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
       Effect.flatMap(CurrentUserTag, (currentUser) =>
         collectOpenFindingsByControl(currentUser.orgId),
       ).pipe(Effect.map(openFindingsCsv)),
+    )
+    .handle("vulnerabilitiesCsv", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) => vulnerabilitiesCsv(currentUser.orgId)),
     ),
 );
 

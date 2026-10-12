@@ -1,7 +1,7 @@
-import type { SessionRowMethod } from "@cloudable/contracts";
+import { type SessionRowMethod, isVulnerabilityScanSettingKey } from "@cloudable/contracts";
 import type { DomainEvent, OrgEvent } from "@cloudable/events";
 import { type SettingRow, machines, resolveSetting, settingValues } from "@cloudable/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
@@ -15,11 +15,13 @@ import {
   snapshotInspectEnabledOf,
   webTerminalEnabledOf,
 } from "../machine/settings";
+import { type AdminRoleRequiredError, requireAdmin } from "../people/authorization";
 import {
   EVENTS_RETENTION_DAYS_KEY,
   MIN_EVENTS_RETENTION_DAYS,
   isValidEventsRetentionDays,
 } from "../retention/policy";
+import { invalidVulnerabilityScanValue } from "../vulnerability-scan/settings";
 import {
   InvalidScopeError,
   InvalidSettingValueError,
@@ -51,6 +53,7 @@ export interface ApplySettingChangeResult {
 }
 
 export type ApplySettingChangeError =
+  | AdminRoleRequiredError
   | InvalidScopeError
   | InvalidSettingValueError
   | MachineNotFoundError
@@ -64,11 +67,13 @@ export type ApplySettingChangeError =
  * (`handleImportConfig`) call this exact function, entry for entry — the
  * same path whether the change came from the UI or a Git commit.
  *
- * Inert with respect to a machine's *desired state*: it never reads or writes `machines.desiredStateVersion`
- * and never triggers reconcile — the agent picks up the new resolved value
- * on its own next poll. See `trigger-reconcile.ts` for the only operation
- * allowed to mutate a machine's desired-state version, which is
- * confirmation-gated.
+ * Inert with respect to a machine's *desired state*, with one exception: it never triggers
+ * reconcile, and for every key except the vulnerability scan ones it never reads or writes
+ * `machines.desiredStateVersion` — the agent picks up the new resolved value on its own next
+ * poll. A vulnerability scan key is delivered to agents on the poll (`settings.vulnerabilityScan`),
+ * and an agent only re-reads the poll body when its version changes, so a changed value bumps
+ * the version of every live machine in the org. That is the only thing it does to them; the
+ * agent decides what to do with the new schedule.
  *
  * One deliberate exception to "only ever touches `setting_values` and the
  * append-only `events` table": a write to `machine.accessMethodsEnabled`
@@ -121,6 +126,34 @@ export const applySettingChange = (
             key: input.key,
             message: `event retention must be a whole number of days, at least ${MIN_EVENTS_RETENTION_DAYS}`,
           }),
+        );
+      }
+    }
+
+    // Vulnerability scanning is org-wide for the same reason event retention is: a machine that
+    // could switch its own scan off would be a gap in the evidence. Validated here, on every
+    // write path, so the dedicated endpoint, the generic one and the Git import cannot disagree.
+    if (isVulnerabilityScanSettingKey(input.key)) {
+      // Turning a scanner on across the org, and changing when and how it runs, is an admin's
+      // decision. Checked here, on the one path every write takes, so the dedicated endpoint, the
+      // generic settings endpoint and the Git import all enforce it. A system actor is the
+      // control plane itself and is not a person with a role.
+      if (input.actorType === "person") {
+        yield* requireAdmin(
+          input.actorId,
+          input.orgId,
+          "Only an admin can change vulnerability scanning.",
+        );
+      }
+      if (input.scopeType !== "org") {
+        return yield* Effect.fail(
+          new InvalidScopeError({ message: "vulnerability scanning can only be set for the org" }),
+        );
+      }
+      const invalid = invalidVulnerabilityScanValue(input.key, input.value);
+      if (invalid !== null) {
+        return yield* Effect.fail(
+          new InvalidSettingValueError({ key: input.key, message: invalid }),
         );
       }
     }
@@ -326,6 +359,31 @@ export const applySettingChange = (
           (cause) => new SettingWriteError({ message: `publishing event: ${cause.reason}` }),
         ),
       );
+
+    // --- A changed vulnerability scan setting reaches agents through the poll, so the poll's
+    // version has to move. Every live machine in the org, in one statement. Skipped when the
+    // value did not change: re-saving the same schedule should not make the fleet re-download
+    // its settings. Runs after the event is durably published, so the change is on record
+    // whatever happens here.
+    if (
+      isVulnerabilityScanSettingKey(input.key) &&
+      JSON.stringify(previous) !== JSON.stringify(input.value)
+    ) {
+      yield* Effect.tryPromise({
+        try: () =>
+          db
+            .update(machines)
+            .set({ desiredStateVersion: sql`${machines.desiredStateVersion} + 1` })
+            .where(
+              and(
+                eq(machines.orgId, input.orgId),
+                notInArray(machines.state, ["archived_restorable", "archived_expired"]),
+              ),
+            ),
+        catch: (cause) =>
+          new SettingWriteError({ message: `notifying machines of the change: ${String(cause)}` }),
+      });
+    }
 
     // --- Disabling terminates live sessions, not merely
     // refuses new ones. Only a true → false transition matters

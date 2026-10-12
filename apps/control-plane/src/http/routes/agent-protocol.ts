@@ -1,4 +1,8 @@
-import { HARDENING_BASELINE_PATTERN } from "@cloudable/contracts";
+import {
+  HARDENING_BASELINE_PATTERN,
+  MAX_REPORTED_FINDINGS,
+  SCAN_FAILURE_REASONS,
+} from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 
@@ -71,6 +75,42 @@ const PackageActionResult = Schema.Struct({
   installedVersion: Schema.optional(Schema.String),
 });
 
+/**
+ * One vulnerability the scanner found. Every string is length-bounded: the body comes from a
+ * machine, and a report is only as large as these limits and `MAX_REPORTED_FINDINGS` allow.
+ */
+const VulnerabilityFinding = Schema.Struct({
+  vulnerabilityId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  ecosystem: Schema.Literal("os"),
+  packageName: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  installedVersion: Schema.String.pipe(Schema.maxLength(256)),
+  fixedVersion: Schema.NullOr(Schema.String.pipe(Schema.maxLength(256))),
+  severity: Schema.Literal("critical", "high", "medium", "low", "unknown"),
+});
+
+/** Mirrors `VulnerabilityScanReport` in `packages/contracts/src/domains/vulnerability-scan.ts`. */
+const VulnerabilityScanReport = Schema.Struct({
+  scanId: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,64}$/)),
+  scanner: Schema.Literal("trivy"),
+  scannerVersion: Schema.NullOr(Schema.String.pipe(Schema.maxLength(64))),
+  scope: Schema.Literal("os"),
+  startedAt: Schema.String,
+  finishedAt: Schema.String,
+  outcome: Schema.Literal("completed", "failed"),
+  failureReason: Schema.optional(Schema.Literal(...SCAN_FAILURE_REASONS)),
+  dbBuiltAt: Schema.optional(Schema.String),
+  truncated: Schema.optional(Schema.Boolean),
+  findings: Schema.optional(
+    Schema.Array(VulnerabilityFinding).pipe(Schema.maxItems(MAX_REPORTED_FINDINGS)),
+  ),
+});
+
+/** Mirrors `InstalledScanner`. */
+const InstalledScanner = Schema.Struct({
+  name: Schema.Literal("trivy"),
+  version: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
+});
+
 const ReportPayload = Schema.Struct({
   agentVersion: Schema.String,
   observedAt: Schema.String,
@@ -99,6 +139,8 @@ const ReportPayload = Schema.Struct({
     Schema.String.pipe(Schema.pattern(HARDENING_BASELINE_PATTERN)),
   ),
   actionResults: Schema.optional(Schema.Array(PackageActionResult)),
+  scanner: Schema.optional(InstalledScanner),
+  vulnerabilityScan: Schema.optional(VulnerabilityScanReport),
 });
 
 const ReportSuccess = Schema.Struct({ acknowledged: Schema.Literal(true) });

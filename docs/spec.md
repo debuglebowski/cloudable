@@ -17,7 +17,12 @@ Violating any of these breaks a stated customer promise. They are not preference
 4. **Nothing installs or removes software unasked.** A person asks, per package, and the request,
    its outcome and its failures are all recorded. The package manifest is a *permission* list —
    declaring a package says a machine may have it, never that something will go and install it.
-   Nothing adopts software it found running into the manifest either.
+   Nothing adopts software it found running into the manifest either. The one exception is
+   Cloudable's own components: the agent, the tunnel daemon, and monitoring tools such as the
+   vulnerability scanner. Monitoring tools install only after an admin turns them on for the org,
+   and every install and update is recorded. The list is closed and lives in `docs/agents.md`.
+   Why: compliance needs the same monitoring on every machine, and asking per machine would leave
+   gaps in the evidence.
 5. **Drift is never auto-corrected.** Detected, surfaced, aged — never silently removed.
 6. **Machines are never deleted.** Only archived. Snapshot data expires; the record is permanent.
 7. **No inbound network access to any machine, ever.** Agents are pull-only; tunnels are outbound.
@@ -363,8 +368,9 @@ Most of ISO Annex A (physical security, HR screening, supplier contracts) has no
 | Elevated access was approved | A break-glass or admin session has no approval record and reason |
 | Retention is honoured | A snapshot outlives its retention window without a legal hold |
 | Machines are reporting | `last verified at` older than the expected reconcile window |
+| Vulnerabilities are fixed on time | A fixable Critical or High vulnerability is open past its window, or scans are not keeping up |
 
-**Six is a starting set, not a ceiling.** Unimplemented checks display as *not covered*.
+**These are a starting set, not a ceiling.** Unimplemented checks display as *not covered*.
 
 ### Checks are applicability-gated
 A check is only asked where it makes sense — by machine type, org policy and current state. Dashboards full of `N/A` train people to ignore them.

@@ -22,6 +22,7 @@ import { RestartGroup } from "./routes/restart";
 import { TunnelGroup } from "./routes/tunnel";
 import { TunnelSignalGroup } from "./routes/tunnel-signal";
 import { UpgradeGroup } from "./routes/upgrade";
+import { VulnerabilityScanGroup } from "./routes/vulnerability-scan";
 
 const HealthGroup = HttpApiGroup.make("health").add(
   HttpApiEndpoint.get("check", "/api/v1/health").addSuccess(
@@ -52,6 +53,7 @@ export class Api extends HttpApi.make("cloudable")
   .add(CatalogGroup)
   .add(ProvisioningCapabilitiesGroup)
   .add(AuthSsoStatusGroup)
-  .add(CliAuthGroup) {}
+  .add(CliAuthGroup)
+  .add(VulnerabilityScanGroup) {}
 // Feature units: import your HttpApiGroup and append `.add(YourGroup)` to the chain above.
 // Never reorder existing `.add()` calls.

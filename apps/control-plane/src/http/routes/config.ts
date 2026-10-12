@@ -7,6 +7,7 @@ import {
   PinnedSettingError,
   SettingWriteError,
 } from "../../domain/config/errors";
+import { AdminRoleRequiredError } from "../../domain/people/authorization";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
 // Wire schemas for `/api/v1/config/...`. These mirror
@@ -66,6 +67,7 @@ export const ConfigGroup = HttpApiGroup.make("config")
     HttpApiEndpoint.patch("patchSetting", "/api/v1/config/settings")
       .setPayload(PatchSettingPayload)
       .addSuccess(PatchSettingResponse)
+      .addError(AdminRoleRequiredError, { status: 403 })
       .addError(InvalidScopeError, { status: 400 })
       .addError(InvalidSettingValueError, { status: 400 })
       .addError(MachineNotFoundError, { status: 404 })
@@ -80,6 +82,7 @@ export const ConfigGroup = HttpApiGroup.make("config")
     HttpApiEndpoint.post("importConfig", "/api/v1/config/import")
       .setPayload(ImportConfigPayload)
       .addSuccess(ImportConfigResponse)
+      .addError(AdminRoleRequiredError, { status: 403 })
       .addError(InvalidScopeError, { status: 400 })
       .addError(InvalidSettingValueError, { status: 400 })
       .addError(MachineNotFoundError, { status: 404 })

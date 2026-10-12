@@ -25,7 +25,7 @@ Never violate these. If one seems wrong, stop and say so — do not work around 
 1. No cloud credential is ever stored. Federation only, never client secrets.
 2. Events are append-only. No updates. The only delete is the retention sweep, which removes events older than the org's retention window.
 3. A machine has exactly one owner, always a person. No shared or unowned machines.
-4. Nothing installs or removes software unasked. A person asks, per package, and it is recorded.
+4. Nothing installs or removes software unasked. A person asks, per package, and it is recorded. The one exception is Cloudable's own components: the agent, the tunnel daemon, and monitoring tools such as the vulnerability scanner. Monitoring tools install only after an admin turns them on for the org. Every install and update is recorded. The list is closed and lives in `docs/agents.md`.
 5. Drift is flagged, never auto-corrected.
 6. Machines are archived, never deleted. Data expires; the record is permanent.
 7. No inbound access to any machine. Agents poll; tunnels are outbound.
@@ -75,7 +75,8 @@ Read the relevant file before working in that area.
 | `docs/cloud-auth.md`  | Self-hosted managed identity (the real path), RBAC scope, why BYOC federation was removed |
 | `docs/access.md`      | Web terminal, SSH certificates, session tokens                 |
 | `docs/lifecycle.md`   | Archive, snapshots, restore, offboarding, break-glass          |
-| `docs/compliance.md`  | Events → checks → controls, the six v1 checks, evidence export |
+| `docs/compliance.md`  | Events → checks → controls, the v1 checks, evidence export |
+| `docs/vulnerability-scanning.md` | The vulnerability scan: scanner delivery, schedule, findings, the check, evidence |
 | `docs/hardening.md`   | Machine security baseline, exceptions, malware protection, evidence table |
 | `docs/events.md`      | Full event catalogue                                           |
 | `docs/frontend.md`    | Console structure, design tokens, LineageGutter                |
@@ -83,7 +84,7 @@ Read the relevant file before working in that area.
 
 ## Not in v1
 
-No templates. No Tailscale. No AWS or GCP. No billing. No idle suspend. No full command capture. Six compliance checks, not more.
+No templates. No Tailscale. No AWS or GCP. No billing. No idle suspend. No full command capture.
 
 Never build: SSH public key upload, per-machine passwords or 2FA codes, shared machines, auto-correcting drift, code-server, application hosting.
 

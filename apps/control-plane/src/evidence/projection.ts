@@ -275,6 +275,21 @@ function summarize(row: RawEventRow): string {
         : `${verb} of "${event.payload.packageName}" failed: ${event.payload.reason}`;
     }
 
+    case "machine.vulnerability_scan_completed": {
+      const { counts } = event.payload;
+      const found = `${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low`;
+      const moved = `${event.payload.newFindings} new, ${event.payload.resolvedFindings} resolved`;
+      return `Vulnerability scan completed with ${event.payload.scanner} ${event.payload.scannerVersion}: ${found} (${moved}).`;
+    }
+    case "machine.vulnerability_scan_failed":
+      return `Vulnerability scan failed: ${event.payload.reason}.`;
+    case "machine.scanner_installed": {
+      const from = event.payload.previousVersion
+        ? ` (replacing ${event.payload.previousVersion})`
+        : "";
+      return `Vulnerability scanner ${event.payload.scanner} ${event.payload.version} installed on this machine${from}.`;
+    }
+
     case "agent.attested":
       return `Control agent attested via ${event.payload.method}.`;
     case "agent.attestation_failed":
@@ -354,6 +369,9 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "machine.package_action_requested":
     case "machine.package_action_completed":
     case "machine.package_action_failed":
+    case "machine.vulnerability_scan_completed":
+    case "machine.vulnerability_scan_failed":
+    case "machine.scanner_installed":
     case "agent.attested":
     case "agent.attestation_failed":
       return undefined;

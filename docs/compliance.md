@@ -12,7 +12,7 @@ How the compliance surface is implemented.
 
 One check can evidence several controls; one control usually needs several checks. Many-to-many, expressed as `ComplianceCheck.controlRefs: string[]` — an array of control ids, not a single tag.
 
-## The six v1 checks
+## The v1 checks
 
 | # | Check id (`registry.ts`) | Fails when | Event query? |
 |---|---|---|---|
@@ -22,10 +22,11 @@ One check can evidence several controls; one control usually needs several check
 | 4 | `elevated-access-approved` | A break-glass or admin session has no approval record and reason | yes |
 | 5 | `retention-honoured` | A snapshot outlives its retention window without a legal hold | yes |
 | 6 | `machines-reporting` | `lastVerifiedAt` older than the expected reconcile window | **no** |
+| 7 | `vulnerabilities-remediated` | A fixable Critical or High vulnerability is open past its window, or scans are not keeping up | **no** |
 
-Checks 1–5 belong to other feature units and are registered into `COMPLIANCE_CHECKS` as they land — this file, `control-map.ts`, and every endpoint below iterate that array generically, so they work correctly with however many of the six are actually registered (including zero).
+Checks 1–5 belong to other feature units and are registered into `COMPLIANCE_CHECKS` as they land — this file, `control-map.ts`, and every endpoint below iterate that array generically, so they work correctly with however many of them are actually registered (including zero).
 
-**Six is a starting set, not a ceiling.** A control with no registered check displays as `manual_action_required` or `not_covered` (see below) rather than silently omitting the control.
+**This is a starting set, not a ceiling.** A control with no registered check displays as `manual_action_required` or `not_covered` (see below) rather than silently omitting the control.
 
 ### Check #6 — "Machines are reporting" (this unit)
 
@@ -48,6 +49,42 @@ The `createdAt` branch matters: a machine defaults to `state = 'provisioning'`, 
 `appliesTo` always returns `true` — any org with a live machine expects it to check in, and an org with no live machines simply produces zero findings.
 
 Each finding: `{ checkId: "machines-reporting", machineId, detail: { lastVerifiedAt, thresholdMinutes } }`.
+
+### Check #7 — "Vulnerabilities are fixed on time"
+
+`apps/control-plane/src/compliance/checks/vulnerabilities-remediated.ts`. Not an event query: it
+reads the scan findings and scan records the control plane keeps (see
+`docs/vulnerability-scanning.md`). One finding per machine, `detailKey` the machine id, with every
+reason that applies in `detail.reasons`.
+
+It does not apply (`not_applicable`) while the org has vulnerability scanning switched off.
+
+A machine fails when:
+
+- `fix_overdue`: a **Critical** with a fix available has been open longer than the org's Critical
+  window (7 days by default), or a **High** longer than its window (30 days by default). The
+  clock starts when a fix first exists, not when the vulnerability was first seen. Vulnerabilities
+  with no fix, and Medium and Low ones, are shown in the console and the export but never fail the
+  check. Applies to every machine that is not archived, running or not.
+- `scan_overdue`: the last completed scan is older than the longest gap between the org's scan days
+  plus 24 hours (8 days for a weekly schedule). Running machines only.
+- `never_scanned`: no completed scan, and more than 24 hours since the later of the machine's
+  creation and the moment scanning was switched on. Running machines only.
+- `database_stale`: the last scan used a vulnerability database built more than 7 days before the
+  scan ran. Running machines only.
+
+A stopped machine cannot be scanned, so it is not failed for the last three. It scans after its next
+boot. `machines-reporting` is the check that notices a machine that has gone quiet.
+
+Severity is `high`. Severity is per check here, not per finding, and an unremediated Critical or High
+is the most serious thing this product reports.
+
+A passing check says the process is working. It does not say there are no vulnerabilities: the
+scanner only knows vulnerabilities that are in its database, in operating system packages.
+
+Each finding: `{ checkId: "vulnerabilities-remediated", machineId, detail: { reasons, lastScanAt,
+dbBuiltAt, remediationDays, overdueFixes, overdue } }`, where `overdue` names up to 10 of the most
+overdue CVE ids. The full list is in the vulnerabilities export.
 
 ## Checks are applicability-gated
 
@@ -73,6 +110,7 @@ A small static taxonomy of controls, each mapped to a framework clause (placehol
 |---|---|---|
 | `access-management` | ISO 27001 A.9 | yes |
 | `asset-management` | ISO 27001 A.8 | yes |
+| `vulnerability-management` | ISO 27001 A.12.6 | yes |
 | `hr-screening` | ISO 27001 A.7 | **no** |
 | `physical-security` | ISO 27001 A.11 | **no** |
 | `supplier-management` | ISO 27001 A.15 | **no** |
@@ -87,15 +125,18 @@ Status, computed purely from `COMPLIANCE_CHECKS` (no DB access needed for this e
 
 `GET /api/v1/compliance/findings/export` — CSV, **grouped by control, not by time**. For every in-scope control with at least one evidencing check, lists that check's current open findings. Columns: `control, control_label, framework, check, check_label, machine_id, first_seen_at, open_days, severity, detail`.
 
-`severity` is real, sourced from `ComplianceCheck.severity` (`apps/control-plane/src/domain/compliance/types.ts`) — a fixed, per-check editorial classification (which of the six v1 checks tends to matter more if it fails: `access-revoked-on-offboarding` and `elevated-access-approved` are `high`; `active-owner`, `no-undeclared-software`, and `retention-honoured` are `medium`; `machines-reporting` is `low`). Every finding under the same check shares its check's severity — there is no finer-grained per-finding score. This is the one place severity is defined: both evidence CSVs and `GET /api/v1/compliance/findings` (as `ComplianceCheckResult.severity`) read it from here, rather than each keeping an independent classification.
+`severity` is real, sourced from `ComplianceCheck.severity` (`apps/control-plane/src/domain/compliance/types.ts`) — a fixed, per-check editorial classification (which of the v1 checks tends to matter more if it fails: `access-revoked-on-offboarding`, `elevated-access-approved` and `vulnerabilities-remediated` are `high`; `active-owner`, `no-undeclared-software`, and `retention-honoured` are `medium`; `machines-reporting` is `low`). Every finding under the same check shares its check's severity — there is no finer-grained per-finding score. This is the one place severity is defined: both evidence CSVs and `GET /api/v1/compliance/findings` (as `ComplianceCheckResult.severity`) read it from here, rather than each keeping an independent classification.
 
-Two named exports:
+Three named exports:
 
 - `GET /api/v1/compliance/exports/findings.csv` — same underlying open-findings data as the main export, narrower columns: `control, check, machine_id, severity, open_since`.
-- `GET /api/v1/compliance/exports/asset-inventory.csv` — one row per machine in the org: `machine_id, machine_name, owner, state, encryption_status, drift_status, patch_status, hardening_baseline`.
+- `GET /api/v1/compliance/exports/asset-inventory.csv` — one row per machine in the org: `machine_id, machine_name, owner, state, encryption_status, drift_status, patch_status, hardening_baseline, vulnerability_scan_status, last_scan_at, open_critical, open_high`.
+  - `vulnerability_scan_status` is `disabled` (the org has scanning off), `current`, `overdue`, `never_scanned`, or `stopped` (the machine is not running and has no current scan, so it cannot be scanned until it boots). `last_scan_at` is the finish time of the last completed scan, empty if there is none. `open_critical` and `open_high` count open findings. The same rules as the compliance check and the console; see `docs/vulnerability-scanning.md`.
   - `hardening_baseline` is the security baseline label the machine's own agent last reported (`cis-ubuntu-l1-v1`), or `none`. See `docs/hardening.md` for what the label means, the exceptions, and the rest of the evidence table.
   - `encryption_status` is `"encrypted_at_rest"` for `provider: "azure"` machines (Azure managed disks are encrypted at rest by Storage Service Encryption unconditionally, never opted out of) and `"unknown"` for Docker/Fake, which have no such platform guarantee. `patch_status` is derived from the machine's own `upgrade_attempts` history: `"up_to_date"` (latest attempt succeeded), `"upgrade_failed"` (latest attempt rolled back/aborted), or `"never_upgraded"` (no attempt on record) — this reflects OS-image patch level, not live per-package OS-patch telemetry, which nothing in this build collects yet (see `evidence-export.ts`).
   - `drift_status` comes from the `no-undeclared-software` check (unit 8) when it's registered in `COMPLIANCE_CHECKS`: `"drifted"` if that check has an open finding for the machine, `"clean"` otherwise. Reports `"unknown"` for every machine if that check isn't registered yet, rather than guessing.
+
+- `GET /api/v1/compliance/exports/vulnerabilities.csv` — one row per vulnerability finding, open and resolved, for every machine in the org including archived ones: `machine_id, machine_name, vulnerability_id, package, ecosystem, installed_version, fixed_version, severity, status, first_seen_at, open_days, fix_available_since, last_seen_at, resolved_at`. For a resolved finding `open_days` is how long it took to fix. Resolved rows are kept for the org's event retention window.
 
 All three exports guard against CSV/formula injection (`apps/control-plane/src/compliance/csv.ts`): a field starting with `=`, `+`, `-`, `@`, or a tab is prefixed with `'` before quoting, since machine names and finding detail are free text that flows straight into a file auditors typically open in Excel or Sheets.
 
@@ -106,11 +147,12 @@ All under `/api/v1/compliance/*` (`apps/control-plane/src/http/routes/compliance
 | Method | Path | Returns |
 |---|---|---|
 | GET | `/control-map` | `ControlMapResponse` (JSON) |
-| GET | `/findings?orgId=` | `ComplianceFindingsResponse` (JSON) |
-| GET | `/findings/export?orgId=` | CSV, grouped by control |
-| GET | `/exports/asset-inventory.csv?orgId=` | CSV |
-| GET | `/exports/findings.csv?orgId=` | CSV |
+| GET | `/findings` | `ComplianceFindingsResponse` (JSON) |
+| GET | `/findings/export` | CSV, grouped by control |
+| GET | `/exports/asset-inventory.csv` | CSV |
+| GET | `/exports/findings.csv` | CSV |
+| GET | `/exports/vulnerabilities.csv` | CSV |
 
 Wire types: `packages/contracts/src/domains/compliance.ts`.
 
-**Known gap**: `orgId` is a plain, unauthenticated query param — auth isn't wired to any endpoint yet (`http/middleware/auth.ts` is a stub). Until it is, any caller can read any org's findings and exports by passing its id. `orgId` is validated as a UUID (`Schema.UUID`), so a malformed id gets a clean `400` instead of a raw Postgres error, but that's a format check, not an authorization one. Closing this means scoping these endpoints to `CurrentUserTag.orgId` once auth lands, not trusting the param.
+Every endpoint requires a signed-in caller (a console session or a CLI token) and reads the org from that caller, never from the request (`CurrentUserAuthentication` in `http/middleware/auth.ts`). Nothing takes an `orgId`.

@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
+import { AdminRoleRequiredError } from "../../domain/people/authorization";
 import {
   PersonAlreadyExistsError,
   PersonNotFoundError,
@@ -52,6 +53,7 @@ export const PeopleGroup = HttpApiGroup.make("people")
     HttpApiEndpoint.post("create", "/api/v1/people")
       .setPayload(CreatePersonPayload)
       .addSuccess(Person, { status: 201 })
+      .addError(AdminRoleRequiredError, { status: 403 })
       .addError(PersonAlreadyExistsError, { status: 409 }),
   )
   .add(
@@ -59,6 +61,7 @@ export const PeopleGroup = HttpApiGroup.make("people")
       .setPath(PersonIdPath)
       .setPayload(UpdatePersonPayload)
       .addSuccess(Person)
+      .addError(AdminRoleRequiredError, { status: 403 })
       .addError(PersonNotFoundError, { status: 404 })
       .addError(PersonNotManuallyManagedError, { status: 409 }),
   )

@@ -2,13 +2,15 @@ import path from "node:path";
 import { HttpApiBuilder, HttpRouter, HttpServerResponse } from "@effect/platform";
 import { Effect } from "effect";
 import { config } from "../../config";
+import { SCANNER_BINARY_FILES } from "../../domain/vulnerability-scan/scanner-release";
 
 /**
  * `GET /_internal/binaries/:target` — serves the compiled agent +
  * tunnel-daemon binaries (`Dockerfile` copies them to `config.agentBinariesDir`)
  * so `ProvisioningService.azure.ts`'s cloud-init can `curl` them onto a
  * fresh VM at boot. A brand-new Ubuntu VM has no Bun/Node to run TS source
- * with — only a standalone binary works.
+ * with — only a standalone binary works. Also serves the vulnerability scanner, to an agent
+ * that was told to install it.
  *
  * Deliberately unauthenticated: these binaries aren't secret (same posture
  * as the public GHCR control-plane image) and the machine curling them
@@ -28,6 +30,11 @@ const TARGETS: Record<string, string> = {
   "cloudable-agent-linux-arm64": "cloudable-agent-linux-arm64",
   "cloudable-tunnel-daemon-linux-x64": "cloudable-tunnel-daemon-linux-x64",
   "cloudable-tunnel-daemon-linux-arm64": "cloudable-tunnel-daemon-linux-arm64",
+  // The vulnerability scanner. Not fetched by cloud-init like the rest: an agent downloads it
+  // only after an admin turns scanning on, and checks it against the SHA-256 the poll gave it.
+  // Names come from `SCANNER_BINARY_FILES`, the same list the manifest reader accepts.
+  [SCANNER_BINARY_FILES["linux-x64"]]: SCANNER_BINARY_FILES["linux-x64"],
+  [SCANNER_BINARY_FILES["linux-arm64"]]: SCANNER_BINARY_FILES["linux-arm64"],
 };
 
 export const BinariesRouteLive = HttpApiBuilder.Router.use((router) =>

@@ -3,6 +3,9 @@ export * from "./domains/machines";
 export * from "./domains/agent-protocol";
 export * from "./domains/compliance";
 export * from "./domains/access";
+export * from "./domains/vulnerability-scan";
+export * from "./domains/vulnerability-scan-schedule";
+export * from "./domains/roles";
 
 export * from "./domains/approvals";
 export * from "./domains/archive";

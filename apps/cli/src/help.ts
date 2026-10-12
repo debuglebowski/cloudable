@@ -130,6 +130,18 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         notes: ["Machines are archived, never deleted. The data expires; the record is permanent."],
       },
       {
+        name: "vulnerabilities",
+        summary: "A machine's known vulnerabilities and its last scan",
+        args: "<machine>",
+        options: [
+          { flag: "--all", description: "List every open finding (default: the first 25)" },
+        ],
+        notes: [
+          "Finds known vulnerabilities in operating system packages only. No findings does not mean a machine is secure.",
+          "A stopped machine cannot be scanned. It scans after its next boot, and its last results stay here.",
+        ],
+      },
+      {
         name: "packages",
         summary: "The machine layer of the package manifest",
         subcommands: [
@@ -396,9 +408,17 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
   },
   {
     name: "org",
-    summary: "Org-wide settings and the org package manifest",
+    summary: "Org-wide settings, vulnerability scanning and the org package manifest",
     subcommands: [
       { name: "get", summary: "Show settings, logging tier and retention" },
+      {
+        name: "vulnerability-scan",
+        summary: "Show vulnerability scanning: settings and where every machine stands",
+        notes: [
+          "Finds known vulnerabilities in operating system packages only. No findings does not mean a machine is secure.",
+          "Change it with `cloudable org update --vulnerability-scan on|off` and the scan flags.",
+        ],
+      },
       {
         name: "update",
         summary: "Change org settings",
@@ -418,6 +438,34 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
             flag: "--approval-mode <action>=<mode>",
             description: "none|single|dual per action (repeatable)",
           },
+          {
+            flag: "--vulnerability-scan on|off",
+            description: "Scan every machine in the org for known vulnerabilities",
+          },
+          {
+            flag: "--scan-days sun,wed",
+            description: "Which UTC days machines scan (any of sun to sat; default sun)",
+          },
+          { flag: "--scan-time 02:00", description: "When machines start scanning, in UTC" },
+          {
+            flag: "--remediation-critical <days>",
+            description: "Days a fixable Critical may stay open before the check fails (default 7)",
+          },
+          {
+            flag: "--remediation-high <days>",
+            description: "Days a fixable High may stay open before the check fails (default 30)",
+          },
+          {
+            flag: "--vuln-db-repository <registry/path>|none",
+            description:
+              "Your own mirror of the vulnerability database, or none for the public ones",
+          },
+        ],
+        notes: [
+          "Changing vulnerability scanning needs an admin: a person whose role is owner or admin.",
+          "Turning scanning on installs the scanner on every machine in the org. The change is recorded.",
+          "Each machine starts at a random moment within 2 hours after the scan time. A machine that was off scans after its next boot.",
+          "The mirror must allow anonymous pulls. Cloudable stores no credentials.",
         ],
       },
       {
@@ -521,6 +569,11 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       {
         name: "findings",
         summary: "Every finding, with age",
+        options: [{ flag: "--output <path>", description: "Write a file instead of stdout" }],
+      },
+      {
+        name: "vulnerabilities",
+        summary: "Every vulnerability found on every machine, open and resolved",
         options: [{ flag: "--output <path>", description: "Write a file instead of stdout" }],
       },
     ],

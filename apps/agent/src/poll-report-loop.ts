@@ -9,6 +9,8 @@ import { ApiError } from "./http-client";
 import { listInstalledPackages } from "./installed-packages";
 import { listOpenPorts } from "./open-ports";
 import { readAllVolumeUsage } from "./volume-usage";
+import { type ScanManager, createScanManager } from "./vulnerability-scan/scan-manager";
+import { httpDownloader } from "./vulnerability-scan/scanner-install";
 import { connectWake } from "./wake";
 import type { AgentReportRequest, AgentReportResponse, DesiredStateResponse } from "./wire-types";
 
@@ -127,7 +129,18 @@ async function reportObservedState(
  *
  * Runs forever; `signal` is the only way out (used by tests).
  */
-export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Promise<never> {
+export async function runAgentLoop(
+  options: {
+    signal?: AbortSignal;
+    /** Replaced by tests. The real one downloads from the control plane and runs the scanner. */
+    scanManager?: ScanManager;
+  } = {},
+): Promise<never> {
+  // Vulnerability scanning. It remembers the org's scan settings from the last poll that sent
+  // them, so a 304 (no body) does not make it forget them, and it does its slow work in the
+  // background so a scan never holds up this loop. See `vulnerability-scan/scan-manager.ts`.
+  const scanManager =
+    options.scanManager ?? createScanManager({ download: httpDownloader(config.controlPlaneUrl) });
   let attempt = 0;
   let lastEtag: string | null = null;
   // Held across iterations because a 304 carries no body: the allowed list is
@@ -181,7 +194,13 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
             actionResults = await applyPackageActions(pendingActions);
           }
           allowedPackages = poll.desiredState?.packages ?? allowedPackages;
+          // Only a 200 carries settings, and a 200 always carries all of them: a missing
+          // vulnerabilityScan key means scanning is off, not "unchanged".
+          scanManager.setSettings(poll.desiredState?.settings);
         }
+
+        // Starts a scan or a scanner install in the background if one is due. Returns at once.
+        scanManager.tick();
 
         // Real observed state: `installedPackages`, `openPorts`, and `configState`
         // are all real scans now — `installed-packages.ts`/`open-ports.ts`/
@@ -200,6 +219,8 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
         // Synchronous and cheap (two statfs calls), so it stays out of the Promise.all.
         const volumeUsage = readAllVolumeUsage();
         const hardeningBaseline = readHardeningBaseline();
+        const installedScanner = scanManager.installedScanner();
+        const vulnerabilityScan = scanManager.pendingReport();
         await reportObservedState(session.bearerToken, {
           agentVersion: AGENT_VERSION,
           observedAt: new Date().toISOString(),
@@ -218,7 +239,15 @@ export async function runAgentLoop(options: { signal?: AbortSignal } = {}): Prom
           // look" and "there is nothing there" are different answers, and a snapshot
           // sized from the second one would be a new way of lying about the same thing.
           ...(Object.keys(volumeUsage).length > 0 ? { volumeUsage } : {}),
+          // The scanner as it sits on this machine, so the control plane can notice when it
+          // changes. The agent never says "I installed it": that is the control plane's call.
+          ...(installedScanner ? { scanner: installedScanner } : {}),
+          // A finished scan nobody has acknowledged yet. Sent again next cycle if this report
+          // fails, which is safe: the control plane ignores a scan id it has already stored.
+          ...(vulnerabilityScan ? { vulnerabilityScan } : {}),
         });
+        // Reached only when the report went through. A failed report throws above.
+        if (vulnerabilityScan) scanManager.acknowledge(vulnerabilityScan.scanId);
 
         attempt = 0;
         await waker.wait(POLL_INTERVAL_MS);

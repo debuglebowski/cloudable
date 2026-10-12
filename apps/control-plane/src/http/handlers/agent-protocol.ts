@@ -10,6 +10,12 @@ import {
   collectPendingActions,
   expireStaleActions,
 } from "../../domain/machine/package-actions";
+import {
+  recordReportedScanner,
+  recordVulnerabilityScan,
+} from "../../domain/vulnerability-scan/ingest";
+import { pollSettingsFor } from "../../domain/vulnerability-scan/poll-settings";
+import { scannerEtagSuffix } from "../../domain/vulnerability-scan/scanner-release";
 import { EventBus } from "../../services/EventBus";
 import { AgentSessionToken } from "../../services/attestation/AgentSessionToken";
 import { AttestationRegistryTag } from "../../services/attestation/AttestationMethod";
@@ -211,7 +217,9 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
           return yield* Effect.fail(new AgentUnauthorized({ reason: "machine_not_found" }));
         }
 
-        const etag = `"${desired.version}"`;
+        // The bundled scanner's version rides along, so a control plane that ships a different
+        // scanner gives every machine one fresh answer carrying the new release.
+        const etag = `"${desired.version}${scannerEtagSuffix()}"`;
 
         // A 304 must not swallow work. Collecting below is a write, so the
         // early return is only safe because a new action always bumps
@@ -225,11 +233,13 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
           Effect.catchAll(() => Effect.succeed([])),
         );
 
+        const settings = yield* pollSettingsFor(db, identity.orgId).pipe(Effect.orDie);
+
         return HttpServerResponse.unsafeJson(
           {
             version: desired.version,
             packages: desired.allowedPackages,
-            settings: {},
+            settings,
             pendingActions: collected.map((row) => ({
               id: row.id,
               op: row.op,
@@ -379,6 +389,37 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
               .publish([makeEvent("machine.state_reported", identityFields, { changes })])
               .pipe(Effect.orDie);
           }
+        }
+
+        // The scanner the machine says it has. Compared with what was last stored, and a change
+        // is recorded as `machine.scanner_installed`. A failure is logged, not fatal: the next
+        // report compares again, so nothing is lost by trying later.
+        yield* recordReportedScanner(db, {
+          orgId: identity.orgId,
+          machineId: machine.id,
+          previous: {
+            scanner: machine.scanner ?? null,
+            scannerVersion: machine.scannerVersion ?? null,
+          },
+          reported: payload.scanner,
+        }).pipe(
+          Effect.catchAll((error) =>
+            Effect.logWarning(
+              `report: failed to record scanner for ${machine.id}: ${error.message}`,
+            ),
+          ),
+        );
+
+        // A finished scan. Last on purpose, and NOT swallowed on failure: the agent keeps the
+        // result until a report is acknowledged, so failing the request here is what makes it
+        // send the scan again. Everything above has already been stored.
+        if (payload.vulnerabilityScan) {
+          yield* recordVulnerabilityScan(db, {
+            orgId: identity.orgId,
+            machineId: machine.id,
+            report: payload.vulnerabilityScan,
+            receivedAt: now,
+          }).pipe(Effect.orDie);
         }
 
         return { acknowledged: true as const };

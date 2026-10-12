@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { VULNERABILITY_SCAN_SETTING_KEYS } from "@cloudable/contracts";
 import * as schema from "@cloudable/schema";
 import { HttpApiBuilder, HttpServer } from "@effect/platform";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { AppConfigLive } from "../src/config";
 import { Db } from "../src/db/layer";
@@ -33,6 +34,7 @@ import { RestartLive } from "../src/http/handlers/restart";
 import { TunnelLive } from "../src/http/handlers/tunnel";
 import { TunnelSignalLive } from "../src/http/handlers/tunnel-signal";
 import { UpgradeLive } from "../src/http/handlers/upgrade";
+import { VulnerabilityScanLive } from "../src/http/handlers/vulnerability-scan";
 import { CurrentUserAuthenticationLive } from "../src/http/middleware/auth";
 import { ApprovalService } from "../src/services/ApprovalService";
 import { EventBus } from "../src/services/EventBus";
@@ -125,6 +127,7 @@ describe("agent-protocol handlers (integration)", () => {
           ProvisioningCapabilitiesLive,
           AuthSsoStatusLive,
           CliAuthLive,
+          VulnerabilityScanLive,
         ),
       ),
     );
@@ -326,5 +329,207 @@ describe("agent-protocol handlers (integration)", () => {
 
     const firstSeen = await eventsOfType("machine.first_seen");
     expect(firstSeen.length).toBeGreaterThan(0);
+  });
+  describe("vulnerability scanning", () => {
+    const KEYS = VULNERABILITY_SCAN_SETTING_KEYS;
+
+    const attest = async (): Promise<string> => {
+      const credential = await Effect.runPromise(
+        joinTokenAttestation.issueCredential({ orgId, machineId }),
+      );
+      const res = await handler(
+        new Request("http://localhost/api/v1/agent/attest", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ method: "join_token", credential }),
+        }),
+      );
+      return ((await res.json()) as { bearerToken: string }).bearerToken;
+    };
+
+    const poll = (bearerToken: string, etag?: string) =>
+      handler(
+        new Request("http://localhost/api/v1/agent/poll", {
+          headers: {
+            authorization: `Bearer ${bearerToken}`,
+            ...(etag ? { "if-none-match": etag } : {}),
+          },
+        }),
+      );
+
+    const report = (bearerToken: string, extra: Record<string, unknown>) =>
+      handler(
+        new Request("http://localhost/api/v1/agent/report", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${bearerToken}` },
+          body: JSON.stringify({
+            agentVersion: "0.0.0",
+            observedAt: new Date().toISOString(),
+            installedPackages: [],
+            openPorts: [],
+            configState: { runningAccessMethods: [] },
+            ...extra,
+          }),
+        }),
+      );
+
+    const scanReport = (overrides: Record<string, unknown> = {}) => ({
+      scanId: crypto.randomUUID(),
+      scanner: "trivy",
+      scannerVersion: "0.75.0",
+      scope: "os",
+      startedAt: new Date(Date.now() - 120_000).toISOString(),
+      finishedAt: new Date(Date.now() - 60_000).toISOString(),
+      outcome: "completed",
+      dbBuiltAt: new Date(Date.now() - 3_600_000).toISOString(),
+      findings: [
+        {
+          vulnerabilityId: "CVE-2026-0001",
+          ecosystem: "os",
+          packageName: "openssl",
+          installedVersion: "3.0.2",
+          fixedVersion: "3.0.3",
+          severity: "critical",
+        },
+      ],
+      ...overrides,
+    });
+
+    test("scanning off: the poll carries no settings; turning it on changes the ETag and adds the config", async () => {
+      const token = await attest();
+      const before = await poll(token);
+      expect(before.status).toBe(200);
+      expect(((await before.json()) as { settings: object }).settings).toEqual({});
+      const etagBefore = before.headers.get("etag") ?? "";
+
+      // What `applySettingChange` does for these keys (covered by its own tests): write the row
+      // and move the machine's desired-state version.
+      await testDb.db.insert(schema.settingValues).values({
+        scopeType: "org",
+        scopeId: orgId,
+        key: KEYS.enabled,
+        value: true,
+        source: "org",
+      });
+      await testDb.db
+        .update(schema.machines)
+        .set({ desiredStateVersion: sql`${schema.machines.desiredStateVersion} + 1` })
+        .where(eq(schema.machines.id, machineId));
+
+      const unchanged = await poll(token, etagBefore);
+      expect(unchanged.status).toBe(200);
+      expect(unchanged.headers.get("etag")).not.toBe(etagBefore);
+      const body = (await unchanged.json()) as {
+        settings: { vulnerabilityScan?: { scanner: string; scanDays: string[]; release: unknown } };
+      };
+      expect(body.settings.vulnerabilityScan?.scanner).toBe("trivy");
+      expect(body.settings.vulnerabilityScan?.scanDays).toEqual(["sun"]);
+      // This test image carries no scanner, and the poll says so rather than inventing one.
+      expect(body.settings.vulnerabilityScan?.release).toBeNull();
+
+      await testDb.db.delete(schema.settingValues).where(eq(schema.settingValues.scopeId, orgId));
+    });
+
+    test("a reported scan is stored, its findings kept, and exactly one event written", async () => {
+      const token = await attest();
+      const scan = scanReport();
+      const res = await report(token, { vulnerabilityScan: scan });
+      expect(res.status).toBe(200);
+
+      const events = (await eventsOfType("machine.vulnerability_scan_completed")).filter(
+        (event) => event.correlationId === scan.scanId,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]?.actorType).toBe("agent");
+      expect(events[0]?.machineId).toBe(machineId);
+
+      const findings = await testDb.db
+        .select()
+        .from(schema.machineVulnerabilities)
+        .where(eq(schema.machineVulnerabilities.machineId, machineId));
+      expect(findings.map((f) => f.vulnerabilityId)).toContain("CVE-2026-0001");
+    });
+
+    test("the same scan sent again is acknowledged and changes nothing", async () => {
+      const token = await attest();
+      const scan = scanReport({
+        findings: [
+          {
+            vulnerabilityId: "CVE-2026-0002",
+            ecosystem: "os",
+            packageName: "zlib",
+            installedVersion: "1.2.11",
+            fixedVersion: null,
+            severity: "high",
+          },
+        ],
+      });
+      expect((await report(token, { vulnerabilityScan: scan })).status).toBe(200);
+      expect((await report(token, { vulnerabilityScan: scan })).status).toBe(200);
+
+      const events = (await eventsOfType("machine.vulnerability_scan_completed")).filter(
+        (event) => event.correlationId === scan.scanId,
+      );
+      expect(events).toHaveLength(1);
+    });
+
+    test("a failed scan is recorded with its reason", async () => {
+      const token = await attest();
+      const scan = scanReport({
+        outcome: "failed",
+        failureReason: "db_unavailable",
+        findings: undefined,
+        dbBuiltAt: undefined,
+      });
+      expect((await report(token, { vulnerabilityScan: scan })).status).toBe(200);
+      const failed = (await eventsOfType("machine.vulnerability_scan_failed")).filter(
+        (event) => event.correlationId === scan.scanId,
+      );
+      expect(failed).toHaveLength(1);
+      expect((failed[0]?.payload as { reason: string }).reason).toBe("db_unavailable");
+    });
+
+    test("a report whose scan is malformed is refused and stores nothing", async () => {
+      const token = await attest();
+      const scan = scanReport({
+        findings: [
+          {
+            vulnerabilityId: "CVE-2026-0003",
+            ecosystem: "os",
+            packageName: "curl",
+            installedVersion: "7.0",
+            fixedVersion: null,
+            severity: "catastrophic",
+          },
+        ],
+      });
+      const res = await report(token, { vulnerabilityScan: scan });
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
+      const rows = await testDb.db
+        .select()
+        .from(schema.machineVulnerabilityScans)
+        .where(eq(schema.machineVulnerabilityScans.scanId, scan.scanId));
+      expect(rows).toHaveLength(0);
+    });
+
+    test("the scanner a machine reports is recorded once, as machine.scanner_installed", async () => {
+      const token = await attest();
+      const before = (await eventsOfType("machine.scanner_installed")).length;
+      expect((await report(token, { scanner: { name: "trivy", version: "0.75.0" } })).status).toBe(
+        200,
+      );
+      expect((await report(token, { scanner: { name: "trivy", version: "0.75.0" } })).status).toBe(
+        200,
+      );
+
+      const installed = await eventsOfType("machine.scanner_installed");
+      expect(installed.length).toBe(before + 1);
+      expect(installed[installed.length - 1]?.payload).toEqual({
+        scanner: "trivy",
+        version: "0.75.0",
+        previousVersion: null,
+      });
+    });
   });
 });

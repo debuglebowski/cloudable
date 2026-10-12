@@ -34,6 +34,7 @@ import { RestartLive } from "./http/handlers/restart";
 import { AccessAttachRouteLive, TunnelConnectRouteLive, TunnelLive } from "./http/handlers/tunnel";
 import { TunnelSignalLive } from "./http/handlers/tunnel-signal";
 import { UpgradeLive } from "./http/handlers/upgrade";
+import { VulnerabilityScanLive } from "./http/handlers/vulnerability-scan";
 import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
 import { AuthRouteLive } from "./http/routes/auth";
 import { BinariesRouteLive } from "./http/routes/binaries";
@@ -100,6 +101,7 @@ const ApiLive = HttpApiBuilder.api(Api).pipe(
       ProvisioningCapabilitiesLive,
       AuthSsoStatusLive,
       CliAuthLive,
+      VulnerabilityScanLive,
     ),
   ),
   Layer.provide(DbLive),

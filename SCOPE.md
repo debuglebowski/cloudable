@@ -7,8 +7,8 @@ behind every decision referenced below.
 
 Everything in the build order in `docs/spec.md` except the items listed under "Not in v1" there:
 control plane + reconciliation loop (fake Azure provider — no real Azure account is used in this
-build), agent with join-token and managed-identity attestation, generic approval object, all six
-compliance checks with finding age and control mapping, package manifest with org→machine
+build), agent with join-token and managed-identity attestation, generic approval object, the
+compliance checks (docs/compliance.md) with finding age and control mapping, package manifest with org→machine
 inheritance, cloud provider federation (OIDC issuer), SSH CA + `cloudable login`, tunnel daemon +
 web terminal, secrets injection, logging tiers + evidence projection, archive lifecycle + offboarding,
 elevation/break-glass, transactional upgrades, config editor/GitOps path, and the full console.

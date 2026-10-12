@@ -6,6 +6,7 @@ import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { toEventRows } from "../../services/EventBus";
 import { SYSTEM_ACTOR, makeEnvelope } from "../archive/events";
+import { expireOrgVulnerabilityData } from "../vulnerability-scan/retention";
 import { EVENTS_RETENTION_DAYS_KEY, effectiveEventsRetentionDays } from "./policy";
 
 export class EventRetentionError extends Data.TaggedError("EventRetentionError")<{
@@ -197,6 +198,22 @@ export const expireEventsPastRetention = (
           Effect.logWarning(
             `event retention: org ${org.id} failed this pass: ${error.reason}`,
           ).pipe(Effect.as(0)),
+        ),
+      );
+      // Vulnerability findings and scan records follow the same window. Their own failure is
+      // logged and does not undo or block the events above.
+      yield* expireOrgVulnerabilityData(org.id, retentionDays, now).pipe(
+        Effect.flatMap((removed) =>
+          removed.findings + removed.scans > 0
+            ? Effect.logInfo(
+                `vulnerability retention: org ${org.id} removed ${removed.findings} resolved findings and ${removed.scans} scan records`,
+              )
+            : Effect.void,
+        ),
+        Effect.catchAll((error) =>
+          Effect.logWarning(
+            `vulnerability retention: org ${org.id} failed this pass: ${error.reason}`,
+          ),
         ),
       );
     }

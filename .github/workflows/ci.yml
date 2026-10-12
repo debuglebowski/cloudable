@@ -60,9 +60,9 @@ jobs:
       # `apps/control-plane`'s `test:integration` script runs everything that needs
       # a real Postgres or Docker: `reconcile-diff.integration.ts`, the `*.test.ts`
       # files that guard on `isDbReachable` (against the `postgres` service above),
-      # and the `*.integration-check.ts` files (five of the six compliance checks —
-      # every one except `machines-reporting`, which has no such file — plus the
-      # agent protocol), which each spin up their own throwaway Postgres via
+      # and the `*.integration-check.ts` files (five of the compliance checks —
+      # every one except `machines-reporting` and `vulnerabilities-remediated`, which have no
+      # such file — plus the agent protocol), which each spin up their own throwaway Postgres via
       # testcontainers, independent of the service. Every other workspace's
       # `test:integration` is still a placeholder `exit 0`, wired in now so a real
       # script starts running in CI the moment it's written, not silently ignored.

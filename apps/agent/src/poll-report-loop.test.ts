@@ -211,6 +211,252 @@ describe("runAgentLoop", () => {
   }, 15_000);
 });
 
+/** A stand-in for the vulnerability scan manager that records what the loop does with it. */
+function fakeScanManager(init: {
+  scanner?: { name: "trivy"; version: string };
+  pending?: import("@cloudable/contracts").VulnerabilityScanReport;
+}) {
+  let pending = init.pending;
+  const calls = { setSettings: [] as unknown[], ticks: 0, acknowledged: [] as string[] };
+  const manager: import("./vulnerability-scan/scan-manager").ScanManager = {
+    setSettings: (settings) => {
+      calls.setSettings.push(settings);
+    },
+    tick: () => {
+      calls.ticks += 1;
+    },
+    installedScanner: () => init.scanner,
+    pendingReport: () => pending,
+    acknowledge: (scanId) => {
+      calls.acknowledged.push(scanId);
+      if (pending?.scanId === scanId) pending = undefined;
+    },
+    idle: () => Promise.resolve(),
+  };
+  return { manager, calls };
+}
+
+const SCAN_SETTINGS = {
+  vulnerabilityScan: {
+    scanner: "trivy",
+    scope: "os",
+    scanDays: ["sun"],
+    scanTimeUtc: "02:00",
+    dbRepository: null,
+    release: null,
+  },
+};
+
+const FINISHED_SCAN: import("@cloudable/contracts").VulnerabilityScanReport = {
+  scanId: "scan-1",
+  scanner: "trivy",
+  scannerVersion: "0.75.0",
+  scope: "os",
+  startedAt: "2026-10-11T02:05:00.000Z",
+  finishedAt: "2026-10-11T02:06:00.000Z",
+  outcome: "completed",
+  truncated: false,
+  findings: [
+    {
+      vulnerabilityId: "CVE-2026-0001",
+      ecosystem: "os",
+      packageName: "openssl",
+      installedVersion: "3.0.2-0ubuntu1",
+      fixedVersion: "3.0.2-0ubuntu1.18",
+      severity: "high",
+    },
+  ],
+};
+
+/**
+ * A mock control plane for the scanning tests: scripted polls and reports, the report bodies
+ * recorded, and a wake socket so a test can start the next cycle without waiting 30 seconds.
+ */
+function startScanMock(script: {
+  poll: (call: number, ifNoneMatch: string | null) => Response;
+  report: (call: number) => Response;
+}) {
+  const reports: Record<string, unknown>[] = [];
+  const polls: { ifNoneMatch: string | null }[] = [];
+  let wakeSocket: import("bun").ServerWebSocket<unknown> | undefined;
+  const server = Bun.serve({
+    port,
+    async fetch(req, srv) {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/v1/agent/wake") {
+        if (srv.upgrade(req, { data: undefined })) return;
+        return new Response("expected a websocket upgrade", { status: 400 });
+      }
+      if (url.pathname === "/api/v1/agent/attest" && req.method === "POST") {
+        return Response.json({
+          bearerToken: "fake-bearer-token",
+          expiresAt: new Date(Date.now() + 900_000).toISOString(),
+          orgId: "org-1",
+          machineId: "machine-1",
+        });
+      }
+      if (url.pathname === "/api/v1/agent/poll" && req.method === "GET") {
+        const ifNoneMatch = req.headers.get("if-none-match");
+        polls.push({ ifNoneMatch });
+        return script.poll(polls.length, ifNoneMatch);
+      }
+      if (url.pathname === "/api/v1/agent/report" && req.method === "POST") {
+        reports.push((await req.json()) as Record<string, unknown>);
+        return script.report(reports.length);
+      }
+      return new Response("not found", { status: 404 });
+    },
+    websocket: {
+      open(ws) {
+        wakeSocket = ws;
+      },
+      message() {},
+      close() {
+        wakeSocket = undefined;
+      },
+    },
+  });
+  return {
+    server,
+    reports,
+    polls,
+    wake: () => wakeSocket?.send(JSON.stringify({ type: "pull_now" })),
+  };
+}
+
+async function waitFor(condition: () => boolean, ms = 5_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!condition() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  if (!condition()) throw new Error("timed out waiting for the loop");
+}
+
+describe("runAgentLoop: vulnerability scanning", () => {
+  let mock: ReturnType<typeof startScanMock> | undefined;
+
+  afterEach(() => {
+    mock?.server.stop(true);
+    mock = undefined;
+    attestation.clearCachedSession();
+  });
+
+  const run = async (
+    manager: import("./vulnerability-scan/scan-manager").ScanManager,
+    until: () => boolean,
+  ) => {
+    const controller = new AbortController();
+    const loopPromise = loop.runAgentLoop({ signal: controller.signal, scanManager: manager });
+    try {
+      await waitFor(until);
+    } finally {
+      controller.abort();
+      await expect(loopPromise).rejects.toThrow("agent loop aborted");
+    }
+  };
+
+  test("reports the installed scanner and an unacknowledged scan, then acknowledges it", async () => {
+    const { manager, calls } = fakeScanManager({
+      scanner: { name: "trivy", version: "0.75.0" },
+      pending: FINISHED_SCAN,
+    });
+    mock = startScanMock({
+      poll: () =>
+        Response.json({ version: "v1", packages: [], settings: {} }, { headers: { etag: '"v1"' } }),
+      report: () => Response.json({ acknowledged: true }),
+    });
+
+    await run(manager, () => calls.acknowledged.length > 0);
+
+    expect(mock.reports[0]?.scanner).toEqual({ name: "trivy", version: "0.75.0" });
+    expect(mock.reports[0]?.vulnerabilityScan).toEqual(FINISHED_SCAN);
+    expect(calls.acknowledged).toEqual(["scan-1"]);
+  }, 15_000);
+
+  test("a report the control plane rejects is not acknowledged, and the scan goes out again", async () => {
+    const { manager, calls } = fakeScanManager({ pending: FINISHED_SCAN });
+    mock = startScanMock({
+      poll: () =>
+        Response.json({ version: "v1", packages: [], settings: {} }, { headers: { etag: '"v1"' } }),
+      report: (call) =>
+        call === 1 ? new Response("boom", { status: 500 }) : Response.json({ acknowledged: true }),
+    });
+
+    await run(manager, () => calls.acknowledged.length > 0);
+
+    expect(mock.reports.length).toBeGreaterThanOrEqual(2);
+    // The same result, with the same id, on the retry. The control plane drops a repeat.
+    expect(mock.reports[0]?.vulnerabilityScan).toEqual(FINISHED_SCAN);
+    expect(mock.reports[1]?.vulnerabilityScan).toEqual(FINISHED_SCAN);
+    expect(calls.acknowledged).toEqual(["scan-1"]);
+  }, 15_000);
+
+  test("leaves both fields out when there is no scanner and no result", async () => {
+    const { manager, calls } = fakeScanManager({});
+    mock = startScanMock({
+      poll: () =>
+        Response.json({ version: "v1", packages: [], settings: {} }, { headers: { etag: '"v1"' } }),
+      report: () => Response.json({ acknowledged: true }),
+    });
+
+    await run(manager, () => (mock?.reports.length ?? 0) > 0 && calls.ticks > 0);
+
+    expect(mock.reports[0]).not.toHaveProperty("scanner");
+    expect(mock.reports[0]).not.toHaveProperty("vulnerabilityScan");
+    expect(calls.acknowledged).toEqual([]);
+  }, 15_000);
+
+  test("keeps the last 200's settings across a 304, and a new 200 replaces them", async () => {
+    const { manager, calls } = fakeScanManager({});
+    mock = startScanMock({
+      poll: (call, ifNoneMatch) => {
+        // 1: first poll, a 200 carrying the scan settings.
+        if (call === 1) {
+          return Response.json(
+            { version: "v1", packages: [], settings: SCAN_SETTINGS },
+            { headers: { etag: '"a"' } },
+          );
+        }
+        // 2: nothing changed, a 304 with no body.
+        if (call === 2) {
+          return ifNoneMatch === '"a"'
+            ? new Response(null, { status: 304, headers: { etag: '"a"' } })
+            : new Response("the agent did not send the ETag back", { status: 500 });
+        }
+        // 3: changed, and the key is gone: scanning is off.
+        return Response.json(
+          { version: "v2", packages: [], settings: {} },
+          { headers: { etag: '"b"' } },
+        );
+      },
+      report: () => Response.json({ acknowledged: true }),
+    });
+
+    const controller = new AbortController();
+    const loopPromise = loop.runAgentLoop({ signal: controller.signal, scanManager: manager });
+    try {
+      await waitFor(() => (mock?.polls.length ?? 0) >= 1 && (mock?.reports.length ?? 0) >= 1);
+      for (const target of [2, 3]) {
+        // Cut the 30 second sleep short, as the wake fast path does.
+        for (let i = 0; i < 100 && (mock?.polls.length ?? 0) < target; i += 1) {
+          mock?.wake();
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        await waitFor(() => (mock?.reports.length ?? 0) >= target);
+      }
+    } finally {
+      controller.abort();
+      await expect(loopPromise).rejects.toThrow("agent loop aborted");
+    }
+
+    // Handed over on the two 200s only, never on the 304.
+    expect(calls.setSettings).toEqual([SCAN_SETTINGS, {}]);
+    // But evaluated every cycle, 304 or not, so a scan due between polls still starts.
+    expect(calls.ticks).toBeGreaterThanOrEqual(3);
+    expect(mock.polls.map((p) => p.ifNoneMatch).slice(0, 3)).toEqual([null, '"a"', '"a"']);
+  }, 20_000);
+});
+
 // `AGENT_VERSION` is read from `process.env.AGENT_VERSION` at module-evaluation time (see
 // poll-report-loop.ts's doc comment), so each case needs its own fresh dynamic import *after*
 // setting the env var — same pattern as config.test.ts. Distinct `?case=` cache-busters force

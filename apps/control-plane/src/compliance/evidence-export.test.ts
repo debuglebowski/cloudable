@@ -248,16 +248,16 @@ describe("evidence-export (live DB)", () => {
     const [header, ...lines] = csv.trim().split("\r\n");
 
     expect(header).toBe(
-      "machine_id,machine_name,owner,state,encryption_status,drift_status,patch_status,hardening_baseline",
+      "machine_id,machine_name,owner,state,encryption_status,drift_status,patch_status,hardening_baseline,vulnerability_scan_status,last_scan_at,open_critical,open_high",
     );
     expect(lines).toHaveLength(3);
 
     const line = (machineId: string) => lines.find((l) => l?.startsWith(`${machineId},`));
     expect(line(neverUpgraded.id)).toContain(",unknown,");
-    expect(line(neverUpgraded.id)?.endsWith(",never_upgraded,none")).toBe(true);
+    expect(line(neverUpgraded.id)?.endsWith(",never_upgraded,none,disabled,,0,0")).toBe(true);
     expect(line(upToDate.id)).toContain(",encrypted_at_rest,");
-    expect(line(upToDate.id)?.endsWith(",up_to_date,cis-ubuntu-l1-v1")).toBe(true);
+    expect(line(upToDate.id)?.endsWith(",up_to_date,cis-ubuntu-l1-v1,disabled,,0,0")).toBe(true);
     expect(line(upgradeFailed.id)).toContain(",unknown,");
-    expect(line(upgradeFailed.id)?.endsWith(",upgrade_failed,none")).toBe(true);
+    expect(line(upgradeFailed.id)?.endsWith(",upgrade_failed,none,disabled,,0,0")).toBe(true);
   });
 });

@@ -8,6 +8,9 @@ export interface MachineRecord {
   readonly orgId: string;
   readonly state: string;
   readonly lastVerifiedAt: Date | null;
+  /** The scanner and version the agent last reported. Optional so a record built by hand stays valid. */
+  readonly scanner?: string | null;
+  readonly scannerVersion?: string | null;
 }
 
 /**

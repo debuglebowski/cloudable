@@ -1,6 +1,12 @@
 import * as schema from "@cloudable/schema";
-import { events, machines, settingValues } from "@cloudable/schema";
-import { eq } from "drizzle-orm";
+import {
+  events,
+  machineVulnerabilities,
+  machineVulnerabilityScans,
+  machines,
+  settingValues,
+} from "@cloudable/schema";
+import { eq, inArray } from "drizzle-orm";
 import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
@@ -31,6 +37,17 @@ export async function cleanupOrgRows(
 ): Promise<void> {
   await db.delete(events).where(eq(events.orgId, orgId));
   await db.delete(settingValues).where(eq(settingValues.scopeId, orgId));
+  // Scan rows reference machines, so they go first.
+  const orgMachines = db
+    .select({ id: machines.id })
+    .from(machines)
+    .where(eq(machines.orgId, orgId));
+  await db
+    .delete(machineVulnerabilities)
+    .where(inArray(machineVulnerabilities.machineId, orgMachines));
+  await db
+    .delete(machineVulnerabilityScans)
+    .where(inArray(machineVulnerabilityScans.machineId, orgMachines));
   await db.delete(machines).where(eq(machines.orgId, orgId));
 }
 

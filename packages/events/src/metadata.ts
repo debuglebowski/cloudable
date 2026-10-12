@@ -133,6 +133,23 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
     description:
       "A package install or removal failed on a machine, or was collected by the agent and never reported back.",
   },
+  // Tier 1: scan results are the evidence for the vulnerability-management control, and
+  // installing the scanner is a change to a governed machine. Neither may be filtered out.
+  "machine.vulnerability_scan_completed": {
+    tier: 1,
+    description:
+      "A vulnerability scan of a machine finished. Carries counts and the new Critical and High CVE ids; the findings themselves are current state, not events.",
+  },
+  "machine.vulnerability_scan_failed": {
+    tier: 1,
+    description:
+      "A vulnerability scan of a machine started and produced no findings, with the reason (for example the vulnerability database was unreachable).",
+  },
+  "machine.scanner_installed": {
+    tier: 1,
+    description:
+      "The vulnerability scanner was installed on a machine, or replaced by another version. An admin asked for it by turning scanning on for the org.",
+  },
 
   // --- access --- (certificates, denials, and elevation are always
   // audited at tier 1; routine session start/end is tier 2)

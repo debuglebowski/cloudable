@@ -17,6 +17,15 @@ export type {
   WakeMessage,
 } from "@cloudable/contracts";
 
+// Vulnerability scanning: the settings the poll carries, and what the report sends back.
+export type {
+  InstalledScanner,
+  ScanFailureReason,
+  VulnerabilityFinding,
+  VulnerabilityScanConfig,
+  VulnerabilityScanReport,
+} from "@cloudable/contracts";
+
 // Tunnel-signal channel (CP -> agent, deliberately separate from `wake` — see
 // tunnel/signal-listener.ts and apps/control-plane/src/tunnel/signal.ts for why) — see
 // apps/control-plane/src/http/routes/tunnel-signal.ts for the server side.

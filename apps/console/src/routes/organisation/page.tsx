@@ -28,12 +28,20 @@ import {
   RetentionDaysDialog,
   RetentionLocationDialog,
 } from "./setting-dialogs";
+import { VulnerabilityScanCard } from "./vulnerability-scan-card";
 
 function formatMode(mode: string): string {
   return mode.charAt(0).toUpperCase() + mode.slice(1);
 }
 
-type SettingsTab = "general" | "approvals" | "logging" | "retention" | "packages" | "compliance";
+type SettingsTab =
+  | "general"
+  | "approvals"
+  | "logging"
+  | "retention"
+  | "packages"
+  | "vulnerabilities"
+  | "compliance";
 
 export function OrganisationPage() {
   const { data: settings, isLoading } = useOrgSettings();
@@ -81,6 +89,7 @@ export function OrganisationPage() {
           <TabsTrigger value="logging">Logging</TabsTrigger>
           <TabsTrigger value="retention">Retention</TabsTrigger>
           <TabsTrigger value="packages">Packages</TabsTrigger>
+          <TabsTrigger value="vulnerabilities">Vulnerabilities</TabsTrigger>
           <TabsTrigger value="compliance">Compliance</TabsTrigger>
         </TabsList>
 
@@ -199,6 +208,10 @@ export function OrganisationPage() {
 
         <TabsContent value="packages" className="mt-6">
           <OrgPackageManifestCard />
+        </TabsContent>
+
+        <TabsContent value="vulnerabilities" className="mt-6">
+          <VulnerabilityScanCard />
         </TabsContent>
 
         <TabsContent value="compliance" className="mt-6">

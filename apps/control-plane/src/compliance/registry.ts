@@ -5,6 +5,7 @@ import { elevatedAccessApprovedCheck } from "./checks/elevated-access-approved";
 import { machinesReportingCheck } from "./checks/machines-reporting";
 import { noUndeclaredSoftwareCheck } from "./checks/no-undeclared-software";
 import { retentionHonouredCheck } from "./checks/retention-honoured";
+import { vulnerabilitiesRemediatedCheck } from "./checks/vulnerabilities-remediated";
 
 // Feature units append their own check to this array — additive only, never reorder.
 export const COMPLIANCE_CHECKS: ComplianceCheck[] = [
@@ -14,4 +15,5 @@ export const COMPLIANCE_CHECKS: ComplianceCheck[] = [
   elevatedAccessApprovedCheck,
   retentionHonouredCheck,
   machinesReportingCheck,
+  vulnerabilitiesRemediatedCheck,
 ];

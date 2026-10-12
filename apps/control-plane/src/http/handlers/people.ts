@@ -1,6 +1,10 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import {
+  requireAdminToChangeRole,
+  requireAdminToCreateWithRole,
+} from "../../domain/people/authorization";
+import {
   type PersonRow,
   createPerson,
   getPersonById,
@@ -51,6 +55,8 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
     .handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        // Anyone may add a person as an ordinary member. Handing out an admin role takes an admin.
+        yield* requireAdminToCreateWithRole(currentUser, payload.role);
         return yield* createPerson({ ...payload, orgId: currentUser.orgId });
       }).pipe(
         Effect.map(toWire),
@@ -60,6 +66,15 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
     .handle("update", ({ path, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        // Changing a role needs an admin, in either direction. Without this, the admin check on
+        // sensitive settings would stop nobody: a member could make themselves an owner first.
+        // Sending the role a person already has is not a change.
+        if (payload.role !== undefined) {
+          const target = yield* getPersonById(path.id).pipe(
+            Effect.catchTag("PeopleDbError", (e) => Effect.die(e)),
+          );
+          yield* requireAdminToChangeRole(currentUser, target, payload.role);
+        }
         return yield* updatePerson({ personId: path.id, orgId: currentUser.orgId, ...payload });
       }).pipe(
         Effect.map(toWire),

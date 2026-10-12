@@ -12,7 +12,7 @@ import { apiGet, apiGetText } from "@/lib/api-client";
  * worked; this file was never updated after they merged.
  */
 
-/** The two evidence exports, by the path each actually lives at. (`findings.csv`, not
+/** The evidence exports, by the path each actually lives at. (`findings.csv`, not
  * `open-findings.csv` — the mock's guessed name was never corrected against the real
  * endpoint.) Fetched with credentials rather than linked to; see `apiGetText`. */
 export const AUDIT_EXPORTS = {
@@ -25,6 +25,11 @@ export const AUDIT_EXPORTS = {
     path: "/api/v1/compliance/exports/findings.csv",
     filename: "open-findings.csv",
     label: "Open findings",
+  },
+  vulnerabilities: {
+    path: "/api/v1/compliance/exports/vulnerabilities.csv",
+    filename: "vulnerabilities.csv",
+    label: "Vulnerabilities",
   },
 } as const;
 
@@ -100,7 +105,7 @@ export interface OpenFinding {
   machineId?: string | undefined;
 }
 
-/** One of the six v1 compliance checks, as evidence for a control. */
+/** One of the v1 compliance checks, as evidence for a control. */
 export interface ControlCheckEvidence {
   id: string;
   checkLabel: string;
@@ -237,8 +242,8 @@ interface ComplianceCheckResultWire {
 /**
  * The real backend has no per-finding severity — findings are a fact
  * ("this machine diverges from its manifest"), not a graded risk score.
- * This is a fixed, check-level editorial classification (which of the six
- * v1 checks tends to matter more if it fails), not a fabricated per-finding
+ * This is a fixed, check-level editorial classification (which of the v1
+ * checks tends to matter more if it fails), not a fabricated per-finding
  * value — every finding under the same check gets the same severity.
  * Unlisted/future checks default to "medium".
  */
@@ -249,6 +254,7 @@ const CHECK_SEVERITY: Record<string, FindingSeverity> = {
   "no-undeclared-software": "medium",
   "active-owner": "medium",
   "machines-reporting": "low",
+  "vulnerabilities-remediated": "high",
 };
 
 export const SEVERITY_VARIANT: Record<FindingSeverity, BadgeProps["variant"]> = {
@@ -327,7 +333,7 @@ async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
         status: "unknown",
         detail:
           control.status === "not_covered"
-            ? "Not covered by any of the six v1 compliance checks."
+            ? "Not covered by any of the v1 compliance checks."
             : "Manual action required — no automated check evidences this control yet.",
         medianAgeDays: null,
         findings: [],
@@ -343,7 +349,7 @@ async function fetchControlEvidence(): Promise<ControlEvidenceGroup[]> {
   });
 }
 
-/** One of the six v1 checks, ungrouped by control — the shape a machine-scoped view
+/** One of the v1 checks, ungrouped by control — the shape a machine-scoped view
  * wants ("does this check implicate this machine"), vs. `ControlEvidenceGroup`'s
  * control/framework grouping (compliance-taxonomy detail an auditor cares about, a
  * single machine's page doesn't) and its synthetic "not covered" placeholder checks. */

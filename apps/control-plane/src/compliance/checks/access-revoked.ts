@@ -50,7 +50,7 @@ export const accessRevokedOnOffboardingCheck: ComplianceCheck = {
   id: CHECK_ID,
   label: "Access revoked on offboarding",
   // Live, unrevoked SSH access surviving an offboarding is a direct
-  // unauthorised-access risk — the highest severity among the six checks.
+  // unauthorised-access risk — one of the highest severities among the v1 checks.
   severity: "high",
   controlRefs: ["access-management"],
 

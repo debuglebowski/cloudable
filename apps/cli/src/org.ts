@@ -1,3 +1,7 @@
+import type {
+  UpdateVulnerabilityScanRequest,
+  VulnerabilityScanOrgView,
+} from "@cloudable/contracts";
 // ---------------------------------------------------------------------------
 // `cloudable org *` — org-wide settings and the org layer of the package
 // manifest.
@@ -14,6 +18,14 @@ import { type OrgWire, fetchOrg } from "./identity";
 import { packageEdits } from "./machines";
 import { dash, printEmpty, printFields, printJson, printTable } from "./output";
 import { usageFor } from "./program";
+import {
+  VULNERABILITY_SCAN_USAGE,
+  VULNERABILITY_SCAN_VALUE_FLAGS,
+  describeSwitch,
+  hasVulnerabilityScanChanges,
+  printVulnerabilityScanView,
+  vulnerabilityScanUpdateFromArgs,
+} from "./vulnerability-scan";
 
 const APPROVAL_ACTIONS = [
   "snapshot_restore",
@@ -79,7 +91,7 @@ function approvalModes(values: ReadonlyArray<string>): Record<string, string> {
 
 export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--event-retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode>]",
+    `org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--event-retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode>] ${VULNERABILITY_SCAN_USAGE}`,
   );
   const args = parseArgs(
     argv,
@@ -90,6 +102,7 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
         "retention-days",
         "event-retention-days",
         "retention-location",
+        ...VULNERABILITY_SCAN_VALUE_FLAGS,
       ],
       repeatable: ["approval-mode"],
     }),
@@ -121,14 +134,42 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
   }
   if (Object.keys(modes).length > 0) payload.approvalModes = modes;
 
-  if (Object.keys(payload).length === 0) throw new UsageError(`nothing to change\n\n${usage}`);
+  // Parsed (and refused if invalid) before anything is sent, so a typo in a scanning flag
+  // cannot leave a half-applied change behind.
+  const scan: UpdateVulnerabilityScanRequest = vulnerabilityScanUpdateFromArgs(args);
+  const changesScan = hasVulnerabilityScanChanges(scan);
 
-  const org = await authenticatedApiRequest<OrgWire>("/api/v1/organisation", patchJson(payload));
+  if (Object.keys(payload).length === 0 && !changesScan) {
+    throw new UsageError(`nothing to change\n\n${usage}`);
+  }
+
+  // Scanning lives on its own endpoint, so it is one PATCH of its own. Organisation settings
+  // keep the one they always had. Each is recorded server side as setting changes.
+  const org =
+    Object.keys(payload).length > 0
+      ? await authenticatedApiRequest<OrgWire>("/api/v1/organisation", patchJson(payload))
+      : undefined;
+  const scanView = changesScan
+    ? await authenticatedApiRequest<VulnerabilityScanOrgView>(
+        "/api/v1/vulnerability-scan",
+        patchJson(scan),
+      )
+    : undefined;
+
   if (args.booleans.has("json")) {
-    printJson(org);
+    // One result keeps its own shape; both together are named so neither is ambiguous.
+    printJson(
+      org && scanView ? { organisation: org, vulnerabilityScan: scanView } : (org ?? scanView),
+    );
     return;
   }
-  printOrg(org);
+  if (org) printOrg(org);
+  if (scanView) {
+    if (org) console.log("");
+    const note = describeSwitch(scan);
+    if (note) console.log(`${note}\n`);
+    printVulnerabilityScanView(scanView);
+  }
 }
 
 export async function runOrgPackagesListCommand(argv: ReadonlyArray<string>): Promise<void> {

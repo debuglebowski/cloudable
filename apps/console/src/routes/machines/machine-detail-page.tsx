@@ -58,6 +58,7 @@ import {
   MACHINE_STATE_BADGE_VARIANT,
   MACHINE_STATE_LABEL,
 } from "./machine-state";
+import { MachineVulnerabilitiesTab } from "./machine-vulnerabilities-tab";
 import { RestartMachineDialog } from "./restart-machine-dialog";
 import { UpgradeMachineDialog } from "./upgrade-machine-dialog";
 
@@ -96,12 +97,27 @@ function PropertyRow({
   );
 }
 
-type DetailTab = "properties" | "manifest" | "compliance" | "sessions" | "snapshots" | "activity";
+type DetailTab =
+  | "properties"
+  | "manifest"
+  | "compliance"
+  | "vulnerabilities"
+  | "sessions"
+  | "snapshots"
+  | "activity";
 
-// Stable (non-index) keys for the six-check loading skeleton — this app's six v1 checks
+// Stable (non-index) keys for the seven-check loading skeleton — this app's v1 checks
 // never reorder, but a plain array index survives biome's own line-wrapping less reliably
 // than a fixed key set does.
-const COMPLIANCE_SKELETON_KEYS = ["skel-1", "skel-2", "skel-3", "skel-4", "skel-5", "skel-6"];
+const COMPLIANCE_SKELETON_KEYS = [
+  "skel-1",
+  "skel-2",
+  "skel-3",
+  "skel-4",
+  "skel-5",
+  "skel-6",
+  "skel-7",
+];
 
 /**
  * Detail is a sub-route (`/machines/$machineId`), not an expandable row: the tabs below carry
@@ -287,6 +303,7 @@ export function MachineDetailPage() {
             <TabsTrigger value="properties">Properties</TabsTrigger>
             <TabsTrigger value="manifest">Manifest</TabsTrigger>
             <TabsTrigger value="compliance">Compliance</TabsTrigger>
+            <TabsTrigger value="vulnerabilities">Vulnerabilities</TabsTrigger>
             <TabsTrigger value="sessions">Sessions</TabsTrigger>
             <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
@@ -530,6 +547,10 @@ export function MachineDetailPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="vulnerabilities">
+          <MachineVulnerabilitiesTab machineId={machineId} />
         </TabsContent>
 
         <TabsContent value="sessions">

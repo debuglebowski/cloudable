@@ -53,6 +53,10 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     const { runMachinesArchiveCommand } = await import("./machines");
     await runMachinesArchiveCommand(rest);
   },
+  "machines vulnerabilities": async (rest) => {
+    const { runMachinesVulnerabilitiesCommand } = await import("./vulnerability-scan");
+    await runMachinesVulnerabilitiesCommand(rest);
+  },
   "machines packages list": async (rest) => {
     const { runMachinesPackagesListCommand } = await import("./machines");
     await runMachinesPackagesListCommand(rest);
@@ -199,6 +203,10 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     const { runOrgUpdateCommand } = await import("./org");
     await runOrgUpdateCommand(rest);
   },
+  "org vulnerability-scan": async (rest) => {
+    const { runOrgVulnerabilityScanCommand } = await import("./vulnerability-scan");
+    await runOrgVulnerabilityScanCommand(rest);
+  },
   "org packages list": async (rest) => {
     const { runOrgPackagesListCommand } = await import("./org");
     await runOrgPackagesListCommand(rest);
@@ -249,6 +257,10 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
   "export findings": async (rest) => {
     const { runExportFindingsCommand } = await import("./compliance");
     await runExportFindingsCommand(rest);
+  },
+  "export vulnerabilities": async (rest) => {
+    const { runExportVulnerabilitiesCommand } = await import("./compliance");
+    await runExportVulnerabilitiesCommand(rest);
   },
 
   events: async (rest) => {

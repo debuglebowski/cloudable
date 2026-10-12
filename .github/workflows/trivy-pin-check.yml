@@ -1,0 +1,98 @@
+# Checks the pinned Trivy release in apps/control-plane/Dockerfile.
+#
+# The Dockerfile bundles Trivy, the vulnerability scanner that machines download from the control
+# plane (docs/vulnerability-scanning.md). It pins the release by version and by the SHA-256 of each
+# release tarball, and the build fails if a download differs. That guarantees the same bytes on
+# every build. It does not prove those bytes are what Aqua published: that is what this does, and
+# only when the pin changes, which is the only time it can change.
+#
+# It downloads the release's checksums file and its Sigstore bundle, verifies the signature, and
+# then requires both pinned hashes to be listed in that signed file. A wrong, mistyped or swapped
+# hash fails here, in review, before it reaches an image.
+#
+# cosign runs from a container pinned by digest, not from a third-party action: aquasecurity/
+# trivy-action was compromised in March 2026 (see trivy-scan.yml), and every action in this repo is
+# pinned to a commit for the same reason.
+#
+# Not tested before this file was written: the machine it was written on could not reach Sigstore's
+# trust root. The first run on GitHub is its first real run. The signing identity below was read from
+# the v0.75.0 bundle's certificate: https://github.com/aquasecurity/trivy/.github/workflows/
+# reusable-release.yaml@refs/tags/v0.75.0, issued by https://token.actions.githubusercontent.com.
+name: Trivy pin check
+
+on:
+  push:
+    branches: [main]
+    paths: &pin-paths
+      - "apps/control-plane/Dockerfile"
+      - ".github/workflows/trivy-pin-check.yml"
+  pull_request:
+    paths: *pin-paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-pin:
+    name: Verify the pinned Trivy release
+    runs-on: ubuntu-latest
+    env:
+      # ghcr.io/sigstore/cosign/cosign:v2.5.3, by digest. Bump deliberately, with the tag beside it.
+      COSIGN_IMAGE: ghcr.io/sigstore/cosign/cosign:v2.5.3@sha256:f1946d0f30fc8e3777b02f2201e02efdba9fe38f4918162f937052fac98e083f
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Read the pin
+        id: pin
+        run: |
+          dockerfile=apps/control-plane/Dockerfile
+          version=$(sed -n 's/^ARG TRIVY_VERSION=//p' "$dockerfile")
+          sha_x64=$(sed -n 's/^ARG TRIVY_SHA256_X64=//p' "$dockerfile")
+          sha_arm64=$(sed -n 's/^ARG TRIVY_SHA256_ARM64=//p' "$dockerfile")
+
+          # These go into URLs and shell commands below, so they must look like what they are.
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "TRIVY_VERSION is not x.y.z: '$version'" >&2; exit 1; }
+          [[ "$sha_x64" =~ ^[0-9a-f]{64}$ ]] || { echo "TRIVY_SHA256_X64 is not a SHA-256: '$sha_x64'" >&2; exit 1; }
+          [[ "$sha_arm64" =~ ^[0-9a-f]{64}$ ]] || { echo "TRIVY_SHA256_ARM64 is not a SHA-256: '$sha_arm64'" >&2; exit 1; }
+
+          {
+            echo "version=$version"
+            echo "sha_x64=$sha_x64"
+            echo "sha_arm64=$sha_arm64"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download the release's checksums file and signature bundle
+        env:
+          VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          base="https://github.com/aquasecurity/trivy/releases/download/v${VERSION}"
+          curl -fsSL -o checksums.txt "${base}/trivy_${VERSION}_checksums.txt"
+          curl -fsSL -o checksums.txt.sigstore.json "${base}/trivy_${VERSION}_checksums.txt.sigstore.json"
+
+      - name: Verify the signature
+        env:
+          VERSION: ${{ steps.pin.outputs.version }}
+        run: |
+          # The identity is Aqua's release workflow, at the tag for this exact version. A signature
+          # from any other workflow, repository or tag does not pass.
+          version_pattern="${VERSION//./\\.}"
+          docker run --rm -v "$PWD:/work" -w /work "$COSIGN_IMAGE" verify-blob \
+            --bundle checksums.txt.sigstore.json \
+            --certificate-identity-regexp "^https://github\\.com/aquasecurity/trivy/\\.github/workflows/[A-Za-z0-9._-]+@refs/tags/v${version_pattern}\$" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            checksums.txt
+
+      - name: Check both pinned hashes are in the signed file
+        env:
+          VERSION: ${{ steps.pin.outputs.version }}
+          SHA_X64: ${{ steps.pin.outputs.sha_x64 }}
+          SHA_ARM64: ${{ steps.pin.outputs.sha_arm64 }}
+        run: |
+          status=0
+          grep -Fx "${SHA_X64}  trivy_${VERSION}_Linux-64bit.tar.gz" checksums.txt \
+            || { echo "TRIVY_SHA256_X64 is not the signed hash of trivy_${VERSION}_Linux-64bit.tar.gz" >&2; status=1; }
+          grep -Fx "${SHA_ARM64}  trivy_${VERSION}_Linux-ARM64.tar.gz" checksums.txt \
+            || { echo "TRIVY_SHA256_ARM64 is not the signed hash of trivy_${VERSION}_Linux-ARM64.tar.gz" >&2; status=1; }
+          exit "$status"

@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import net from "node:net";
+import { VULNERABILITY_SCAN_SETTING_KEYS } from "@cloudable/contracts";
 import type * as schema from "@cloudable/schema";
-import { events, machines, orgs, sessions, settingValues } from "@cloudable/schema";
+import { events, machines, orgs, people, sessions, settingValues } from "@cloudable/schema";
 import { and, eq, inArray, or } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
@@ -16,6 +17,7 @@ import { TunnelSignal } from "../../tunnel/signal";
 import { MachineService } from "../machine/MachineService";
 import { ACCESS_METHODS_ENABLED_KEY } from "../machine/settings";
 import { getOrgSettings, updateOrgSettings } from "../organisation/settings";
+import { AdminRoleRequiredError } from "../people/authorization";
 import { EVENTS_RETENTION_DAYS_KEY, EVENTS_RETENTION_INVALID_REASON } from "../retention/policy";
 import { applySettingChange } from "./apply-setting-change";
 import { InvalidScopeError, InvalidSettingValueError, PinnedSettingError } from "./errors";
@@ -123,6 +125,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
           ),
         );
       await db.delete(machines).where(inArray(machines.orgId, createdOrgIds));
+      await db.delete(people).where(inArray(people.orgId, createdOrgIds));
       await db.delete(orgs).where(inArray(orgs.id, createdOrgIds));
     }
     await close();
@@ -860,6 +863,256 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         current: { versionPin: "24", pinned: false },
         overridesLevel: "org",
       });
+    });
+  });
+  describe("vulnerability scan settings", () => {
+    const KEYS = VULNERABILITY_SCAN_SETTING_KEYS;
+
+    async function seedPerson(
+      orgId: string,
+      role: string,
+      options: { active?: boolean } = {},
+    ): Promise<string> {
+      const [person] = await db
+        .insert(people)
+        .values({
+          orgId,
+          email: `p-${crypto.randomUUID()}@test.local`,
+          role,
+          active: options.active ?? true,
+        })
+        .returning();
+      if (!person) throw new Error("seed failed");
+      return person.id;
+    }
+
+    // One owner per org, made the first time it is needed. Writing these settings takes an admin,
+    // so a test that is not about permission acts as one.
+    const ownerByOrg = new Map<string, string>();
+    const ownerOf = async (orgId: string): Promise<string> => {
+      const existing = ownerByOrg.get(orgId);
+      if (existing) return existing;
+      const created = await seedPerson(orgId, "owner");
+      ownerByOrg.set(orgId, created);
+      return created;
+    };
+
+    const writeAs = async (
+      actor: { type: "person" | "system"; id: string },
+      orgId: string,
+      key: string,
+      value: unknown,
+      scopeId = orgId,
+      scopeType: "org" | "machine" = "org",
+    ) =>
+      run(
+        Effect.either(
+          applySettingChange({
+            orgId,
+            scopeType,
+            scopeId,
+            key,
+            value,
+            actorType: actor.type,
+            actorId: actor.id,
+            correlationId: crypto.randomUUID(),
+          }),
+        ),
+      );
+
+    const write = async (
+      orgId: string,
+      key: string,
+      value: unknown,
+      scopeId = orgId,
+      scopeType: "org" | "machine" = "org",
+    ) =>
+      writeAs({ type: "person", id: await ownerOf(orgId) }, orgId, key, value, scopeId, scopeType);
+
+    const versionOf = async (machineId: string) => {
+      const [row] = await db.select().from(machines).where(eq(machines.id, machineId));
+      return row?.desiredStateVersion;
+    };
+
+    test("every key refuses a machine-scope write, writing nothing", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+      for (const key of Object.values(KEYS)) {
+        const result = await write(org.id, key, true, machine.id, "machine");
+        expect(result._tag).toBe("Left");
+        if (result._tag === "Left") expect(result.left).toBeInstanceOf(InvalidScopeError);
+      }
+      const rows = await db
+        .select()
+        .from(settingValues)
+        .where(eq(settingValues.scopeId, machine.id));
+      expect(rows).toHaveLength(0);
+    });
+
+    test("rejects an invalid value for each key, writing nothing and emitting nothing", async () => {
+      const org = await seedOrg();
+      const invalid: Array<[string, unknown]> = [
+        [KEYS.enabled, "yes"],
+        [KEYS.scanner, "grype"],
+        [KEYS.scope, "libraries"],
+        [KEYS.scanDays, []],
+        [KEYS.scanTimeUtc, "25:00"],
+        [KEYS.remediationDaysCritical, 0],
+        [KEYS.remediationDaysHigh, 1000],
+        [KEYS.dbRepository, "https://registry.example.com/db"],
+      ];
+      for (const [key, value] of invalid) {
+        const result = await write(org.id, key, value);
+        expect(result._tag).toBe("Left");
+        if (result._tag === "Left") expect(result.left).toBeInstanceOf(InvalidSettingValueError);
+      }
+      const rows = await db.select().from(settingValues).where(eq(settingValues.scopeId, org.id));
+      expect(rows).toHaveLength(0);
+      expect(await db.select().from(events).where(eq(events.orgId, org.id))).toHaveLength(0);
+    });
+
+    test("turning scanning on is an audited org.setting_changed event naming who did it", async () => {
+      const org = await seedOrg();
+      const result = await write(org.id, KEYS.enabled, true);
+      expect(result._tag).toBe("Right");
+
+      const recorded = await db.select().from(events).where(eq(events.orgId, org.id));
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]?.type).toBe("org.setting_changed");
+      expect(recorded[0]?.actorType).toBe("person");
+      expect(recorded[0]?.actorId).toBe(ownerByOrg.get(org.id) ?? "no owner was made");
+      expect(recorded[0]?.payload).toEqual({
+        key: KEYS.enabled,
+        previous: null,
+        current: true,
+        level: "org",
+      });
+    });
+
+    describe("who may change them", () => {
+      const refusalIn = async (
+        actor: { type: "person" | "system"; id: string },
+        orgId: string,
+        key: string = KEYS.enabled,
+        value: unknown = true,
+      ) => writeAs(actor, orgId, key, value);
+
+      test("a member is refused, and nothing is written, versioned or recorded", async () => {
+        const org = await seedOrg();
+        const machine = await seedMachine(org.id);
+        const member = await seedPerson(org.id, "member");
+
+        for (const key of Object.values(KEYS)) {
+          const result = await refusalIn({ type: "person", id: member }, org.id, key, true);
+          expect(result._tag).toBe("Left");
+          if (result._tag === "Left") expect(result.left).toBeInstanceOf(AdminRoleRequiredError);
+        }
+        expect(
+          await db.select().from(settingValues).where(eq(settingValues.scopeId, org.id)),
+        ).toHaveLength(0);
+        expect(await db.select().from(events).where(eq(events.orgId, org.id))).toHaveLength(0);
+        expect(await versionOf(machine.id)).toBe(0);
+      });
+
+      test("an owner and an admin may", async () => {
+        const org = await seedOrg();
+        const owner = await seedPerson(org.id, "owner");
+        const admin = await seedPerson(org.id, "admin");
+        expect((await refusalIn({ type: "person", id: owner }, org.id))._tag).toBe("Right");
+        expect(
+          (await refusalIn({ type: "person", id: admin }, org.id, KEYS.scanTimeUtc, "05:00"))._tag,
+        ).toBe("Right");
+      });
+
+      test("the role must match exactly: a lookalike is not an admin", async () => {
+        const org = await seedOrg();
+        for (const role of ["Owner", "ADMIN", "administrator", "owner ", ""]) {
+          const person = await seedPerson(org.id, role);
+          const result = await refusalIn({ type: "person", id: person }, org.id);
+          expect(result._tag).toBe("Left");
+        }
+      });
+
+      test("a deactivated admin is refused", async () => {
+        const org = await seedOrg();
+        const gone = await seedPerson(org.id, "owner", { active: false });
+        expect((await refusalIn({ type: "person", id: gone }, org.id))._tag).toBe("Left");
+      });
+
+      test("an admin of another org is refused", async () => {
+        const mine = await seedOrg();
+        const theirs = await seedOrg();
+        const stranger = await seedPerson(theirs.id, "owner");
+        expect((await refusalIn({ type: "person", id: stranger }, mine.id))._tag).toBe("Left");
+      });
+
+      test("someone who is not a person at all is refused, as an answer and not a crash", async () => {
+        const org = await seedOrg();
+        for (const id of [crypto.randomUUID(), "person-1", "", "'; drop table people; --"]) {
+          const result = await refusalIn({ type: "person", id }, org.id);
+          expect(result._tag).toBe("Left");
+          if (result._tag === "Left") expect(result.left).toBeInstanceOf(AdminRoleRequiredError);
+        }
+      });
+
+      test("the control plane itself, acting as the system, is not held to a role", async () => {
+        const org = await seedOrg();
+        expect((await refusalIn({ type: "system", id: "control-plane" }, org.id))._tag).toBe(
+          "Right",
+        );
+      });
+
+      test("other settings are not affected: a member may still change them", async () => {
+        const org = await seedOrg();
+        const member = await seedPerson(org.id, "member");
+        expect(
+          (await refusalIn({ type: "person", id: member }, org.id, "logging_tier", 2))._tag,
+        ).toBe("Right");
+      });
+    });
+
+    test("a changed value bumps every live machine in the org, and nobody else's", async () => {
+      const org = await seedOrg();
+      const other = await seedOrg();
+      const live = await seedMachine(org.id);
+      const [archived] = await db
+        .insert(machines)
+        .values({
+          orgId: org.id,
+          name: "gone",
+          provider: "fake",
+          region: "eastus",
+          sizeSku: "Standard_B2s",
+          image: "ubuntu-24.04",
+          state: "archived_restorable",
+        })
+        .returning();
+      if (!archived) throw new Error("seed failed");
+      createdMachineIds.push(archived.id);
+      const elsewhere = await seedMachine(other.id);
+
+      await write(org.id, KEYS.enabled, true);
+      expect(await versionOf(live.id)).toBe(1);
+      expect(await versionOf(archived.id)).toBe(0);
+      expect(await versionOf(elsewhere.id)).toBe(0);
+
+      await write(org.id, KEYS.scanTimeUtc, "03:30");
+      expect(await versionOf(live.id)).toBe(2);
+    });
+
+    test("saving the same value again does not make the fleet re-read its settings", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+      await write(org.id, KEYS.enabled, true);
+      await write(org.id, KEYS.enabled, true);
+      expect(await versionOf(machine.id)).toBe(1);
+    });
+
+    test("other settings still leave desired state alone", async () => {
+      const org = await seedOrg();
+      const machine = await seedMachine(org.id);
+      await write(org.id, "logging_tier", 2);
+      expect(await versionOf(machine.id)).toBe(0);
     });
   });
 });
