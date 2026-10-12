@@ -655,8 +655,10 @@ other. Turning it off terminates the inspections already open, like the other tw
 - **The OS disk**, as above.
 - **Per-path audit.** Deliberate, see above.
 - **Local development** needs `FAKE_SNAPSHOT_IMAGE_PATH` pointed at a real ext4 image
-  (`apps/control-plane/src/snapshot-fs/__fixtures__/home.img.gz`, gunzipped). Docker
-  machines capture no disks, so there is otherwise nothing to read.
+  (`apps/control-plane/src/snapshot-fs/__fixtures__/home.img.gz`, gunzipped, for example
+  to `.data/home.img`, which git ignores). Docker machines capture no disks, so there is
+  otherwise nothing to read. `.env.example` has the command. The e2e snapshot specs skip,
+  with a warning, when the variable is unset or the file is missing.
 
 ## Actor attribution
 

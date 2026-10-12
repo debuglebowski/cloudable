@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { eq } from "drizzle-orm";
 import { e2eConfig } from "../setup/config";
@@ -22,9 +23,17 @@ import { E2E_PASSWORD } from "../setup/global-setup";
  *
  * The control plane must be running with FAKE_SNAPSHOT_IMAGE_PATH pointed at a real ext4
  * image for the listing assertions; without it the open succeeds and the first listing
- * fails, so those are skipped rather than reported as a product failure.
+ * fails, so those are skipped rather than reported as a product failure. A path that is
+ * set but points at nothing counts as missing, with a warning, so a stale `.env` entry is
+ * not mistaken for a product failure either.
  */
-const hasImage = !!process.env.FAKE_SNAPSHOT_IMAGE_PATH;
+const imagePath = process.env.FAKE_SNAPSHOT_IMAGE_PATH;
+const hasImage = !!imagePath && existsSync(imagePath);
+if (imagePath && !hasImage) {
+  console.warn(
+    `FAKE_SNAPSHOT_IMAGE_PATH=${imagePath} does not exist; skipping the specs that browse files. See .env.example for how to create the image.`,
+  );
+}
 
 // Suffixed per run so a machine name can never collide with a previous run's leftovers.
 const suffix = randomUUID().slice(0, 8);
@@ -172,7 +181,7 @@ const snapshotRow = async (
 };
 
 test("the owner can browse their own archived machine's files", async ({ page }) => {
-  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH on the control plane");
+  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH set to an existing ext4 image");
 
   const row = await snapshotRow(page, ids.owned);
   await row.getByRole("button", { name: "Browse files" }).click();
@@ -185,7 +194,7 @@ test("the owner can browse their own archived machine's files", async ({ page })
 });
 
 test("nothing can be changed from a snapshot", async ({ page }) => {
-  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH on the control plane");
+  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH set to an existing ext4 image");
 
   const row = await snapshotRow(page, ids.owned);
   await row.getByRole("button", { name: "Browse files" }).click();
@@ -199,7 +208,7 @@ test("nothing can be changed from a snapshot", async ({ page }) => {
 });
 
 test("a file too large to read inline can still be downloaded", async ({ page }) => {
-  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH on the control plane");
+  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH set to an existing ext4 image");
 
   // The point of the whole feature: recovering the file someone actually needs back. That
   // file is as likely to be a 40 MiB archive as a text note, and `read` refuses anything
@@ -238,7 +247,7 @@ test("a snapshot that captured nothing greys the action out rather than hiding i
 });
 
 test("a manual snapshot is browsable from the machine's own Snapshots tab", async ({ page }) => {
-  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH on the control plane");
+  test.skip(!hasImage, "needs FAKE_SNAPSHOT_IMAGE_PATH set to an existing ext4 image");
 
   // A manual snapshot of a RUNNING machine — a row the Archive page never listed even
   // when it had actions, because it only ever showed one archive-trigger snapshot per
