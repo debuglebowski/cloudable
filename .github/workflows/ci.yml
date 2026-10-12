@@ -57,38 +57,31 @@ jobs:
       - name: Unit tests (all workspaces)
         run: bun run --filter '*' test:unit
 
-      # `apps/control-plane`'s `test:integration` script runs a real
-      # integration test (`reconcile-diff.integration.ts`) against the
-      # `postgres` service above — every other workspace's `test:integration`
-      # is still a placeholder `exit 0`, wired in now so a real script starts
-      # running in CI the moment it's written, not silently ignored. docs/spec.md
-      # is explicit that some invariants (tenant-subject binding, signature
-      # validation) are only ever caught by a negative-path integration test.
+      # `apps/control-plane`'s `test:integration` script runs everything that needs
+      # a real Postgres or Docker: `reconcile-diff.integration.ts`, the `*.test.ts`
+      # files that guard on `isDbReachable` (against the `postgres` service above),
+      # and the `*.integration-check.ts` files (five of the six compliance checks —
+      # every one except `machines-reporting`, which has no such file — plus the
+      # agent protocol), which each spin up their own throwaway Postgres via
+      # testcontainers, independent of the service. Every other workspace's
+      # `test:integration` is still a placeholder `exit 0`, wired in now so a real
+      # script starts running in CI the moment it's written, not silently ignored.
+      # docs/spec.md is explicit that some invariants (tenant-subject binding,
+      # signature validation) are only ever caught by a negative-path integration
+      # test.
+      #
+      # The script leaves out `ProvisioningService.docker.integration-check.ts`. It is
+      # the only one that builds rather than just talks to Postgres: two
+      # `bun build --compile` binaries and a `docker build` that runs `apt-get`, all
+      # cold on every runner. It held steady at 32-44s for this whole step until
+      # 2026-09-11, when it started taking 112-377s with no change on our side — a
+      # package mirror stalling inside the build. It covers the local Docker
+      # provisioning backend, which is dev/demo only, so paying that on every console
+      # or control-plane commit buys nothing. `docker-provisioning-check.yml` runs it
+      # on the paths that can break it. It also leaves out the Azure check, which
+      # creates a real VM.
       - name: Integration tests (all workspaces)
         run: bun run --filter '*' test:integration
-
-      # The `*.integration-check.ts` files (five of the six compliance
-      # checks — every one except `machines-reporting`, which has no such
-      # file — plus the agent protocol) don't match the `.test.`/`.spec.`
-      # glob that `test:unit`/`test:integration` use, so nothing ever ran
-      # them. Each spins up its own throwaway Postgres via testcontainers —
-      # independent of the `postgres` service above — so they only need
-      # Docker, which this runner already provides.
-      #
-      # `SKIP_DOCKER_PROVISIONING_CHECK` excludes exactly one of those files,
-      # `ProvisioningService.docker.integration-check.ts`. It is the only one
-      # that builds rather than just talks to Postgres: two
-      # `bun build --compile` binaries and a `docker build` that runs
-      # `apt-get`, all cold on every runner. It held steady at 32-44s for this
-      # whole step until 2026-09-11, when it started taking 112-377s with no
-      # change on our side — a package mirror stalling inside the build. It
-      # covers the local Docker provisioning backend, which is dev/demo only,
-      # so paying that on every console or control-plane commit buys nothing.
-      # `docker-provisioning-check.yml` runs it on the paths that can break it.
-      - name: Integration-check tests (control-plane)
-        env:
-          SKIP_DOCKER_PROVISIONING_CHECK: "1"
-        run: bun run --cwd apps/control-plane test:integration-check
 
       - name: Lint (Biome)
         run: bun run lint

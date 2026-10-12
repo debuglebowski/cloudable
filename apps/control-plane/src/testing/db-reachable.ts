@@ -19,7 +19,8 @@ import postgres from "postgres";
  * instead (`DATABASE_URL`, defaulting to the docker-compose value).
  *
  * To actually exercise a suite gated on this: `docker compose up -d` at the
- * repo root, `bun run db:migrate`, then run that file.
+ * repo root, `bun run db:migrate`, then run that file, or `bun run test:integration`
+ * to run all of them.
  */
 
 function isPortReachable(hostname: string, port: number, timeoutMs: number): Promise<boolean> {
