@@ -83,6 +83,30 @@ describe("hardeningSection", () => {
     expect(executable()).not.toContain("TrustedUserCAKeys");
   });
 
+  test("reads a disabled module back from modprobe's real output", () => {
+    const check = executable()
+      .split("\n")
+      .find((line) => line.includes('expect "module $m"'));
+    if (!check) throw new Error("module check not found");
+    const run = (modprobeOutput: string) =>
+      Bun.spawnSync([
+        "bash",
+        "-c",
+        `modprobe() { printf '${modprobeOutput}'; }
+fail() { echo "FAIL $1"; exit 1; }
+expect() { [ "$2" = "$3" ] || fail "$1 is '$2'"; }
+m=cramfs
+${check}
+echo ok`,
+      ]).stdout.toString();
+    // Ubuntu 24.04 on Azure, verbatim: a dependency first, and a trailing space on every line.
+    const kernelModule = "/lib/modules/7.0.0-1017-azure/kernel/drivers/mtd/mtd.ko.zst";
+    expect(run(`insmod ${kernelModule} \\ninstall /bin/false \\n`)).toBe("ok\n");
+    expect(run("install /bin/false \\n")).toBe("ok\n");
+    // Not disabled: only insmod lines, so the check must still fail.
+    expect(run(`insmod ${kernelModule} \\n`)).toStartWith("FAIL");
+  });
+
   test("creates sshd's privilege separation directory before testing the config", () => {
     // Without it `sshd -t` fails on a socket-activated first boot and the baseline is dropped.
     const script = executable();

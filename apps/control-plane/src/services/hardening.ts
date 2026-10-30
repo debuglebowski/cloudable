@@ -294,7 +294,10 @@ expect "tcp_syncookies" "$(sysctl -n net.ipv4.tcp_syncookies)" 1
 expect "randomize_va_space" "$(sysctl -n kernel.randomize_va_space)" 2
 expect "suid_dumpable" "$(sysctl -n fs.suid_dumpable)" 0
 for m in ${DISABLED_MODULES.join(" ")}; do
-  expect "module $m" "$(modprobe -n -v "$m" 2>/dev/null | head -n1)" "install /bin/false"
+  # The install line, not the first line: modprobe prints a dependency's insmod first
+  # (cramfs and jffs2 pull in mtd on the 24.04 Azure kernel) and pads every line with a
+  # trailing space. Both broke this check live. No install line still fails it.
+  expect "module $m" "$(modprobe -n -v "$m" 2>/dev/null | awk '$1=="install"{print $1, $2}' | tail -n1)" "install /bin/false"
 done
 expect "/etc/shadow mode" "$(stat -c %a /etc/shadow)" 640
 expect "/etc/passwd mode" "$(stat -c %a /etc/passwd)" 644
