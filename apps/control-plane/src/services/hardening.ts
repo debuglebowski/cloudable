@@ -232,6 +232,11 @@ ClientAliveInterval 300
 ClientAliveCountMax 3
 EOF
   chmod 600 /etc/ssh/sshd_config /etc/ssh/sshd_config.d/00-cloudable-hardening.conf
+  # "sshd -t" refuses to run without its privilege separation directory, whatever the
+  # config says. Ubuntu 24.04 socket-activates sshd, so on first boot nothing has created
+  # it yet: found live, every Azure machine dropped the whole baseline on this line.
+  # systemd's own unit creates the same directory with the same mode.
+  install -d -m 0755 /run/sshd
   if ! sshd -t; then
     rm -f /etc/ssh/sshd_config.d/00-cloudable-hardening.conf
     fail "sshd rejected the hardening drop-in, removed it"

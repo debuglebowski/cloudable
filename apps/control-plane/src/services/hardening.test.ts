@@ -83,6 +83,14 @@ describe("hardeningSection", () => {
     expect(executable()).not.toContain("TrustedUserCAKeys");
   });
 
+  test("creates sshd's privilege separation directory before testing the config", () => {
+    // Without it `sshd -t` fails on a socket-activated first boot and the baseline is dropped.
+    const script = executable();
+    const mkdir = script.indexOf("install -d -m 0755 /run/sshd");
+    expect(mkdir).toBeGreaterThan(-1);
+    expect(mkdir).toBeLessThan(script.indexOf("sshd -t"));
+  });
+
   test("does not use a JS template interpolation by accident inside the bash", () => {
     // A stray `${` in the source would have been consumed by TypeScript.
     expect(extractScript()).not.toContain("undefined");
