@@ -129,9 +129,9 @@ export function ApprovalsPage() {
         </Badge>
       </div>
       <p className="max-w-prose shrink-0 text-sm text-muted-foreground">
-        Sensitive actions — snapshot restore, break-glass, admin access to an unowned machine,
-        offboarding — gated by org policy per action type: none, single, or dual approval. Every
-        decision writes an event; denials require a reason and are evidence.
+        Package installs, snapshot restores, offboarding and changes to approval settings wait
+        here for a decision. You can't decide a request you made, one about you, or one about your
+        own machine. Every decision is recorded. A rejection needs a reason.
       </p>
 
       <Tabs value={view} onValueChange={(value) => setView(value as View)} className="shrink-0">
