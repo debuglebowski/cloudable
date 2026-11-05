@@ -20,4 +20,13 @@ export type PersonEvent =
   | (EventEnvelope & {
       type: "person.role_changed";
       payload: { previous: string; current: string };
+    })
+  | (EventEnvelope & {
+      type: "person.email_changed";
+      /** Every console session and CLI token the person held is revoked in the same change. */
+      payload: { previous: string; current: string };
+    })
+  | (EventEnvelope & {
+      type: "person.approver_changed";
+      payload: { previous: boolean; current: boolean };
     });

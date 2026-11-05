@@ -1,6 +1,7 @@
 import { HttpApiBuilder, HttpServerRequest } from "@effect/platform";
 import { Effect } from "effect";
 import { CONFIGURED_IDP_PROVIDER_ID, config } from "../../config";
+import { requireAdminUser } from "../../domain/authz";
 import {
   type IntegrationRow,
   connectIntegration,
@@ -74,6 +75,7 @@ export const IntegrationsLive = HttpApiBuilder.group(Api, "integrations", (handl
     .handle("list", () =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can see integrations.");
         const rows = yield* listActiveIntegrations(currentUser.orgId);
         // Deployment config replaces any idp row rather than sitting
         // alongside it. A stored row can only exist here if one was connected
@@ -93,6 +95,7 @@ export const IntegrationsLive = HttpApiBuilder.group(Api, "integrations", (handl
     .handle("connect", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can connect an integration.");
 
         // Deployment config wins. `@better-auth/sso` would reject the
         // registration anyway (it reserves any providerId declared in
@@ -160,6 +163,7 @@ export const IntegrationsLive = HttpApiBuilder.group(Api, "integrations", (handl
     .handle("disconnect", ({ path }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can disconnect an integration.");
         // The config-declared provider has no row to soft-delete and no
         // auth_sso_provider row to remove, so a disconnect would silently do
         // nothing while the console showed a success toast. The UI hides the

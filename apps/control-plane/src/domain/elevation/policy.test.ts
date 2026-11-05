@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SettingRow } from "@cloudable/schema";
+import { config } from "../../config";
 import {
   ADMIN_ACCESS_APPROVAL_MODE_SETTING_KEY,
   ADMIN_ACCESS_ELEVATION_TTL_MINUTES_SETTING_KEY,
@@ -44,42 +45,22 @@ describe("approvalModeSatisfiesFloor", () => {
 });
 
 describe("resolveAdminAccessPolicy", () => {
-  test("defaults to with_approval (fail-safe) when unset", () => {
-    expect(resolveAdminAccessPolicy([], chain)).toBe(DEFAULT_ADMIN_ACCESS_POLICY);
-    expect(DEFAULT_ADMIN_ACCESS_POLICY).toBe("with_approval");
+  test("is the deploy-time pin, `never` unless the deployment says otherwise", () => {
+    expect(DEFAULT_ADMIN_ACCESS_POLICY).toBe("never");
+    expect(resolveAdminAccessPolicy([], chain)).toBe(config.adminAccessPolicy);
   });
 
-  test("reads the org-scoped admin_access_policy setting", () => {
+  test("ignores an admin_access_policy setting row: the console cannot loosen the pin", () => {
     const rows: SettingRow<unknown>[] = [
       {
         scopeType: "org",
         scopeId: "org-1",
-        key: ADMIN_ACCESS_POLICY_SETTING_KEY,
-        value: "never",
-        source: "org",
-      },
-    ];
-    expect(resolveAdminAccessPolicy(rows, chain)).toBe("never");
-  });
-
-  test("a machine-scoped override wins over the org default", () => {
-    const rows: SettingRow<unknown>[] = [
-      {
-        scopeType: "org",
-        scopeId: "org-1",
-        key: ADMIN_ACCESS_POLICY_SETTING_KEY,
-        value: "never",
-        source: "org",
-      },
-      {
-        scopeType: "machine",
-        scopeId: "machine-1",
         key: ADMIN_ACCESS_POLICY_SETTING_KEY,
         value: "always",
-        source: "machine",
+        source: "org",
       },
     ];
-    expect(resolveAdminAccessPolicy(rows, chain)).toBe("always");
+    expect(resolveAdminAccessPolicy(rows, chain)).toBe(config.adminAccessPolicy);
   });
 });
 

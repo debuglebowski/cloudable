@@ -13,6 +13,10 @@ export interface CurrentUser {
   readonly personId: string;
   readonly orgId: string;
   readonly email: string;
+  /** `people.role`, read live on this request. Admin is `isAdminRole(role)`. */
+  readonly role: string;
+  /** `people.approver`, read live on this request. */
+  readonly approver: boolean;
 }
 
 export class CurrentUserTag extends Context.Tag("CurrentUser")<CurrentUserTag, CurrentUser>() {}
@@ -27,7 +31,19 @@ export class CurrentUserTag extends Context.Tag("CurrentUser")<CurrentUserTag, C
  */
 export class AuthenticationRequired extends Schema.TaggedError<AuthenticationRequired>()(
   "AuthenticationRequired",
-  { reason: Schema.Literal("no_session", "no_matching_person", "invalid_token") },
+  {
+    reason: Schema.Literal(
+      "no_session",
+      "no_matching_person",
+      "invalid_token",
+      // The person exists but is deactivated. Same 401 as no person at all: a deactivated
+      // person keeps no access of any kind, and the console sends them back to sign-in.
+      "deactivated",
+      // The credential was issued before the person's credentials were revoked (an admin
+      // changed their email). Signing in again issues a fresh one.
+      "credentials_revoked",
+    ),
+  },
   HttpApiSchema.annotations({ status: 401 }),
 ) {}
 
@@ -53,8 +69,10 @@ export class AuthenticationRequired extends Schema.TaggedError<AuthenticationReq
  *
  * Either way the `people` row is read live, on every request. Neither
  * credential carries an org, a role or an email of its own, so neither can
- * outlive the person's current standing: offboarding deletes the row and the
- * next request fails, without waiting for a TTL.
+ * outlive the person's current standing: a deactivated person is refused on
+ * their next request, offboarding deletes the row, and a credential issued
+ * before `people.credentials_revoked_at` (set when an admin changes the
+ * person's email) is refused too. None of it waits for a TTL.
  *
  * Apply via `.middleware(CurrentUserAuthentication)` on an `HttpApiGroup`/
  * `HttpApiEndpoint` — every handler downstream can then `yield* CurrentUserTag`
@@ -106,13 +124,18 @@ export const CurrentUserAuthenticationLive = Layer.effect(
       const request = yield* HttpServerRequest.HttpServerRequest;
 
       const token = bearerToken(request.headers);
-      const rows = token
+      // `issuedAt` is when the credential was issued, in ms since the epoch. Compared against
+      // the person's `credentialsRevokedAt` below.
+      const { rows, issuedAt } = token
         ? yield* Effect.gen(function* () {
             const verified = verifyCliToken(token);
             if (!verified.ok) {
               return yield* Effect.fail(new AuthenticationRequired({ reason: "invalid_token" }));
             }
-            return yield* personById(verified.personId);
+            return {
+              rows: yield* personById(verified.personId),
+              issuedAt: verified.issuedAt,
+            };
           })
         : yield* Effect.gen(function* () {
             const session = yield* Effect.tryPromise({
@@ -122,18 +145,32 @@ export const CurrentUserAuthenticationLive = Layer.effect(
             if (!session) {
               return yield* Effect.fail(new AuthenticationRequired({ reason: "no_session" }));
             }
-            return yield* personByEmail(session.user.email);
+            return {
+              rows: yield* personByEmail(session.user.email),
+              issuedAt: new Date(session.session.createdAt).getTime(),
+            };
           });
 
       const person = rows[0];
       if (!person) {
         return yield* Effect.fail(new AuthenticationRequired({ reason: "no_matching_person" }));
       }
+      if (!person.active) {
+        return yield* Effect.fail(new AuthenticationRequired({ reason: "deactivated" }));
+      }
+      if (
+        person.credentialsRevokedAt !== null &&
+        issuedAt <= person.credentialsRevokedAt.getTime()
+      ) {
+        return yield* Effect.fail(new AuthenticationRequired({ reason: "credentials_revoked" }));
+      }
 
       return {
         personId: person.id,
         orgId: person.orgId,
         email: person.email,
+        role: person.role,
+        approver: person.approver,
       } satisfies CurrentUser;
     });
   }),

@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import {
   COST_ESTIMATE_DISCLAIMER,
   InspectionFileUnreadableError,
+  SnapshotNotFoundError,
   type SnapshotRow,
   archiveMachine,
   clearLegalHold,
@@ -21,9 +22,18 @@ import {
   resumeRestore,
   setLegalHold,
 } from "../../domain/archive";
+import {
+  MachineNotVisibleError,
+  NotPermittedError,
+  authorizeMachine,
+  isAdmin,
+  ownOnlyFilter,
+  requireAdminUser,
+} from "../../domain/authz";
+import { ApprovalService } from "../../services/ApprovalService";
 import { TunnelRelay } from "../../tunnel/relay";
 import { Api } from "../api";
-import { CurrentUserTag } from "../middleware/auth";
+import { type CurrentUser, CurrentUserTag } from "../middleware/auth";
 
 const toSnapshotView = (snapshot: SnapshotRow) => ({
   id: snapshot.id,
@@ -54,6 +64,23 @@ const toLegalHoldResponse = (snapshot: SnapshotRow) => ({
   legalHoldReason: snapshot.legalHoldReason,
 });
 
+/**
+ * A snapshot is visible to whoever may see its machine: the machine's owner, or an admin. Anyone
+ * else gets the same 404 as a snapshot that does not exist.
+ */
+const authorizeSnapshot = (user: CurrentUser, snapshotId: string) =>
+  Effect.gen(function* () {
+    const snapshot = yield* fetchSnapshot(snapshotId, user.orgId);
+    yield* authorizeMachine(user, snapshot.machineId).pipe(
+      Effect.catchTag("MachineNotVisibleError", () =>
+        Effect.fail(new SnapshotNotFoundError({ snapshotId })),
+      ),
+    );
+    return snapshot;
+  });
+
+const restoreRefused = (reason: string) => Effect.fail(new NotPermittedError({ reason }));
+
 export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
   handlers
     .handle("archiveMachine", ({ path, payload }) =>
@@ -62,6 +89,9 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
         // `archiveMachine`'s own signature is exact and load-bearing (see
         // `domain/archive/archive.ts`) and doesn't take an `orgId` — this
         // scoped fetch is the tenant-ownership gate in front of it.
+        // The owner archives their own machine. An admin archives someone else's only by
+        // offboarding them (`/api/v1/offboarding`), which is approval-gated.
+        yield* authorizeMachine(currentUser, path.machineId, "archive");
         yield* fetchMachine(path.machineId, currentUser.orgId);
         yield* archiveMachine(path.machineId, payload.approvalId);
         // Archiving a machine directly (not via offboarding) must also kill
@@ -99,7 +129,34 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
         const currentUser = yield* CurrentUserTag;
         // Same scoped-fetch-then-act pattern as `archiveMachine` above —
         // `restoreSnapshot`'s own signature doesn't take an `orgId`.
-        yield* fetchSnapshot(path.snapshotId, currentUser.orgId);
+        const snapshot = yield* authorizeSnapshot(currentUser, path.snapshotId);
+        const source = yield* fetchMachine(snapshot.machineId, currentUser.orgId);
+        // A snapshot's data goes back to the person it came from, never to anyone else. With no
+        // owner (the person was offboarded) it goes nowhere new: the archive keeps it.
+        if (source.ownerPersonId === null) {
+          return yield* restoreRefused(
+            "This machine has no owner, so its snapshot cannot be restored to anyone.",
+          );
+        }
+        if (!isAdmin(currentUser) && source.ownerPersonId !== currentUser.personId) {
+          return yield* restoreRefused("Only the machine's owner or an admin can restore it.");
+        }
+        if (
+          payload.target.kind === "new_machine" &&
+          payload.target.ownerPersonId !== source.ownerPersonId
+        ) {
+          return yield* restoreRefused(
+            "A snapshot can only be restored to its own owner, not to a different person.",
+          );
+        }
+        if (payload.target.kind === "existing_machine" && payload.target.machineId !== source.id) {
+          const target = yield* fetchMachine(payload.target.machineId, currentUser.orgId);
+          if (target.ownerPersonId !== source.ownerPersonId) {
+            return yield* restoreRefused(
+              "A snapshot can only be restored onto a machine with the same owner.",
+            );
+          }
+        }
         return yield* restoreSnapshot({
           snapshotId: path.snapshotId,
           mode: payload.mode,
@@ -136,6 +193,16 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
     .handle("resumeRestore", ({ path }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        if (!isAdmin(currentUser)) {
+          // Only the person who asked for the restore (or an admin) resumes it.
+          const approvalService = yield* ApprovalService;
+          const approval = yield* approvalService
+            .status(path.approvalId, currentUser.orgId)
+            .pipe(Effect.catchTag("ApprovalError", () => Effect.succeed(null)));
+          if (approval?.requestedByPersonId !== currentUser.personId) {
+            return yield* Effect.fail(new MachineNotVisibleError({ machineId: path.approvalId }));
+          }
+        }
         // `resumeRestore` scopes its own approval lookup to `orgId` — a
         // foreign or non-restore approval id comes back as
         // `InvalidRestoreApprovalError`, the same non-leaking shape used
@@ -146,6 +213,7 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
     .handle("setLegalHold", ({ path, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can set or clear a legal hold.");
         return yield* setLegalHold(path.snapshotId, currentUser.orgId, payload.reason);
       }).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
@@ -155,6 +223,7 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
     .handle("clearLegalHold", ({ path, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can set or clear a legal hold.");
         return yield* clearLegalHold(path.snapshotId, currentUser.orgId, payload.reason);
       }).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
@@ -166,6 +235,7 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
         const currentUser = yield* CurrentUserTag;
         return yield* listSnapshotsByOrg({
           orgId: currentUser.orgId,
+          ownerPersonId: ownOnlyFilter(currentUser),
           cursor: urlParams.cursor,
           limit: urlParams.limit,
         });
@@ -180,7 +250,7 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
     .handle("getSnapshot", ({ path }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
-        return yield* fetchSnapshot(path.snapshotId, currentUser.orgId);
+        return yield* authorizeSnapshot(currentUser, path.snapshotId);
       }).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
         Effect.map(toSnapshotView),
@@ -189,7 +259,7 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
     .handle("getSnapshotCostEstimate", ({ path }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
-        return yield* fetchSnapshot(path.snapshotId, currentUser.orgId);
+        return yield* authorizeSnapshot(currentUser, path.snapshotId);
       }).pipe(
         Effect.catchTag("ArchiveDbError", (e) => Effect.die(e)),
         Effect.map((snapshot) => ({
@@ -205,6 +275,7 @@ export const ArchiveLive = HttpApiBuilder.group(Api, "archive", (handlers) =>
         const currentUser = yield* CurrentUserTag;
         // The tenancy gate, same as every other machine-scoped action here:
         // `createSnapshot`'s own signature is load-bearing and takes no orgId.
+        yield* authorizeMachine(currentUser, path.machineId, "snapshot");
         yield* fetchMachine(path.machineId, currentUser.orgId);
         const snapshot = yield* createSnapshot(path.machineId, "manual", undefined, undefined, {
           scope: payload.scope ?? "shallow",

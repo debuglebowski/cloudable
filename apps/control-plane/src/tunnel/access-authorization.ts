@@ -25,6 +25,7 @@ import type * as schema from "@cloudable/schema";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
+import { config } from "../config";
 import type { ElevationLevel } from "../domain/elevation/types";
 import type { SessionMethod } from "./session-token";
 
@@ -51,17 +52,19 @@ const ACCEPTED_ELEVATION_LEVELS: Record<SessionMethod, ReadonlyArray<ElevationLe
  * `personId` may open a session of `method` against a machine whose current
  * `ownerPersonId` is `ownerPersonId`, and whose id is `machineId`, when:
  *
- *  - the machine has no owner at all (`null`) — a machine mid-provisioning
- *    or mid owner-reassignment must not become inaccessible to every org
- *    member; a *live* machine always has exactly one
- *    owner, but this gate errs toward "not yet assigned" rather than
- *    "locked to nobody", and every access-method/tenancy check ahead of
- *    this one in `mintSession` already ran, so this is never the ONLY
- *    thing standing between a stranger and the machine; or
  *  - `personId` IS that owner; or
- *  - `personId` holds a currently `granted`, non-expired elevation for exactly this
- *    machine at a level `ACCEPTED_ELEVATION_LEVELS[method]` accepts (the admin-access
- *    primitive — see `domain/elevation/ElevationService.ts`).
+ *  - the deployment allows admin access at all (`config.adminAccessPolicy` is not
+ *    `never`, which is the default and what production pins), and `personId` holds a
+ *    currently `granted`, non-expired elevation for exactly this machine at a level
+ *    `ACCEPTED_ELEVATION_LEVELS[method]` accepts (see `domain/elevation/ElevationService.ts`).
+ *
+ * A machine with no owner (mid-offboarding, or archived) is open to nobody on the first
+ * path. It used to be open to anyone in the org, on the reasoning that a machine waiting
+ * for an owner should not be locked to everyone; but that is exactly the machine of a
+ * person who just left, and its data is theirs.
+ *
+ * The policy is read here too, not only when an elevation is requested, so a grant made
+ * before the pin (or before a redeploy that tightened it) stops working at once.
  *
  * `method` is not optional and has no default. Both callers — `mintSession` at grant time
  * and `closeSessionsWithLapsedAuthorization` in steady state — must ask the same question
@@ -77,9 +80,10 @@ export const isAuthorizedForInteractiveAccess = (
     method: SessionMethod;
   },
 ): Effect.Effect<boolean, Error> => {
-  if (input.ownerPersonId === null || input.ownerPersonId === input.personId) {
+  if (input.ownerPersonId !== null && input.ownerPersonId === input.personId) {
     return Effect.succeed(true);
   }
+  if (config.adminAccessPolicy === "never") return Effect.succeed(false);
 
   return Effect.gen(function* () {
     const now = new Date();

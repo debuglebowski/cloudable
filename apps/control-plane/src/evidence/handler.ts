@@ -1,6 +1,7 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import { Db } from "../db/layer";
+import { requireAdminUser } from "../domain/authz";
 import { Api } from "../http/api";
 import { CurrentUserTag } from "../http/middleware/auth";
 import { queryEvidencePage } from "./service";
@@ -19,6 +20,7 @@ export const EvidenceLive = HttpApiBuilder.group(Api, "evidence", (handlers) =>
   handlers.handle("list", ({ urlParams }) =>
     Effect.gen(function* () {
       const currentUser = yield* CurrentUserTag;
+      yield* requireAdminUser(currentUser, "Only an admin can see the audit log.");
       const db = yield* Db;
       return yield* queryEvidencePage(db, {
         orgId: currentUser.orgId,

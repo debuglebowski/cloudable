@@ -218,8 +218,14 @@ export const upgradeMachine = (
   machineId: string,
   targetImage: string,
   scope: SnapshotScope = "full",
+  /** The person who asked. Their id goes on the events; omitted, the actor is the system. */
+  actorPersonId?: string,
 ): Effect.Effect<UpgradeResult, UpgradeError, Db | EventBus | ProvisioningServiceTag> =>
   Effect.gen(function* () {
+    const actor =
+      actorPersonId !== undefined
+        ? { actorType: "person" as const, actorId: actorPersonId }
+        : { actorType: "system" as const, actorId: UPGRADE_ACTOR_ID };
     const db = yield* Db;
     const eventBus = yield* EventBus;
     const provisioning = yield* ProvisioningServiceTag;
@@ -348,8 +354,7 @@ export const upgradeMachine = (
             payload: { previousImage, currentImage: targetImage },
             occurredAt: now,
             orgId,
-            actorType: "system",
-            actorId: UPGRADE_ACTOR_ID,
+            ...actor,
             machineId,
             correlationId,
             schemaVersion: 1,

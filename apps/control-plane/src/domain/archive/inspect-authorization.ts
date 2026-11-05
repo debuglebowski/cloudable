@@ -35,6 +35,7 @@ import type * as schema from "@cloudable/schema";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect } from "effect";
+import { config } from "../../config";
 import type { ElevationLevel } from "../elevation/types";
 
 type DbHandle = PostgresJsDatabase<typeof schema>;
@@ -79,6 +80,9 @@ export const isAuthorizedToInspectSnapshot = (
   if (input.ownerPersonId !== null && input.ownerPersonId === input.personId) {
     return Effect.succeed(true);
   }
+  // Same deploy-time pin as live access (`tunnel/access-authorization.ts`): with admin access
+  // `never`, no elevation opens anyone else's snapshot either.
+  if (config.adminAccessPolicy === "never") return Effect.succeed(false);
 
   return Effect.gen(function* () {
     const now = new Date();

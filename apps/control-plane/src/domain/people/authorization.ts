@@ -1,5 +1,6 @@
 import { isAdminRole } from "@cloudable/contracts";
 import { people } from "@cloudable/schema";
+import { HttpApiSchema } from "@effect/platform";
 import { eq } from "drizzle-orm";
 import { Effect, Schema } from "effect";
 import { Db } from "../../db/layer";
@@ -10,6 +11,7 @@ import { Db } from "../../db/layer";
 export class AdminRoleRequiredError extends Schema.TaggedError<AdminRoleRequiredError>()(
   "AdminRoleRequiredError",
   { reason: Schema.String },
+  HttpApiSchema.annotations({ status: 403 }),
 ) {}
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

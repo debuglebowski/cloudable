@@ -1,5 +1,6 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
+import { authorizeMachine } from "../../domain/authz";
 import { restartMachine } from "../../domain/machine/restart";
 import { TunnelRelay } from "../../tunnel/relay";
 import { Api } from "../api";
@@ -9,6 +10,8 @@ export const RestartLive = HttpApiBuilder.group(Api, "restart", (handlers) =>
   handlers.handle("restartMachine", ({ path }) =>
     Effect.gen(function* () {
       const currentUser = yield* CurrentUserTag;
+      // The owner or an admin. Either way the restart is recorded with who asked.
+      yield* authorizeMachine(currentUser, path.machineId, "restart");
       const result = yield* restartMachine(path.machineId, currentUser.orgId, currentUser.personId);
       // Restarting kills the container/VM process, so any live web terminal against it
       // is already dead — tell the browser rather than let it hang, same requirement

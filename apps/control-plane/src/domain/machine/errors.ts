@@ -99,6 +99,7 @@ export class PackageActionRejected extends Schema.TaggedError<PackageActionRejec
       "baseline_package",
       "already_pending",
       "write_failed",
+      "reason_required",
     ),
     message: Schema.String,
     requestId: Schema.String,

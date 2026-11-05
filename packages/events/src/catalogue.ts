@@ -95,4 +95,8 @@ export const EVENT_TYPES = [
   // --- agent ---
   "agent.attested",
   "agent.attestation_failed",
+
+  // --- person (added later; kept at the end so nothing above moves) ---
+  "person.email_changed",
+  "person.approver_changed",
 ] as const satisfies ReadonlyArray<DomainEvent["type"]>;

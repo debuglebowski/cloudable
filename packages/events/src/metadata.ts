@@ -47,6 +47,15 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
     tier: 1,
     description: "A person's account was deactivated, manually or via SCIM.",
   },
+  "person.email_changed": {
+    tier: 1,
+    description:
+      "An admin changed a person's email. Every session and CLI token the person held was revoked.",
+  },
+  "person.approver_changed": {
+    tier: 1,
+    description: "An admin made a person an approver, or took the approver flag away.",
+  },
   "person.role_changed": {
     tier: 1,
     description: "A person's role was changed.",

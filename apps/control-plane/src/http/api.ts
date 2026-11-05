@@ -1,5 +1,7 @@
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
+import { MachineNotVisibleError, NotPermittedError } from "../domain/authz";
+import { AdminRoleRequiredError } from "../domain/people/authorization";
 import { EvidenceGroup } from "../evidence/api";
 import { AccessGroup } from "./routes/access";
 import { AgentProtocolGroup } from "./routes/agent-protocol";
@@ -54,6 +56,10 @@ export class Api extends HttpApi.make("cloudable")
   .add(ProvisioningCapabilitiesGroup)
   .add(AuthSsoStatusGroup)
   .add(CliAuthGroup)
-  .add(VulnerabilityScanGroup) {}
+  .add(VulnerabilityScanGroup)
+  // Role checks can refuse any endpoint (see `domain/authz`), so every endpoint declares them.
+  .addError(NotPermittedError)
+  .addError(MachineNotVisibleError)
+  .addError(AdminRoleRequiredError) {}
 // Feature units: import your HttpApiGroup and append `.add(YourGroup)` to the chain above.
 // Never reorder existing `.add()` calls.

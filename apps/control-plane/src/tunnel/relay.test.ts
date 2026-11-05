@@ -12,6 +12,7 @@ import { Db, DbLive } from "../db/layer";
 import { EventBus } from "../services/EventBus";
 import type { SignerTag } from "../services/Signer";
 import { LocalSignerLive } from "../services/Signer.local";
+import { useAdminAccessPolicy } from "../test-support/admin-access-policy";
 import { TunnelRegistry, type TunnelSocket } from "./registry";
 import { TunnelRelay, closeSessionsWithLapsedAuthorization } from "./relay";
 import { TunnelServer } from "./server";
@@ -54,7 +55,7 @@ function fakeSocket() {
 }
 
 async function withOrgAndMachine<T>(
-  run: (ctx: { orgId: string; machineId: string }) => Promise<T>,
+  run: (ctx: { orgId: string; machineId: string; ownerPersonId: string }) => Promise<T>,
 ): Promise<T> {
   const program = Effect.gen(function* () {
     const db = yield* Db;
@@ -65,6 +66,14 @@ async function withOrgAndMachine<T>(
         .returning({ id: orgs.id }),
     );
     if (!org) throw new Error("failed to insert org");
+    // A real owner: a machine with no owner is open to nobody (`access-authorization.ts`).
+    const [owner] = yield* Effect.tryPromise(() =>
+      db
+        .insert(people)
+        .values({ orgId: org.id, email: `${crypto.randomUUID()}@example.com`, role: "member" })
+        .returning({ id: people.id }),
+    );
+    if (!owner) throw new Error("failed to insert owner");
     const [machine] = yield* Effect.tryPromise(() =>
       db
         .insert(machines)
@@ -76,11 +85,12 @@ async function withOrgAndMachine<T>(
           sizeSku: "Standard_B2s",
           image: "ubuntu-24.04",
           state: "running",
+          ownerPersonId: owner.id,
         })
         .returning({ id: machines.id }),
     );
     if (!machine) throw new Error("failed to insert machine");
-    return { orgId: org.id, machineId: machine.id };
+    return { orgId: org.id, machineId: machine.id, ownerPersonId: owner.id };
   });
   const ctx = await Effect.runPromise(Effect.provide(program, DbLive));
   return run(ctx);
@@ -94,13 +104,13 @@ const queryDb = <A>(effect: Effect.Effect<A, unknown, Db>) =>
 
 describe("TunnelRelay (against local dev Postgres)", () => {
   test("endSession ends the DB row AND tears down the live connection", async () => {
-    await withOrgAndMachine(async ({ orgId, machineId }) => {
+    await withOrgAndMachine(async ({ orgId, machineId, ownerPersonId }) => {
       const minted = await run(
         Effect.gen(function* () {
           const server = yield* TunnelServer;
           return yield* server.mintSession({
             orgId,
-            personId: crypto.randomUUID(),
+            personId: ownerPersonId,
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
             method: "terminal",
@@ -143,13 +153,13 @@ describe("TunnelRelay (against local dev Postgres)", () => {
   });
 
   test("endSession still ends the DB row when no live connection was ever registered (minted-but-unused token)", async () => {
-    await withOrgAndMachine(async ({ orgId, machineId }) => {
+    await withOrgAndMachine(async ({ orgId, machineId, ownerPersonId }) => {
       const minted = await run(
         Effect.gen(function* () {
           const server = yield* TunnelServer;
           return yield* server.mintSession({
             orgId,
-            personId: crypto.randomUUID(),
+            personId: ownerPersonId,
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
             method: "terminal",
@@ -180,14 +190,14 @@ describe("TunnelRelay (against local dev Postgres)", () => {
   });
 
   test("terminateSessionsForMachine ends every live DB session on the machine AND every live connection", async () => {
-    await withOrgAndMachine(async ({ orgId, machineId }) => {
+    await withOrgAndMachine(async ({ orgId, machineId, ownerPersonId }) => {
       const mint = () =>
         run(
           Effect.gen(function* () {
             const server = yield* TunnelServer;
             return yield* server.mintSession({
               orgId,
-              personId: crypto.randomUUID(),
+              personId: ownerPersonId,
               idpIdentity: "kalle@normain.com",
               targetMachineId: machineId,
               method: "terminal",
@@ -260,6 +270,7 @@ describe("TunnelRelay (against local dev Postgres)", () => {
   // `TunnelServer.mintSession`) so each one exercises `closeSessionsWithLapsedAuthorization`'s
   // own logic in isolation, decoupled from the separately-tested mint-time gate it reuses.
   describe("closeSessionsWithLapsedAuthorization (against local dev Postgres)", () => {
+    useAdminAccessPolicy("with_approval");
     const seedOwnedMachineAndStranger = () =>
       queryDb(
         Effect.gen(function* () {

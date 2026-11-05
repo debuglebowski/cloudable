@@ -74,7 +74,7 @@ export type CliTokenError =
 
 export const verifyCliToken = (
   token: string,
-): { ok: true; personId: string } | { ok: false; error: CliTokenError } => {
+): { ok: true; personId: string; issuedAt: number } | { ok: false; error: CliTokenError } => {
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== PURPOSE) {
     return { ok: false, error: { reason: "malformed_token" } };
@@ -106,5 +106,8 @@ export const verifyCliToken = (
     return { ok: false, error: { reason: "expired" } };
   }
 
-  return { ok: true, personId: decoded.personId };
+  // `issuedAt` lets the auth middleware refuse a token minted before the person's credentials
+  // were revoked (`people.credentials_revoked_at`), which is how an email change ends every CLI
+  // session without rotating the secret for everyone.
+  return { ok: true, personId: decoded.personId, issuedAt: decoded.iat };
 };

@@ -17,6 +17,7 @@ import {
 } from "../../compliance/evidence-export";
 import { ageInDays, medianAgeInDays } from "../../compliance/finding-store";
 import { DbLive } from "../../db/layer";
+import { requireAdminUser } from "../../domain/authz";
 import { Api } from "../api";
 import { CurrentUserTag } from "../middleware/auth";
 
@@ -31,6 +32,7 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
     .handle("controlMap", () =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, COMPLIANCE_ADMIN_ONLY);
         const overrides = yield* loadControlOverrides(currentUser.orgId);
         return { controls: applyControlOverrides(computeControlMap(), overrides) };
       }).pipe(Effect.catchTag("ControlOverrideStoreError", rethrowStoreErrorAsDefect)),
@@ -38,6 +40,7 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
     .handle("setControlOverride", ({ path, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can override a control.");
         // Loaded BEFORE the write, then merged with the just-applied change in memory
         // below, rather than re-querying after — a transient failure on a second read
         // would otherwise report this write as failed even though it had already
@@ -60,6 +63,7 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
     .handle("findings", () =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, COMPLIANCE_ADMIN_ONLY);
         const now = new Date();
         const evaluations = yield* evaluateAllChecks(currentUser.orgId);
         return {
@@ -95,20 +99,20 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
       }),
     )
     .handle("findingsExport", () =>
-      Effect.flatMap(CurrentUserTag, (currentUser) =>
+      Effect.flatMap(adminCaller, (currentUser) =>
         collectOpenFindingsByControl(currentUser.orgId),
       ).pipe(Effect.map(findingsByControlCsv)),
     )
     .handle("assetInventoryCsv", () =>
-      Effect.flatMap(CurrentUserTag, (currentUser) => assetInventoryCsv(currentUser.orgId)),
+      Effect.flatMap(adminCaller, (currentUser) => assetInventoryCsv(currentUser.orgId)),
     )
     .handle("findingsCsv", () =>
-      Effect.flatMap(CurrentUserTag, (currentUser) =>
+      Effect.flatMap(adminCaller, (currentUser) =>
         collectOpenFindingsByControl(currentUser.orgId),
       ).pipe(Effect.map(openFindingsCsv)),
     )
     .handle("vulnerabilitiesCsv", () =>
-      Effect.flatMap(CurrentUserTag, (currentUser) => vulnerabilitiesCsv(currentUser.orgId)),
+      Effect.flatMap(adminCaller, (currentUser) => vulnerabilitiesCsv(currentUser.orgId)),
     ),
 );
 
@@ -120,4 +124,11 @@ const ComplianceGroupLive = HttpApiBuilder.group(Api, "compliance", (handlers) =
  * (e.g. `buildAppLive`), so Effect's layer memoization shares the one
  * underlying Postgres connection rather than opening a second.
  */
+const COMPLIANCE_ADMIN_ONLY = "Only an admin can see compliance evidence.";
+
+/** The caller, once they are known to be an admin. Compliance evidence covers the whole org. */
+const adminCaller = Effect.tap(CurrentUserTag, (currentUser) =>
+  requireAdminUser(currentUser, COMPLIANCE_ADMIN_ONLY),
+);
+
 export const ComplianceLive = ComplianceGroupLive.pipe(Layer.provide(DbLive));

@@ -1,6 +1,7 @@
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { Effect } from "effect";
 import { ulid } from "ulid";
+import { requireAdminUser } from "../../domain/authz";
 import {
   OffboardingError,
   OffboardingRepoTag,
@@ -65,6 +66,7 @@ export const OffboardingHttpLive = HttpApiBuilder.group(Api, "offboarding", (han
     .handle("offboardPerson", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can offboard a person.");
         // `offboardPersonDetailed`'s own signature is the exact one the spec
         // describes (see `domain/offboarding/offboardPerson.ts`) and doesn't
         // take an `orgId` — this scoped lookup is the tenant-ownership gate
@@ -94,6 +96,7 @@ export const OffboardingHttpLive = HttpApiBuilder.group(Api, "offboarding", (han
     .handle("sync", ({ path }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can offboard a person.");
         // `resumeOffboarding` scopes its own lookup to `orgId` (see
         // `ApprovalService.status`) — an approval belonging to a different
         // org, or one that isn't an offboarding approval, comes back as

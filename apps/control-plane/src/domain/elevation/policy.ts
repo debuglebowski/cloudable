@@ -1,5 +1,6 @@
 import type { SettingRow } from "@cloudable/schema";
 import { resolveSetting } from "@cloudable/schema";
+import { config } from "../../config";
 import type { AdminAccessPolicy, ApprovalMode, ElevationLevel } from "./types";
 
 /** Org policy for an admin connecting to a machine they do not own. Resolved via `resolveSetting`. */
@@ -18,8 +19,8 @@ export const ADMIN_ACCESS_APPROVAL_MODE_SETTING_KEY = "admin_access_approval_mod
 /** Minutes a granted elevation stays live before it must be re-requested. Org-configurable. */
 export const ADMIN_ACCESS_ELEVATION_TTL_MINUTES_SETTING_KEY = "admin_access_elevation_ttl_minutes";
 
-/** Fail-safe default: unset means "go through approval", not "wide open" or "fully blocked". */
-export const DEFAULT_ADMIN_ACCESS_POLICY: AdminAccessPolicy = "with_approval";
+/** What `ADMIN_ACCESS_POLICY` means when unset: admins get no live access to someone else's machine. */
+export const DEFAULT_ADMIN_ACCESS_POLICY: AdminAccessPolicy = "never";
 
 export const DEFAULT_APPROVAL_MODE: ApprovalMode = "single";
 
@@ -63,16 +64,17 @@ export interface SettingsChain {
   machineId: string;
 }
 
+/**
+ * The admin-access policy in force. It comes from deployment config (`ADMIN_ACCESS_POLICY`,
+ * default `never`), not from settings: an `admin_access_policy` setting row, if one exists from
+ * before the pin, is ignored, and the API refuses to write a new one. `rows` and `chain` stay in
+ * the signature so callers keep asking the question the same way.
+ */
 export function resolveAdminAccessPolicy(
-  rows: ReadonlyArray<SettingRow<unknown>>,
-  chain: SettingsChain,
+  _rows: ReadonlyArray<SettingRow<unknown>>,
+  _chain: SettingsChain,
 ): AdminAccessPolicy {
-  const resolved = resolveSetting<AdminAccessPolicy>(
-    ADMIN_ACCESS_POLICY_SETTING_KEY,
-    rows as unknown as ReadonlyArray<SettingRow<AdminAccessPolicy>>,
-    chain,
-  );
-  return resolved?.value ?? DEFAULT_ADMIN_ACCESS_POLICY;
+  return config.adminAccessPolicy;
 }
 
 export function resolveAdminAccessApprovalMode(

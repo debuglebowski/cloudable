@@ -16,6 +16,13 @@ export const people = pgTable("people", {
     .default("manual"),
   active: boolean("active").notNull().default(true),
   role: text("role").notNull().default("member"),
+  // A flag on top of the role, not a role of its own: an approver may decide approval requests
+  // (see `apps/control-plane/src/domain/authz/policy.ts`). Member or admin, either can be one.
+  approver: boolean("approver").notNull().default(false),
+  // Every credential issued to this person before this instant is refused: console sessions are
+  // deleted when it is set, and a CLI token whose `iat` is older fails authentication. Set when an
+  // admin changes the person's email, so a sign-in under the old address cannot outlive it.
+  credentialsRevokedAt: timestamp("credentials_revoked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
 });

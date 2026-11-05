@@ -1,18 +1,21 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
+import { requireAdminUser } from "../../domain/authz";
+import { requestApprovalSettingsChange } from "../../domain/organisation/approval-settings-change";
 import {
   type OrgPackagesError,
   listOrgPackages,
   updateOrgPackages,
 } from "../../domain/organisation/packages";
 import {
-  type OrgSettingsError,
+  OrgSettingsError,
   getOrgSettings,
   updateOrgSettings,
 } from "../../domain/organisation/settings";
 import { EVENTS_RETENTION_INVALID_REASON } from "../../domain/retention/policy";
 import { Api } from "../api";
 import { CurrentUserTag } from "../middleware/auth";
+import { toApprovalWire } from "../routes/approvals";
 
 /** Which `OrgSettingsError` reasons are genuine client-facing validation
  * failures (worth a typed 4xx) versus our own infrastructure breaking
@@ -20,6 +23,9 @@ import { CurrentUserTag } from "../middleware/auth";
  * it, same convention every other domain in this codebase uses). */
 const VALIDATION_REASONS = new Set([
   "org_not_found",
+  "approval_modes_need_sign_off",
+  "no_approval_mode_change",
+  "reason_required",
   "org_name_required",
   "retention_days_must_be_a_positive_integer",
   EVENTS_RETENTION_INVALID_REASON,
@@ -46,10 +52,26 @@ export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handl
     .handle("update", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can change organisation settings.");
+        // Approval modes change only with an approver's sign-off (`requestApprovalModesChange`).
+        // Sending today's values back unchanged is allowed, so a form that posts everything
+        // still saves its other fields.
+        if (payload.approvalModes !== undefined) {
+          const current = yield* getOrgSettings(currentUser.orgId);
+          const changes = Object.entries(payload.approvalModes).some(
+            ([actionType, mode]) =>
+              mode !== undefined &&
+              current.approvalModes[actionType as keyof typeof current.approvalModes] !== mode,
+          );
+          if (changes) {
+            return yield* Effect.fail(
+              new OrgSettingsError({ reason: "approval_modes_need_sign_off" }),
+            );
+          }
+        }
         return yield* updateOrgSettings({
           orgId: currentUser.orgId,
           name: payload.name,
-          approvalModes: payload.approvalModes,
           loggingTier: payload.loggingTier,
           retentionDefaultDays: payload.retentionDefaultDays,
           eventRetentionDays: payload.eventRetentionDays,
@@ -58,6 +80,19 @@ export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handl
           // actor on a permanent `organisation.updated` event.
           actor: { actorType: "person", actorId: currentUser.personId },
         });
+      }).pipe(Effect.catchTag("OrgSettingsError", rethrowInfraAsDefect)),
+    )
+    .handle("requestApprovalModesChange", ({ payload }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can ask to change approval settings.");
+        const approval = yield* requestApprovalSettingsChange({
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+          approvalModes: payload.approvalModes,
+          reason: payload.reason,
+        });
+        return toApprovalWire(approval);
       }).pipe(Effect.catchTag("OrgSettingsError", rethrowInfraAsDefect)),
     )
     .handle("listPackages", () =>
@@ -69,6 +104,8 @@ export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handl
     .handle("updatePackages", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        // The org manifest says which packages any machine may have: configuration, so admin.
+        yield* requireAdminUser(currentUser, "Only an admin can change the org's packages.");
         return yield* updateOrgPackages({
           orgId: currentUser.orgId,
           upserts: payload.upserts,

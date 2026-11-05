@@ -1,17 +1,34 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
+import { MachineNotVisibleError, isAdmin, requireAdminUser } from "../../domain/authz";
 import { ElevationService } from "../../domain/elevation/ElevationService";
 import { listElevationsByOrg } from "../../domain/elevation/queries";
 import { ElevationInfraError } from "../../domain/elevation/types";
 import { Api } from "../api";
-import { CurrentUserTag } from "../middleware/auth";
+import { type CurrentUser, CurrentUserTag } from "../middleware/auth";
 import { toWire } from "../routes/elevations";
+
+/** An elevation is its requester's and the admins'. Anyone else gets the same 404 as a miss. */
+const requireOwnElevationOrAdmin = (
+  user: CurrentUser,
+  elevation: { personId: string; machineId: string },
+) =>
+  isAdmin(user) || elevation.personId === user.personId
+    ? Effect.void
+    : Effect.fail(new MachineNotVisibleError({ machineId: elevation.machineId }));
 
 export const ElevationsLive = HttpApiBuilder.group(Api, "elevations", (handlers) =>
   handlers
     .handle("request", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        // Elevation is the admin-access path to someone else's machine. Members never had a
+        // reason to use it. Whether admins may is the deploy-time `ADMIN_ACCESS_POLICY`, which
+        // `ElevationService.request` reads; production pins it to `never`.
+        yield* requireAdminUser(
+          currentUser,
+          "Only an admin can ask for access to someone else's machine.",
+        );
         const elevationService = yield* ElevationService;
         return toWire(
           yield* elevationService.request({ ...payload, personId: currentUser.personId }),
@@ -22,6 +39,10 @@ export const ElevationsLive = HttpApiBuilder.group(Api, "elevations", (handlers)
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
         const elevationService = yield* ElevationService;
+        yield* requireOwnElevationOrAdmin(
+          currentUser,
+          yield* elevationService.get(path.id, currentUser.orgId),
+        );
         return toWire(yield* elevationService.get(path.id, currentUser.orgId));
       }),
     )
@@ -29,6 +50,10 @@ export const ElevationsLive = HttpApiBuilder.group(Api, "elevations", (handlers)
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
         const elevationService = yield* ElevationService;
+        yield* requireOwnElevationOrAdmin(
+          currentUser,
+          yield* elevationService.get(path.id, currentUser.orgId),
+        );
         return toWire(yield* elevationService.syncApproval(path.id, currentUser.orgId));
       }),
     )
@@ -36,6 +61,10 @@ export const ElevationsLive = HttpApiBuilder.group(Api, "elevations", (handlers)
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
         const elevationService = yield* ElevationService;
+        yield* requireOwnElevationOrAdmin(
+          currentUser,
+          yield* elevationService.get(path.id, currentUser.orgId),
+        );
         yield* elevationService.expire(path.id, currentUser.orgId);
         return toWire(yield* elevationService.get(path.id, currentUser.orgId));
       }),
@@ -43,7 +72,10 @@ export const ElevationsLive = HttpApiBuilder.group(Api, "elevations", (handlers)
     .handle("list", () =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
-        return yield* listElevationsByOrg(currentUser.orgId);
+        const rows = yield* listElevationsByOrg(currentUser.orgId);
+        return isAdmin(currentUser)
+          ? rows
+          : rows.filter((row) => row.personId === currentUser.personId);
       }).pipe(
         Effect.map((rows) => ({
           elevations: rows.map((row) => ({

@@ -1,5 +1,5 @@
 import { machines, restoreRequests, snapshots } from "@cloudable/schema";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { RestoreMode } from "./approval-escalation";
@@ -88,6 +88,8 @@ export const fetchLatestSnapshotForMachine = (
 
 export interface ListSnapshotsParams {
   orgId: string;
+  /** Only snapshots of machines this person owns. Omitted lists the whole org (admins). */
+  ownerPersonId?: string | undefined;
   cursor?: string | undefined;
   limit?: number | undefined;
 }
@@ -133,6 +135,18 @@ export const listSnapshotsByOrg = (
     const cursor = params.cursor ? decodeSnapshotCursor(params.cursor) : null;
 
     const conditions = [eq(snapshots.orgId, params.orgId)];
+    // A member's list holds snapshots of the machines they own now, nothing else.
+    if (params.ownerPersonId !== undefined) {
+      conditions.push(
+        inArray(
+          snapshots.machineId,
+          db
+            .select({ id: machines.id })
+            .from(machines)
+            .where(eq(machines.ownerPersonId, params.ownerPersonId)),
+        ),
+      );
+    }
     if (cursor) {
       const cursorCondition = or(
         lt(snapshots.createdAt, cursor.createdAt),

@@ -10,6 +10,10 @@ import {
 } from "../../services/ApprovalService";
 import { EventBus, type EventBusError } from "../../services/EventBus";
 import {
+  pinAdminAccessPolicyForTest,
+  useAdminAccessPolicy,
+} from "../../test-support/admin-access-policy";
+import {
   type ElevationRepo,
   ElevationRepoTag,
   type InsertElevationValues,
@@ -18,7 +22,7 @@ import {
   type PersonRecord,
 } from "./ElevationRepo";
 import { ElevationService } from "./ElevationService";
-import { ADMIN_ACCESS_APPROVAL_MODE_SETTING_KEY, ADMIN_ACCESS_POLICY_SETTING_KEY } from "./policy";
+import { ADMIN_ACCESS_APPROVAL_MODE_SETTING_KEY } from "./policy";
 import type { Elevation } from "./types";
 import {
   ElevationNotFoundError,
@@ -168,6 +172,7 @@ function makeFakeApprovalService() {
     orgId: "fake-org",
     actionType: "admin_access",
     mode: "single",
+    payload: null,
     status,
     requestedByPersonId: "fake-requester",
     targetMachineId: null,
@@ -249,6 +254,8 @@ async function run<A, E>(
 }
 
 describe("ElevationService", () => {
+  // Restores the real default once the file is done; each test pins its own policy.
+  useAdminAccessPolicy("never");
   test("self-owned machine: no elevation needed at all", async () => {
     const s = seed();
     const repo = makeFakeRepo(s);
@@ -346,7 +353,7 @@ describe("ElevationService", () => {
     test("denies immediately, no approval call needed", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "never");
+      pinAdminAccessPolicyForTest("never");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
 
@@ -375,7 +382,7 @@ describe("ElevationService", () => {
     test("grants immediately — still logged and time-boxed, not a free-for-all", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      pinAdminAccessPolicyForTest("always");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
 
@@ -418,7 +425,7 @@ describe("ElevationService", () => {
     test("a failed owner notification does not fail the grant itself", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      pinAdminAccessPolicyForTest("always");
       repo.failNextNotification();
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
@@ -450,7 +457,7 @@ describe("ElevationService", () => {
     test("syncApproval retries a previously-failed notification on an already-granted elevation, then stays idempotent", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      pinAdminAccessPolicyForTest("always");
       repo.failNextNotification();
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
@@ -513,7 +520,7 @@ describe("ElevationService", () => {
       // `buildAutoApprovalGrantedEvent`).
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      pinAdminAccessPolicyForTest("always");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
 
@@ -540,7 +547,7 @@ describe("ElevationService", () => {
     test("file_recovery may proceed at the default (single) approval mode", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "with_approval");
+      pinAdminAccessPolicyForTest("with_approval");
       // admin_access_approval_mode left unset — defaults to "single", which satisfies file_recovery's floor.
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
@@ -567,7 +574,7 @@ describe("ElevationService", () => {
     test("shell is refused when the org's configured approval mode is only single", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "with_approval");
+      pinAdminAccessPolicyForTest("with_approval");
       repo.setSetting(ADMIN_ACCESS_APPROVAL_MODE_SETTING_KEY, "single");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
@@ -596,7 +603,7 @@ describe("ElevationService", () => {
     test("shell proceeds once the org's configured approval mode is dual", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "with_approval");
+      pinAdminAccessPolicyForTest("with_approval");
       repo.setSetting(ADMIN_ACCESS_APPROVAL_MODE_SETTING_KEY, "dual");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
@@ -621,7 +628,7 @@ describe("ElevationService", () => {
     test("syncApproval grants once the approval is later approved", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "with_approval");
+      pinAdminAccessPolicyForTest("with_approval");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
       const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
@@ -677,7 +684,7 @@ describe("ElevationService", () => {
     test("syncApproval denies once the approval is rejected", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "with_approval");
+      pinAdminAccessPolicyForTest("with_approval");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
       const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
@@ -715,7 +722,7 @@ describe("ElevationService", () => {
     test("syncApproval no-ops while the approval is still pending", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "with_approval");
+      pinAdminAccessPolicyForTest("with_approval");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
       const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
@@ -749,7 +756,7 @@ describe("ElevationService", () => {
     test("flips a granted elevation past its expiresAt to expired, and emits the event", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      pinAdminAccessPolicyForTest("always");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
       const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
@@ -793,7 +800,7 @@ describe("ElevationService", () => {
     test("refuses to expire an elevation that hasn't reached expiresAt yet", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      pinAdminAccessPolicyForTest("always");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
       const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
@@ -824,7 +831,7 @@ describe("ElevationService", () => {
     test("refuses to expire an elevation that was never granted", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "with_approval");
+      pinAdminAccessPolicyForTest("with_approval");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
       const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
@@ -862,7 +869,7 @@ describe("ElevationService", () => {
     test("get returns the elevation when orgId matches, and ElevationNotFoundError when it doesn't", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      pinAdminAccessPolicyForTest("always");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
       const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
@@ -902,7 +909,7 @@ describe("ElevationService", () => {
     test("syncApproval on another org's elevation fails with ElevationNotFoundError, and never touches it", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "with_approval");
+      pinAdminAccessPolicyForTest("with_approval");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
       const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };
@@ -938,7 +945,7 @@ describe("ElevationService", () => {
     test("expire on another org's elevation fails with ElevationNotFoundError, and never touches it", async () => {
       const s = seed();
       const repo = makeFakeRepo(s);
-      repo.setSetting(ADMIN_ACCESS_POLICY_SETTING_KEY, "always");
+      pinAdminAccessPolicyForTest("always");
       const approval = makeFakeApprovalService();
       const eventBus = makeFakeEventBus();
       const layers = { repo: repo.layer, approval: approval.layer, eventBus: eventBus.layer };

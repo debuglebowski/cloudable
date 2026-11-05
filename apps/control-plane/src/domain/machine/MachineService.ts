@@ -1,5 +1,5 @@
-import { machinePackages, machines } from "@cloudable/schema";
-import { and, asc, eq, gt, or, sql } from "drizzle-orm";
+import { machinePackages, machines, people } from "@cloudable/schema";
+import { and, asc, eq, gt, inArray, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { ulid } from "ulid";
 import { config } from "../../config";
@@ -90,6 +90,8 @@ export interface CreateMachineInput {
 
 export interface ListMachinesInput {
   orgId: string;
+  /** Only this person's machines. Omitted lists the whole org (admins). */
+  ownerPersonId?: string | undefined;
   cursor?: string | undefined;
   limit?: number | undefined;
 }
@@ -281,6 +283,43 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
               error: { code: "invalid_machine_request", message, requestId: ulid() },
             }),
           );
+
+        // The owner is a real, active person of this org (invariant 3), and holds no other
+        // live machine: an admin creates one machine per person. A machine that is archived
+        // or failed to provision does not count, so a failed one can be replaced.
+        const ownerRows = yield* Effect.tryPromise({
+          try: () =>
+            db
+              .select({ orgId: people.orgId, active: people.active })
+              .from(people)
+              .where(eq(people.id, input.ownerPersonId))
+              .limit(1),
+          catch: (cause) => new MachineServiceError({ reason: "owner_read_failed", cause }),
+        });
+        const owner = ownerRows[0];
+        if (!owner || owner.orgId !== input.orgId) {
+          return yield* invalid("the owner must be a person in this org");
+        }
+        if (!owner.active) {
+          return yield* invalid("the owner is deactivated; a machine needs an active owner");
+        }
+        const liveMachines = yield* Effect.tryPromise({
+          try: () =>
+            db
+              .select({ id: machines.id })
+              .from(machines)
+              .where(
+                and(
+                  eq(machines.ownerPersonId, input.ownerPersonId),
+                  inArray(machines.state, ["provisioning", "running", "stopped"]),
+                ),
+              )
+              .limit(1),
+          catch: (cause) => new MachineServiceError({ reason: "owner_read_failed", cause }),
+        });
+        if (liveMachines.length > 0) {
+          return yield* invalid("this person already has a machine; each person has one machine");
+        }
 
         const providerEnabled = yield* isProviderEnabled(input.orgId, input.provider).pipe(
           Effect.provideService(Db, db),
@@ -568,18 +607,22 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
               .select()
               .from(machines)
               .where(
-                cursor
-                  ? and(
-                      eq(machines.orgId, input.orgId),
-                      or(
+                and(
+                  eq(machines.orgId, input.orgId),
+                  // A member's list holds their own machines only (see `domain/authz`).
+                  input.ownerPersonId !== undefined
+                    ? eq(machines.ownerPersonId, input.ownerPersonId)
+                    : undefined,
+                  cursor
+                    ? or(
                         gt(machines.createdAt, new Date(cursor.createdAt)),
                         and(
                           eq(machines.createdAt, new Date(cursor.createdAt)),
                           gt(machines.id, cursor.id),
                         ),
-                      ),
-                    )
-                  : eq(machines.orgId, input.orgId),
+                      )
+                    : undefined,
+                ),
               )
               .orderBy(asc(machines.createdAt), asc(machines.id))
               .limit(limit + 1),

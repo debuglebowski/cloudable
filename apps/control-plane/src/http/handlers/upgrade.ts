@@ -2,6 +2,7 @@ import type { ApiErrorBody } from "@cloudable/contracts";
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { Effect } from "effect";
 import { ulid } from "ulid";
+import { authorizeMachine } from "../../domain/authz";
 import { MachineService } from "../../domain/machine/MachineService";
 import { upgradeMachine } from "../../domain/upgrade/UpgradeService";
 import { UpgradeError } from "../../domain/upgrade/types";
@@ -42,6 +43,8 @@ export const UpgradeLive = HttpApiBuilder.group(Api, "upgrade", (handlers) =>
   handlers.handle("triggerUpgrade", ({ path, payload }) =>
     Effect.gen(function* () {
       const currentUser = yield* CurrentUserTag;
+      // The owner or an admin. Either way the upgrade is recorded with who asked.
+      yield* authorizeMachine(currentUser, path.machineId, "upgrade");
       // `upgradeMachine`'s own signature doesn't take an `orgId` — this
       // scoped fetch is the tenant-ownership gate in front of it, same
       // reasoning as `archive`/`offboarding`'s handlers. Reusing
@@ -56,7 +59,12 @@ export const UpgradeLive = HttpApiBuilder.group(Api, "upgrade", (handlers) =>
             Effect.fail(new UpgradeError({ reason: "db_error", cause })),
         }),
       );
-      return yield* upgradeMachine(path.machineId, payload.targetImage, payload.snapshotScope);
+      return yield* upgradeMachine(
+        path.machineId,
+        payload.targetImage,
+        payload.snapshotScope,
+        currentUser.personId,
+      );
     }).pipe(
       Effect.map((result) => ({
         ...result,

@@ -11,6 +11,8 @@ import { Schema } from "effect";
 const SsoProviderStatus = Schema.Struct({
   available: Schema.Boolean,
   providerId: Schema.NullOr(Schema.String),
+  // Whether the login page should offer email and password at all (`config.passwordSignInEnabled`).
+  passwordSignIn: Schema.Boolean,
 });
 
 export const AuthSsoStatusGroup = HttpApiGroup.make("authSsoStatus").add(

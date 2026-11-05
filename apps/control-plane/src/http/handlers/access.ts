@@ -1,5 +1,9 @@
+import { certificates, machines, people, sessions } from "@cloudable/schema";
 import { HttpApiBuilder } from "@effect/platform";
+import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { Db } from "../../db/layer";
+import { isAdmin } from "../../domain/authz";
 import { verifyCliAuthCode } from "../../services/CliAuthCode";
 import { CLI_TOKEN_TTL_MS, issueCliToken } from "../../services/CliToken";
 import { SignerTag } from "../../services/Signer";
@@ -36,6 +40,51 @@ const asAccessError = <E extends { reason: string; cause?: unknown; detail?: str
 ): AccessErrorBody =>
   toAccessError(error.reason, error.detail ?? String(error.cause ?? error.reason));
 
+/**
+ * The machines a certificate may name: only the person's own. An admin has no live access to
+ * anyone else's machine either, so the rule is the same for everyone. `"all"` is narrowed to
+ * the person's own machines at issue time, so the stored scope says what it really covers.
+ */
+const resolveCertificateScope = (
+  personId: string,
+  orgId: string,
+  requested: "all" | ReadonlyArray<string>,
+) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const owned = yield* Effect.tryPromise(() =>
+      db
+        .select({ id: machines.id })
+        .from(machines)
+        .where(and(eq(machines.ownerPersonId, personId), eq(machines.orgId, orgId))),
+    ).pipe(Effect.orDie);
+    const ownedIds = owned.map((row) => row.id);
+    if (requested === "all") return ownedIds;
+    const notOwned = requested.filter((id) => !ownedIds.includes(id));
+    if (notOwned.length > 0) {
+      return yield* Effect.fail({
+        code: "denied" as const,
+        message: `A certificate can only name your own machines. Not yours: ${notOwned.join(", ")}.`,
+      });
+    }
+    return requested;
+  });
+
+/** Whether a person is still active. The CLI sign-in code alone does not say. */
+const requireActivePerson = (personId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rows = yield* Effect.tryPromise(() =>
+      db.select({ active: people.active }).from(people).where(eq(people.id, personId)).limit(1),
+    ).pipe(Effect.orDie);
+    if (!rows[0]?.active) {
+      return yield* Effect.fail({
+        code: "denied" as const,
+        message: "This person is deactivated. Ask an org admin.",
+      });
+    }
+  });
+
 export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
   handlers
     .handle("issueCertificate", ({ payload }) =>
@@ -53,13 +102,20 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
           });
         }
 
+        yield* requireActivePerson(verified.personId);
+        const machineScope = yield* resolveCertificateScope(
+          verified.personId,
+          verified.orgId,
+          payload.machineScope,
+        );
+
         const sshCa = yield* SshCaService;
         const subjectPublicKeyRaw = new Uint8Array(Buffer.from(payload.publicKeyBase64, "base64"));
         const issued = yield* sshCa.issueCertificate({
           orgId: verified.orgId,
           personId: verified.personId,
           osUser: payload.osUser,
-          machineScope: payload.machineScope,
+          machineScope,
           subjectPublicKeyRaw,
         });
         // One sign-in, both credentials. The certificate is for sshd on the
@@ -80,7 +136,11 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
         const sshCa = yield* SshCaService;
-        const rows = yield* sshCa.listCertificates(currentUser.orgId);
+        const all = yield* sshCa.listCertificates(currentUser.orgId);
+        // A member sees their own certificates. An admin sees the org's.
+        const rows = isAdmin(currentUser)
+          ? all
+          : all.filter((row) => row.personId === currentUser.personId);
         return {
           certificates: rows.map((row) => ({
             id: row.id,
@@ -98,6 +158,28 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
     .handle("revokeCertificate", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        if (!isAdmin(currentUser)) {
+          // Not yours: the same not-found as a certificate that does not exist.
+          const db = yield* Db;
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select({ personId: certificates.personId })
+              .from(certificates)
+              .where(
+                and(
+                  eq(certificates.id, payload.certificateId),
+                  eq(certificates.orgId, currentUser.orgId),
+                ),
+              )
+              .limit(1),
+          ).pipe(Effect.orDie);
+          if (rows[0]?.personId !== currentUser.personId) {
+            return yield* Effect.fail({
+              code: "not_found" as const,
+              message: `no certificate ${payload.certificateId}`,
+            });
+          }
+        }
         const sshCa = yield* SshCaService;
         yield* sshCa.revokeCertificate({
           orgId: currentUser.orgId,
@@ -128,6 +210,22 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
     .handle("endSession", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        if (!isAdmin(currentUser)) {
+          const db = yield* Db;
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select({ personId: sessions.personId })
+              .from(sessions)
+              .where(and(eq(sessions.id, payload.sessionId), eq(sessions.orgId, currentUser.orgId)))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          if (rows[0]?.personId !== currentUser.personId) {
+            return yield* Effect.fail({
+              code: "not_found" as const,
+              message: `no live session ${payload.sessionId}`,
+            });
+          }
+        }
         const tunnel = yield* TunnelServer;
         yield* tunnel.endSession({ orgId: currentUser.orgId, sessionId: payload.sessionId });
         return { ok: true as const };
@@ -135,7 +233,13 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
     )
     .handle("listSessions", () =>
       Effect.flatMap(CurrentUserTag, (currentUser) =>
-        listActiveSessionsByOrg(currentUser.orgId),
+        listActiveSessionsByOrg(currentUser.orgId).pipe(
+          Effect.map((rows) =>
+            isAdmin(currentUser)
+              ? rows
+              : rows.filter((row) => row.personId === currentUser.personId),
+          ),
+        ),
       ).pipe(
         Effect.map((rows) => ({
           sessions: rows.map((row) => ({

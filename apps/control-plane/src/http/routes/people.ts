@@ -21,6 +21,8 @@ const Person = Schema.Struct({
   source: PersonSource,
   active: Schema.Boolean,
   role: Schema.String,
+  // Approver is a flag on top of the role: see `@cloudable/contracts` `domains/roles.ts`.
+  approver: Schema.Boolean,
   createdAt: Schema.String,
   deactivatedAt: Schema.NullOr(Schema.String),
 });
@@ -38,6 +40,7 @@ const CreatePersonPayload = Schema.Struct({
 const UpdatePersonPayload = Schema.Struct({
   email: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   role: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
+  approver: Schema.optional(Schema.Boolean),
 });
 
 const SetActivePayload = Schema.Struct({ active: Schema.Boolean });

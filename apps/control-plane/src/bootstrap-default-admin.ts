@@ -83,6 +83,13 @@ export async function bootstrapDefaultAdmin(
         .returning();
     }
 
+    // With password sign-in off (production), the person record is all there is to make: the
+    // admin signs in through the IdP, which creates their account on first sign-in.
+    if (!config.passwordSignInEnabled) {
+      console.log(`[bootstrap] added default admin ${normalizedEmail}; they sign in through SSO`);
+      return;
+    }
+
     await auth.api.signUpEmail({
       body: { email: normalizedEmail, password: effectivePassword, name: "Admin" },
     });

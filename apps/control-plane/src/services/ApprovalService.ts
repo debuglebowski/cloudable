@@ -4,6 +4,7 @@ import {
   type SettingRow,
   approvalDecisions,
   approvals,
+  machines,
   resolveSetting,
   settingValues,
 } from "@cloudable/schema";
@@ -17,7 +18,9 @@ export type ApprovalActionType =
   | "snapshot_restore"
   | "break_glass"
   | "admin_access"
-  | "offboarding";
+  | "offboarding"
+  | "package_install"
+  | "approval_settings_change";
 export type ApprovalMode = "none" | "single" | "dual";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 export type ApprovalDecisionValue = "approved" | "rejected";
@@ -31,6 +34,9 @@ export interface ApprovalRequest {
    * `targetMachineId`. Optional, not just nullable — most call sites never set it. */
   targetPersonId?: string | null;
   reason: string;
+  /** What exactly is asked for, when the target alone does not say it. Stored on the approval
+   * and shown to the approver; see `approvals.payload`. */
+  payload?: unknown;
   /**
    * A minimum mode a caller can require ON TOP OF whatever the org has configured for
    * `actionType` — e.g. `domain/archive/approval-escalation.ts`'s `resolveRestoreApprovalFloor`
@@ -55,6 +61,7 @@ export interface ApprovalResult {
   targetMachineId: string | null;
   targetPersonId: string | null;
   reason: string;
+  payload: unknown;
   requiredApprovals: number;
   /** Count of distinct people who have recorded an "approved" decision so far. */
   approvedCount: number;
@@ -69,6 +76,8 @@ export class ApprovalError extends Data.TaggedError("ApprovalError")<{
     | "already_decided"
     | "duplicate_decision"
     | "self_approval"
+    // The decider is the person the request is about, or owns the machine it is about.
+    | "conflict_of_interest"
     | "reason_required"
     | "query_failed"
     | "insert_failed";
@@ -161,6 +170,7 @@ const toResult = (row: ApprovalRow, approvedCount: number): ApprovalResult => ({
   targetMachineId: row.targetMachineId,
   targetPersonId: row.targetPersonId,
   reason: row.reason,
+  payload: row.payload ?? null,
   requiredApprovals: row.requiredApprovals,
   approvedCount,
   createdAt: row.createdAt,
@@ -195,6 +205,8 @@ export interface ListApprovalsParams {
   // exists to close.
   orgId: string;
   status?: ApprovalStatus | undefined;
+  /** Only requests this person made. Set for a caller who is neither approver nor admin. */
+  requestedByPersonId?: string | undefined;
   cursor?: string | undefined;
   limit?: number | undefined;
 }
@@ -327,6 +339,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
                   targetMachineId: req.targetMachineId,
                   targetPersonId: req.targetPersonId ?? null,
                   reason: req.reason,
+                  payload: req.payload ?? null,
                   requiredApprovals,
                   expiresAt,
                 })
@@ -386,7 +399,14 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
         // resolves to auto-approval — resolving the raw configured mode first would let an
         // org's own `"none"` setting silently skip approval for an action whose caller
         // required at least `"dual"`, which is exactly the gap `requiredModeFloor` closes.
-        const mode = applyModeFloor(configuredMode, req.requiredModeFloor);
+        // A change to approval settings always needs a real sign-off: an org that set every
+        // mode to "none" must not be able to set this one to "none" too and wave its own
+        // change through.
+        const floor =
+          req.actionType === "approval_settings_change"
+            ? applyModeFloor("single", req.requiredModeFloor)
+            : req.requiredModeFloor;
+        const mode = applyModeFloor(configuredMode, floor);
         if (mode === "none") {
           return yield* autoApprove(req, mode);
         }
@@ -409,7 +429,9 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
                   status: "pending",
                   requestedByPersonId: req.requestedByPersonId,
                   targetMachineId: req.targetMachineId,
+                  targetPersonId: req.targetPersonId ?? null,
                   reason: req.reason,
+                  payload: req.payload ?? null,
                   requiredApprovals,
                   expiresAt,
                 })
@@ -421,7 +443,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
                 type: "approval.requested",
                 payload: {
                   actionType: req.actionType,
-                  actionRef: req.targetMachineId ?? req.requestedByPersonId,
+                  actionRef: req.targetMachineId ?? req.targetPersonId ?? req.requestedByPersonId,
                   reason: req.reason,
                   mode,
                 },
@@ -466,6 +488,7 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
           | { kind: "already_decided" }
           | { kind: "duplicate_decision" }
           | { kind: "self_approval" }
+          | { kind: "conflict_of_interest" }
           | { kind: "denied"; row: ApprovalRow; approverIds: string[] }
           | { kind: "granted"; row: ApprovalRow; approverIds: string[] }
           | { kind: "still_pending"; row: ApprovalRow; approverIds: string[] };
@@ -503,6 +526,20 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
               // the caller — five call sites would each have had to remember, and the one
               // that forgot would be the hole.
               if (existing.requestedByPersonId === personId) return { kind: "self_approval" };
+
+              // Nor a request about themselves (an offboarding of them), or about a machine
+              // they own (an install on it, a restore onto it, access to it). Whether the
+              // decider may decide at all (approver or admin) is the handler's check; this one
+              // needs the target, so it lives here with the locked row.
+              if (existing.targetPersonId === personId) return { kind: "conflict_of_interest" };
+              if (existing.targetMachineId !== null) {
+                const [target] = await tx
+                  .select({ ownerPersonId: machines.ownerPersonId })
+                  .from(machines)
+                  .where(eq(machines.id, existing.targetMachineId))
+                  .limit(1);
+                if (target?.ownerPersonId === personId) return { kind: "conflict_of_interest" };
+              }
 
               const [duplicate] = await tx
                 .select({ id: approvalDecisions.id })
@@ -593,6 +630,9 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
         if (outcome.kind === "self_approval") {
           return yield* Effect.fail(new ApprovalError({ reason: "self_approval" }));
         }
+        if (outcome.kind === "conflict_of_interest") {
+          return yield* Effect.fail(new ApprovalError({ reason: "conflict_of_interest" }));
+        }
 
         if (outcome.kind === "denied") {
           // The `approval.denied` event was already inserted atomically
@@ -639,6 +679,9 @@ export class ApprovalService extends Effect.Service<ApprovalService>()("Approval
 
         const conditions: SQL[] = [eq(approvals.orgId, params.orgId)];
         if (params.status) conditions.push(eq(approvals.status, params.status));
+        if (params.requestedByPersonId) {
+          conditions.push(eq(approvals.requestedByPersonId, params.requestedByPersonId));
+        }
         if (cursor) {
           // Bound as an explicitly-cast string, not a raw `Date` — postgres-js's
           // parameter binder only knows how to serialize a `Date` when Drizzle

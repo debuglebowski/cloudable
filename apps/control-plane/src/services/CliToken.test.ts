@@ -5,7 +5,7 @@ import { CLI_TOKEN_TTL_MS, issueCliToken, verifyCliToken } from "./CliToken";
 describe("CliToken", () => {
   test("issued token round-trips through verifyCliToken", () => {
     const token = issueCliToken({ personId: "person-1" });
-    expect(verifyCliToken(token)).toEqual({ ok: true, personId: "person-1" });
+    expect(verifyCliToken(token)).toMatchObject({ ok: true, personId: "person-1" });
   });
 
   test("rejects garbage and empty input as malformed", () => {

@@ -211,6 +211,20 @@ export interface AppConfig {
   readonly idpSamlConfig: IdpSamlConfig | null;
   /** Display name for the configured IdP, shown on the console's Integrations card. */
   readonly idpDisplayName: string;
+  /**
+   * Whether the console offers email and password sign-in (`PASSWORD_SIGN_IN=on|off`). Defaults
+   * to off whenever an identity provider is configured in deployment config, so a production
+   * deployment signs in through SSO only, and on otherwise, so local development still works.
+   * When off, the bootstrap admin gets a person record only and signs in through the IdP.
+   */
+  readonly passwordSignInEnabled: boolean;
+  /**
+   * Whether an admin may get live access (terminal, files, SSH, snapshot inspection) to a machine
+   * they do not own (`ADMIN_ACCESS_POLICY=never|with_approval|always`, default `never`). Pinned at
+   * deploy time on purpose: no one, admins included, can change it from the console or the API.
+   * Emergency access goes through Azure PIM instead (see `docs/access.md`, "Break-glass").
+   */
+  readonly adminAccessPolicy: "never" | "with_approval" | "always";
 }
 
 /**
@@ -266,6 +280,19 @@ const parseIdpSamlConfig = (raw: string | undefined): IdpSamlConfig | null => {
   };
 };
 
+const parseOnOff = (name: string, raw: string | undefined, fallback: boolean): boolean => {
+  if (raw === undefined || raw === "") return fallback;
+  if (raw === "on") return true;
+  if (raw === "off") return false;
+  throw new Error(`${name} must be "on" or "off", got "${raw}".`);
+};
+
+const parseAdminAccessPolicy = (raw: string | undefined): AppConfig["adminAccessPolicy"] => {
+  if (raw === undefined || raw === "") return "never";
+  if (raw === "never" || raw === "with_approval" || raw === "always") return raw;
+  throw new Error(`ADMIN_ACCESS_POLICY must be never, with_approval or always, got "${raw}".`);
+};
+
 const readConfig = (): AppConfig => {
   const port = Number(process.env.PORT ?? 4780);
   const idpConfigured =
@@ -307,6 +334,12 @@ const readConfig = (): AppConfig => {
     idpMetadataUrl: idpConfigured ? (process.env.IDP_METADATA_URL ?? null) : null,
     idpSamlConfig: idpConfigured ? parseIdpSamlConfig(process.env.IDP_SAML_CONFIG) : null,
     idpDisplayName: process.env.IDP_DISPLAY_NAME ?? "Microsoft Entra ID",
+    passwordSignInEnabled: parseOnOff(
+      "PASSWORD_SIGN_IN",
+      process.env.PASSWORD_SIGN_IN,
+      !idpConfigured,
+    ),
+    adminAccessPolicy: parseAdminAccessPolicy(process.env.ADMIN_ACCESS_POLICY),
   };
 };
 

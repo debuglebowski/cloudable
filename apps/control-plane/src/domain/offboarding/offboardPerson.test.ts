@@ -130,6 +130,7 @@ function buildTestLayers(opts: {
     orgId: "org-1",
     actionType: "offboarding",
     mode: "none",
+    payload: null,
     status: approvalStatus,
     requestedByPersonId: "requester-1",
     targetMachineId: null,

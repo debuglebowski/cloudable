@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as schema from "@cloudable/schema";
-import { machines, notifications, orgs, people, settingValues } from "@cloudable/schema";
+import { machines, notifications, orgs, people } from "@cloudable/schema";
 import { eq } from "drizzle-orm";
 import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
@@ -9,9 +9,12 @@ import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { ApprovalService } from "../../services/ApprovalService";
 import { EventBus } from "../../services/EventBus";
+import {
+  pinAdminAccessPolicyForTest,
+  useAdminAccessPolicy,
+} from "../../test-support/admin-access-policy";
 import { ElevationRepoLive } from "./ElevationRepo.live";
 import { ElevationService } from "./ElevationService";
-import { ADMIN_ACCESS_POLICY_SETTING_KEY } from "./policy";
 
 /**
  * Runs the REAL, fully-wired stack (`ElevationRepoLive`, real
@@ -25,6 +28,7 @@ import { ADMIN_ACCESS_POLICY_SETTING_KEY } from "./policy";
  * only re-covers the two paths that reach a grant.
  */
 describe("ElevationService (live DB) — owner notification", () => {
+  useAdminAccessPolicy("never");
   let sql: ReturnType<typeof postgres>;
   let db: PostgresJsDatabase<typeof schema>;
   let TestLayer: Layer.Layer<ElevationService | ApprovalService>;
@@ -91,13 +95,7 @@ describe("ElevationService (live DB) — owner notification", () => {
 
   test("org policy 'always': granting immediately persists one owner notification", async () => {
     const { org, owner, admin, machine } = await seedOrgOwnerAdminMachine();
-    await db.insert(settingValues).values({
-      scopeType: "org",
-      scopeId: org.id,
-      key: ADMIN_ACCESS_POLICY_SETTING_KEY,
-      value: "always",
-      source: "org",
-    });
+    pinAdminAccessPolicyForTest("always");
 
     const elevation = await run(
       Effect.gen(function* () {
@@ -122,7 +120,7 @@ describe("ElevationService (live DB) — owner notification", () => {
 
   test("org policy 'with_approval': the owner is notified only once the approval is actually granted", async () => {
     const { org, owner, admin, machine } = await seedOrgOwnerAdminMachine();
-    // Default policy is already "with_approval" — no setting row needed.
+    pinAdminAccessPolicyForTest("with_approval");
 
     const requested = await run(
       Effect.gen(function* () {
@@ -143,7 +141,8 @@ describe("ElevationService (live DB) — owner notification", () => {
     await run(
       Effect.gen(function* () {
         const approvalService = yield* ApprovalService;
-        return yield* approvalService.decide(approvalId, org.id, owner.id, "approved");
+        // A third person: the owner may not approve access to their own machine.
+        return yield* approvalService.decide(approvalId, org.id, crypto.randomUUID(), "approved");
       }),
     );
 

@@ -54,18 +54,22 @@ export class OrgSettingsError extends Schema.TaggedError<OrgSettingsError>()("Or
   cause: Schema.optional(Schema.Unknown),
 }) {}
 
+/** The approval modes an org sets on its Organisation page. `approval_settings_change` is not
+ * one of them: a change to these always needs an approver (see `approval-settings-change.ts`). */
 export type ApprovalActionType =
   | "snapshot_restore"
   | "break_glass"
   | "admin_access"
-  | "offboarding";
+  | "offboarding"
+  | "package_install";
 export type ApprovalMode = "none" | "single" | "dual";
 
-const APPROVAL_ACTION_TYPES: readonly ApprovalActionType[] = [
+export const APPROVAL_ACTION_TYPES: readonly ApprovalActionType[] = [
   "snapshot_restore",
   "break_glass",
   "admin_access",
   "offboarding",
+  "package_install",
 ];
 
 export interface OrgSettingsView {

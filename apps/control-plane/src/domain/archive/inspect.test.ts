@@ -14,6 +14,7 @@ import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import type { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
+import { useAdminAccessPolicy } from "../../test-support/admin-access-policy";
 import { isDbReachable } from "../../testing/db-reachable";
 import { ACCESS_METHODS_ENABLED_KEY } from "../machine/settings";
 import { closeInspection, openInspection } from "./inspect";
@@ -127,6 +128,8 @@ describe.skipIf(!dbReachable)("snapshot inspection — the gate (requires Postgr
     });
 
   describe("who may look", () => {
+    // The elevation cases below need a deployment that allows admin access at all.
+    useAdminAccessPolicy("with_approval");
     test("the machine's owner may inspect their own snapshot", async () => {
       const org = await seedOrg();
       const owner = await seedPerson(org.id);
@@ -170,9 +173,9 @@ describe.skipIf(!dbReachable)("snapshot inspection — the gate (requires Postgr
       expect((error as { reason: string }).reason).toContain("offboarded");
     });
 
-    test("the live-access gate would have allowed exactly that, which is why this one exists", async () => {
-      // Pinned deliberately. If someone ever "simplifies" the two gates into one, this
-      // fails and says why rather than quietly reopening the hole.
+    test("a machine with no owner is open to nobody, live or in its snapshots", async () => {
+      // The live-access gate used to let anyone in the org into an ownerless machine; this
+      // gate never did. Both are closed now. Pinned so neither quietly reopens.
       const { isAuthorizedForInteractiveAccess } = await import(
         "../../tunnel/access-authorization"
       );
@@ -196,7 +199,7 @@ describe.skipIf(!dbReachable)("snapshot inspection — the gate (requires Postgr
         }),
       );
 
-      expect(live).toBe(true);
+      expect(live).toBe(false);
       expect(inspect).toBe(false);
     });
 

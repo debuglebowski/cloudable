@@ -4,6 +4,7 @@ import { PackagePinConflictError } from "../../domain/machine/errors";
 import { OrgPackagesError } from "../../domain/organisation/packages";
 import { OrgSettingsError } from "../../domain/organisation/settings";
 import { CurrentUserAuthentication } from "../middleware/auth";
+import { ApprovalResource } from "./approvals";
 
 // Real backend for the Organisation page. An aggregate
 // read/write over settings that already live in, and are governed by,
@@ -26,6 +27,7 @@ const ApprovalActionType = Schema.Literal(
   "break_glass",
   "admin_access",
   "offboarding",
+  "package_install",
 );
 const ApprovalMode = Schema.Literal("none", "single", "dual");
 const LoggingTier = Schema.Literal(1, 2);
@@ -46,8 +48,15 @@ const OrgSettingsResource = Schema.Struct({
   retentionLocation: RetentionLocation,
 });
 
+const RequestApprovalModesChangePayload = Schema.Struct({
+  approvalModes: Schema.partial(ApprovalModes),
+  reason: Schema.String.pipe(Schema.minLength(1)),
+});
+
 const UpdateOrgSettingsPayload = Schema.Struct({
   name: Schema.optional(Schema.String),
+  // Refused unless every mode sent equals today's: approval modes change only through
+  // `requestApprovalModesChange` below. Kept on the wire so an old console gets a clear error.
   approvalModes: Schema.optional(Schema.partial(ApprovalModes)),
   loggingTier: Schema.optional(LoggingTier),
   retentionDefaultDays: Schema.optional(Schema.Number),
@@ -90,6 +99,15 @@ export const OrganisationGroup = HttpApiGroup.make("organisation")
     HttpApiEndpoint.patch("update", "/api/v1/organisation")
       .setPayload(UpdateOrgSettingsPayload)
       .addSuccess(OrgSettingsResource)
+      .addError(OrgSettingsError, { status: 400 })
+      .middleware(CurrentUserAuthentication),
+  )
+  .add(
+    // An admin asks for new approval modes; an approver signs off; then they apply. Returns the
+    // pending approval. See `domain/organisation/approval-settings-change.ts`.
+    HttpApiEndpoint.post("requestApprovalModesChange", "/api/v1/organisation/approval-modes")
+      .setPayload(RequestApprovalModesChangePayload)
+      .addSuccess(ApprovalResource, { status: 202 })
       .addError(OrgSettingsError, { status: 400 })
       .middleware(CurrentUserAuthentication),
   )

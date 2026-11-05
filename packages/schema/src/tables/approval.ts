@@ -1,11 +1,18 @@
-import { integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /** A request for approval to perform a sensitive action (restore, break-glass, admin access, offboarding). */
 export const approvals = pgTable("approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
   orgId: uuid("org_id").notNull(),
   actionType: text("action_type", {
-    enum: ["snapshot_restore", "break_glass", "admin_access", "offboarding"],
+    enum: [
+      "snapshot_restore",
+      "break_glass",
+      "admin_access",
+      "offboarding",
+      "package_install",
+      "approval_settings_change",
+    ],
   }).notNull(),
   mode: text("mode", { enum: ["none", "single", "dual"] }).notNull(),
   status: text("status", { enum: ["pending", "approved", "rejected", "expired"] })
@@ -21,6 +28,11 @@ export const approvals = pgTable("approvals", {
   // just that "an offboarding" is pending.
   targetPersonId: uuid("target_person_id"),
   reason: text("reason").notNull(),
+  // What exactly was asked for, for the action types whose target alone does not say it:
+  // `package_install` stores `{ packageName, op, versionPin }`, `approval_settings_change` stores
+  // `{ approvalModes }`. Written once at request time and never changed, so what the approver saw
+  // is what gets carried out. Null for every other action type.
+  payload: jsonb("payload"),
   requiredApprovals: integer("required_approvals").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

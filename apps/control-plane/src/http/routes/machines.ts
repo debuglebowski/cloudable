@@ -9,6 +9,7 @@ import {
   PackagePinConflictError,
 } from "../../domain/machine/errors";
 import { CurrentUserAuthentication } from "../middleware/auth";
+import { ApprovalResource } from "./approvals";
 
 const machineProviderSchema = Schema.Literal("azure", "docker", "fake");
 
@@ -215,16 +216,24 @@ const packageActionPathSchema = Schema.Struct({
 
 const createPackageActionPayloadSchema = Schema.Struct({
   op: Schema.Literal("install", "uninstall"),
+  // Shown to the approver of an install. Defaults to "Install <package>".
+  reason: Schema.optional(Schema.String),
 });
 
+// An install that waits for an approver comes back with `action: null` and the pending
+// `approval`; the action is queued when it is granted. A removal, or an install the org lets
+// through without sign-off, comes back with the queued `action`.
 const createPackageActionResponseSchema = Schema.Struct({
-  action: Schema.Struct({
-    id: Schema.String,
-    op: Schema.Literal("install", "uninstall"),
-    status: Schema.Literal("pending", "running", "succeeded", "failed", "expired"),
-    requestedAt: Schema.String,
-    failureReason: Schema.optional(Schema.String),
-  }),
+  action: Schema.NullOr(
+    Schema.Struct({
+      id: Schema.String,
+      op: Schema.Literal("install", "uninstall"),
+      status: Schema.Literal("pending", "running", "succeeded", "failed", "expired"),
+      requestedAt: Schema.String,
+      failureReason: Schema.optional(Schema.String),
+    }),
+  ),
+  approval: Schema.NullOr(ApprovalResource),
 });
 
 const manifestHistoryUrlParamsSchema = Schema.Struct({

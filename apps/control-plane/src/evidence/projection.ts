@@ -148,6 +148,12 @@ function summarize(row: RawEventRow): string {
       return `A person's account was deactivated (${event.payload.source}).`;
     case "person.role_changed":
       return `A person's role changed from "${event.payload.previous}" to "${event.payload.current}".`;
+    case "person.email_changed":
+      return `A person's email changed from ${event.payload.previous} to ${event.payload.current}. Their sessions and CLI tokens were revoked.`;
+    case "person.approver_changed":
+      return event.payload.current
+        ? "A person was made an approver."
+        : "A person is no longer an approver.";
 
     case "machine.created":
       return `Machine "${event.payload.name}" was declared (${event.payload.region}, ${event.payload.size}, ${event.payload.image}).`;
@@ -332,6 +338,8 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "person.activated":
     case "person.deactivated":
     case "person.role_changed":
+    case "person.email_changed":
+    case "person.approver_changed":
     case "machine.created":
     case "machine.provisioned":
     case "machine.provisioning_failed":

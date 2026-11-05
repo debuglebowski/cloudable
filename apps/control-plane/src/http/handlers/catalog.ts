@@ -1,5 +1,6 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
+import { requireAdminUser } from "../../domain/authz";
 import {
   type CatalogEntry,
   listProviderCatalog,
@@ -7,6 +8,7 @@ import {
   syncAzureSizes,
 } from "../../services/CloudCatalogService";
 import { Api } from "../api";
+import { CurrentUserTag } from "../middleware/auth";
 
 const toWireItem = (entry: CatalogEntry) => ({
   code: entry.code,
@@ -26,12 +28,14 @@ export const CatalogLive = HttpApiBuilder.group(Api, "catalog", (handlers) =>
     )
     .handle("syncRegions", () =>
       Effect.gen(function* () {
+        yield* requireAdminUser(yield* CurrentUserTag, "Only an admin can sync the cloud catalog.");
         const items = yield* syncAzureRegions();
         return { items: items.map(toWireItem) };
       }).pipe(Effect.catchTag("CloudCatalogError", (e) => Effect.die(e))),
     )
     .handle("syncSizes", () =>
       Effect.gen(function* () {
+        yield* requireAdminUser(yield* CurrentUserTag, "Only an admin can sync the cloud catalog.");
         const items = yield* syncAzureSizes();
         return { items: items.map(toWireItem) };
       }).pipe(Effect.catchTag("CloudCatalogError", (e) => Effect.die(e))),

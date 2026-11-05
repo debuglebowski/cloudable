@@ -18,6 +18,7 @@ import { Db, DbLive } from "../db/layer";
 import { ACCESS_METHODS_ENABLED_KEY } from "../domain/machine/settings";
 import { EventBus } from "../services/EventBus";
 import { LocalSignerLive } from "../services/Signer.local";
+import { useAdminAccessPolicy } from "../test-support/admin-access-policy";
 import { TunnelServer } from "./server";
 import { TunnelSignal } from "./signal";
 
@@ -42,7 +43,7 @@ const TestLayer = TunnelServer.Default.pipe(
 
 async function withOrgAndMachine<T>(
   state: "running" | "stopped" | "archived_restorable",
-  run: (ctx: { orgId: string; machineId: string }) => Promise<T>,
+  run: (ctx: { orgId: string; machineId: string; ownerPersonId: string }) => Promise<T>,
 ): Promise<T> {
   const program = Effect.gen(function* () {
     const db = yield* Db;
@@ -53,6 +54,14 @@ async function withOrgAndMachine<T>(
         .returning({ id: orgs.id }),
     );
     if (!org) throw new Error("failed to insert org");
+    // A real owner: a machine with no owner is open to nobody (`access-authorization.ts`).
+    const [owner] = yield* Effect.tryPromise(() =>
+      db
+        .insert(people)
+        .values({ orgId: org.id, email: `${crypto.randomUUID()}@example.com`, role: "member" })
+        .returning({ id: people.id }),
+    );
+    if (!owner) throw new Error("failed to insert owner");
     const [machine] = yield* Effect.tryPromise(() =>
       db
         .insert(machines)
@@ -64,11 +73,12 @@ async function withOrgAndMachine<T>(
           sizeSku: "Standard_B2s",
           image: "ubuntu-24.04",
           state,
+          ownerPersonId: owner.id,
         })
         .returning({ id: machines.id }),
     );
     if (!machine) throw new Error("failed to insert machine");
-    return { orgId: org.id, machineId: machine.id };
+    return { orgId: org.id, machineId: machine.id, ownerPersonId: owner.id };
   });
   const ctx = await Effect.runPromise(Effect.provide(program, DbLive));
   return run(ctx);
@@ -79,8 +89,8 @@ const queryDb = <A>(effect: Effect.Effect<A, unknown, Db>) =>
 
 describe("TunnelServer (against local dev Postgres)", () => {
   test("mintSession against a running machine persists a session and emits access.session_started", async () => {
-    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
-      const personId = crypto.randomUUID();
+    await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
+      const personId = ownerPersonId;
       const program = Effect.gen(function* () {
         const tunnel = yield* TunnelServer;
         return yield* tunnel.mintSession({
@@ -123,12 +133,12 @@ describe("TunnelServer (against local dev Postgres)", () => {
   });
 
   test("mintSession against a stopped machine is denied and emits access.session_denied", async () => {
-    await withOrgAndMachine("stopped", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("stopped", async ({ orgId, machineId, ownerPersonId }) => {
       const program = Effect.gen(function* () {
         const tunnel = yield* TunnelServer;
         return yield* tunnel.mintSession({
           orgId,
-          personId: crypto.randomUUID(),
+          personId: ownerPersonId,
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
           method: "ssh",
@@ -220,12 +230,12 @@ describe("TunnelServer (against local dev Postgres)", () => {
    * hands to `su`.
    */
   test("mintSession always targets the machine's own OS user, never root", async () => {
-    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
       const program = Effect.gen(function* () {
         const tunnel = yield* TunnelServer;
         return yield* tunnel.mintSession({
           orgId,
-          personId: crypto.randomUUID(),
+          personId: ownerPersonId,
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
           method: "terminal",
@@ -248,7 +258,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
   // setting in this codebase uses.
   describe("mintSession: access method policy", () => {
     test("with no access_methods setting configured anywhere, both terminal and ssh are allowed", async () => {
-      await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
         for (const method of ["terminal", "ssh"] as const) {
           const minted = await Effect.runPromise(
             Effect.provide(
@@ -256,7 +266,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
                 const tunnel = yield* TunnelServer;
                 return yield* tunnel.mintSession({
                   orgId,
-                  personId: crypto.randomUUID(),
+                  personId: ownerPersonId,
                   idpIdentity: "kalle@normain.com",
                   targetMachineId: machineId,
                   method,
@@ -277,7 +287,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
     // every org that had ever configured access methods. Fails closed, so not a hole; it
     // just means the feature silently does not exist for existing installs.
     test("a stored access_methods row predating `files` still resolves files as enabled", async () => {
-      await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
         await queryDb(
           Effect.gen(function* () {
             const db = yield* Db;
@@ -299,7 +309,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
               const tunnel = yield* TunnelServer;
               return yield* tunnel.mintSession({
                 orgId,
-                personId: crypto.randomUUID(),
+                personId: ownerPersonId,
                 idpIdentity: "kalle@normain.com",
                 targetMachineId: machineId,
                 method: "files",
@@ -313,7 +323,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
     });
 
     test("REQUIRED FAILURE PATH: an explicit files:false still denies a files session", async () => {
-      await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
         await queryDb(
           Effect.gen(function* () {
             const db = yield* Db;
@@ -336,7 +346,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
                 const tunnel = yield* TunnelServer;
                 return yield* tunnel.mintSession({
                   orgId,
-                  personId: crypto.randomUUID(),
+                  personId: ownerPersonId,
                   idpIdentity: "kalle@normain.com",
                   targetMachineId: machineId,
                   method: "files",
@@ -351,7 +361,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
     });
 
     test("REQUIRED FAILURE PATH: an org-level access_methods setting that excludes a method denies mintSession with method_disabled", async () => {
-      await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
         await queryDb(
           Effect.gen(function* () {
             const db = yield* Db;
@@ -371,7 +381,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
           const tunnel = yield* TunnelServer;
           return yield* tunnel.mintSession({
             orgId,
-            personId: crypto.randomUUID(),
+            personId: ownerPersonId,
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
             method: "terminal",
@@ -384,7 +394,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
     });
 
     test("a machine-level access_methods setting overrides an org-level restriction (lowest scope wins)", async () => {
-      await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
         await queryDb(
           Effect.gen(function* () {
             const db = yield* Db;
@@ -415,7 +425,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
               const tunnel = yield* TunnelServer;
               return yield* tunnel.mintSession({
                 orgId,
-                personId: crypto.randomUUID(),
+                personId: ownerPersonId,
                 idpIdentity: "kalle@normain.com",
                 targetMachineId: machineId,
                 method: "terminal",
@@ -429,7 +439,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
     });
 
     test("REQUIRED FAILURE PATH: a machine-level restriction denies mintSession even with no org-level setting at all", async () => {
-      await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+      await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
         await queryDb(
           Effect.gen(function* () {
             const db = yield* Db;
@@ -449,7 +459,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
           const tunnel = yield* TunnelServer;
           return yield* tunnel.mintSession({
             orgId,
-            personId: crypto.randomUUID(),
+            personId: ownerPersonId,
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
             method: "ssh",
@@ -469,6 +479,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
   // use their own seeding helper rather than `withOrgAndMachine` (which always creates a
   // fresh org internally and has no way to attach a pre-existing person to it as owner).
   describe("mintSession: ownership & elevation", () => {
+    useAdminAccessPolicy("with_approval");
     const seedOrgAndOwnedMachine = () =>
       queryDb(
         Effect.gen(function* () {
@@ -712,12 +723,12 @@ describe("TunnelServer (against local dev Postgres)", () => {
   });
 
   test("endSession sets endedAt/durationSeconds and emits access.session_ended", async () => {
-    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
       const mint = Effect.gen(function* () {
         const tunnel = yield* TunnelServer;
         return yield* tunnel.mintSession({
           orgId,
-          personId: crypto.randomUUID(),
+          personId: ownerPersonId,
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
           method: "terminal",
@@ -760,7 +771,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
   });
 
   test("endSession pushes a session_terminate tunnel signal for the ended session", async () => {
-    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
       // One `runPromise` for the whole thing (see the mintSession signal test above for why)
       // — this is the person-initiated end path, the one with a real, already-wired
       // production HTTP endpoint (`POST /api/v1/access/sessions/end`), so a regression here
@@ -769,7 +780,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
         const tunnel = yield* TunnelServer;
         const minted = yield* tunnel.mintSession({
           orgId,
-          personId: crypto.randomUUID(),
+          personId: ownerPersonId,
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
           method: "terminal",
@@ -791,7 +802,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
   });
 
   test("terminateSessionsForMachine ends every live session and emits one access.session_ended per session", async () => {
-    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
       const mint = (personId: string) =>
         Effect.gen(function* () {
           const tunnel = yield* TunnelServer;
@@ -804,8 +815,8 @@ describe("TunnelServer (against local dev Postgres)", () => {
           });
         });
 
-      const a = await Effect.runPromise(Effect.provide(mint(crypto.randomUUID()), TestLayer));
-      const b = await Effect.runPromise(Effect.provide(mint(crypto.randomUUID()), TestLayer));
+      const a = await Effect.runPromise(Effect.provide(mint(ownerPersonId), TestLayer));
+      const b = await Effect.runPromise(Effect.provide(mint(ownerPersonId), TestLayer));
 
       const terminated = await Effect.runPromise(
         Effect.provide(
@@ -853,7 +864,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
   });
 
   test("mintSession pushes a session_waiting tunnel signal for the target machine", async () => {
-    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
       // Everything runs against the one `TestLayer` instance this single `runPromise` builds
       // — reading the signal back via a *separate* `Effect.provide(..., TestLayer)` call
       // would build a second, unrelated `TunnelSignal` instance (Effect layers aren't
@@ -862,7 +873,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
         const tunnel = yield* TunnelServer;
         const minted = yield* tunnel.mintSession({
           orgId,
-          personId: crypto.randomUUID(),
+          personId: ownerPersonId,
           idpIdentity: "kalle@normain.com",
           targetMachineId: machineId,
           method: "terminal",
@@ -878,13 +889,13 @@ describe("TunnelServer (against local dev Postgres)", () => {
   });
 
   test("mintSession denied against a non-running machine pushes no tunnel signal", async () => {
-    await withOrgAndMachine("stopped", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("stopped", async ({ orgId, machineId, ownerPersonId }) => {
       const program = Effect.gen(function* () {
         const tunnel = yield* TunnelServer;
         yield* Effect.either(
           tunnel.mintSession({
             orgId,
-            personId: crypto.randomUUID(),
+            personId: ownerPersonId,
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
             method: "terminal",
@@ -904,13 +915,13 @@ describe("TunnelServer (against local dev Postgres)", () => {
   // Unfiltered, turning off the web terminal would also drop every live file session on
   // the machine — disconnecting people from a method that was never taken away from them.
   test("terminateSessionsForMachine with a methods filter ends only those methods' sessions", async () => {
-    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
       const mint = (method: "terminal" | "files") =>
         Effect.gen(function* () {
           const tunnel = yield* TunnelServer;
           return yield* tunnel.mintSession({
             orgId,
-            personId: crypto.randomUUID(),
+            personId: ownerPersonId,
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
             method,
@@ -953,13 +964,13 @@ describe("TunnelServer (against local dev Postgres)", () => {
   });
 
   test("terminateSessionsForMachine with no methods filter still ends every session", async () => {
-    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
       const mint = (method: "terminal" | "files") =>
         Effect.gen(function* () {
           const tunnel = yield* TunnelServer;
           return yield* tunnel.mintSession({
             orgId,
-            personId: crypto.randomUUID(),
+            personId: ownerPersonId,
             idpIdentity: "kalle@normain.com",
             targetMachineId: machineId,
             method,
@@ -989,7 +1000,7 @@ describe("TunnelServer (against local dev Postgres)", () => {
   });
 
   test("terminateSessionsForMachine pushes one session_terminate tunnel signal per session ended", async () => {
-    await withOrgAndMachine("running", async ({ orgId, machineId }) => {
+    await withOrgAndMachine("running", async ({ orgId, machineId, ownerPersonId }) => {
       const mint = (personId: string) =>
         Effect.gen(function* () {
           const tunnel = yield* TunnelServer;
@@ -1003,8 +1014,8 @@ describe("TunnelServer (against local dev Postgres)", () => {
         });
 
       const program = Effect.gen(function* () {
-        const a = yield* mint(crypto.randomUUID());
-        const b = yield* mint(crypto.randomUUID());
+        const a = yield* mint(ownerPersonId);
+        const b = yield* mint(ownerPersonId);
 
         const signal = yield* TunnelSignal;
         // Drain the two `session_waiting` signals the mints above just pushed, so the

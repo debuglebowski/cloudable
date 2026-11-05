@@ -57,7 +57,10 @@ interface AuthInstance {
   api: {
     getSession: (options: {
       headers: Headers;
-    }) => Promise<{ user: { id: string; email: string } } | null>;
+    }) => Promise<{
+      user: { id: string; email: string };
+      session: { id: string; createdAt: Date };
+    } | null>;
     signUpEmail: (options: {
       body: { email: string; password: string; name: string };
     }) => Promise<{ user: { id: string; email: string } }>;
@@ -204,7 +207,9 @@ const options = {
   // API and the console); in local dev they differ, which is the only reason
   // consoleOrigin is here at all. Deduped so the list stays honest either way.
   trustedOrigins: [...new Set([config.betterAuthUrl, config.consoleOrigin])],
-  emailAndPassword: { enabled: true },
+  // Off in production: sign-in is SSO only there (see `config.passwordSignInEnabled`). With it
+  // off, BetterAuth refuses both email sign-up and email sign-in.
+  emailAndPassword: { enabled: config.passwordSignInEnabled },
   account: {
     accountLinking: {
       // A SAML assertion for an email that already has a local password
@@ -244,7 +249,7 @@ const options = {
       create: {
         before: async (user) => {
           const [person] = await authDb
-            .select({ id: people.id })
+            .select({ id: people.id, active: people.active })
             .from(people)
             .where(eq(people.email, user.email))
             .limit(1);
@@ -252,6 +257,14 @@ const options = {
             throw new APIError("BAD_REQUEST", {
               code: "no_matching_person",
               message: `No person record exists for "${user.email}". An org admin must add you as a person (People page) before you can sign in.`,
+            });
+          }
+          // A deactivated person gets no new account either. The API refuses them on every
+          // request anyway (`http/middleware/auth.ts`); this stops the account existing at all.
+          if (!person.active) {
+            throw new APIError("FORBIDDEN", {
+              code: "person_deactivated",
+              message: `"${user.email}" is deactivated. Ask an org admin.`,
             });
           }
         },

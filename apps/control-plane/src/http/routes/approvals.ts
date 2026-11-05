@@ -1,14 +1,37 @@
 import { HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema } from "@effect/platform";
 import { Schema } from "effect";
+import type { ApprovalResult } from "../../services/ApprovalService";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
-const ActionType = Schema.Literal("snapshot_restore", "break_glass", "admin_access", "offboarding");
+export const toApprovalWire = (result: ApprovalResult) => ({
+  ...result,
+  createdAt: result.createdAt.toISOString(),
+  expiresAt: result.expiresAt.toISOString(),
+  decidedAt: result.decidedAt ? result.decidedAt.toISOString() : null,
+});
+
+const ActionType = Schema.Literal(
+  "snapshot_restore",
+  "break_glass",
+  "admin_access",
+  "offboarding",
+  "package_install",
+  "approval_settings_change",
+);
+/** What `POST /api/v1/approvals` accepts. Package installs and approval-settings changes are
+ * requested through their own endpoints, which store what exactly is asked for. */
+const DirectActionType = Schema.Literal(
+  "snapshot_restore",
+  "break_glass",
+  "admin_access",
+  "offboarding",
+);
 const Mode = Schema.Literal("none", "single", "dual");
 const Status = Schema.Literal("pending", "approved", "rejected", "expired");
 const DecisionValue = Schema.Literal("approved", "rejected");
 
 /** Wire shape of an approval — mirrors `@cloudable/contracts`' `ApprovalResource`. */
-const ApprovalResource = Schema.Struct({
+export const ApprovalResource = Schema.Struct({
   id: Schema.String,
   orgId: Schema.String,
   actionType: ActionType,
@@ -22,6 +45,9 @@ const ApprovalResource = Schema.Struct({
   // that one is pending.
   targetPersonId: Schema.NullOr(Schema.String),
   reason: Schema.String,
+  // What exactly is asked for: `{ packageName, op, versionPin }` for `package_install`,
+  // `{ approvalModes }` for `approval_settings_change`, null otherwise.
+  payload: Schema.NullOr(Schema.Unknown),
   requiredApprovals: Schema.Number,
   approvedCount: Schema.Number,
   createdAt: Schema.String,
@@ -34,7 +60,7 @@ const ApprovalResource = Schema.Struct({
 // from the client — a caller can't request or decide an approval
 // attributed to someone else, or in another org.
 const CreateApprovalPayload = Schema.Struct({
-  actionType: ActionType,
+  actionType: DirectActionType,
   targetMachineId: Schema.NullOr(Schema.UUID),
   reason: Schema.String.pipe(Schema.minLength(1)),
 });

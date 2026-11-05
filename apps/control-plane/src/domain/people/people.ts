@@ -1,6 +1,6 @@
 import type * as schema from "@cloudable/schema";
-import { people } from "@cloudable/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { authSession, authUser, people } from "@cloudable/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Data, Effect, Schema } from "effect";
 import { Db } from "../../db/layer";
@@ -144,6 +144,7 @@ export interface UpdatePersonInput {
   orgId: string;
   email?: string | undefined;
   role?: string | undefined;
+  approver?: boolean | undefined;
 }
 
 export const updatePerson = (
@@ -156,20 +157,41 @@ export const updatePerson = (
   Effect.gen(function* () {
     const db = yield* Db;
     const existing = yield* findById(db, input.personId, input.orgId);
-    if (existing.source !== "manual") {
+    // Email and role come from the IdP for a synced person. The approver flag is Cloudable's own,
+    // so it can be set on anyone.
+    if (existing.source !== "manual" && (input.email !== undefined || input.role !== undefined)) {
       return yield* Effect.fail(new PersonNotManuallyManagedError({ personId: input.personId }));
     }
 
+    const nextEmail = input.email?.trim();
+    const emailChanges = nextEmail !== undefined && nextEmail !== existing.email;
+
+    // One transaction: an email change and the end of every credential issued under the old
+    // email commit together, or not at all. Without the revocation, whoever signed in as the old
+    // address would stay signed in as this person (the auth middleware resolves a console
+    // session by email, a CLI token by person id). Deleting the sessions ends them now;
+    // `credentialsRevokedAt` also refuses any CLI token and any session read from a cookie cache.
     const rows = yield* dbTry(
       () =>
-        db
-          .update(people)
-          .set({
-            ...(input.email !== undefined ? { email: input.email.trim() } : {}),
-            ...(input.role !== undefined ? { role: input.role } : {}),
-          })
-          .where(eq(people.id, input.personId))
-          .returning(),
+        db.transaction(async (tx) => {
+          const updated = await tx
+            .update(people)
+            .set({
+              ...(emailChanges ? { email: nextEmail, credentialsRevokedAt: new Date() } : {}),
+              ...(input.role !== undefined ? { role: input.role } : {}),
+              ...(input.approver !== undefined ? { approver: input.approver } : {}),
+            })
+            .where(eq(people.id, input.personId))
+            .returning();
+          if (emailChanges) {
+            const oldUsers = tx
+              .select({ id: authUser.id })
+              .from(authUser)
+              .where(sql`lower(${authUser.email}) = ${existing.email.toLowerCase()}`);
+            await tx.delete(authSession).where(inArray(authSession.userId, oldUsers));
+          }
+          return updated;
+        }),
       "update_person_failed",
     );
     const row = rows[0];

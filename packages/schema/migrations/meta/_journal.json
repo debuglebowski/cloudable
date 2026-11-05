@@ -183,6 +183,13 @@
       "when": 1791818923097,
       "tag": "0025_vulnerability_scanning",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793915834052,
+      "tag": "0026_rbac_roles_and_approvals",
+      "breakpoints": true
     }
   ]
 }

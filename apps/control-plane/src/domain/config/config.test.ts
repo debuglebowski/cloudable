@@ -589,7 +589,13 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       const org = await seedOrg();
       const machineA = await seedMachine(org.id);
       const machineB = await seedMachine(org.id);
-      const currentUser = { orgId: org.id, personId: "person-1", email: "person-1@example.com" };
+      const currentUser = {
+        orgId: org.id,
+        personId: "person-1",
+        email: "person-1@example.com",
+        role: "owner",
+        approver: false,
+      };
 
       await run(
         handlePatchSetting(
