@@ -13,7 +13,7 @@ import type {
 // ---------------------------------------------------------------------------
 import { oneOf, parseArgs, positiveInt, readSpec } from "./args";
 import { UsageError } from "./errors";
-import { authenticatedApiRequest, patchJson } from "./http-client";
+import { authenticatedApiRequest, patchJson, postJson } from "./http-client";
 import { type OrgWire, fetchOrg } from "./identity";
 import { packageEdits } from "./machines";
 import { dash, printEmpty, printFields, printJson, printTable } from "./output";
@@ -32,6 +32,7 @@ const APPROVAL_ACTIONS = [
   "break_glass",
   "admin_access",
   "offboarding",
+  "package_install",
 ] as const;
 const APPROVAL_MODES = ["none", "single", "dual"] as const;
 const RETENTION_LOCATIONS = ["customer", "cloudable_sweden_central"] as const;
@@ -91,7 +92,7 @@ function approvalModes(values: ReadonlyArray<string>): Record<string, string> {
 
 export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    `org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--event-retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode>] ${VULNERABILITY_SCAN_USAGE}`,
+    `org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--event-retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode> --reason <text>] ${VULNERABILITY_SCAN_USAGE}`,
   );
   const args = parseArgs(
     argv,
@@ -102,6 +103,7 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
         "retention-days",
         "event-retention-days",
         "retention-location",
+        "reason",
         ...VULNERABILITY_SCAN_VALUE_FLAGS,
       ],
       repeatable: ["approval-mode"],
@@ -132,14 +134,20 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
       "retention-location",
     );
   }
-  if (Object.keys(modes).length > 0) payload.approvalModes = modes;
+  // Approval modes change only with an approver's sign-off, so they are a request of their
+  // own, not part of the PATCH. Checked before anything is sent.
+  const changesModes = Object.keys(modes).length > 0;
+  const reason = args.flags.reason?.trim();
+  if (changesModes && !reason) {
+    throw new UsageError(`--approval-mode needs --reason: an approver reads it\n\n${usage}`);
+  }
 
   // Parsed (and refused if invalid) before anything is sent, so a typo in a scanning flag
   // cannot leave a half-applied change behind.
   const scan: UpdateVulnerabilityScanRequest = vulnerabilityScanUpdateFromArgs(args);
   const changesScan = hasVulnerabilityScanChanges(scan);
 
-  if (Object.keys(payload).length === 0 && !changesScan) {
+  if (Object.keys(payload).length === 0 && !changesScan && !changesModes) {
     throw new UsageError(`nothing to change\n\n${usage}`);
   }
 
@@ -156,12 +164,29 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
       )
     : undefined;
 
+  const modeRequest = changesModes
+    ? await authenticatedApiRequest<{ id: string; status: string }>(
+        "/api/v1/organisation/approval-modes",
+        postJson({ approvalModes: modes, reason }),
+      )
+    : undefined;
+
   if (args.booleans.has("json")) {
-    // One result keeps its own shape; both together are named so neither is ambiguous.
-    printJson(
-      org && scanView ? { organisation: org, vulnerabilityScan: scanView } : (org ?? scanView),
-    );
+    // One result keeps its own shape; more than one are named so none is ambiguous.
+    const parts = {
+      organisation: org,
+      vulnerabilityScan: scanView,
+      approvalModesRequest: modeRequest,
+    };
+    const present = Object.entries(parts).filter(([, value]) => value !== undefined);
+    printJson(present.length === 1 ? present[0]?.[1] : Object.fromEntries(present));
     return;
+  }
+  if (modeRequest) {
+    console.log(
+      `Approval mode change requested (approval ${modeRequest.id}). It applies once an approver signs off.`,
+    );
+    if (org || scanView) console.log("");
   }
   if (org) printOrg(org);
   if (scanView) {

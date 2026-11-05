@@ -332,13 +332,17 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       },
       {
         name: "update",
-        summary: "Change a person's email or role",
+        summary: "Change a person's email, role or approver flag",
         args: "<email|id>",
         options: [
-          { flag: "--email <email>", description: "New address" },
+          { flag: "--email <email>", description: "New address. Signs them out everywhere" },
           { flag: "--role <role>", description: "New role" },
+          { flag: "--approver yes|no", description: "Whether they decide approval requests" },
         ],
-        notes: ["Only people this org manages itself. A SCIM-sourced person is refused."],
+        notes: [
+          "Admin only.",
+          "Email and role only for people this org manages itself. A SCIM-sourced person is refused.",
+        ],
       },
       { name: "activate", summary: "Let a person sign in again", args: "<email|id>" },
       {
@@ -436,8 +440,10 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
           },
           {
             flag: "--approval-mode <action>=<mode>",
-            description: "none|single|dual per action (repeatable)",
+            description:
+              "none|single|dual per action (repeatable). Asks for the change; an approver signs off",
           },
+          { flag: "--reason <text>", description: "Why, for the approver (with --approval-mode)" },
           {
             flag: "--vulnerability-scan on|off",
             description: "Scan every machine in the org for known vulnerabilities",

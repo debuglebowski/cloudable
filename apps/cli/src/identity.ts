@@ -8,6 +8,8 @@ export interface PersonWire {
   source: "manual" | "scim";
   active: boolean;
   role: string;
+  /** Approvers decide approval requests. A flag on top of the role. */
+  approver: boolean;
   createdAt: string;
   deactivatedAt: string | null;
 }

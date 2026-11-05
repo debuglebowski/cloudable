@@ -26,6 +26,7 @@ function printPerson(person: PersonWire): void {
     ["id", person.id],
     ["email", person.email],
     ["role", person.role],
+    ["approver", person.approver ? "yes" : "no"],
     ["source", person.source],
     ["active", person.active ? "yes" : "no"],
     ["created", shortTime(person.createdAt)],
@@ -45,8 +46,15 @@ export async function runPeopleListCommand(argv: ReadonlyArray<string>): Promise
     return;
   }
   printTable(
-    ["id", "email", "role", "source", "active"],
-    people.map((p) => [p.id, p.email, p.role, p.source, p.active ? "yes" : "no"]),
+    ["id", "email", "role", "approver", "source", "active"],
+    people.map((p) => [
+      p.id,
+      p.email,
+      p.role,
+      p.approver ? "yes" : "no",
+      p.source,
+      p.active ? "yes" : "no",
+    ]),
   );
 }
 
@@ -68,10 +76,19 @@ export async function runPeopleCreateCommand(argv: ReadonlyArray<string>): Promi
 }
 
 export async function runPeopleUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = usageFor("people update <email|id> [--email <email>] [--role <role>]");
-  const args = parseArgs(argv, readSpec({ values: ["email", "role"] }));
+  const usage = usageFor(
+    "people update <email|id> [--email <email>] [--role <role>] [--approver yes|no]",
+  );
+  const args = parseArgs(argv, readSpec({ values: ["email", "role", "approver"] }));
   const id = await personId(required(args, 0, "a person", usage));
-  const payload = patchable(args, ["email", "role"]);
+  const payload: Record<string, string | boolean> = patchable(args, ["email", "role"]);
+  const approver = args.flags.approver;
+  if (approver !== undefined) {
+    if (approver !== "yes" && approver !== "no") {
+      throw new UsageError(`--approver takes yes or no\n\n${usage}`);
+    }
+    payload.approver = approver === "yes";
+  }
   if (Object.keys(payload).length === 0) throw new UsageError(`nothing to change\n\n${usage}`);
 
   const person = await authenticatedApiRequest<PersonWire>(
