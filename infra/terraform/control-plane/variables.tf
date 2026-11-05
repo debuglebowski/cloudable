@@ -447,3 +447,35 @@ variable "idp_email_domains" {
   type        = list(string)
   default     = []
 }
+
+variable "admin_access_policy" {
+  description = <<-EOT
+    Whether an admin may get live access (terminal, files, SSH, snapshot
+    inspection) to a machine they do not own: "never", "with_approval" or
+    "always". Pinned here on purpose: nobody, admins included, can change it
+    from the console or the API. Emergency access goes through Azure PIM on
+    the machines resource group instead (docs/access.md, "Break-glass").
+  EOT
+  type        = string
+  default     = "never"
+
+  validation {
+    condition     = contains(["never", "with_approval", "always"], var.admin_access_policy)
+    error_message = "admin_access_policy must be never, with_approval or always."
+  }
+}
+
+variable "password_sign_in" {
+  description = <<-EOT
+    "on" or "off": whether the console offers email and password sign-in.
+    Null (the default) means off when idp_metadata_url is set, so a deployment
+    with an identity provider signs in through SSO only, and on otherwise.
+  EOT
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.password_sign_in == null || contains(["on", "off"], coalesce(var.password_sign_in, "on"))
+    error_message = "password_sign_in must be on, off, or null."
+  }
+}

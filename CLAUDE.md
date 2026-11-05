@@ -73,7 +73,7 @@ Read the relevant file before working in that area.
 | `docs/inheritance.md` | org → template → machine, package permission, overrides, pinning |
 | `docs/agents.md`      | Control agent, tunnel daemon, wire protocol, attestation       |
 | `docs/cloud-auth.md`  | Self-hosted managed identity (the real path), RBAC scope, why BYOC federation was removed |
-| `docs/access.md`      | Web terminal, SSH certificates, session tokens                 |
+| `docs/access.md`      | Roles (member, admin, approver), web terminal, SSH certificates, session tokens |
 | `docs/lifecycle.md`   | Archive, snapshots, restore, offboarding, break-glass          |
 | `docs/compliance.md`  | Events → checks → controls, the v1 checks, evidence export |
 | `docs/vulnerability-scanning.md` | The vulnerability scan: scanner delivery, schedule, findings, the check, evidence |

@@ -102,6 +102,12 @@ machine towards it. Installing and removing are explicit per-package actions a p
 (`domain/machine/package-actions.ts`), each one recorded as a request, an outcome, and a failure if
 there was one.
 
+Who may ask: the machine's owner, or an admin. An install also needs an approval
+(`package_install`, one approver by default, set on the Organisation page) and is queued only
+once it is approved (`domain/machine/package-request.ts`). A removal is queued at once. Which
+packages a machine *may* have is configuration, so only an admin edits a manifest, at either
+scope.
+
 That split is why a machine's packages table has two independent columns. A package can be allowed
 and absent because nobody has installed it yet, or present and disallowed because somebody
 installed it anyway — and the second is exactly what the compliance check is looking for.

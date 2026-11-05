@@ -3,6 +3,94 @@
 How access methods are implemented: the SSH CA, `cloudable login`, signed
 session tokens, and the web terminal / tunnel daemon's control-plane side.
 
+## Roles: who may see and do what
+
+Every person has a role, `member` or admin (`owner` or `admin`). On top of that, any person can
+be an **approver** (`people.approver`). The rules live in `packages/contracts/src/domains/roles.ts`.
+The control plane checks them on every request (`apps/control-plane/src/domain/authz`). The
+console only hides what a person cannot use.
+
+**A member** sees and works on their own machine only. They cannot see anyone else's machine, not
+even that it exists: the API answers 404. They cannot create a machine.
+
+**An admin** runs the org. People, settings, integrations, audit, archive and compliance are
+admin only. An admin creates a machine for a person. The owner must be an active person of the
+org with no other live machine. An admin has **no live access** to someone else's machine: no
+terminal, no files, no SSH, no snapshot inspection.
+
+**An approver** decides approval requests. Admins can decide them too. Nobody decides a request
+they made, a request about themselves, or a request about a machine they own. A change to
+approval settings needs an approver specifically, not just any admin.
+
+| On a machine | Owner | Admin (not owner) | Anyone else |
+| :--- | :--- | :--- | :--- |
+| See it | yes | yes | no (404) |
+| Connect: terminal, files, SSH | yes | no | no |
+| Inspect a snapshot | yes | no | no |
+| Archive | yes | only by offboarding the owner | no |
+| Restart, upgrade, take a snapshot | yes | yes | no |
+| Ask for a package install or removal | yes | yes | no |
+| Change which packages it may have | no | yes | no |
+| Restore a snapshot | yes, to the same owner | yes, to the same owner | no |
+
+Every one of these is recorded with the person who did it.
+
+| Elsewhere | Member | Approver | Admin |
+| :--- | :--- | :--- | :--- |
+| Machines list | own only | own only | all |
+| Access page: sessions, certificates | own only | own only | all |
+| Approvals | own requests | all, and decide | all, and decide |
+| People list | themselves only | all | all, and edit |
+| Audit, Archive, Integrations, Organisation, compliance | no | no | yes |
+| Any setting, at org or machine scope | no | no | yes |
+
+### Live access is the owner's alone
+
+`ADMIN_ACCESS_POLICY` (`config.ts`, set by Terraform) decides whether an admin can ever get an
+elevation on someone else's machine. It defaults to `never`, and production pins it there. It is
+not a setting: the API refuses to write `admin_access_policy`, and an old setting row is ignored.
+The policy is checked when a session opens, not only when an elevation is asked for, so a grant
+from before the pin opens nothing.
+
+A machine with no owner (after offboarding) is open to nobody.
+
+### Break-glass
+
+Break-glass is outside Cloudable, through Azure PIM (Privileged Identity Management). An operator
+activates an Azure role with MFA and a written justification. PIM records it and tells the
+Security Delegates. See `cloudable-deploy/README.md` for who is eligible.
+
+**Not done yet:** today PIM in `cloudable-deploy` covers the Key Vault roles only. There is no
+PIM-eligible role on the machines resource group (`rg-cloudable-managed`) for reaching a VM. Until
+there is, break-glass to a machine means a standing Azure role, which is not the control this
+section describes.
+
+This is also the honest limit of the rule above. Anyone with Azure rights on that resource group
+can run commands on a VM or copy its disk without Cloudable seeing it.
+
+### Sign-in
+
+Production signs in through Entra SSO only. Email and password sign-in is off whenever the
+deployment declares an identity provider (`PASSWORD_SIGN_IN`, default off then).
+
+A deactivated person is refused on every request (401) and cannot create a sign-in account.
+
+Only an admin can change a person's email. A console session is matched to a person by email, so
+whoever can change an email can sign in as someone else. When an admin changes one, every console
+session and CLI token the person held is revoked (`people.credentials_revoked_at`) and a
+`person.email_changed` event is written.
+
+### Approvals that replace open paths
+
+- **Package installs** need an approval, by default from one person (`package_install` on the
+  Organisation page). The owner asks on their own machine, an admin on any. The install is queued
+  only once it is approved. A removal is queued at once.
+- **Approval settings** change only with an approver's sign-off. An admin asks
+  (`POST /api/v1/organisation/approval-modes`), an approver decides, then the new modes apply.
+  This request can never be set to need no one.
+- **Restore** goes back to the snapshot's own owner only. Restoring a person's data to someone
+  else is refused.
+
 ## What the Access surface shows, and nothing else
 
 **"Which certificates are live, for whom, expiring when"** — nothing more. This build
@@ -10,7 +98,7 @@ deliberately does not implement, and must not grow, any of: per-key staleness cl
 access reviews, password-authentication toggles, per-machine connection passwords, or SSH public
 key upload. Certificates replace key upload entirely.
 
-`GET /api/v1/access/certificates?orgId=...` is the entire read surface for this: id, person,
+`GET /api/v1/access/certificates` is the entire read surface for this: id, person,
 machine scope, fingerprint, issued/expires timestamps, revoked-at/reason. See
 `packages/contracts/src/domains/access.ts` for the wire shape.
 
@@ -83,8 +171,9 @@ serials for KRL purposes.
 ### `machineScope` is recorded, not enforced
 
 `issueCertificate` takes a `machineScope` (`"all"`, or a list of machine ids from `cloudable login
---machine-scope`), writes it to the `certificates` row and puts it in `access.certificate_issued`
-— and then builds a certificate that does not mention it. The only principal is the OS user, and
+--machine-scope`). The handler checks it first: it may name only the person's own machines, and
+`"all"` is narrowed to exactly those. It writes the scope to the `certificates` row and puts it in
+`access.certificate_issued`, and then builds a certificate that does not mention it. The only principal is the OS user, and
 the only extension is `permit-pty`. sshd never learns the scope, so a certificate issued for
 `m-abc` authenticates to `m-def` exactly as well.
 
@@ -557,21 +646,17 @@ null owner. `domain/archive/inspect-authorization.ts` is the gate, and
 | Method | Path | Purpose |
 | :--- | :--- | :--- |
 | `POST` | `/api/v1/access/certificates` | Issue a certificate (`cloudable login`'s call) |
-| `GET` | `/api/v1/access/certificates?orgId=...` | The Access surface's read view (see above) |
-| `POST` | `/api/v1/access/certificates/revoke` | Revoke a certificate (org-scoped) |
+| `GET` | `/api/v1/access/certificates` | The Access surface's read view (see above). Own only, unless admin |
+| `POST` | `/api/v1/access/certificates/revoke` | Revoke a certificate. Own only, unless admin |
 | `POST` | `/api/v1/access/sessions` | Mint a session (web terminal / file session / SSH session start) |
-| `POST` | `/api/v1/access/sessions/end` | End a session |
+| `POST` | `/api/v1/access/sessions/end` | End a session. Own only, unless admin |
+| `GET` | `/api/v1/access/sessions` | Open sessions. Own only, unless admin |
 
 Not part of this group (bearer-authenticated like the agent protocol, not `orgId`/`personId`-in-body like the table above) — `GET /api/v1/tunnel/signal`, the tunnel-signal long poll, `apps/control-plane/src/http/routes/tunnel-signal.ts` + `handlers/tunnel-signal.ts`. See `docs/agents.md`'s own section on it.
 
-**No path parameters** — certificate/session ids travel in the JSON body rather than `/:id`
-segments. This is a deliberate simplification: no `CurrentUserTag` auth middleware exists yet
-(`apps/control-plane/src/http/middleware/auth.ts` is an explicit stub — "no endpoint currently
-requires `CurrentUserTag`"), so there is no authenticated caller to scope a `/:id` lookup to in
-the first place; every request here also carries `orgId`/`personId` explicitly in the body for
-the same reason. A future feature unit that wires real auth up should both add `:id` path params
-back and drop the body-carried identity fields in favor of the authenticated session — the
-`orgId`-scoping already present in every DB query is what that unit will lean on.
+Every endpoint takes the caller from their session (`CurrentUserTag`), never from the body. A
+member sees and ends only their own sessions and revokes only their own certificates; an admin can
+do it for anyone in the org. Another person's session or certificate answers 404.
 
 Every endpoint shares one error shape (`{ code, message }`) with four variants —
 `not_found` (404), `denied` (403), `bad_request` (400), `internal_error` (500) — mapped from the

@@ -336,7 +336,7 @@ A restore names what it lands on:
 
 | Target | What happens | Approval floor |
 | :-- | :-- | :-- |
-| `new_machine` | A machine is provisioned with `/home` from the snapshot. Nothing existing is touched. Requires an explicit `ownerPersonId` — never inherited from the snapshot's original machine, since a common restore recovers an offboarded person's data. | the mode's own floor |
+| `new_machine` | A machine is provisioned with `/home` from the snapshot. Nothing existing is touched. Requires an explicit `ownerPersonId`, and it must be the snapshot machine's current owner: a person's data is never restored to someone else. A machine with no owner (offboarded) cannot be restored to anyone. | the mode's own floor |
 | `existing_machine`, archived | Its VM, disks, NIC and IP were deleted by `archive()`, so they are rebuilt. The row un-archives. | the mode's own floor |
 | `existing_machine`, live | Its current data disk is **destroyed** and replaced. Requires `confirmDestroysData: true`. | always `dual` |
 
@@ -500,38 +500,24 @@ trail.
 `tunnel/access-authorization.ts`'s `isAuthorizedForInteractiveAccess`. The difference is
 one line, and it is the whole reason this is a separate function.
 
-The live gate opens with:
+Both gates now treat a null owner the same way: closed. The live gate used to let anyone in
+the org into an ownerless machine, on the reasoning that a machine waiting for an owner should
+not be locked to everyone. But `offboardPerson.ts` clears the owner and **then** archives, so an
+ownerless machine is usually a departed person's, and its data is theirs.
 
-```ts
-if (input.ownerPersonId === null || input.ownerPersonId === input.personId) {
-  return Effect.succeed(true);
-}
-```
+Both gates also refuse every elevation while `ADMIN_ACCESS_POLICY` is `never`, which is the
+default and production's value. So in production only the owner may look. See
+`docs/access.md`, "Roles".
 
-A null owner means "allow anyone in the org". That is correct for what it guards — a
-machine mid-provisioning or mid owner-reassignment must not become unreachable to
-everyone, and a live machine always has exactly one owner.
-
-Here it would be a hole. `offboardPerson.ts` clears the owner and **then** archives, so
-every snapshot offboarding produces belongs to a machine whose `ownerPersonId` is null.
-Reusing that gate would mean any member of the org could read a departed colleague's home
-directory with no elevation, no approval and no reason recorded.
-
-It is masked today only because `mintSession` refuses any machine that is not `running`.
-Inspection works precisely on archived machines, so it removes the mask.
-
-**For a snapshot, a null owner is closed.** It means "offboarded", not "not yet assigned",
-and the people who may still look are the ones who went through elevation to get there.
-`inspect.test.ts` pins both gates side by side on the same offboarded machine and asserts
-they disagree, so anyone who later merges them gets a failure that explains itself.
+`inspect.test.ts` pins both gates on the same ownerless machine and asserts both refuse.
 
 Who may look:
 
 | | |
 |---|---|
 | The machine's owner | Directly. Their own data, which they could have read on the live machine. |
-| Anyone else | A granted, unexpired `file_recovery` or `shell` elevation on that machine — which is itself approval-gated (`ElevationService`). |
-| Nobody owns it | Elevation, always. There is no owner fast path to fall into. |
+| Anyone else | Only where `ADMIN_ACCESS_POLICY` allows elevations at all (not production): a granted, unexpired `file_recovery` or `shell` elevation on that machine. |
+| Nobody owns it | Nobody, except through such an elevation. |
 
 Inspection is not charged an elevation level of its own. It is strictly less than a live
 files session — read-only, against a frozen copy rather than a running machine — so
@@ -726,9 +712,9 @@ two-argument contract described in the feature-unit brief.
 | Method | Path | Notes |
 |---|---|---|
 | `POST` | `/api/v1/archive/machines/:machineId/snapshots` | Takes a snapshot of a LIVE machine now. Body `{scope?}`, default `shallow`. Never quiesced — the machine keeps running, so the copy is crash-consistent. |
-| `POST` | `/api/v1/archive/machines/:machineId/archive` | Body: `{approvalId?}`. `404` if the machine doesn't exist, `409` if it's already archived (archiving is one-way — see "The state machine"). |
-| `POST` | `/api/v1/archive/snapshots/:snapshotId/restore` | Body: `RestoreSnapshotRequest`. `404` snapshot or target machine not found, `409` expired, `400` full-mode without acknowledgement, `403` denied/expired approval. |
-| `POST` | `/api/v1/archive/snapshots/:snapshotId/legal-hold` | Body: `{reason}`. `400` on an empty reason. |
+| `POST` | `/api/v1/archive/machines/:machineId/archive` | The owner only. An admin archives someone else's machine by offboarding them. Body: `{approvalId?}`. `404` if the machine doesn't exist or is not the caller's to see, `403` if the caller is not the owner, `409` if it's already archived (archiving is one-way, see "The state machine"). |
+| `POST` | `/api/v1/archive/snapshots/:snapshotId/restore` | The machine's owner or an admin, onto the same owner only. Body: `RestoreSnapshotRequest`. `404` snapshot or target machine not found, `409` expired, `400` full-mode without acknowledgement, `403` a different owner, or a denied/expired approval. |
+| `POST` | `/api/v1/archive/snapshots/:snapshotId/legal-hold` | Admin only. Body: `{reason}`. `400` on an empty reason. |
 | `POST` | `/api/v1/archive/snapshots/:snapshotId/legal-hold/clear` | Same shape as above. |
 | `GET` | `/api/v1/archive/snapshots/:snapshotId` | Returns `SnapshotView`, including computed `subState` and `restoreUnavailableReason`. |
 | `GET` | `/api/v1/archive/snapshots/:snapshotId/cost-estimate` | Returns `SnapshotCostEstimateResponse`. |

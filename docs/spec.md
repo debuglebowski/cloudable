@@ -65,6 +65,10 @@ SCIM 2.0 + SAML against Microsoft Entra ID. IdP and cloud provider are independe
 
 SCIM is **not required**. With no IdP connected, Cloudable's People section is the system of record and fully editable. When SCIM is connected, synced fields become read-only with an indicator of origin.
 
+**Roles.** A person is a member or an admin, and either can also be an approver. A member works on their own machine only. An admin runs the org but has no live access to anyone else's machine. Approvers and admins decide approval requests. Full rules: `docs/access.md`, "Roles". Why: the buyer answers the auditor, and "one person cannot see or reach another person's machine" has to hold for admins too, or it is not a control.
+
+With an IdP declared in deployment config, sign-in is SSO only. Email and password exist for local development and first boot without an IdP.
+
 ---
 
 ## 4. Provisioning
@@ -235,7 +239,9 @@ See `docs/access.md` for implementation detail.
 
 **Approval mode is policy**, inherited through the chain, per action type: **none / single / dual**.
 
-Consumers: snapshot restore, break-glass, admin access to an unowned machine, offboarding.
+Consumers: snapshot restore, break-glass, admin access to an unowned machine, offboarding, package installs, and changes to approval settings.
+
+**Who decides.** An approver or an admin. Never the person who asked, the person the request is about, or the owner of the machine it is about. A change to approval settings needs an approver specifically, and can never resolve to "none": otherwise an admin could set a mode to "none" and then act alone.
 
 Every decision writes an event, granted or denied. Denials are evidence.
 
@@ -280,15 +286,13 @@ See `docs/lifecycle.md` for implementation detail.
 
 ## 15. Admin access & break-glass
 
-Implemented in Cloudable, **not** Entra PIM. One elevation primitive on the generic approval object.
+**Admins have no live access to a machine they do not own.** No terminal, files, SSH or snapshot inspection. This replaced the earlier design, where an org policy of never / always / with approval let an admin in through a time-boxed elevation.
 
-**Admin connecting to a machine they do not own:** org policy of **never / always / with approval**.
+Why it changed: the policy was a setting, and anyone who could change the setting could open the machine. Approval did not help, because two admins can approve each other. "One person cannot reach another person's machine" only holds if no role inside Cloudable can.
 
-If allowed: reason required, time-boxed grant (e.g. 1h) that expires on its own, owner notified, session recorded, event written.
+The elevation primitive is still in the code (two levels, file recovery and interactive shell, reason required, time-boxed, owner notified). It is gated by `ADMIN_ACCESS_POLICY`, set at deploy time, default and production value `never`. It is not a setting and cannot be changed from the console.
 
-**Two elevation levels with separate approval requirements:**
-- **File recovery** — lower risk
-- **Interactive shell** — can read injected secrets on a live machine
+**Break-glass is Azure PIM**, outside Cloudable: an operator activates an Azure role on the machines resource group, with MFA and a justification, and PIM records it. See `docs/access.md`, "Break-glass", including what is not set up yet.
 
 ---
 
@@ -410,6 +414,8 @@ Deliberate omissions:
 **Archive is separate from Machines.** Snapshots outlive machines and carry their own retention clock. The Machines page shows archived rows behind a filter; the Archive section governs retention.
 
 **People is top-level and fully editable.** SCIM is not assumed.
+
+**The console follows the role.** Members see Machines (their own) and Access (their own). Approvers also see Approvals. People, Audit, Archive, Integrations and Organisation are admin only. Hiding is for clarity; the control plane refuses the same things.
 
 ### LineageGutter
 Exactly three props:

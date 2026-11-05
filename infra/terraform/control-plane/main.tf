@@ -1397,6 +1397,25 @@ resource "azurerm_container_app" "this" {
           value = local.idp_saml_config
         }
       }
+
+      # Who can get in at all, pinned here rather than left to a setting anyone
+      # could change from the console. Appended last, like the IdP blocks above.
+      #
+      # ADMIN_ACCESS_POLICY: whether an admin may ever open a terminal, files
+      # or a snapshot on a machine they do not own. "never" in production.
+      # Emergency access goes through Azure PIM on the machines resource group
+      # instead (docs/access.md, "Break-glass").
+      env {
+        name  = "ADMIN_ACCESS_POLICY"
+        value = var.admin_access_policy
+      }
+
+      # PASSWORD_SIGN_IN: email and password sign-in. "off" whenever the
+      # deployment declares an identity provider, so sign-in is SSO only.
+      env {
+        name  = "PASSWORD_SIGN_IN"
+        value = coalesce(var.password_sign_in, var.idp_metadata_url != null ? "off" : "on")
+      }
     }
   }
 
