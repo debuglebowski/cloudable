@@ -61,47 +61,58 @@ const toErrorResponse = (error: unknown) => {
   ).pipe(Effect.orDie);
 };
 
+const adminOnly = Effect.flatMap(CurrentUserTag, (currentUser) =>
+  requireAdminUser(currentUser, "Only an admin can offboard a person."),
+);
+
 export const OffboardingHttpLive = HttpApiBuilder.group(Api, "offboarding", (handlers) =>
   handlers
     .handle("offboardPerson", ({ payload }) =>
-      Effect.gen(function* () {
-        const currentUser = yield* CurrentUserTag;
-        yield* requireAdminUser(currentUser, "Only an admin can offboard a person.");
-        // `offboardPersonDetailed`'s own signature is the exact one the spec
-        // describes (see `domain/offboarding/offboardPerson.ts`) and doesn't
-        // take an `orgId` — this scoped lookup is the tenant-ownership gate
-        // in front of it, same reasoning as `archive`'s handlers. A person
-        // in a DIFFERENT org is `person_not_found`, not a separate case —
-        // never confirm another org's person exists.
-        const repo = yield* OffboardingRepoTag;
-        const person = yield* repo
-          .findPerson(payload.personId)
-          .pipe(
-            Effect.mapError(
-              (cause) => new OffboardingError({ reason: "sub_operation_failed", cause }),
-            ),
-          );
-        if (!person || person.orgId !== currentUser.orgId) {
-          return yield* Effect.fail(
-            new OffboardingError({ reason: "person_not_found", cause: payload.personId }),
-          );
-        }
-        return yield* offboardPersonDetailed(
-          payload.personId,
-          currentUser.personId,
-          payload.reason,
-        );
-      }).pipe(Effect.map(toWireOutcome), Effect.catchAll(toErrorResponse)),
+      // The role check runs outside `toErrorResponse`, which would turn its 403 into a 500.
+      adminOnly.pipe(
+        Effect.zipRight(
+          Effect.gen(function* () {
+            const currentUser = yield* CurrentUserTag;
+            // `offboardPersonDetailed`'s own signature is the exact one the spec
+            // describes (see `domain/offboarding/offboardPerson.ts`) and doesn't
+            // take an `orgId` — this scoped lookup is the tenant-ownership gate
+            // in front of it, same reasoning as `archive`'s handlers. A person
+            // in a DIFFERENT org is `person_not_found`, not a separate case —
+            // never confirm another org's person exists.
+            const repo = yield* OffboardingRepoTag;
+            const person = yield* repo
+              .findPerson(payload.personId)
+              .pipe(
+                Effect.mapError(
+                  (cause) => new OffboardingError({ reason: "sub_operation_failed", cause }),
+                ),
+              );
+            if (!person || person.orgId !== currentUser.orgId) {
+              return yield* Effect.fail(
+                new OffboardingError({ reason: "person_not_found", cause: payload.personId }),
+              );
+            }
+            return yield* offboardPersonDetailed(
+              payload.personId,
+              currentUser.personId,
+              payload.reason,
+            );
+          }).pipe(Effect.map(toWireOutcome), Effect.catchAll(toErrorResponse)),
+        ),
+      ),
     )
     .handle("sync", ({ path }) =>
-      Effect.gen(function* () {
-        const currentUser = yield* CurrentUserTag;
-        yield* requireAdminUser(currentUser, "Only an admin can offboard a person.");
-        // `resumeOffboarding` scopes its own lookup to `orgId` (see
-        // `ApprovalService.status`) — an approval belonging to a different
-        // org, or one that isn't an offboarding approval, comes back as
-        // `invalid_approval`, the same non-leaking shape as everywhere else.
-        return yield* resumeOffboarding(path.approvalId, currentUser.orgId);
-      }).pipe(Effect.map(toWireOutcome), Effect.catchAll(toErrorResponse)),
+      adminOnly.pipe(
+        Effect.zipRight(
+          Effect.gen(function* () {
+            const currentUser = yield* CurrentUserTag;
+            // `resumeOffboarding` scopes its own lookup to `orgId` (see
+            // `ApprovalService.status`) — an approval belonging to a different
+            // org, or one that isn't an offboarding approval, comes back as
+            // `invalid_approval`, the same non-leaking shape as everywhere else.
+            return yield* resumeOffboarding(path.approvalId, currentUser.orgId);
+          }).pipe(Effect.map(toWireOutcome), Effect.catchAll(toErrorResponse)),
+        ),
+      ),
     ),
 );

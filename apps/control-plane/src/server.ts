@@ -9,32 +9,9 @@ import { Cause, Effect, Layer, Option } from "effect";
 import { bootstrapDefaultAdmin } from "./bootstrap-default-admin";
 import { config } from "./config";
 import { DbLive } from "./db/layer";
-import { EvidenceLive } from "./evidence/handler";
 import { startExpirySweepDaemon } from "./expiry/daemon";
-import { Api } from "./http/api";
-import { AccessLive } from "./http/handlers/access";
-import { AgentProtocolLive } from "./http/handlers/agent-protocol";
-import { ApprovalsLive } from "./http/handlers/approvals";
-import { ArchiveLive } from "./http/handlers/archive";
-import { AuthSsoStatusLive } from "./http/handlers/auth-sso-status";
-import { CatalogLive } from "./http/handlers/catalog";
-import { CliAuthLive } from "./http/handlers/cli-auth";
-import { ComplianceLive } from "./http/handlers/compliance";
-import { ConfigLive } from "./http/handlers/config";
-import { ElevationsLive } from "./http/handlers/elevations";
-import { HealthLive } from "./http/handlers/health";
-import { IntegrationsLive } from "./http/handlers/integrations";
-import { MachinesLive } from "./http/handlers/machines";
-import { NotificationsLive } from "./http/handlers/notifications";
-import { OffboardingHttpLive } from "./http/handlers/offboarding";
-import { OrganisationLive } from "./http/handlers/organisation";
-import { PeopleLive } from "./http/handlers/people";
-import { ProvisioningCapabilitiesLive } from "./http/handlers/provisioning-capabilities";
-import { RestartLive } from "./http/handlers/restart";
-import { AccessAttachRouteLive, TunnelConnectRouteLive, TunnelLive } from "./http/handlers/tunnel";
-import { TunnelSignalLive } from "./http/handlers/tunnel-signal";
-import { UpgradeLive } from "./http/handlers/upgrade";
-import { VulnerabilityScanLive } from "./http/handlers/vulnerability-scan";
+import { ApiLive } from "./http/api-live";
+import { AccessAttachRouteLive, TunnelConnectRouteLive } from "./http/handlers/tunnel";
 import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
 import { AuthRouteLive } from "./http/routes/auth";
 import { BinariesRouteLive } from "./http/routes/binaries";
@@ -75,37 +52,6 @@ const AppLive = buildAppLive({
 // RestartLive) need it provided here too. `DbLive` is a single scoped layer shared by
 // reference, so this does not open a second Postgres connection pool alongside the one
 // inside `AppLive`.
-const ApiLive = HttpApiBuilder.api(Api).pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      ElevationsLive,
-      UpgradeLive,
-      OffboardingHttpLive,
-      HealthLive,
-      MachinesLive,
-      AgentProtocolLive,
-      ApprovalsLive,
-      ComplianceLive,
-      EvidenceLive,
-      ArchiveLive,
-      ConfigLive,
-      AccessLive,
-      PeopleLive,
-      OrganisationLive,
-      IntegrationsLive,
-      TunnelSignalLive,
-      TunnelLive,
-      NotificationsLive,
-      RestartLive,
-      CatalogLive,
-      ProvisioningCapabilitiesLive,
-      AuthSsoStatusLive,
-      CliAuthLive,
-      VulnerabilityScanLive,
-    ),
-  ),
-  Layer.provide(DbLive),
-);
 
 // Not part of `Api`/`ApiLive` above — `wake` is a raw route on the same shared
 // `HttpApiBuilder.Router`, not an `HttpApiEndpoint` (see agent-wake.ts) — but it needs the

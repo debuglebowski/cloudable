@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
+import { CurrentUserAuthentication } from "../middleware/auth";
 
 /**
  * What this *deployment* can technically run — not what an org has chosen
@@ -7,8 +8,8 @@ import { Schema } from "effect";
  * Azure is available iff this control-plane booted with
  * `AZURE_SUBSCRIPTION_ID` (+ resource group/subnet) configured; docker/fake
  * always are (see `config.ts`'s `azureSubscriptionId` doc comment and
- * `ProvisioningService.switchable.ts`). Read-only, unauthenticated (no
- * secret in this response — just which knobs exist), so the Integrations
+ * `ProvisioningService.switchable.ts`). Read-only, and signed-in only: it names the
+ * Azure subscription and resource group, which an anonymous caller has no use for. So the Integrations
  * page can grey out "Enable" for a provider this deployment can't actually
  * run before the user tries and gets a 500 from the adapter itself.
  */
@@ -33,8 +34,10 @@ const ProvisioningCapabilitiesResponse = Schema.Struct({
   fake: Schema.Struct({ available: Schema.Boolean }),
 });
 
-export const ProvisioningCapabilitiesGroup = HttpApiGroup.make("provisioningCapabilities").add(
-  HttpApiEndpoint.get("get", "/api/v1/provisioning/capabilities").addSuccess(
-    ProvisioningCapabilitiesResponse,
-  ),
-);
+export const ProvisioningCapabilitiesGroup = HttpApiGroup.make("provisioningCapabilities")
+  .add(
+    HttpApiEndpoint.get("get", "/api/v1/provisioning/capabilities").addSuccess(
+      ProvisioningCapabilitiesResponse,
+    ),
+  )
+  .middleware(CurrentUserAuthentication);
