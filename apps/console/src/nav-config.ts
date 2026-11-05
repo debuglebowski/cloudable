@@ -12,6 +12,7 @@ import {
 
 import { usePendingApprovalsCount } from "@/api/approvals";
 import { useUnreadNotificationsCount } from "@/api/notifications";
+import type { PageAccess } from "@/lib/role";
 
 export interface NavItem {
   label: string;
@@ -32,6 +33,8 @@ export interface NavItem {
    * this list doesn't need its own re-validation as items are added.
    */
   iconColorClassName: string;
+  /** Who sees this item. Omitted means everyone. Matches the page's own `gatePage` in its route. */
+  access?: Exclude<PageAccess, "everyone">;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -51,6 +54,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     label: "People",
+    access: "admin",
     to: "/people",
     group: "Operate",
     icon: Users,
@@ -69,6 +73,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     label: "Approvals",
+    access: "approver",
     to: "/approvals",
     group: "Govern",
     icon: ShieldCheck,
@@ -77,6 +82,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     label: "Audit",
+    access: "admin",
     to: "/audit",
     group: "Govern",
     icon: ScrollText,
@@ -85,6 +91,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     label: "Archive",
+    access: "admin",
     to: "/archive",
     group: "Govern",
     icon: Archive,
@@ -93,6 +100,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     label: "Integrations",
+    access: "admin",
     to: "/integrations",
     group: "Configure",
     icon: Plug,
@@ -101,6 +109,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     label: "Organisation",
+    access: "admin",
     to: "/organisation",
     group: "Configure",
     icon: Building2,

@@ -1,3 +1,4 @@
+import { type MachineAction, canActOnMachine, canAdminister } from "@cloudable/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import {
@@ -38,6 +39,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useRoleSubject } from "@/lib/role";
 import { LegalHoldDialog } from "@/routes/archive/legal-hold-dialog";
 import { RestoreDialog } from "@/routes/archive/restore-dialog";
 import { RetentionStatus, formatDate, formatSnapshotSize } from "@/routes/archive/snapshot-format";
@@ -146,6 +148,14 @@ export function MachineDetailPage() {
     queryKey: machinesKeys.detail(machineId),
     queryFn: () => getMachine(machineId),
   });
+  // What this person may do here (see `@cloudable/contracts` roles.ts). The control plane
+  // decides for real; this only hides what would be refused.
+  const subject = useRoleSubject();
+  const isAdmin = subject !== undefined && canAdminister(subject);
+  const can = (action: MachineAction) =>
+    subject !== undefined &&
+    machineQuery.data !== undefined &&
+    canActOnMachine(subject, machineQuery.data, action);
   // Same query key `add-machine-dialog.tsx` already uses for this exact directory lookup —
   // shares its cache entry rather than fetching the same list twice under two keys.
   const peopleQuery = useQuery({
@@ -156,7 +166,9 @@ export function MachineDetailPage() {
   // filters this by `machineId` client-side rather than waiting on a dedicated
   // backend projection. Packages, Snapshots and Activity each have a real
   // per-machine endpoint of their own.
-  const checksQuery = useComplianceChecks();
+  // Compliance evidence and the audit log are admin-only, so a member's own machine page
+  // does not ask for them.
+  const checksQuery = useComplianceChecks(isAdmin);
   const snapshotsQuery = useMachineSnapshots(machineId);
   const { inspect, isPending: inspectPending } = useInspectSnapshot();
   // Legal hold moved here from the Archive page, which could only ever reach the one
@@ -174,7 +186,11 @@ export function MachineDetailPage() {
   // of the Tabs boundary. `enabled` keeps the fetch lazy: the toolbar is mounted
   // by this page rather than by TabsContent, so Radix unmounting an inactive tab
   // no longer holds the query back on its own.
-  const activity = useMachineActivityState(machineId, peopleQuery.data, activeTab === "activity");
+  const activity = useMachineActivityState(
+    machineId,
+    peopleQuery.data,
+    isAdmin && activeTab === "activity",
+  );
 
   if (machineQuery.isPending) {
     return <PageLoader label="Loading machine" />;
@@ -217,56 +233,68 @@ export function MachineDetailPage() {
           {MACHINE_STATE_LABEL[machine.state]}
         </Badge>
         <div className="ml-auto flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={machine.state !== "running"}
-            title={
-              machine.state !== "running"
-                ? "Only a running machine has a live tunnel daemon connection to attach to."
-                : undefined
-            }
-            onClick={() => setFilesOpen(true)}
-          >
-            Files
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={machine.state !== "running"}
-            title={
-              machine.state !== "running"
-                ? "Only a running machine has a live tunnel daemon connection to attach to."
-                : undefined
-            }
-            onClick={() => setConnectOpen(true)}
-          >
-            Connect
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={machine.state !== "running"}
-            title={
-              machine.state !== "running" ? "Only a running machine can be restarted." : undefined
-            }
-            onClick={() => setRestartOpen(true)}
-          >
-            Restart
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setUpgradeOpen(true)}>
-            Upgrade
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={ARCHIVED_MACHINE_STATES.has(machine.state)}
-            title={ARCHIVED_MACHINE_STATES.has(machine.state) ? "Already archived." : undefined}
-            onClick={() => setArchiveOpen(true)}
-          >
-            Archive
-          </Button>
-          {ARCHIVED_MACHINE_STATES.has(machine.state) &&
+          {can("connect") && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={machine.state !== "running"}
+              title={
+                machine.state !== "running"
+                  ? "Only a running machine has a live tunnel daemon connection to attach to."
+                  : undefined
+              }
+              onClick={() => setFilesOpen(true)}
+            >
+              Files
+            </Button>
+          )}
+          {can("connect") && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={machine.state !== "running"}
+              title={
+                machine.state !== "running"
+                  ? "Only a running machine has a live tunnel daemon connection to attach to."
+                  : undefined
+              }
+              onClick={() => setConnectOpen(true)}
+            >
+              Connect
+            </Button>
+          )}
+          {can("restart") && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={machine.state !== "running"}
+              title={
+                machine.state !== "running" ? "Only a running machine can be restarted." : undefined
+              }
+              onClick={() => setRestartOpen(true)}
+            >
+              Restart
+            </Button>
+          )}
+          {can("upgrade") && (
+            <Button variant="outline" size="sm" onClick={() => setUpgradeOpen(true)}>
+              Upgrade
+            </Button>
+          )}
+          {can("archive") && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={ARCHIVED_MACHINE_STATES.has(machine.state)}
+              title={ARCHIVED_MACHINE_STATES.has(machine.state) ? "Already archived." : undefined}
+              onClick={() => setArchiveOpen(true)}
+            >
+              Archive
+            </Button>
+          )}
+          {/* Restore takes the owner or an admin, and always an approval. */}
+          {can("snapshot") &&
+            ARCHIVED_MACHINE_STATES.has(machine.state) &&
             (latestArchiveSnapshot?.subState === "restorable" ? (
               <RestoreDialog snapshot={latestArchiveSnapshot} />
             ) : (
@@ -302,11 +330,11 @@ export function MachineDetailPage() {
           <TabsList>
             <TabsTrigger value="properties">Properties</TabsTrigger>
             <TabsTrigger value="manifest">Manifest</TabsTrigger>
-            <TabsTrigger value="compliance">Compliance</TabsTrigger>
+            {isAdmin && <TabsTrigger value="compliance">Compliance</TabsTrigger>}
             <TabsTrigger value="vulnerabilities">Vulnerabilities</TabsTrigger>
             <TabsTrigger value="sessions">Sessions</TabsTrigger>
             <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
-            <TabsTrigger value="activity">Activity</TabsTrigger>
+            {isAdmin && <TabsTrigger value="activity">Activity</TabsTrigger>}
           </TabsList>
           {activeTab === "activity" && <MachineActivityToolbar state={activity} />}
         </div>
@@ -371,7 +399,11 @@ export function MachineDetailPage() {
         </TabsContent>
 
         <TabsContent value="manifest">
-          <MachineManifestTab machineId={machineId} />
+          <MachineManifestTab
+            machineId={machineId}
+            canEditManifest={can("editManifest")}
+            canRequestActions={can("packages")}
+          />
         </TabsContent>
 
         <TabsContent value="compliance">
@@ -498,40 +530,44 @@ export function MachineDetailPage() {
                                 snapshot someone took on purpose could not be opened from
                                 the console at all. Greyed WITH the reason rather than
                                 hidden, the rule `sub-state.ts` states. */}
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={snapshot.subState !== "restorable" || inspectPending}
-                              title={snapshot.restoreUnavailableReason ?? undefined}
-                              onClick={() => inspect(snapshot.id)}
-                            >
-                              <FolderSearch />
-                              Browse files
-                            </Button>
+                            {can("connect") && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={snapshot.subState !== "restorable" || inspectPending}
+                                title={snapshot.restoreUnavailableReason ?? undefined}
+                                onClick={() => inspect(snapshot.id)}
+                              >
+                                <FolderSearch />
+                                Browse files
+                              </Button>
+                            )}
                             {/* Icon-only to keep three controls in one cell; the label is
                                 on aria-label, and RetentionStatus already renders "Legal
                                 hold" in the Retention column when one is on, so the state
                                 is readable without opening anything. */}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={
-                                snapshot.legalHold ? "Clear legal hold" : "Place legal hold"
-                              }
-                              onClick={() => setLegalHoldTarget(snapshot)}
-                            >
-                              {snapshot.legalHold ? <LockOpen /> : <Lock />}
-                            </Button>
-                            {snapshot.subState === "restorable" ? (
-                              <RestoreDialog snapshot={snapshot} />
-                            ) : (
+                            {isAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={
+                                  snapshot.legalHold ? "Clear legal hold" : "Place legal hold"
+                                }
+                                onClick={() => setLegalHoldTarget(snapshot)}
+                              >
+                                {snapshot.legalHold ? <LockOpen /> : <Lock />}
+                              </Button>
+                            )}
+                            {snapshot.subState !== "restorable" ? (
                               <span
                                 className="text-xs text-muted-foreground"
                                 title={snapshot.restoreUnavailableReason ?? undefined}
                               >
                                 {SNAPSHOT_UNAVAILABLE_LABEL[snapshot.subState]}
                               </span>
-                            )}
+                            ) : can("snapshot") ? (
+                              <RestoreDialog snapshot={snapshot} />
+                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>

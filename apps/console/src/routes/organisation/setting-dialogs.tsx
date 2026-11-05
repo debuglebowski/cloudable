@@ -14,24 +14,32 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
 
 import { ValueEditDialog } from "./value-edit-dialog";
 
 const APPROVAL_MODES: ApprovalMode[] = ["none", "single", "dual"];
 const APPROVAL_MODE_DESCRIPTION: Record<ApprovalMode, string> = {
-  none: "None — no approval required",
-  single: "Single — one approver",
-  dual: "Dual — two approvers",
+  none: "None: no approval needed",
+  single: "Single: one approver",
+  dual: "Dual: two approvers",
 };
 
 export interface ApprovalModeDialogProps {
   actionType: ApprovalActionType | null;
   currentMode: ApprovalMode | undefined;
   onOpenChange: (open: boolean) => void;
-  onSave: (actionType: ApprovalActionType, mode: ApprovalMode) => void | Promise<void>;
+  onSave: (
+    actionType: ApprovalActionType,
+    mode: ApprovalMode,
+    reason: string,
+  ) => void | Promise<void>;
 }
 
-/** Approval mode is policy, per action type: none / single / dual. */
+/**
+ * Approval mode is policy, per action type: none / single / dual. A change does not apply
+ * straight away: it becomes a request an approver must sign off, so it needs a reason.
+ */
 export function ApprovalModeDialog({
   actionType,
   currentMode,
@@ -39,33 +47,47 @@ export function ApprovalModeDialog({
   onSave,
 }: ApprovalModeDialogProps) {
   const id = useId();
+  const current = currentMode ?? "none";
 
   return (
-    <ValueEditDialog<ApprovalMode>
+    <ValueEditDialog<{ mode: ApprovalMode; reason: string }>
       open={actionType != null}
-      currentValue={currentMode ?? "none"}
-      title={`${actionType ? APPROVAL_ACTION_LABELS[actionType] : ""} — approval mode`}
-      description="Inherited through org → template → machine. A confirmation dialog is self-approval and is not an approval."
+      currentValue={{ mode: current, reason: "" }}
+      title={`${actionType ? APPROVAL_ACTION_LABELS[actionType] : ""}: approval mode`}
+      description="Changing this needs an approver's sign-off. It applies once they approve."
       onOpenChange={onOpenChange}
-      onSave={(mode) => {
-        if (actionType) return onSave(actionType, mode);
+      isValid={(value) => value.mode !== current && value.reason.trim().length > 0}
+      onSave={(value) => {
+        if (actionType) return onSave(actionType, value.mode, value.reason.trim());
       }}
     >
-      {(mode, setMode) => (
-        <RadioGroup
-          value={mode}
-          onValueChange={(value) => setMode(value as ApprovalMode)}
-          aria-label="Approval mode"
-        >
-          {APPROVAL_MODES.map((candidate) => (
-            <div key={candidate} className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value={candidate} id={`${id}-${candidate}`} />
-              <Label htmlFor={`${id}-${candidate}`} className="font-normal">
-                {APPROVAL_MODE_DESCRIPTION[candidate]}
-              </Label>
-            </div>
-          ))}
-        </RadioGroup>
+      {(value, setValue) => (
+        <div className="flex flex-col gap-4">
+          <RadioGroup
+            value={value.mode}
+            onValueChange={(mode) => setValue({ ...value, mode: mode as ApprovalMode })}
+            aria-label="Approval mode"
+          >
+            {APPROVAL_MODES.map((candidate) => (
+              <div key={candidate} className="flex items-center gap-2 text-sm">
+                <RadioGroupItem value={candidate} id={`${id}-${candidate}`} />
+                <Label htmlFor={`${id}-${candidate}`} className="font-normal">
+                  {APPROVAL_MODE_DESCRIPTION[candidate]}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor={`${id}-reason`}>Reason</Label>
+            <Textarea
+              id={`${id}-reason`}
+              rows={2}
+              value={value.reason}
+              onChange={(event) => setValue({ ...value, reason: event.target.value })}
+              placeholder="Why change it? The approver sees this."
+            />
+          </div>
+        </div>
       )}
     </ValueEditDialog>
   );

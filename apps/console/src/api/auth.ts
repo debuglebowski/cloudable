@@ -51,7 +51,9 @@ export function useSsoProviderQuery() {
   return useQuery({
     queryKey: ["auth", "sso-provider"] as const,
     queryFn: () =>
-      apiGet<{ available: boolean; providerId: string | null }>("/api/v1/auth/sso-provider"),
+      apiGet<{ available: boolean; providerId: string | null; passwordSignIn: boolean }>(
+        "/api/v1/auth/sso-provider",
+      ),
   });
 }
 

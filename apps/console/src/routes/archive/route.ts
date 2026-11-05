@@ -1,5 +1,7 @@
 import { createRoute } from "@tanstack/react-router";
 
+import { gatePage } from "@/components/role-gate";
+
 import { rootRoute } from "../route-tree";
 import { ArchivePage } from "./page";
 import { SnapshotFilesPage } from "./snapshot-files-page";
@@ -7,7 +9,7 @@ import { SnapshotFilesPage } from "./snapshot-files-page";
 export const archiveRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/archive",
-  component: ArchivePage,
+  component: gatePage(ArchivePage, "admin"),
 });
 
 /**

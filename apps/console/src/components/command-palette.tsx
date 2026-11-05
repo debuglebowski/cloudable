@@ -15,6 +15,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { canSeePage, useRoleSubject } from "@/lib/role";
 import { NAV_ITEMS } from "@/nav-config";
 
 import { ARCHIVED_MACHINE_STATES, MACHINE_STATE_LABEL } from "@/routes/machines/machine-state";
@@ -33,16 +34,18 @@ export interface CommandPaletteProps {
  */
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const navigate = useNavigate();
+  const subject = useRoleSubject();
 
   const { data: machines } = useQuery({
     queryKey: machinesKeys.list(),
     queryFn: listMachines,
     enabled: open,
   });
+  // The roster is admin-only; a member's list holds only themselves.
   const { data: people } = useQuery({
     queryKey: peopleKeys.list(),
     queryFn: listPeople,
-    enabled: open,
+    enabled: open && subject !== undefined && canSeePage(subject, "admin"),
   });
 
   useEffect(() => {
@@ -71,7 +74,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
         <CommandGroup heading="Go to">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter(
+            (item) =>
+              item.access === undefined ||
+              (subject !== undefined && canSeePage(subject, item.access)),
+          ).map((item) => {
             const Icon = item.icon;
             return (
               <CommandItem key={item.to} value={item.label} onSelect={() => goTo(item.to)}>

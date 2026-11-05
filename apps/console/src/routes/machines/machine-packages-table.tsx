@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { refusalReason } from "@/lib/api-client";
 
 /**
  * A machine's packages: what it is allowed to have, what it actually has, and
@@ -41,7 +42,17 @@ import {
  * is several hundred packages, and listing them by default buries the handful
  * anyone came here to look at.
  */
-export function MachinePackagesTable({ machineId }: { machineId: string }) {
+export function MachinePackagesTable({
+  machineId,
+  canEditPermission,
+  canRequestActions,
+}: {
+  machineId: string;
+  /** Which packages a machine may have is configuration: admin only. */
+  canEditPermission: boolean;
+  /** Installing and removing: the owner or an admin. */
+  canRequestActions: boolean;
+}) {
   const queryClient = useQueryClient();
   const [showBaseline, setShowBaseline] = useState(false);
 
@@ -64,8 +75,15 @@ export function MachinePackagesTable({ machineId }: { machineId: string }) {
   const actionMutation = useMutation({
     mutationFn: (vars: { packageName: string; op: PackageActionOp }) =>
       createPackageAction(machineId, vars.packageName, vars.op),
-    onSuccess: (_action, vars) => {
+    onSuccess: (result, vars) => {
       invalidate();
+      // An install usually waits for an approver. Nothing is queued until one says yes.
+      if (!result.action && result.approval?.status === "pending") {
+        toast.success(`Asked to install "${vars.packageName}"`, {
+          description: "Waiting for approval. It installs once an approver says yes.",
+        });
+        return;
+      }
       // Deliberately not "installed": the machine has not done anything yet.
       toast.success(
         vars.op === "install"
@@ -75,7 +93,10 @@ export function MachinePackagesTable({ machineId }: { machineId: string }) {
     },
     onError: (err) => {
       toast.error("Couldn't request that", {
-        description: err instanceof PackageActionError ? err.body.error.message : err.message,
+        description:
+          err instanceof PackageActionError
+            ? err.body.error.message
+            : (refusalReason(err) ?? err.message),
       });
     },
   });
@@ -94,7 +115,7 @@ export function MachinePackagesTable({ machineId }: { machineId: string }) {
       );
     },
     onError: (err) => {
-      toast.error("Couldn't change that", { description: err.message });
+      toast.error("Couldn't change that", { description: refusalReason(err) ?? err.message });
     },
   });
 
@@ -154,6 +175,8 @@ export function MachinePackagesTable({ machineId }: { machineId: string }) {
                   (permissionMutation.isPending &&
                     permissionMutation.variables?.packageName === row.packageName)
                 }
+                canEditPermission={canEditPermission}
+                canRequestActions={canRequestActions}
                 onAction={(op) => actionMutation.mutate({ packageName: row.packageName, op })}
                 onPermission={(allowed) =>
                   permissionMutation.mutate({ packageName: row.packageName, allowed })
@@ -211,14 +234,25 @@ function SkeletonRows({ rows = 3, widths }: { rows?: number; widths: string[] })
 function PermissionCell({
   row,
   busy,
+  canEdit,
   onPermission,
 }: {
   row: MachinePackageRow;
   busy: boolean;
+  canEdit: boolean;
   onPermission: (allowed: boolean) => void;
 }) {
   if (row.isBaseline && row.permission === null) {
     return <span className="text-sm text-muted-foreground">from the image</span>;
+  }
+  if (!canEdit) {
+    return row.permission === "disallowed" ? (
+      <Badge variant="outline">disallowed</Badge>
+    ) : (
+      <span className="text-sm text-muted-foreground">
+        {row.permission === "allowed" ? "allowed" : "—"}
+      </span>
+    );
   }
   if (row.permission === "allowed") {
     return (
@@ -314,11 +348,15 @@ function StatusCell({ row }: { row: MachinePackageRow }) {
 function PackageRow({
   row,
   busy,
+  canEditPermission,
+  canRequestActions,
   onAction,
   onPermission,
 }: {
   row: MachinePackageRow;
   busy: boolean;
+  canEditPermission: boolean;
+  canRequestActions: boolean;
   onAction: (op: PackageActionOp) => void;
   onPermission: (allowed: boolean) => void;
 }) {
@@ -337,7 +375,12 @@ function PackageRow({
         )}
       </TableCell>
       <TableCell>
-        <PermissionCell row={row} busy={busy} onPermission={onPermission} />
+        <PermissionCell
+          row={row}
+          busy={busy}
+          canEdit={canEditPermission}
+          onPermission={onPermission}
+        />
       </TableCell>
       <TableCell>
         <StatusCell row={row} />
@@ -347,7 +390,7 @@ function PackageRow({
         {/* No button at all on a base image package, rather than a disabled one
             with a tooltip: uninstalling systemd is not an option we want to
             render as merely unavailable right now. */}
-        {row.isBaseline ? (
+        {row.isBaseline || !canRequestActions ? (
           <span className="text-xs text-muted-foreground">—</span>
         ) : row.installed === "unknown" ? (
           <span className="text-xs text-muted-foreground">waiting for the agent</span>

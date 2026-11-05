@@ -21,7 +21,20 @@ export type ApprovalActionType =
   | "snapshot_restore"
   | "break_glass"
   | "admin_access"
-  | "offboarding";
+  | "offboarding"
+  | "package_install"
+  | "approval_settings_change";
+
+/** What exactly was asked for, for the action types whose target alone does not say it. */
+export type ApprovalPayload =
+  | {
+      packageName: string;
+      op: "install" | "uninstall";
+      versionPin: string | null;
+      isBaselinePackage: boolean;
+    }
+  | { approvalModes: Partial<Record<string, ApprovalMode>> }
+  | null;
 
 export type ApprovalMode = "none" | "single" | "dual";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
@@ -32,7 +45,14 @@ export interface Approval {
   actionType: ApprovalActionType;
   mode: ApprovalMode;
   status: ApprovalStatus;
+  requestedByPersonId: string;
   requestedByName: string;
+  /** Who the request is about, for offboarding. */
+  targetPersonId: string | null;
+  /** The owner of the target machine, when there is one and it could be resolved. */
+  targetMachineOwnerId: string | null;
+  /** Plain-language line saying what exactly is asked for, or null when the target says it. */
+  details: string | null;
   reason: string;
   /** Human-readable target, e.g. "machine: db-prod-03". Falls back to the raw id
    * when the target machine can't be resolved (deleted, or missing from the
@@ -50,7 +70,60 @@ export const ACTION_TYPE_LABELS: Record<ApprovalActionType, string> = {
   break_glass: "Break-glass",
   admin_access: "Admin access",
   offboarding: "Offboarding",
+  package_install: "Package install",
+  approval_settings_change: "Approval settings change",
 };
+
+const MODE_WORDS: Record<ApprovalMode, string> = {
+  none: "no approval",
+  single: "one approver",
+  dual: "two approvers",
+};
+
+/** Exported for the test. */
+export function describePayload(actionType: ApprovalActionType, payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  if (actionType === "package_install" && "packageName" in payload) {
+    const p = payload as { packageName: string; op: string; versionPin: string | null };
+    const verb = p.op === "uninstall" ? "Remove" : "Install";
+    return `${verb} ${p.packageName}${p.versionPin ? ` (version ${p.versionPin})` : ""}`;
+  }
+  if (actionType === "approval_settings_change" && "approvalModes" in payload) {
+    const modes = (payload as { approvalModes: Record<string, ApprovalMode | undefined> })
+      .approvalModes;
+    return Object.entries(modes)
+      .filter((entry): entry is [string, ApprovalMode] => entry[1] !== undefined)
+      .map(([type, mode]) => {
+        const label = ACTION_TYPE_LABELS[type as ApprovalActionType] ?? type;
+        return `${label}: ${MODE_WORDS[mode]}`;
+      })
+      .join(", ");
+  }
+  return null;
+}
+
+/**
+ * Why the signed-in person may not decide this request, or null when they may. Mirrors the
+ * control plane's rules (see `@cloudable/contracts` roles.ts and `ApprovalService.decide`):
+ * nobody decides their own request, one about themselves, or one about a machine they own, and
+ * only an approver signs off a change to approval settings. The server still decides.
+ */
+export function decisionBlockedReason(
+  approval: Pick<
+    Approval,
+    "actionType" | "requestedByPersonId" | "targetPersonId" | "targetMachineOwnerId"
+  >,
+  me: { personId: string; approver: boolean; isAdmin: boolean },
+): string | null {
+  if (!me.approver && !me.isAdmin) return "Only an approver or an admin can decide requests.";
+  if (approval.requestedByPersonId === me.personId) return "You asked for this one.";
+  if (approval.targetPersonId === me.personId) return "This request is about you.";
+  if (approval.targetMachineOwnerId === me.personId) return "This request is about your machine.";
+  if (approval.actionType === "approval_settings_change" && !me.approver) {
+    return "Only an approver can sign off a change to approval settings.";
+  }
+  return null;
+}
 
 /** Domain-first query key tuples for the approvals feature. */
 export const approvalKeys = {
@@ -70,6 +143,7 @@ interface ApprovalResourceWire {
   /** Set only by person-targeted action types (today: `offboarding`). */
   targetPersonId: string | null;
   reason: string;
+  payload: unknown;
   requiredApprovals: number;
   approvedCount: number;
   createdAt: string;
@@ -96,7 +170,11 @@ async function toApproval(wire: ApprovalResourceWire): Promise<Approval> {
     actionType: wire.actionType,
     mode: wire.mode,
     status: wire.status,
+    requestedByPersonId: wire.requestedByPersonId,
     requestedByName: requester?.email ?? wire.requestedByPersonId,
+    targetPersonId: wire.targetPersonId,
+    targetMachineOwnerId: machine?.ownerPersonId ?? null,
+    details: describePayload(wire.actionType, wire.payload),
     reason: wire.reason,
     targetLabel,
     requiredApprovals: wire.requiredApprovals,

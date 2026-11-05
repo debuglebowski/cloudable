@@ -17,7 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { CloudProvider } from "@/api/integrations";
 import { useIntegrations } from "@/api/integrations";
-import { createMachine, machinesKeys } from "@/api/machines";
+import { createMachine, listMachines, machinesKeys } from "@/api/machines";
 import { listPeople } from "@/api/people-directory";
 import type { CatalogItem } from "@/api/provider-catalog";
 import { useProviderCatalog, useSyncAzureRegions, useSyncAzureSizes } from "@/api/provider-catalog";
@@ -241,7 +241,21 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
     queryFn: listPeople,
     enabled: open,
   });
-  const activePeople = (peopleQuery.data ?? []).filter((p) => p.active);
+  // Each person has one machine: a person who already holds a live one is not offered. The
+  // control plane refuses it anyway; a machine that failed or was archived does not count.
+  const machinesQuery = useQuery({
+    queryKey: machinesKeys.list(),
+    queryFn: listMachines,
+    enabled: open,
+  });
+  const ownersWithAMachine = new Set(
+    (machinesQuery.data ?? [])
+      .filter((m) => m.state === "provisioning" || m.state === "running" || m.state === "stopped")
+      .map((m) => m.ownerPersonId),
+  );
+  const activePeople = (peopleQuery.data ?? []).filter(
+    (p) => p.active && !ownersWithAMachine.has(p.id),
+  );
 
   const integrationsQuery = useIntegrations();
   const enabledProviders = useMemo(
@@ -770,13 +784,13 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
                     <TableHeaderIcon icon={User} />
                     Owner <span className="text-destructive">(required)</span>
                   </Label>
-                  {peopleQuery.isLoading ? (
+                  {peopleQuery.isLoading || machinesQuery.isLoading ? (
                     <Skeleton className="h-9 w-full" />
                   ) : activePeople.length === 0 ? (
                     <EmptyState
                       icon={User}
-                      title="No active people found"
-                      description="Add a person to the directory before creating a machine."
+                      title="Everyone already has a machine"
+                      description="Each person has one machine. Add a person first."
                     />
                   ) : (
                     <Select value={ownerPersonId} onValueChange={setOwnerPersonId}>

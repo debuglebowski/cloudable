@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { apiGet, apiPatch } from "@/lib/api-client";
+import { apiGet, apiPatch, apiPost, refusalReason } from "@/lib/api-client";
 
 /**
  * Organisation settings — wired to the real `apps/control-plane/src/http/
@@ -19,7 +19,8 @@ export type ApprovalActionType =
   | "snapshot_restore"
   | "break_glass"
   | "admin_access"
-  | "offboarding";
+  | "offboarding"
+  | "package_install";
 
 /** Matches `approvals.mode`. */
 export type ApprovalMode = "none" | "single" | "dual";
@@ -50,6 +51,7 @@ export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
   "break_glass",
   "admin_access",
   "offboarding",
+  "package_install",
 ];
 
 export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
@@ -57,6 +59,7 @@ export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
   break_glass: "Break-glass access",
   admin_access: "Admin access to an unowned machine",
   offboarding: "Offboarding",
+  package_install: "Package install",
 };
 
 export const LOGGING_TIER_LABELS: Record<LoggingTier, string> = {
@@ -100,8 +103,11 @@ export function useOrgSettings() {
 }
 
 // `loggingTierOverrideCount` is derived (a count over machines' own
-// settings), never something the org PATCH endpoint accepts.
-export type UpdateOrgSettingsInput = Partial<Omit<OrgSettings, "id" | "loggingTierOverrideCount">>;
+// settings), never something the org PATCH endpoint accepts. Neither are approval modes:
+// those change only with an approver's sign-off, through `useRequestApprovalModesChange`.
+export type UpdateOrgSettingsInput = Partial<
+  Omit<OrgSettings, "id" | "loggingTierOverrideCount" | "approvalModes">
+>;
 
 export function useUpdateOrgSettings() {
   const queryClient = useQueryClient();
@@ -113,7 +119,40 @@ export function useUpdateOrgSettings() {
       toast.success("Organisation settings updated");
     },
     onError: (error) => {
-      toast.error("Couldn't update settings", { description: error.message });
+      toast.error("Couldn't update settings", {
+        description: refusalReason(error) ?? error.message,
+      });
+    },
+  });
+}
+
+/**
+ * `POST /api/v1/organisation/approval-modes`. Nothing changes yet: the control plane records a
+ * request, and the new modes apply once an approver signs it off on the Approvals page.
+ */
+export function useRequestApprovalModesChange() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      approvalModes: Partial<Record<ApprovalActionType, ApprovalMode>>;
+      reason: string;
+    }) => apiPost<{ id: string; status: string }>("/api/v1/organisation/approval-modes", input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      toast.success("Change requested", {
+        description: "An approver must sign it off before it applies.",
+        action: {
+          label: "Approvals",
+          onClick: () => {
+            window.location.href = "/approvals";
+          },
+        },
+      });
+    },
+    onError: (error) => {
+      toast.error("Couldn't request the change", {
+        description: refusalReason(error) ?? error.message,
+      });
     },
   });
 }

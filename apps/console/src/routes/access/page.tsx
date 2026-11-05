@@ -44,7 +44,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
+import { useIsAdmin } from "@/lib/role";
 import { FingerprintCell } from "./fingerprint-cell";
+
 import { RequestElevationDialog } from "./request-elevation-dialog";
 import { RevokeCertificateDialog } from "./revoke-certificate-dialog";
 import { TerminateSessionDialog } from "./terminate-session-dialog";
@@ -139,6 +141,9 @@ export function AccessPage() {
   const elevationsQuery = useElevations();
   const syncElevation = useSyncElevation();
   const expireElevation = useExpireElevation();
+  // Elevation is the admin path to someone else's machine. Members never get one, and whether
+  // admins may is set when Cloudable is deployed (production: never).
+  const isAdmin = useIsAdmin();
 
   const [activeTab, setActiveTab] = useState<AccessTab>("certificates");
   const [certificateToRevoke, setCertificateToRevoke] = useState<LiveCertificate | null>(null);
@@ -334,9 +339,11 @@ export function AccessPage() {
         </TabsContent>
 
         <TabsContent value="elevations" className="mt-0 flex min-h-0 flex-col gap-2">
-          <div className="flex shrink-0 justify-end">
-            <RequestElevationDialog />
-          </div>
+          {isAdmin && (
+            <div className="flex shrink-0 justify-end">
+              <RequestElevationDialog />
+            </div>
+          )}
           <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
             {elevationsQuery.isLoading ||
             elevationsQuery.isError ||

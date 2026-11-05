@@ -61,6 +61,14 @@ function extractMessage(body: unknown): string | undefined {
   if (body && typeof body === "object") {
     const obj = body as Record<string, unknown>;
     if (typeof obj.message === "string") return obj.message;
+    // A role check's refusal (`NotPermittedError`, `AdminRoleRequiredError`) carries a
+    // plain-language `reason` written to be shown as is.
+    if (
+      (obj._tag === "NotPermittedError" || obj._tag === "AdminRoleRequiredError") &&
+      typeof obj.reason === "string"
+    ) {
+      return obj.reason;
+    }
     const err = obj.error;
     if (
       err &&
@@ -71,6 +79,12 @@ function extractMessage(body: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+/** The control plane's own words when a role check refused the request, else undefined. */
+export function refusalReason(err: unknown): string | undefined {
+  if (!(err instanceof ApiError) || err.status !== 403) return undefined;
+  return extractMessage(err.body);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

@@ -27,13 +27,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { ARCHIVED_MACHINE_STATES } from "@/routes/machines/machine-state";
 
@@ -115,7 +108,6 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<RestoreMode>("data");
   const [targetKind, setTargetKind] = useState<TargetKind>("new_machine");
-  const [ownerPersonId, setOwnerPersonId] = useState("");
   const [newMachineName, setNewMachineName] = useState("");
   const [confirmDestroys, setConfirmDestroys] = useState(false);
   const [reason, setReason] = useState("");
@@ -140,7 +132,11 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
   // Unknown counts as live. Overwriting something we cannot see the state of is the case
   // that deserves the extra confirmation, not the one that skips it.
   const targetIsLive = targetMachine ? !ARCHIVED_MACHINE_STATES.has(targetMachine.state) : true;
-  const activePeople = (peopleQuery.data ?? []).filter((person) => person.active);
+  // A snapshot goes back to its own owner and nobody else; the control plane refuses any other
+  // person. A machine with no owner (its person was offboarded) cannot be restored to anyone.
+  const ownerPersonId = targetMachine?.ownerPersonId ?? "";
+  const ownerEmail =
+    peopleQuery.data?.find((person) => person.id === ownerPersonId)?.email ?? ownerPersonId;
 
   // Every restore is backed by an approval object regardless of mode (reason is
   // required free text, never optional) — the real endpoint rejects an empty
@@ -157,12 +153,11 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
     !modeUnavailable &&
     (!requiresAck || acknowledged) &&
     (!needsDestroyAck || confirmDestroys) &&
-    (targetKind !== "new_machine" || ownerPersonId.length > 0);
+    ownerPersonId.length > 0;
 
   function reset() {
     setMode("data");
     setTargetKind("new_machine");
-    setOwnerPersonId("");
     setNewMachineName("");
     setConfirmDestroys(false);
     setReason("");
@@ -273,26 +268,19 @@ export function RestoreDialog({ snapshot }: RestoreDialogProps) {
         {!confirmingFull && targetKind === "new_machine" && (
           <div className="flex flex-col gap-3 rounded-md border border-border p-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="restore-owner">
-                Owner <Badge variant="outline">required</Badge>
-              </Label>
-              <Select value={ownerPersonId} onValueChange={setOwnerPersonId}>
-                <SelectTrigger id="restore-owner">
-                  <SelectValue
-                    placeholder={peopleQuery.isLoading ? "Loading people…" : "Select a person"}
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {activePeople.map((person) => (
-                    <SelectItem key={person.id} value={person.id}>
-                      {person.email}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Owner</Label>
+              {machinesQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading…</p>
+              ) : ownerPersonId ? (
+                <p className="text-sm">{ownerEmail}</p>
+              ) : (
+                <p className="text-sm text-destructive">
+                  This machine has no owner, so its snapshot cannot be restored to anyone.
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
-                Never inherited from the archived machine — restoring an offboarded person's data is
-                exactly when the old owner is the wrong answer.
+                A snapshot goes back to the machine's own owner. It is never restored to a different
+                person.
               </p>
             </div>
             <div className="flex flex-col gap-1.5">

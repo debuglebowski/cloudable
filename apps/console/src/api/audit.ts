@@ -382,9 +382,11 @@ export function useControlEvidence() {
   return useQuery({ queryKey: auditKeys.evidence(), queryFn: fetchControlEvidence });
 }
 
-export function useComplianceChecks() {
+/** `enabled` lets a page that is not admin-only (a machine's own page) skip an admin-only fetch. */
+export function useComplianceChecks(enabled = true) {
   return useQuery({
     queryKey: [...auditKeys.all, "checks"] as const,
     queryFn: fetchComplianceChecks,
+    enabled,
   });
 }

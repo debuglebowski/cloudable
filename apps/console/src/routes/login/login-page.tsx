@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthError } from "@/lib/auth-client";
 import { safeRedirectTarget, ssoErrorFromSearch } from "@/lib/redirect-target";
+import { cn } from "@/lib/utils";
 
 /** Where a successful sign-in lands — `root.tsx`'s guard sets this when it bounced an unauthenticated visit through here; falls back to `/` when there wasn't one, or when the value isn't a safe same-origin path (see `safeRedirectTarget`). */
 function redirectTarget(): string {
@@ -114,6 +115,10 @@ export function LoginPage() {
     new URLSearchParams(window.location.search).get("ssoError");
   const ssoMutation = useSignInSsoMutation();
   const navigate = useNavigate();
+  // Production turns email and password off (SSO only). Shown only once the server has said it
+  // is on, so an SSO-only deployment never flashes a password form. If the question itself
+  // fails, fall back to showing it: the server still refuses it when it is off.
+  const showPassword = ssoProvider.data ? ssoProvider.data.passwordSignIn : ssoProvider.isError;
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -165,56 +170,60 @@ export function LoginPage() {
             </p>
           </div>
 
-          <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                autoFocus
-                placeholder="you@company.com"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="h-10"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="h-10"
-              />
-            </div>
-            {mutation.isError && (
-              <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
-                <AlertCircle className="size-4 shrink-0" />
-                <span>
-                  {mutation.error instanceof AuthError
-                    ? mutation.error.message
-                    : "Something went wrong."}
-                </span>
+          {showPassword && (
+            <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  autoFocus
+                  placeholder="you@company.com"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-10"
+                />
               </div>
-            )}
-            <Button type="submit" disabled={mutation.isPending} size="lg" className="mt-1 w-full">
-              {mutation.isPending && <Loader2 className="size-4 animate-spin" />}
-              {mutation.isPending ? "Signing in…" : "Sign in"}
-            </Button>
-          </form>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-10"
+                />
+              </div>
+              {mutation.isError && (
+                <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span>
+                    {mutation.error instanceof AuthError
+                      ? mutation.error.message
+                      : "Something went wrong."}
+                  </span>
+                </div>
+              )}
+              <Button type="submit" disabled={mutation.isPending} size="lg" className="mt-1 w-full">
+                {mutation.isPending && <Loader2 className="size-4 animate-spin" />}
+                {mutation.isPending ? "Signing in…" : "Sign in"}
+              </Button>
+            </form>
+          )}
 
           {ssoProvider.data?.available && (
-            <div className="mt-5 flex flex-col gap-3">
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <div className="h-px flex-1 bg-border" />
-                or
-                <div className="h-px flex-1 bg-border" />
-              </div>
+            <div className={cn("flex flex-col gap-3", showPassword && "mt-5")}>
+              {showPassword && (
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="h-px flex-1 bg-border" />
+                  or
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              )}
               {/* The reason a completed SAML round trip was rejected. The plugin
                   reports it as a `?error=` on the redirect rather than by
                   throwing, so without this a rejected assertion is

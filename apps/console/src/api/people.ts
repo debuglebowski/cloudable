@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { useSessionQuery } from "@/api/auth";
 import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
 
 /**
@@ -18,6 +19,8 @@ export interface Person {
   source: PersonSource;
   active: boolean;
   role: string;
+  /** A flag on top of the role: may decide approval requests. */
+  approver: boolean;
   createdAt: string;
   deactivatedAt: string | null;
 }
@@ -61,6 +64,7 @@ export async function addPerson(input: AddPersonInput): Promise<Person> {
 export interface UpdatePersonInput {
   email?: string;
   role?: string;
+  approver?: boolean;
 }
 
 /** Only valid for `source: "manual"` people — SCIM-synced fields are never edited here
@@ -97,9 +101,15 @@ export async function setPersonActive(id: string, active: boolean): Promise<Pers
  * a setting is read-only for them. The control plane decides for real on every change.
  */
 export function useMe() {
+  // Keyed by who is signed in, and only asked once someone is: the role of the last person to
+  // use this tab must never decide what the next one sees, and the login page has nobody to ask
+  // about.
+  const session = useSessionQuery();
+  const email = session.data?.user.email;
   return useQuery({
-    queryKey: [...peopleKeys.all, "me"] as const,
+    queryKey: [...peopleKeys.all, "me", email] as const,
     queryFn: () => apiGet<Person>("/api/v1/me"),
     staleTime: 60_000,
+    enabled: email !== undefined,
   });
 }

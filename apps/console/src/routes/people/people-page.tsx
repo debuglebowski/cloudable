@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock, Mail, Plus, Shield, Tag, Users, Workflow } from "lucide-react";
+import { CheckSquare, Clock, Mail, Plus, Shield, Tag, Users, Workflow } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -15,6 +15,7 @@ import { PersonAvatar } from "@/components/person-avatar";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -62,9 +63,16 @@ export function PeoplePage() {
     void queryClient.invalidateQueries({ queryKey: peopleKeys.list() });
 
   const updateMutation = useMutation({
-    mutationFn: (vars: { id: string; patch: { email?: string; role?: string } }) =>
-      updatePerson(vars.id, vars.patch),
-    onSuccess: invalidatePeople,
+    mutationFn: (vars: {
+      id: string;
+      patch: { email?: string; role?: string; approver?: boolean };
+    }) => updatePerson(vars.id, vars.patch),
+    onSuccess: (_result, vars) => {
+      invalidatePeople();
+      if (vars.patch.approver !== undefined) {
+        toast.success(vars.patch.approver ? "Now an approver" : "No longer an approver");
+      }
+    },
   });
 
   const activeMutation = useMutation({
@@ -127,6 +135,12 @@ export function PeoplePage() {
                   </span>
                 </TableHead>
                 <TableHead>
+                  <span className="flex items-center gap-1.5" title="Can decide approval requests">
+                    <TableHeaderIcon icon={CheckSquare} />
+                    Approver
+                  </span>
+                </TableHead>
+                <TableHead>
                   <span className="flex items-center gap-1.5">
                     <TableHeaderIcon icon={Tag} />
                     Status
@@ -162,6 +176,9 @@ export function PeoplePage() {
                       <Skeleton className="h-4 w-16" />
                     </TableCell>
                     <TableCell>
+                      <Skeleton className="size-4 rounded" />
+                    </TableCell>
+                    <TableCell>
                       <Skeleton className="h-5 w-16 rounded-md" />
                     </TableCell>
                     <TableCell>
@@ -177,7 +194,7 @@ export function PeoplePage() {
                 ))}
               {isError && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-destructive">
+                  <TableCell colSpan={7} className="text-center text-destructive">
                     Couldn&apos;t load people. Try refreshing the page.
                   </TableCell>
                 </TableRow>
@@ -212,6 +229,21 @@ export function PeoplePage() {
                       ) : (
                         <span className="capitalize">{person.role}</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      {/* A flag on top of the role. Approvers decide approval requests, but
+                          never their own, one about themselves, or one about their machine. */}
+                      <Checkbox
+                        aria-label={`${person.email} is an approver`}
+                        checked={person.approver}
+                        disabled={updateMutation.isPending}
+                        onCheckedChange={(checked) =>
+                          updateMutation.mutate({
+                            id: person.id,
+                            patch: { approver: checked === true },
+                          })
+                        }
+                      />
                     </TableCell>
                     <TableCell>
                       <Badge variant={person.active ? "ok" : "secondary"} dot={!person.active}>

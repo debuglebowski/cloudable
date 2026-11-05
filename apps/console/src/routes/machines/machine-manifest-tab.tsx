@@ -46,7 +46,17 @@ import { MachinePackagesTable } from "@/routes/machines/machine-packages-table";
  * The table itself lives in `machine-packages-table.tsx`; this tab is the
  * table, the form for declaring something new, and the change history.
  */
-export function MachineManifestTab({ machineId }: { machineId: string }) {
+export function MachineManifestTab({
+  machineId,
+  canEditManifest,
+  canRequestActions,
+}: {
+  machineId: string;
+  /** Changing what the machine may have: admin only. */
+  canEditManifest: boolean;
+  /** Asking for an install or a removal: the owner or an admin. Installs wait for an approver. */
+  canRequestActions: boolean;
+}) {
   const queryClient = useQueryClient();
 
   const manifestQuery = useQuery({
@@ -72,18 +82,24 @@ export function MachineManifestTab({ machineId }: { machineId: string }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <MachinePackagesTable machineId={machineId} />
-
-          <AddPackageForm
+          <MachinePackagesTable
             machineId={machineId}
-            existing={manifest}
-            onDone={() => {
-              void queryClient.invalidateQueries({ queryKey: machinesKeys.manifest(machineId) });
-              void queryClient.invalidateQueries({
-                queryKey: machinesKeys.manifestHistory(machineId),
-              });
-            }}
+            canEditPermission={canEditManifest}
+            canRequestActions={canRequestActions}
           />
+
+          {canEditManifest && (
+            <AddPackageForm
+              machineId={machineId}
+              existing={manifest}
+              onDone={() => {
+                void queryClient.invalidateQueries({ queryKey: machinesKeys.manifest(machineId) });
+                void queryClient.invalidateQueries({
+                  queryKey: machinesKeys.manifestHistory(machineId),
+                });
+              }}
+            />
+          )}
         </CardContent>
       </Card>
 

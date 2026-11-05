@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useIsAdmin } from "@/lib/role";
 
 import { AddMachineDialog } from "./add-machine-dialog";
 import {
@@ -32,6 +33,8 @@ import {
 export function MachinesPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  // Members do not create machines; an admin creates one for each person.
+  const isAdmin = useIsAdmin();
 
   const { data, isPending, isError, error } = useQuery({
     queryKey: machinesKeys.list(),
@@ -71,10 +74,12 @@ export function MachinesPage() {
             <Archive />
             {showArchived ? "Hide archived" : "Show archived"}
           </Button>
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus />
-            Add machine
-          </Button>
+          {isAdmin && (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus />
+              Add machine
+            </Button>
+          )}
         </div>
       </div>
 
@@ -213,12 +218,16 @@ export function MachinesPage() {
             <EmptyState
               icon={Server}
               title="No machines yet"
-              description="Add a machine to bring it under management."
+              description={
+                isAdmin
+                  ? "Add a machine to bring it under management."
+                  : "You don't have a machine yet. An admin creates one for you."
+              }
             />
           )}
         </div>
       )}
-      <AddMachineDialog open={addOpen} onOpenChange={setAddOpen} />
+      {isAdmin && <AddMachineDialog open={addOpen} onOpenChange={setAddOpen} />}
     </div>
   );
 }

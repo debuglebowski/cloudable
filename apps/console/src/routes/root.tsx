@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { safeRedirectTarget, ssoErrorFromSearch } from "@/lib/redirect-target";
+import { canSeePage, useRoleSubject } from "@/lib/role";
 import { cn } from "@/lib/utils";
 import { NAV_BADGE_HOOKS, NAV_ITEMS, type NavItem } from "@/nav-config";
 
@@ -24,11 +25,10 @@ const NO_LIVE_BADGE: () => number | undefined = () => undefined;
  *
  * `NAV_BADGE_HOOKS[item.to]` is looked up by key rather than called as a literal
  * `useXxx()` identifier, which normal rules-of-hooks lint checks can't verify. It's
- * safe today only because NAV_ITEMS is a fixed array evaluated once at module load —
- * a given `item.to` always resolves to the same hook (or none) for this component
- * instance's whole lifetime. If NAV_ITEMS is ever made conditional (e.g. filtered by
- * permissions), this lookup needs to change to something that can't vary between
- * renders of the same instance.
+ * safe because NAV_ITEMS is a fixed array evaluated once at module load, and each
+ * NavBadge is keyed by `item.to`: a given instance always resolves to the same hook (or
+ * none) for its whole lifetime. The sidebar filters items by role before rendering,
+ * which only mounts or unmounts whole NavBadge instances, never swaps the hook inside one.
  */
 function NavBadge({ item }: { item: NavItem }) {
   const liveHook = NAV_BADGE_HOOKS[item.to] ?? NO_LIVE_BADGE;
@@ -129,6 +129,7 @@ export function RootLayout() {
   const { pathname } = useLocation();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const sessionQuery = useSessionQuery();
+  const subject = useRoleSubject();
 
   // Deliberately renders nothing (not a spinner) while the very first
   // session check is in flight — this resolves in well under a second
@@ -237,7 +238,15 @@ export function RootLayout() {
         </div>
         <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 pb-6">
           {NAV_GROUPS.map((group) => {
-            const items = NAV_ITEMS.filter((item) => item.group === group);
+            // Until `/me` answers, only the pages everyone may see. Hidden is not refused:
+            // the control plane checks every request.
+            const items = NAV_ITEMS.filter(
+              (item) =>
+                item.group === group &&
+                (item.access === undefined ||
+                  (subject !== undefined && canSeePage(subject, item.access))),
+            );
+            if (items.length === 0) return null;
             return (
               <div key={group} className="flex flex-col gap-0.5">
                 {/* Plain case, not uppercase/tracking-wider — a quiet group label,

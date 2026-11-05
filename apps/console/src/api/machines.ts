@@ -414,24 +414,30 @@ export async function getMachinePackages(machineId: string): Promise<MachinePack
  * `POST /machines/:id/packages/:name/actions` — ask the machine to install or
  * remove one package.
  *
- * Returns as soon as the request is recorded. The agent collects it on its next
- * poll, so the row shows the action as pending until the machine reports back,
- * and `installed` keeps saying whatever the machine last said rather than what
- * was asked for.
+ * A removal is queued at once: the agent collects it on its next poll, so the
+ * row shows it as pending until the machine reports back. An install usually
+ * waits for an approver first, and then comes back with no action and the
+ * pending approval; it is queued when the approval is granted. If the org lets
+ * installs through without sign-off, both come back.
  */
+export interface PackageActionRequestResult {
+  action: PendingPackageActionView | null;
+  approval: { id: string; status: "pending" | "approved" | "rejected" | "expired" } | null;
+}
+
 export async function createPackageAction(
   machineId: string,
   packageName: string,
   op: PackageActionOp,
-): Promise<PendingPackageActionView> {
+  reason?: string,
+): Promise<PackageActionRequestResult> {
   try {
-    const res = await apiPost<{ action: PendingPackageActionView }>(
+    return await apiPost<PackageActionRequestResult>(
       `/api/v1/machines/${machineId}/packages/${encodeURIComponent(packageName)}/actions`,
-      { op },
+      reason ? { op, reason } : { op },
     );
-    return res.action;
   } catch (err) {
-    if (err instanceof ApiError && err.body) {
+    if (err instanceof ApiError && err.body && (err.body as { error?: unknown }).error) {
       throw new PackageActionError(err.body as ApiErrorBody);
     }
     throw err;

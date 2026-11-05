@@ -8,6 +8,7 @@ import {
   LOGGING_TIER_LABELS,
   RETENTION_LOCATION_LABELS,
   useOrgSettings,
+  useRequestApprovalModesChange,
   useUpdateOrgSettings,
 } from "@/api/organisation";
 import { LineageGutter } from "@/components/lineage-gutter";
@@ -46,6 +47,7 @@ type SettingsTab =
 export function OrganisationPage() {
   const { data: settings, isLoading } = useOrgSettings();
   const update = useUpdateOrgSettings();
+  const requestModesChange = useRequestApprovalModesChange();
   const { data: controlMap, isLoading: controlMapLoading } = useControlMap();
   const setControlOverride = useSetControlOverride();
 
@@ -129,7 +131,8 @@ export function OrganisationPage() {
             <CardHeader>
               <CardTitle>Approvals</CardTitle>
               <CardDescription>
-                Approval mode per action type — none, single, or dual approver.
+                Approval mode per action type: none, single, or dual approver. A change needs an
+                approver's sign-off before it applies.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col">
@@ -259,10 +262,9 @@ export function OrganisationPage() {
         onOpenChange={(open) => {
           if (!open) setEditingApproval(null);
         }}
-        onSave={async (actionType, mode) => {
-          await update.mutateAsync({
-            approvalModes: { ...settings.approvalModes, [actionType]: mode },
-          });
+        onSave={async (actionType, mode, reason) => {
+          // Only the one mode that changes: the request shows the approver exactly that.
+          await requestModesChange.mutateAsync({ approvalModes: { [actionType]: mode }, reason });
         }}
       />
       <LoggingTierDialog

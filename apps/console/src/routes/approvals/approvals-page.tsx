@@ -1,3 +1,4 @@
+import { canAdminister } from "@cloudable/contracts";
 import {
   CheckSquare,
   Clock,
@@ -14,6 +15,7 @@ import { type ReactNode, useState } from "react";
 import {
   ACTION_TYPE_LABELS,
   type Approval,
+  decisionBlockedReason,
   useDecidedApprovalsQuery,
   usePendingApprovalsCount,
   usePendingApprovalsQuery,
@@ -33,6 +35,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+import { useRoleSubject } from "@/lib/role";
 
 import { ApprovalDecisionDialog } from "./decision-dialog";
 
@@ -97,6 +101,12 @@ function decisionSummary(approval: Approval): string {
 
 export function ApprovalsPage() {
   const [view, setView] = useState<View>("pending");
+  const subject = useRoleSubject();
+  const me = subject && {
+    personId: subject.personId,
+    approver: subject.approver,
+    isAdmin: canAdminister(subject),
+  };
   const pendingCount = usePendingApprovalsCount();
   const pendingQuery = usePendingApprovalsQuery();
   const decidedQuery = useDecidedApprovalsQuery(view === "decided");
@@ -190,7 +200,16 @@ export function ApprovalsPage() {
                           {approval.requestedByName}
                         </div>
                       </TableCell>
-                      <TableCell>{ACTION_TYPE_LABELS[approval.actionType]}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span>{ACTION_TYPE_LABELS[approval.actionType]}</span>
+                          {approval.details && (
+                            <span className="text-xs text-muted-foreground">
+                              {approval.details}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="font-mono text-xs">{approval.targetLabel}</TableCell>
                       <TableCell className="max-w-xs truncate" title={approval.reason}>
                         {approval.reason}
@@ -224,10 +243,17 @@ export function ApprovalsPage() {
                       )}
                       {view === "pending" && (
                         <TableCell>
-                          <div className="flex gap-2">
-                            <ApprovalDecisionDialog approval={approval} decision="approved" />
-                            <ApprovalDecisionDialog approval={approval} decision="rejected" />
-                          </div>
+                          {(() => {
+                            const blocked = me ? decisionBlockedReason(approval, me) : "";
+                            return blocked === null ? (
+                              <div className="flex gap-2">
+                                <ApprovalDecisionDialog approval={approval} decision="approved" />
+                                <ApprovalDecisionDialog approval={approval} decision="rejected" />
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{blocked}</span>
+                            );
+                          })()}
                         </TableCell>
                       )}
                     </TableRow>

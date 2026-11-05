@@ -1,5 +1,6 @@
+import { canAdminister } from "@cloudable/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, Navigate } from "@tanstack/react-router";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import type * as React from "react";
 
@@ -12,6 +13,7 @@ import { PageLoader } from "@/components/page-loader";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useRoleSubject } from "@/lib/role";
 import { cn } from "@/lib/utils";
 
 import { ARCHIVED_MACHINE_STATES, MACHINE_STATE_LABEL } from "./machines/machine-state";
@@ -24,6 +26,11 @@ import { ARCHIVED_MACHINE_STATES, MACHINE_STATE_LABEL } from "./machines/machine
  * never becomes a second source of truth that can drift from the real page.
  */
 export function IndexPage() {
+  const subject = useRoleSubject();
+  if (!subject) return <PageLoader />;
+  // The overview is org-wide (approvals, compliance, people, audit): admins only. Everyone else
+  // lands on their own machines.
+  if (!canAdminister(subject)) return <Navigate to="/machines" />;
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
