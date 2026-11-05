@@ -129,9 +129,9 @@ export function ApprovalsPage() {
         </Badge>
       </div>
       <p className="max-w-prose shrink-0 text-sm text-muted-foreground">
-        Package installs, snapshot restores, offboarding and changes to approval settings wait
-        here for a decision. You can't decide a request you made, one about you, or one about your
-        own machine. Every decision is recorded. A rejection needs a reason.
+        Package installs, snapshot restores, offboarding and changes to approval settings wait here
+        for a decision. You can't decide a request you made, one about you, or one about your own
+        machine. Every decision is recorded. A rejection needs a reason.
       </p>
 
       <Tabs value={view} onValueChange={(value) => setView(value as View)} className="shrink-0">
