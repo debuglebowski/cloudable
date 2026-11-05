@@ -20,6 +20,7 @@ import type { CapturedDisk } from "@cloudable/schema";
 import { sessions } from "@cloudable/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { Effect } from "effect";
+import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import type { ProvisioningError, ProvisioningServiceTag } from "../../services/ProvisioningService";
@@ -165,12 +166,16 @@ const authorizeInspection = (input: {
       return yield* Effect.fail(
         new SnapshotInspectionDeniedError({
           snapshotId: snapshot.id,
-          // Says what to do, not just no. An offboarded machine has no owner at all, so
-          // for those this is the only route and every requester takes it.
+          // Says what to do, not just no. With admin access pinned to "never" (production)
+          // there is nothing to ask for inside Cloudable, so it says that instead.
           reason:
-            machine.ownerPersonId === null
-              ? "This machine's owner was cleared when they were offboarded, so nobody owns it. Request elevated access to it — file recovery is enough — and an approver has to grant that before you can look."
-              : "You do not own this machine. Request elevated access to it — file recovery is enough — and an approver has to grant that before you can look.",
+            config.adminAccessPolicy === "never"
+              ? machine.ownerPersonId === null
+                ? "This machine's owner was offboarded, so nobody can look at its snapshots in Cloudable."
+                : "Only the machine's owner can look at its snapshots."
+              : machine.ownerPersonId === null
+                ? "This machine's owner was cleared when they were offboarded, so nobody owns it. Request elevated access to it (file recovery is enough), and an approver has to grant that before you can look."
+                : "You do not own this machine. Request elevated access to it (file recovery is enough), and an approver has to grant that before you can look.",
         }),
       );
     }

@@ -228,13 +228,14 @@ test("a file too large to read inline can still be downloaded", async ({ page })
 });
 
 test("an offboarded machine's snapshot is refused, with what to do about it", async ({ page }) => {
-  // The case the gate exists for: offboarding cleared the owner, and the live-access gate
-  // would read that null owner as "allow anyone in the org".
+  // The case the gate exists for: offboarding cleared the owner, so nobody may look. The
+  // signed-in person is an admin, and that does not help: admins have no access to anyone
+  // else's machine (ADMIN_ACCESS_POLICY defaults to never).
   const row = await snapshotRow(page, ids.orphaned);
   await row.getByRole("button", { name: "Browse files" }).click();
 
   await expect(page).not.toHaveURL(/\/inspections\//);
-  await expect(page.getByText(/Request elevated access/)).toBeVisible();
+  await expect(page.getByText(/nobody can look at its snapshots/)).toBeVisible();
 });
 
 test("a snapshot that captured nothing greys the action out rather than hiding it", async ({
