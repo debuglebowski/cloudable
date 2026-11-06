@@ -76,6 +76,8 @@ jobs:
           context: .
           file: apps/control-plane/Dockerfile
           push: false
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
           load: true
           tags: cloudable-control-plane:scan
           cache-from: type=gha

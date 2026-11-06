@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
-    "build": "AGENT_VERSION=$(bun -e \"console.log(require('./package.json').version)\") bun build ./src/index.ts --compile --target=bun-linux-x64 --env 'AGENT_VERSION*' --outfile=dist/cloudable-agent-linux-x64",
-    "build:arm64": "AGENT_VERSION=$(bun -e \"console.log(require('./package.json').version)\") bun build ./src/index.ts --compile --target=bun-linux-arm64 --env 'AGENT_VERSION*' --outfile=dist/cloudable-agent-linux-arm64",
+    "build": "AGENT_VERSION=$(c=${GIT_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}; echo ${c} | cut -c1-7) bun build ./src/index.ts --compile --target=bun-linux-x64 --env 'AGENT_VERSION*' --outfile=dist/cloudable-agent-linux-x64",
+    "build:arm64": "AGENT_VERSION=$(c=${GIT_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}; echo ${c} | cut -c1-7) bun build ./src/index.ts --compile --target=bun-linux-arm64 --env 'AGENT_VERSION*' --outfile=dist/cloudable-agent-linux-arm64",
     "typecheck": "tsc -b",
     "test:unit": "bun test",
     "test:integration": "exit 0"

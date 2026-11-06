@@ -17,11 +17,12 @@ import type { AgentReportRequest, AgentReportResponse, DesiredStateResponse } fr
 /**
  * The agent's own build version, reported as part of observed state.
  * `bun build`'s `--env 'AGENT_VERSION*'` flag (see package.json's
- * `build`/`build:arm64` scripts) inlines `process.env.AGENT_VERSION` — set
- * from this package's own `package.json` `version` field at build time,
- * see those scripts — as a literal into the compiled binary, so a released
- * binary reports its real version with no `package.json` alongside it to
- * read at runtime. `bun run dev` never sets that env var, so the fallback
+ * `build`/`build:arm64` scripts) inlines `process.env.AGENT_VERSION` — the
+ * short commit the binary was built from (`GIT_COMMIT` from CI, else
+ * `git rev-parse`; `package.json`'s version was never bumped, so every build
+ * reported `0.0.0`) — as a literal into the compiled binary, so a released
+ * binary reports which commit it is with nothing alongside it to read at
+ * runtime. `bun run dev` never sets that env var, so the fallback
  * below is also the honest answer for local development.
  */
 export const AGENT_VERSION = process.env.AGENT_VERSION ?? "0.0.0-dev";

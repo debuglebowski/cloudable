@@ -72,6 +72,8 @@ jobs:
           context: .
           file: apps/control-plane/Dockerfile
           push: true
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           # No `latest` tag: the run id makes "what is running right now"

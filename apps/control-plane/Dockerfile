@@ -79,7 +79,12 @@ COPY apps/console apps/console
 # `http://localhost:4780`, a real cross-origin API in local dev).
 ENV VITE_API_URL=""
 
-RUN bun run --cwd packages/contracts build \
+# The commit this image is built from, passed by CI (.git is in .dockerignore,
+# so `git rev-parse` cannot run here). The agent reports it as its version, so
+# "is this machine's agent current?" is a comparison with the deployed commit.
+ARG GIT_COMMIT=""
+
+RUN GIT_COMMIT=$GIT_COMMIT bun run --cwd packages/contracts build \
  && bun run --cwd packages/events build \
  && bun run --cwd packages/schema build \
  && bun run --cwd packages/session-token build \
