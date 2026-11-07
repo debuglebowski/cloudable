@@ -51,9 +51,13 @@ export function useSsoProviderQuery() {
   return useQuery({
     queryKey: ["auth", "sso-provider"] as const,
     queryFn: () =>
-      apiGet<{ available: boolean; providerId: string | null; passwordSignIn: boolean }>(
-        "/api/v1/auth/sso-provider",
-      ),
+      apiGet<{
+        available: boolean;
+        providerId: string | null;
+        passwordSignIn: boolean;
+        /** Roles come from the identity provider: the console shows them read-only. */
+        rolesFromIdp: boolean;
+      }>("/api/v1/auth/sso-provider"),
   });
 }
 
@@ -74,4 +78,12 @@ export function useSignOutMutation() {
       queryClient.invalidateQueries();
     },
   });
+}
+
+/** Shown wherever a role or approver flag would otherwise be editable. Same words as the API's refusal. */
+export const ROLES_MANAGED_BY_IDP = "Roles are managed by your identity provider.";
+
+/** Whether roles come from the identity provider. False until the server has said so: the API refuses changes either way. */
+export function useRolesFromIdp(): boolean {
+  return useSsoProviderQuery().data?.rolesFromIdp ?? false;
 }

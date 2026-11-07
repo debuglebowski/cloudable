@@ -3,6 +3,7 @@ import { CheckSquare, Clock, Mail, Plus, Shield, Tag, Users, Workflow } from "lu
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { ROLES_MANAGED_BY_IDP, useRolesFromIdp } from "@/api/auth";
 import type { Person } from "@/api/people";
 import {
   isManuallyManaged,
@@ -55,6 +56,7 @@ export function PeoplePage() {
     queryFn: listPeople,
   });
 
+  const rolesFromIdp = useRolesFromIdp();
   const [addOpen, setAddOpen] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<Person | null>(null);
   const [offboardTarget, setOffboardTarget] = useState<Person | null>(null);
@@ -99,6 +101,11 @@ export function PeoplePage() {
             System of record for who can own machines. With no IdP connected this list is fully
             editable; once SCIM is connected, synced people become read-only here.
           </p>
+          {rolesFromIdp && (
+            <p className="max-w-prose text-sm text-muted-foreground">
+              {ROLES_MANAGED_BY_IDP} Each sign-in sets the person's role and approver flag.
+            </p>
+          )}
         </div>
         <Button onClick={() => setAddOpen(true)}>
           <Plus />
@@ -219,7 +226,7 @@ export function PeoplePage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {isManual ? (
+                      {isManual && !rolesFromIdp ? (
                         <EditableCell
                           value={person.role}
                           onSave={(next) =>
@@ -227,7 +234,12 @@ export function PeoplePage() {
                           }
                         />
                       ) : (
-                        <span className="capitalize">{person.role}</span>
+                        <span
+                          className="capitalize"
+                          title={rolesFromIdp ? ROLES_MANAGED_BY_IDP : undefined}
+                        >
+                          {person.role}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell>
@@ -236,7 +248,8 @@ export function PeoplePage() {
                       <Checkbox
                         aria-label={`${person.email} is an approver`}
                         checked={person.approver}
-                        disabled={updateMutation.isPending}
+                        disabled={rolesFromIdp || updateMutation.isPending}
+                        title={rolesFromIdp ? ROLES_MANAGED_BY_IDP : undefined}
                         onCheckedChange={(checked) =>
                           updateMutation.mutate({
                             id: person.id,
