@@ -21,7 +21,7 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `person.deactivated` | 1 | A person's account was deactivated, manually or via SCIM. |
 | `person.role_changed` | 1 | A person's role was changed. |
 | `person.email_changed` | 1 | An admin changed a person's email. Every session and CLI token the person held was revoked. |
-| `person.approver_changed` | 1 | An admin made a person an approver, or took the approver flag away. |
+| `person.approver_changed` | 1 | A person was made an approver, or lost the flag: by an admin, or at sign-in when roles come from the identity provider. |
 
 ## Machine
 

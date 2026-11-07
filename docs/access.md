@@ -80,6 +80,77 @@ whoever can change an email can sign in as someone else. When an admin changes o
 session and CLI token the person held is revoked (`people.credentials_revoked_at`) and a
 `person.email_changed` event is written.
 
+### Roles from the identity provider
+
+Off by default. The operator who deploys Cloudable can turn it on. Then the identity provider (IdP)
+decides every person's role and approver flag, not admins in Cloudable.
+
+**What happens when it is on**
+
+- Every SSO sign-in reads the role claim from the assertion and sets the person's role and
+  approver flag from it. A change at the IdP applies at the person's next sign-in. Cloudable has
+  no periodic re-check against the IdP, so between sign-ins the role stays as the last sign-in set
+  it. A CLI token keeps working until it expires, but every request reads the role the last
+  sign-in stored.
+- Several mapped roles: the highest wins (`owner`, then `admin`, then `member`). Any value mapped
+  to `approver` sets the approver flag. The flag alone is not a role.
+- No mapped role (the default rule): the sign-in is refused and the login page says so. The person
+  also becomes a member without the approver flag, and every console session and CLI token they
+  hold ends (`people.credentials_revoked_at`). They get back in once the IdP gives them a role.
+- Role changes in Cloudable are refused: the People page shows roles read-only, and the API and
+  CLI answer 403 "Roles are managed by your identity provider". A new person can still be added,
+  as a member; their first sign-in sets the real role. Email changes still work.
+- Only the IdP declared in deployment config carries roles. A sign-in through any other provider
+  is refused.
+
+**What is recorded**
+
+- A role or flag change from a sign-in writes `person.role_changed` / `person.approver_changed`
+  with actor type `idp` and actor id `configured` (the provider id). A sign-in that changes
+  nothing writes no event.
+- Every sign-in writes one log line starting `[security] idp-role:` with the claim values, the
+  result, and the previous role. Every refused in-tool role change writes one too.
+
+**Configuration** (environment of the control-plane container)
+
+| Variable | Default | Meaning |
+| :--- | :--- | :--- |
+| `ROLES_FROM_IDP` | `off` | `on` turns the mode on. |
+| `IDP_ROLE_CLAIM` | `http://schemas.microsoft.com/ws/2008/06/identity/claims/role` | The SAML attribute that holds the roles, matched by exact name. |
+| `IDP_ROLE_MAPPING` | none, required when on | JSON object, claim value to `owner`, `admin`, `member` or `approver`. Values match exactly, case included. |
+| `IDP_ROLE_UNMAPPED` | `deny` | What a sign-in with no mapped role gets: `deny`, or `member`. |
+
+The control plane refuses to start when the mode is on and the config is wrong: a bad mapping, no
+IdP declared in deployment config (`IDP_METADATA_URL`, `IDP_SAML_CONFIG`), or
+`PASSWORD_SIGN_IN=on`. A password sign-in carries no claim, so it would keep a role the IdP took
+away.
+
+Cloudable signs people in through SAML only, so the claim is a SAML attribute. Any SAML IdP works
+(Entra ID, Okta, Google Workspace, Keycloak, AD FS): send the roles as one multi-valued attribute
+and put its name in `IDP_ROLE_CLAIM`. Okta and Keycloak usually call it something like `roles` or
+`groups`; Google Workspace needs a custom attribute.
+
+**Example: Entra ID**
+
+1. In the Cloudable enterprise application's app registration, open **App roles** and create one
+   role per Cloudable role, for users: for example `Cloudable.Admin`, `Cloudable.Member` and
+   `Cloudable.Approver` (the **Value** field is what the claim carries).
+2. In the enterprise application, **Users and groups**: assign each person or group a role. A
+   person can hold several; assign `Cloudable.Approver` next to a base role.
+3. Entra puts assigned app roles in the SAML assertion as
+   `http://schemas.microsoft.com/ws/2008/06/identity/claims/role`, which is the default claim, so
+   `IDP_ROLE_CLAIM` can stay unset. Check under **Single sign-on**, **Attributes & Claims** that
+   no rule removes it.
+4. Set on the control plane:
+
+```
+ROLES_FROM_IDP=on
+IDP_ROLE_MAPPING={"Cloudable.Admin":"admin","Cloudable.Member":"member","Cloudable.Approver":"approver"}
+```
+
+A person with no Cloudable app role is then refused at sign-in. The code is in
+`apps/control-plane/src/idp-roles/`.
+
 ### Approvals that replace open paths
 
 - **Package installs** need an approval, by default from one person (`package_install` on the
