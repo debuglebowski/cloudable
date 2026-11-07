@@ -2,6 +2,7 @@ import type { DomainEvent } from "@cloudable/events";
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import { ulid } from "ulid";
+import { config } from "../../config";
 import { NotPermittedError, isApproverOrAdmin, requireAdminUser } from "../../domain/authz";
 import {
   type PersonRow,
@@ -49,6 +50,34 @@ const personEvent = <T extends DomainEvent["type"]>(
     payload,
   }) as DomainEvent;
 
+/** What an in-tool role change gets when roles come from the identity provider. */
+export const ROLES_MANAGED_BY_IDP =
+  "Roles are managed by your identity provider. Change the role there; it applies at the person's next sign-in.";
+
+/**
+ * Refuses a role or approver change when the operator turned on roles from the IdP
+ * (`config.idpRoles`), and logs the attempt. A no-op otherwise. Read per call, not captured, so
+ * tests can flip the mode.
+ */
+const refuseIfRolesFromIdp = (
+  actor: CurrentUser,
+  attempt: { readonly personId?: string; readonly role?: string; readonly approver?: boolean },
+) =>
+  Effect.gen(function* () {
+    if (config.idpRoles === null) return;
+    if (attempt.role === undefined && attempt.approver === undefined) return;
+    const asked = [
+      attempt.role !== undefined ? `role=${attempt.role}` : null,
+      attempt.approver !== undefined ? `approver=${attempt.approver}` : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    console.warn(
+      `[security] idp-role: refused in-tool role change by ${actor.email} (person ${actor.personId}) for ${attempt.personId ?? "a new person"}: ${asked}`,
+    );
+    return yield* Effect.fail(new NotPermittedError({ reason: ROLES_MANAGED_BY_IDP }));
+  });
+
 const publish = (events: DomainEvent[]) =>
   events.length === 0
     ? Effect.void
@@ -88,6 +117,11 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
     .handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        // With roles from the IdP a new person starts as a member; their first sign-in sets the
+        // real role. Asking for anything else is a role change.
+        yield* refuseIfRolesFromIdp(currentUser, {
+          ...(payload.role !== "member" ? { role: payload.role } : {}),
+        });
         yield* requireAdminUser(currentUser, "Only an admin can add a person.");
         const row = yield* createPerson({ ...payload, orgId: currentUser.orgId });
         yield* publish([
@@ -102,6 +136,11 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
     .handle("update", ({ path, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* refuseIfRolesFromIdp(currentUser, {
+          personId: path.id,
+          ...(payload.role !== undefined ? { role: payload.role } : {}),
+          ...(payload.approver !== undefined ? { approver: payload.approver } : {}),
+        });
         // Email, role and the approver flag are all admin's to change. Email above all: the
         // console resolves a sign-in to a person by email, so whoever can change it can make
         // their own sign-in arrive as someone else.

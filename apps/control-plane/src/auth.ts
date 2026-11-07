@@ -14,6 +14,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { CONFIGURED_IDP_PROVIDER_ID, config } from "./config";
 import { openPostgres } from "./db/connect";
+import { IDP_ROLE_CLAIM_FIELD, idpRoleProvisioning } from "./idp-roles/sign-in";
 import { spIssuer } from "./services/saml-metadata";
 
 // BetterAuth baseline: email/password, plus SAML SSO via `@better-auth/sso`
@@ -117,6 +118,18 @@ const configuredIdp = (() => {
     samlConfig: {
       issuer: spIssuer(),
       entryPoint: idp.ssoUrl,
+      // Roles from the IdP: copy the role attribute into the sign-in's user info, where
+      // `provisionUser` reads it. `email` and `name` repeat the plugin's own defaults, which this
+      // object would otherwise replace.
+      ...(config.idpRoles
+        ? {
+            mapping: {
+              email: "email",
+              name: "displayName",
+              extraFields: { [IDP_ROLE_CLAIM_FIELD]: config.idpRoles.claim },
+            },
+          }
+        : {}),
       // entityID + cert instead of the metadata XML: the plugin accepts
       // either, and the document is not stable enough to be configuration
       // (Entra regenerates its ID and Signature per request). Passing every
@@ -184,6 +197,15 @@ const options = {
       // `auth.default-sso.test.ts` fails loudly if the option stops being
       // accepted on an upgrade.
       ...(configuredIdp ? { defaultSSO: [configuredIdp] } : {}),
+      // Roles from the IdP, when the operator turned them on: every SSO sign-in, not only the
+      // first, sets the person's role from the claim or refuses the sign-in. Absent when off, so
+      // sign-in behaves exactly as it did before the mode existed.
+      //
+      // A refused sign-in lands on `<BETTER_AUTH_URL>/login`: in production one origin serves
+      // both the API and the console (see `trustedOrigins` below).
+      ...(config.idpRoles
+        ? idpRoleProvisioning(authDb, config.idpRoles, `${config.betterAuthUrl}/login`)
+        : {}),
     }),
   ],
   // BetterAuth's own CSRF/origin check (separate from `HttpMiddleware.cors`

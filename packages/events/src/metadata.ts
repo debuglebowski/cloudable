@@ -54,7 +54,8 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   },
   "person.approver_changed": {
     tier: 1,
-    description: "An admin made a person an approver, or took the approver flag away.",
+    description:
+      "A person was made an approver, or lost the flag: by an admin, or at sign-in when roles come from the identity provider.",
   },
   "person.role_changed": {
     tier: 1,

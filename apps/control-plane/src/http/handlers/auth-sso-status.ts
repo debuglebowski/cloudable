@@ -28,6 +28,12 @@ export const AuthSsoStatusLive = HttpApiBuilder.group(Api, "authSsoStatus", (han
                 ),
           ),
         )
-    ).pipe(Effect.map((status) => ({ ...status, passwordSignIn: config.passwordSignInEnabled }))),
+    ).pipe(
+      Effect.map((status) => ({
+        ...status,
+        passwordSignIn: config.passwordSignInEnabled,
+        rolesFromIdp: config.idpRoles !== null,
+      })),
+    ),
   ),
 );

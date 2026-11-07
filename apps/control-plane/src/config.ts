@@ -1,4 +1,5 @@
 import { Context, Layer } from "effect";
+import { type IdpRolesConfig, parseIdpRolesConfig } from "./idp-roles/config";
 
 /**
  * Control-plane configuration, read once from `process.env` with sane dev
@@ -225,6 +226,14 @@ export interface AppConfig {
    * Emergency access goes through Azure PIM instead (see `docs/access.md`, "Break-glass").
    */
   readonly adminAccessPolicy: "never" | "with_approval" | "always";
+  /**
+   * Roles from the identity provider (`ROLES_FROM_IDP=on`, with `IDP_ROLE_CLAIM`,
+   * `IDP_ROLE_MAPPING` and `IDP_ROLE_UNMAPPED`). `null`, the default, leaves roles to admins in
+   * the console, API and CLI. When set, every sign-in sets the person's role and approver flag
+   * from the claim, and in-tool role changes are refused. See `idp-roles/config.ts` and
+   * `docs/access.md`, "Roles from the identity provider".
+   */
+  readonly idpRoles: IdpRolesConfig | null;
 }
 
 /**
@@ -340,6 +349,7 @@ const readConfig = (): AppConfig => {
       !idpConfigured,
     ),
     adminAccessPolicy: parseAdminAccessPolicy(process.env.ADMIN_ACCESS_POLICY),
+    idpRoles: parseIdpRolesConfig(process.env, idpConfigured),
   };
 };
 
