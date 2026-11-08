@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { VULNERABILITY_SCAN_SETTING_KEYS as KEYS } from "@cloudable/contracts";
+import { readFileSync } from "node:fs";
+import {
+  VULNERABILITY_SCAN_SETTING_KEYS as KEYS,
+  type VulnerabilityScanReport,
+} from "@cloudable/contracts";
 import type * as schema from "@cloudable/schema";
 import {
+  events,
   complianceFindingState,
   machineVulnerabilities,
   machineVulnerabilityScans,
@@ -13,6 +18,7 @@ import { eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
 import { Db } from "../../db/layer";
+import { recordVulnerabilityScan } from "../../domain/vulnerability-scan/ingest";
 import { connectAndMigrate } from "../../test-support/db";
 import { isDbReachable } from "../../testing/db-reachable";
 import { CHECK_ID, vulnerabilitiesRemediatedCheck } from "./vulnerabilities-remediated";
@@ -39,6 +45,7 @@ describe.skipIf(!(await isDbReachable(databaseUrl)))(
     afterAll(async () => {
       if (!close) return;
       if (orgIds.length > 0) {
+        await db.delete(events).where(inArray(events.orgId, orgIds));
         const orgMachines = db
           .select({ id: machines.id })
           .from(machines)
@@ -174,6 +181,76 @@ describe.skipIf(!(await isDbReachable(databaseUrl)))(
       await seedScan(machineId);
       await seedFinding(machineId, { severity: "critical", fixAvailableAgo: 2 * DAY });
       expect(await evaluate(orgId)).toEqual([]);
+    });
+
+    test("an unreadable scan stays never_scanned until a real compact scan is ingested", async () => {
+      // Captured from the fixed scan manager on Ubuntu 24.04, trimmed to four findings.
+      const captured = JSON.parse(
+        readFileSync(
+          new URL(
+            "../../../../agent/src/vulnerability-scan/fixtures/trivy-ubuntu-24.04-agent-report.json",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ) as VulnerabilityScanReport;
+      const orgId = await seedOrg();
+      const machineId = await seedMachine(orgId);
+      const receivedAt = new Date();
+      const common = {
+        scanner: captured.scanner,
+        scannerVersion: captured.scannerVersion,
+        scope: captured.scope,
+        startedAt: ago(60_000).toISOString(),
+        finishedAt: receivedAt.toISOString(),
+      };
+      await Effect.runPromise(
+        recordVulnerabilityScan(db, {
+          orgId,
+          machineId,
+          receivedAt,
+          report: {
+            ...common,
+            scanId: crypto.randomUUID(),
+            outcome: "failed",
+            failureReason: "unreadable_output",
+          },
+        }),
+      );
+      expect(reasonsOf((await evaluate(orgId))[0] as never)).toEqual(["never_scanned"]);
+
+      await Effect.runPromise(
+        recordVulnerabilityScan(db, {
+          orgId,
+          machineId,
+          receivedAt,
+          report: {
+            ...captured,
+            ...common,
+            scanId: crypto.randomUUID(),
+            dbBuiltAt: ago(6 * 60 * 60 * 1000).toISOString(),
+          },
+        }),
+      );
+      expect(await evaluate(orgId)).toEqual([]);
+      const stored = await db
+        .select()
+        .from(machineVulnerabilities)
+        .where(eq(machineVulnerabilities.machineId, machineId));
+      expect(stored).toHaveLength(4);
+      expect(
+        stored.every((finding) => finding.severity === "critical" && finding.fixedVersion === null),
+      ).toBe(true);
+      const scans = await db
+        .select()
+        .from(machineVulnerabilityScans)
+        .where(eq(machineVulnerabilityScans.machineId, machineId));
+      expect(scans.find((scan) => scan.outcome === "completed")?.counts.critical).toBe(4);
+      const recorded = await db.select().from(events).where(eq(events.machineId, machineId));
+      expect(recorded.map((event) => event.type).sort()).toEqual([
+        "machine.vulnerability_scan_completed",
+        "machine.vulnerability_scan_failed",
+      ]);
     });
 
     test("fails for a Critical whose fix has been available longer than 7 days", async () => {
