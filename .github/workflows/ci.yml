@@ -13,6 +13,39 @@ permissions:
   contents: read
 
 jobs:
+  trivy-report:
+    name: Report template against pinned Trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Bun workspace
+        uses: ./.github/actions/setup-bun
+
+      - name: Download and verify the scanner pinned in the image
+        shell: bash
+        run: |
+          set -euo pipefail
+          dockerfile=apps/control-plane/Dockerfile
+          version=$(sed -n 's/^ARG TRIVY_VERSION=//p' "$dockerfile")
+          checksum=$(sed -n 's/^ARG TRIVY_SHA256_X64=//p' "$dockerfile")
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$checksum" =~ ^[0-9a-f]{64}$ ]]
+          scanner_dir="$RUNNER_TEMP/trivy-report"
+          mkdir -p "$scanner_dir"
+          archive="$scanner_dir/trivy.tar.gz"
+          curl --proto '=https' --tlsv1.2 --connect-timeout 20 --max-time 120 --retry 3 -fsSL \
+            "https://github.com/aquasecurity/trivy/releases/download/v${version}/trivy_${version}_Linux-64bit.tar.gz" \
+            -o "$archive"
+          printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$scanner_dir" trivy
+          echo "TRIVY_TEST_BINARY=$scanner_dir/trivy" >> "$GITHUB_ENV"
+
+      - name: Convert reports with the real template (no database required)
+        run: bun test ./apps/agent/src/vulnerability-scan/trivy.integration-check.ts
+
   ci:
     name: typecheck, unit tests, integration tests, lint
     runs-on: ubuntu-latest
