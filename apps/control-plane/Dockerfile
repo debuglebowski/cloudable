@@ -91,6 +91,7 @@ RUN GIT_COMMIT=$GIT_COMMIT bun run --cwd packages/contracts build \
  && bun run --cwd apps/control-plane build \
  && bun run --cwd apps/agent build \
  && bun run --cwd apps/agent build:arm64 \
+ && bun apps/agent/scripts-manifest.ts \
  && bun run --cwd apps/tunnel-daemon build \
  && bun run --cwd apps/tunnel-daemon build:arm64 \
  && bun run --cwd apps/console build
@@ -163,6 +164,7 @@ COPY --from=builder --chown=bun:bun /app/apps/control-plane ./apps/control-plane
 # The 4 standalone binaries GET /_internal/binaries/:target serves
 # (http/routes/binaries.ts) — named exactly as that route expects, so it
 # can join `AGENT_BINARY_DIR`/target straight through with no lookup table.
+COPY --from=builder --chown=bun:bun /app/apps/agent/dist/agent-manifest.json /app/binaries/agent-manifest.json
 COPY --from=builder --chown=bun:bun /app/apps/agent/dist/cloudable-agent-linux-x64 /app/binaries/cloudable-agent-linux-x64
 COPY --from=builder --chown=bun:bun /app/apps/agent/dist/cloudable-agent-linux-arm64 /app/binaries/cloudable-agent-linux-arm64
 COPY --from=builder --chown=bun:bun /app/apps/tunnel-daemon/dist/cloudable-tunnel-daemon-linux-x64 /app/binaries/cloudable-tunnel-daemon-linux-x64

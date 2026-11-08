@@ -289,6 +289,8 @@ function summarize(row: RawEventRow): string {
     }
     case "machine.vulnerability_scan_failed":
       return `Vulnerability scan failed: ${event.payload.reason}.`;
+    case "machine.agent_update":
+      return `Agent update ${event.payload.status}: ${event.payload.oldVersion} → ${event.payload.newVersion} (release ${event.payload.releaseId}).${event.payload.detail ? ` ${event.payload.detail}` : ""}`;
     case "machine.scanner_installed": {
       const from = event.payload.previousVersion
         ? ` (replacing ${event.payload.previousVersion})`
@@ -355,6 +357,7 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "machine.drift_detected":
     case "machine.drift_resolved":
     case "machine.reconciled":
+    case "machine.agent_update":
     case "machine.first_seen":
     case "access.certificate_issued":
     case "access.certificate_revoked":

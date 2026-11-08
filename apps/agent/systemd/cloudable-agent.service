@@ -1,7 +1,7 @@
 # Example systemd unit for the Cloudable control agent (spec §8.1).
 #
 # Install:
-#   cp cloudable-agent-linux-<arch> /opt/cloudable/cloudable-agent
+#   cp cloudable-agent-linux-<arch> /opt/cloudable/agent
 #   cp cloudable-agent.service /etc/systemd/system/cloudable-agent.service
 #   printf 'CONTROL_PLANE_URL=https://your-control-plane.example.com\nMACHINE_TOKEN=<join token>\n' \
 #     > /etc/cloudable/agent.env
@@ -24,17 +24,15 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/cloudable/agent.env
-ExecStart=/opt/cloudable/cloudable-agent
+ExecStart=/opt/cloudable/agent
 Restart=always
 RestartSec=5
 
-# The agent needs no elevated privileges — reconciliation decisions are its
-# own; anything it can't do as an unprivileged user, it isn't supposed to
-# do (invariant #4: reconcile only closes gaps, it never installs).
-User=cloudable-agent
-Group=cloudable-agent
+# Package actions and atomic self-updates need root. Credentials and scanner state
+# remain in their existing locations; the updater only changes executable-adjacent files.
+User=root
+Group=root
 NoNewPrivileges=true
-ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 

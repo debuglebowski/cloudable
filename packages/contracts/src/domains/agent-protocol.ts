@@ -1,3 +1,4 @@
+import type { AgentRelease, AgentUpdateReport } from "./agent-update";
 import type { InstalledScanner, VulnerabilityScanReport } from "./vulnerability-scan";
 
 /**
@@ -74,6 +75,7 @@ export const isValidPackageName = (value: string): boolean =>
  * 304 path was real but could never fire.
  */
 export interface DesiredStateResponse {
+  readonly agentRelease?: AgentRelease;
   readonly version: string;
   /**
    * Package names this machine is ALLOWED to have — a permission list, not an
@@ -132,6 +134,7 @@ export interface PackageActionResult {
 
 /** `POST /api/v1/agent/report` request: observed state, submitted after the agent reconciles locally. */
 export interface AgentReportRequest {
+  readonly agentUpdate?: AgentUpdateReport;
   readonly agentVersion: string;
   /** ISO 8601 — when the agent captured this observation, not when the control plane received it. */
   readonly observedAt: string;

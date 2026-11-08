@@ -1,4 +1,5 @@
 import type { PageInfo, PaginatedRequest } from "../common";
+import type { AgentUpdateReport } from "./agent-update";
 
 /**
  * The single Unix user every Cloudable machine is provisioned with
@@ -176,6 +177,8 @@ export interface AccessMethodsEnabled {
 }
 
 export interface MachineDetail extends MachineSummary {
+  agentUpdate?: Omit<AgentUpdateReport, "observations"> | null;
+  desiredAgentRelease?: { version: string; releaseId: string } | null;
   manifest: ResolvedPackageManifestEntry[];
   persistentPaths: ResolvedMachineSetting<PersistentPaths>;
   accessMethodsEnabled: ResolvedMachineSetting<AccessMethodsEnabled>;

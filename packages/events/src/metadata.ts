@@ -154,6 +154,11 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
     description:
       "A vulnerability scan of a machine started and produced no findings, with the reason (for example the vulnerability database was unreachable).",
   },
+  "machine.agent_update": {
+    tier: 1,
+    description:
+      "Agent release update attempted, confirmed by check-in, failed or rolled back. Includes old/new versions and bundled release identity.",
+  },
   "machine.scanner_installed": {
     tier: 1,
     description:

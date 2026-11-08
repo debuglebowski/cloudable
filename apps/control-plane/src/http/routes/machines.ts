@@ -95,6 +95,24 @@ const effectiveLoggingTierSchema = Schema.Struct({
 });
 
 const machineDetailSchema = Schema.Struct({
+  agentUpdate: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        installedVersion: Schema.String,
+        desiredVersion: Schema.NullOr(Schema.String),
+        releaseId: Schema.NullOr(Schema.String),
+        status: Schema.String,
+      }),
+    ),
+  ),
+  desiredAgentRelease: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        version: Schema.String,
+        releaseId: Schema.String,
+      }),
+    ),
+  ),
   ...machineSummaryFields,
   manifest: Schema.Array(resolvedManifestEntrySchema),
   persistentPaths: resolvedPersistentPathsSchema,

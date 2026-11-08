@@ -26,6 +26,7 @@ import { SCANNER_BINARY_FILES } from "../../domain/vulnerability-scan/scanner-re
  * what a caller sends.
  */
 const TARGETS: Record<string, string> = {
+  "agent-manifest.json": "agent-manifest.json",
   "cloudable-agent-linux-x64": "cloudable-agent-linux-x64",
   "cloudable-agent-linux-arm64": "cloudable-agent-linux-arm64",
   "cloudable-tunnel-daemon-linux-x64": "cloudable-tunnel-daemon-linux-x64",

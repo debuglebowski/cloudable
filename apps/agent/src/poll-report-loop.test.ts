@@ -1,4 +1,8 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AgentUpdater } from "./agent-update";
 
 // See wake.test.ts's comment on the same pattern: `config.ts` reads `CONTROL_PLANE_URL` (and
 // `MACHINE_TOKEN`) once, at the first import of anything that pulls it in — so there's
@@ -486,3 +490,73 @@ describe("AGENT_VERSION", () => {
     }
   });
 });
+
+for (const acknowledged of [true, false]) {
+  test(`updated worker confirms startup only after successful authenticated report (${acknowledged})`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agent-checkin-"));
+    const updater = new AgentUpdater(join(dir, "agent"));
+    writeFileSync(
+      updater.journal,
+      JSON.stringify({
+        release: { version: loop.AGENT_VERSION, releaseId: "test-release", artifacts: {} },
+        oldVersion: "old",
+        phase: "starting",
+        notBefore: 0,
+        observations: [],
+      }),
+    );
+    const controller = new AbortController();
+    let reported: import("@cloudable/contracts").AgentReportRequest | undefined;
+    let authorization: string | null = null;
+    const server = Bun.serve({
+      port,
+      async fetch(req, srv) {
+        const path = new URL(req.url).pathname;
+        if (path.endsWith("/wake")) {
+          if (srv.upgrade(req)) return;
+          return new Response(null, { status: 400 });
+        }
+        if (path.endsWith("/attest"))
+          return Response.json({
+            bearerToken: "checkin-token",
+            expiresAt: new Date(Date.now() + 900000).toISOString(),
+            orgId: "org",
+            machineId: "machine",
+          });
+        if (path.endsWith("/poll"))
+          return Response.json({ version: "v1", packages: [], settings: {}, pendingActions: [] });
+        if (path.endsWith("/report")) {
+          reported = (await req.json()) as import("@cloudable/contracts").AgentReportRequest;
+          authorization = req.headers.get("authorization");
+          controller.abort();
+          return Response.json(acknowledged ? { acknowledged: true } : { error: "unavailable" }, {
+            status: acknowledged ? 200 : 503,
+          });
+        }
+        return new Response(null, { status: 404 });
+      },
+      websocket: { message() {} },
+    });
+    attestation.clearCachedSession();
+    try {
+      await expect(
+        loop.runAgentLoop({
+          signal: controller.signal,
+          updater,
+          scanManager: fakeScanManager({}).manager,
+        }),
+      ).rejects.toThrow("agent loop aborted");
+      expect(authorization as string | null).toBe("Bearer checkin-token");
+      expect(reported?.agentVersion).toBe(loop.AGENT_VERSION);
+      expect(reported?.agentUpdate?.status).toBe("starting");
+      expect(updater.report(loop.AGENT_VERSION).status).toBe(
+        acknowledged ? "succeeded" : "starting",
+      );
+    } finally {
+      controller.abort();
+      server.stop(true);
+      attestation.clearCachedSession();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}

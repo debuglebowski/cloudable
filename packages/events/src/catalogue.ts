@@ -61,6 +61,7 @@ export const EVENT_TYPES = [
   "machine.vulnerability_scan_completed",
   "machine.vulnerability_scan_failed",
   "machine.scanner_installed",
+  "machine.agent_update",
 
   // --- access ---
   "access.certificate_issued",

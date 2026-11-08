@@ -1,5 +1,6 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
+import { getAgentRelease } from "../../domain/agent-update/release";
 import { authorizeMachine, ownOnlyFilter, requireAdminUser } from "../../domain/authz";
 import { MachineService } from "../../domain/machine/MachineService";
 import { toActionView } from "../../domain/machine/package-actions";
@@ -56,9 +57,16 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
         const currentUser = yield* CurrentUserTag;
         yield* authorizeMachine(currentUser, path.id);
         const machineService = yield* MachineService;
-        return yield* machineService
+        const machine = yield* machineService
           .getById(path.id, currentUser.orgId)
           .pipe(Effect.catchTag("MachineServiceError", Effect.die));
+        const release = getAgentRelease();
+        return {
+          ...machine,
+          desiredAgentRelease: release
+            ? { version: release.version, releaseId: release.releaseId }
+            : null,
+        };
       }),
     )
     .handle("updatePackages", ({ path, payload }) =>

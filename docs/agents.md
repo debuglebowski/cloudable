@@ -14,7 +14,8 @@ no inbound access ever. One binary, compiled per-arch via
 On boot it attests its identity, then loops: poll for work, perform any package
 actions it was handed, report observed state, sleep, repeat.
 
-The agent observes, with two exceptions. `apply-packages.ts` installs and removes
+The agent observes, with three exceptions. Its supervisor updates the control-agent
+binary to the release bundled by the deployed control plane (see below). `apply-packages.ts` installs and removes
 packages. It never decides to — it performs actions the control plane handed it,
 each requested by a person. There is no local convergence towards the manifest,
 and the allowed list it receives is a permission, not an instruction. And
@@ -465,3 +466,90 @@ child that immediately failed on a missing env var.
 
 See `docs/access.md` for the web terminal / file session / SSH certificate model
 this daemon serves, including the wire frames and size limits.
+
+## Automatic control-agent updates
+
+The control-plane image carries both agent architectures and `agent-manifest.json`.
+The manifest contains the agent's short commit version, an immutable release identity
+(SHA-256 over the build commit and artifact hashes), and filenames/SHA-256 for
+`linux-x64` and `linux-arm64`. The public allowlisted binaries endpoint publishes
+these files, including the manifest. Cloud-init verifies the agent checksum before
+installing it. Build both binaries, then run `bun apps/agent/scripts-manifest.ts`
+when preparing a bundle outside Docker; Docker does this automatically.
+
+Authenticated `/poll` advertises `agentRelease`. Its release identity participates
+in the ETag, so deploying a new control plane invalidates an unchanged machine poll.
+No GitHub/latest feed, inbound command, new listener or VM reboot is involved.
+The org controls versions by choosing its control-plane image, including deploying
+an older image to downgrade agents. An image without a valid complete manifest
+advertises no update; it never invents hashes or downloads a runtime release.
+
+The compiled agent starts a supervisor and an outbound worker. The worker reports
+normally while waiting a deterministic per-machine/release delay of up to 15 minutes
+from first seeing a release. Offline machines do nothing until they return and
+poll; returning machines also stagger rather than joining a catch-up stampede.
+The same installed version is a no-op. Only Linux x64/arm64 targets are accepted.
+
+After a successful normal report, a due update downloads to `<binary>.download`
+on the executable's filesystem. Downloads have a size cap, timeout, no redirects,
+and must match both the streamed and on-disk SHA-256. The worker exits only after
+the verified stage and journal have been flushed. The supervisor rechecks the
+checksum, durably copies the current executable to `<binary>.previous`, atomically
+renames the stage over the executable, and starts a new worker. It confirms startup
+only after the new version completes an authenticated poll/report cycle. The
+supervisor stays running during replacement; systemd need not be restarted.
+Neither tunnel daemon nor identity, service environment, configuration, scanner
+installation, database/cache or scan-state files are replaced.
+
+A candidate that exits or cannot report within three minutes is stopped and the
+previous executable is restored with an atomic rename. A supervisor interrupted
+during unconfirmed startup restores the backup on its next start. Interrupted or
+bad downloads are removed without replacing the executable. Journal writes and
+executable/backup renames are fsynced, including the containing directory. Keep
+the journal and backup together with the executable when moving an installation.
+
+Interrupted and transiently failed downloads retry after durable five-minute and
+thirty-minute cooldowns, at most three total attempts per release. Checksum
+failures, exhausted downloads and rolled-back releases are blocked locally;
+there is no further automatic retry or restart loop for that release. Normal outbound reporting continues on the old
+version. A different release identity can try again once outstanding evidence is
+acknowledged. To explicitly retry the same release, first verify its failure
+reason, wait for its evidence to appear in the activity feed, stop the service,
+remove only `<binary>.update.json` and `<binary>.download`, then start the service.
+Do not remove the backup. A malformed journal fails closed and needs operator
+repair; it must never be guessed away while a candidate may be unconfirmed.
+
+Reports carry installed/desired versions, release identity, rollout phase and
+unacknowledged observations. Machine detail exposes `agentUpdate` (last reported
+state) and `desiredAgentRelease` (the currently deployed bundle); use
+`lastVerifiedAt` to distinguish an offline machine from a live rollout.
+Pre-updater reports are marked `bootstrap_required`. The control plane records
+`machine.agent_update` as mandatory tier-1 evidence for attempted, succeeded,
+failed and rolled-back transitions, including old/new versions and release
+identity. Durable observation IDs, scoped to the authenticated org/machine, make
+report retries idempotent. Observations survive restart and remain queued until
+an acknowledged report; a success observation follows the confirming check-in.
+Machine statements remain claims from the authenticated agent, like other
+observed state, rather than independently verified execution evidence.
+
+### Bootstrapping existing pre-updater machines
+
+Agents deployed before this feature cannot act on the new poll field. They need
+one final out-of-band installation, for example Azure Run Command (the method
+used for golden-comet-bab0 on 2026-11-08). Use
+`scripts/bootstrap-agent-updater.sh` as root, passing the HTTPS URL of the org's
+control plane and the `releaseId` inspected from its deployed manifest. Optionally
+pass the installed binary path (default `/opt/cloudable/agent`). It selects the
+architecture, pins the inspected release, stages and checks the download, retains
+`<binary>.pre-updater`, atomically replaces the executable and starts the service.
+The service must run as root and the executable's directory must be writable;
+Azure cloud-init already uses root. Update older custom unprivileged units to the
+supplied systemd example first. Preserve all existing environment/identity values.
+
+Verify a fresh authenticated check-in and `agentUpdate.installedVersion` matching
+the manifest; systemd `active` alone is insufficient. If bootstrap startup or
+check-in fails, stop the service, copy `.pre-updater` to a temporary sibling,
+rename it over the executable and start the service. The script restores on an
+immediate systemd start failure; the operator verifies first check-in because the
+pre-updater installation has no updater journal/health watchdog yet. No reboot,
+reimage or scanner reinstall is needed. Future releases then update automatically.

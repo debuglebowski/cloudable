@@ -49,6 +49,7 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `machine.vulnerability_scan_completed` | 1 | A vulnerability scan of a machine finished. Carries counts and the new Critical and High CVE ids; the findings themselves are current state, not events. |
 | `machine.vulnerability_scan_failed` | 1 | A vulnerability scan of a machine started and produced no findings, with the reason (for example the vulnerability database was unreachable). |
 | `machine.scanner_installed` | 1 | The vulnerability scanner was installed on a machine, or replaced by another version. An admin asked for it by turning scanning on for the org. |
+| `machine.agent_update` | 1 | Agent release update attempted, confirmed by check-in, failed or rolled back. Includes old/new versions and bundled release identity. |
 
 ## Access
 

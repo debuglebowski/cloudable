@@ -220,3 +220,26 @@ describe("package manifest summaries", () => {
     );
   });
 });
+
+for (const status of ["attempted", "succeeded", "failed", "rolled_back"]) {
+  test(`agent ${status} evidence includes versions and release`, () => {
+    const record = projectEvent(
+      baseRow({
+        type: "machine.agent_update",
+        payload: {
+          releaseId: "release-123",
+          oldVersion: "old",
+          newVersion: "new",
+          status,
+          installedVersion: "old",
+          desiredVersion: "new",
+          detail: "startup timeout",
+        },
+      }),
+    );
+    expect(record.summary).toContain(status);
+    expect(record.summary).toContain("old → new");
+    expect(record.summary).toContain("release-123");
+    expect(record.summary).toContain("startup timeout");
+  });
+}

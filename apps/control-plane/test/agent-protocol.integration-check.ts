@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { VULNERABILITY_SCAN_SETTING_KEYS } from "@cloudable/contracts";
 import * as schema from "@cloudable/schema";
 import { HttpApiBuilder, HttpServer } from "@effect/platform";
 import { eq, sql } from "drizzle-orm";
 import { Effect, Layer } from "effect";
-import { AppConfigLive } from "../src/config";
+import { AppConfigLive, config } from "../src/config";
 import { Db } from "../src/db/layer";
 import { ElevationRepoLive } from "../src/domain/elevation/ElevationRepo.live";
 import { ElevationService } from "../src/domain/elevation/ElevationService";
@@ -511,6 +514,82 @@ describe("agent-protocol handlers (integration)", () => {
         .from(schema.machineVulnerabilityScans)
         .where(eq(schema.machineVulnerabilityScans.scanId, scan.scanId));
       expect(rows).toHaveLength(0);
+    });
+
+    test("deployment releases invalidate the authenticated poll ETag", async () => {
+      const token = await attest();
+      const original = config.agentBinariesDir;
+      const dirs: string[] = [];
+      try {
+        let previous: string | undefined;
+        for (const version of ["old", "new"]) {
+          const dir = mkdtempSync(join(tmpdir(), "agent-bundle-"));
+          dirs.push(dir);
+          const artifacts = Object.fromEntries(
+            ["linux-x64", "linux-arm64"].map((target) => {
+              const file = `cloudable-agent-${target}`;
+              writeFileSync(join(dir, file), target);
+              return [target, { file, sha256: "a".repeat(64) }];
+            }),
+          );
+          writeFileSync(
+            join(dir, "agent-manifest.json"),
+            JSON.stringify({ version, releaseId: `release-${version}`, artifacts }),
+          );
+          Object.assign(config, { agentBinariesDir: dir });
+          const response = await poll(token, previous);
+          expect(response.status).toBe(200);
+          expect(((await response.json()) as { agentRelease: unknown }).agentRelease).toMatchObject(
+            { version, releaseId: `release-${version}` },
+          );
+          const etag = response.headers.get("etag");
+          expect(etag).not.toBe(previous);
+          if (!etag) throw Error("missing etag");
+          expect((await poll(token, etag)).status).toBe(304);
+          previous = etag;
+        }
+      } finally {
+        Object.assign(config, { agentBinariesDir: original });
+        for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test("rollout evidence is durable and idempotent, with current status persisted", async () => {
+      const token = await attest();
+      const observations = ["attempted", "succeeded", "failed", "rolled_back"].map((status) => ({
+        id: crypto.randomUUID(),
+        observedAt: new Date().toISOString(),
+        releaseId: "release-123",
+        oldVersion: "old",
+        newVersion: "new",
+        status,
+      }));
+      const extra = {
+        agentUpdate: {
+          installedVersion: "old",
+          desiredVersion: "new",
+          releaseId: "release-123",
+          status: "rolled_back",
+          observations,
+        },
+      };
+      const before = (await eventsOfType("machine.agent_update")).length;
+      expect((await report(token, extra)).status).toBe(200);
+      expect((await report(token, extra)).status).toBe(200);
+      const evidence = await eventsOfType("machine.agent_update");
+      expect(evidence.length).toBe(before + 4);
+      expect(evidence.at(-1)?.orgId).toBe(orgId);
+      expect(evidence.at(-1)?.machineId).toBe(machineId);
+      expect(evidence.at(-1)?.payload).toMatchObject({
+        oldVersion: "old",
+        newVersion: "new",
+        releaseId: "release-123",
+      });
+      const [machine] = await testDb.db
+        .select()
+        .from(schema.machines)
+        .where(eq(schema.machines.id, machineId));
+      expect(machine?.agentUpdate).toMatchObject({ desiredVersion: "new", status: "rolled_back" });
     });
 
     test("the scanner a machine reports is recorded once, as machine.scanner_installed", async () => {

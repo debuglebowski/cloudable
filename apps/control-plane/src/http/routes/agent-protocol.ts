@@ -53,7 +53,15 @@ const PendingPackageAction = Schema.Struct({
 });
 
 /** 200 body for `GET /poll` — a 304 (unchanged) has no body. See `docs/agents.md`. */
+const ReleaseArtifact = Schema.Struct({ sha256: Schema.String, downloadPath: Schema.String });
 const DesiredState = Schema.Struct({
+  agentRelease: Schema.optional(
+    Schema.Struct({
+      version: Schema.String,
+      releaseId: Schema.String,
+      artifacts: Schema.Struct({ "linux-x64": ReleaseArtifact, "linux-arm64": ReleaseArtifact }),
+    }),
+  ),
   version: Schema.String,
   // What this machine is ALLOWED to have, not an install list — the agent
   // acts on `pendingActions`, never on this.
@@ -111,7 +119,25 @@ const InstalledScanner = Schema.Struct({
   version: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
 });
 
+const UpdateObservation = Schema.Struct({
+  id: Schema.String.pipe(Schema.pattern(/^[a-f0-9-]{36}$/)),
+  observedAt: Schema.String.pipe(Schema.maxLength(64)),
+  releaseId: Schema.String.pipe(Schema.maxLength(128)),
+  oldVersion: Schema.String.pipe(Schema.maxLength(64)),
+  newVersion: Schema.String.pipe(Schema.maxLength(64)),
+  status: Schema.Literal("attempted", "succeeded", "failed", "rolled_back"),
+  detail: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+});
 const ReportPayload = Schema.Struct({
+  agentUpdate: Schema.optional(
+    Schema.Struct({
+      installedVersion: Schema.String.pipe(Schema.maxLength(64)),
+      desiredVersion: Schema.NullOr(Schema.String.pipe(Schema.maxLength(64))),
+      releaseId: Schema.NullOr(Schema.String.pipe(Schema.maxLength(128))),
+      status: Schema.String.pipe(Schema.maxLength(32)),
+      observations: Schema.Array(UpdateObservation).pipe(Schema.maxItems(16)),
+    }),
+  ),
   agentVersion: Schema.String,
   observedAt: Schema.String,
   installedPackages: Schema.Array(Schema.String),

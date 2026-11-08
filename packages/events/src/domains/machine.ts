@@ -11,6 +11,18 @@ import type { EventEnvelope } from "../envelope";
  */
 export type MachineEvent =
   | (EventEnvelope & {
+      type: "machine.agent_update";
+      payload: {
+        releaseId: string;
+        oldVersion: string;
+        newVersion: string;
+        status: "attempted" | "succeeded" | "failed" | "rolled_back";
+        installedVersion: string;
+        desiredVersion: string | null;
+        detail: string | null;
+      };
+    })
+  | (EventEnvelope & {
       type: "machine.created";
       payload: {
         name: string;

@@ -1,8 +1,12 @@
 import * as crypto from "node:crypto";
 import type { DomainEvent } from "@cloudable/events";
+import { events, machines } from "@cloudable/schema";
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
+import { eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { ulid } from "ulid";
 import { Db } from "../../db/layer";
+import { getAgentRelease } from "../../domain/agent-update/release";
 import { MachineService } from "../../domain/machine/MachineService";
 import { recordHardeningBaseline } from "../../domain/machine/hardening-baseline";
 import {
@@ -219,7 +223,8 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
 
         // The bundled scanner's version rides along, so a control plane that ships a different
         // scanner gives every machine one fresh answer carrying the new release.
-        const etag = `"${desired.version}${scannerEtagSuffix()}"`;
+        const agentRelease = getAgentRelease();
+        const etag = `"${desired.version}${scannerEtagSuffix()}${agentRelease ? `+agent-${agentRelease.releaseId}` : ""}"`;
 
         // A 304 must not swallow work. Collecting below is a write, so the
         // early return is only safe because a new action always bumps
@@ -238,6 +243,7 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
         return HttpServerResponse.unsafeJson(
           {
             version: desired.version,
+            ...(agentRelease ? { agentRelease } : {}),
             packages: desired.allowedPackages,
             settings,
             pendingActions: collected.map((row) => ({
@@ -292,6 +298,54 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
 
         const db = yield* Db;
         const machineService = yield* MachineService;
+
+        // Durable, idempotent evidence: retries after a lost report response cannot duplicate it.
+        // Tier 1 is mandatory. Scope the observation identity to the authenticated machine.
+        for (const observation of payload.agentUpdate?.observations ?? []) {
+          const event = makeEvent("machine.agent_update", identityFields, {
+            releaseId: observation.releaseId,
+            oldVersion: observation.oldVersion,
+            newVersion: observation.newVersion,
+            status: observation.status,
+            installedVersion: payload.agentVersion,
+            desiredVersion: payload.agentUpdate?.desiredVersion ?? null,
+            detail: observation.detail ?? null,
+          });
+          const occurredAt = new Date(observation.observedAt);
+          const hash = crypto
+            .createHash("sha256")
+            .update(`${identity.orgId}:${machine.id}:${observation.id}`)
+            .digest();
+          let offset = 0;
+          const eventTime = Number.isNaN(occurredAt.getTime())
+            ? now.getTime()
+            : occurredAt.getTime();
+          yield* Effect.tryPromise(() =>
+            db
+              .insert(events)
+              .values({
+                ...event,
+                id: ulid(eventTime, () => (hash[offset++ % hash.length] ?? 0) / 256),
+                occurredAt: Number.isNaN(occurredAt.getTime()) ? now : occurredAt,
+                recordedAt: now,
+              })
+              .onConflictDoNothing(),
+          ).pipe(Effect.orDie);
+        }
+
+        yield* Effect.tryPromise(() =>
+          db
+            .update(machines)
+            .set({
+              agentUpdate: {
+                installedVersion: payload.agentVersion,
+                desiredVersion: payload.agentUpdate?.desiredVersion ?? null,
+                releaseId: payload.agentUpdate?.releaseId ?? null,
+                status: payload.agentUpdate?.status ?? "bootstrap_required",
+              },
+            })
+            .where(eq(machines.id, machine.id)),
+        ).pipe(Effect.orDie);
 
         yield* recordHardeningBaseline(db, machine.id, payload.hardeningBaseline);
 

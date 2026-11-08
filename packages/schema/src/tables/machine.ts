@@ -57,6 +57,13 @@ export const machines = pgTable("machines", {
   // and null (no report yet) is exactly the "never reported" case
   // `deriveEvents` treats as `previous: undefined`.
   lastReportedState: jsonb("last_reported_state"),
+  /** Last updater observation; stale/offline is determined by lastVerifiedAt. */
+  agentUpdate: jsonb("agent_update").$type<{
+    installedVersion: string;
+    desiredVersion: string | null;
+    releaseId: string | null;
+    status: string;
+  }>(),
   /**
    * The machine's own measurement of its filesystems, from its last report:
    * `{ persistent: {usedBytes,totalBytes}, root: {usedBytes,totalBytes}, at: ISO }`.

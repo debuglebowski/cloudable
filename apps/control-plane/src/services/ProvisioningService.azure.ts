@@ -416,8 +416,13 @@ ${hardeningSection()}
 
 mkdir -p /opt/cloudable
 ARCH=$(uname -m)
-[ "$ARCH" = "aarch64" ] && ARCH=arm64 || ARCH=x64
-curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-agent-linux-$ARCH" -o /opt/cloudable/agent
+case "$ARCH" in aarch64) ARCH=arm64;; x86_64) ARCH=x64;; *) exit 1;; esac
+curl -fsS "${config.controlPlaneBaseUrl}/_internal/binaries/agent-manifest.json" -o /opt/cloudable/agent-manifest.json
+AGENT_SHA=$(python3 -c 'import json,sys; m=json.load(open("/opt/cloudable/agent-manifest.json")); print(m["artifacts"]["linux-"+sys.argv[1]]["sha256"])' "$ARCH")
+curl -fsS "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-agent-linux-$ARCH" -o /opt/cloudable/agent.download
+printf '%s  %s\\n' "$AGENT_SHA" /opt/cloudable/agent.download | sha256sum --check --status
+chmod 755 /opt/cloudable/agent.download
+mv /opt/cloudable/agent.download /opt/cloudable/agent
 curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-tunnel-daemon-linux-$ARCH" -o /opt/cloudable/tunnel-daemon
 chmod +x /opt/cloudable/agent /opt/cloudable/tunnel-daemon
 

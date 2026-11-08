@@ -1,5 +1,7 @@
+import type { AgentRelease, PendingPackageAction } from "@cloudable/contracts";
 import type { PackageActionResult } from "@cloudable/contracts";
 import { listRunningAccessMethods } from "./access-methods";
+import { AgentUpdater, UPDATE_EXIT } from "./agent-update";
 import { applyPackageActions, declaredPackageVersions } from "./apply-packages";
 import { AttestationRejectedError, attest, clearCachedSession } from "./attestation";
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
@@ -117,7 +119,9 @@ async function reportObservedState(
   if (!res.ok) {
     throw new ApiError(res.status, await res.json().catch(() => undefined));
   }
-  return res.json() as Promise<AgentReportResponse>;
+  const response = (await res.json()) as AgentReportResponse;
+  if (response.acknowledged !== true) throw new Error("report was not acknowledged");
+  return response;
 }
 
 /**
@@ -135,6 +139,7 @@ export async function runAgentLoop(
     signal?: AbortSignal;
     /** Replaced by tests. The real one downloads from the control plane and runs the scanner. */
     scanManager?: ScanManager;
+    updater?: AgentUpdater;
   } = {},
 ): Promise<never> {
   // Vulnerability scanning. It remembers the org's scan settings from the last poll that sent
@@ -142,11 +147,16 @@ export async function runAgentLoop(
   // background so a scan never holds up this loop. See `vulnerability-scan/scan-manager.ts`.
   const scanManager =
     options.scanManager ?? createScanManager({ download: httpDownloader(config.controlPlaneUrl) });
+  const updater =
+    options.updater ??
+    (process.argv.includes("--agent-worker") ? new AgentUpdater(process.execPath) : undefined);
+  let agentRelease: AgentRelease | undefined;
   let attempt = 0;
   let lastEtag: string | null = null;
   // Held across iterations because a 304 carries no body: the allowed list is
   // only resent when it changes, and the report needs it every time.
   let allowedPackages: readonly string[] = [];
+  let pendingActions: PendingPackageAction[] = [];
   const waker = makeWaker(options.signal);
 
   // Optional fast path: wakes this loop's sleep the instant the control plane has
@@ -181,23 +191,24 @@ export async function runAgentLoop(
         let actionResults: PackageActionResult[] = [];
         if (poll.changed) {
           lastEtag = poll.etag;
+          agentRelease = poll.desiredState?.agentRelease;
           console.log(
             `poll: desired state changed (version=${poll.desiredState?.version ?? "unknown"})`,
           );
 
-          // The only thing this agent ever does TO the machine, and only ever
-          // what a person asked for through the control plane. Nothing here
-          // installs the allowed list or removes what is not on it — the
-          // allowed list is a permission, not an instruction.
-          const pendingActions = poll.desiredState?.pendingActions ?? [];
-          if (pendingActions.length > 0) {
-            console.log(`poll: applying ${pendingActions.length} package action(s)`);
-            actionResults = await applyPackageActions(pendingActions);
-          }
+          pendingActions.push(...(poll.desiredState?.pendingActions ?? []));
           allowedPackages = poll.desiredState?.packages ?? allowedPackages;
           // Only a 200 carries settings, and a 200 always carries all of them: a missing
           // vulnerabilityScan key means scanning is off, not "unchanged".
           scanManager.setSettings(poll.desiredState?.settings);
+        }
+
+        // A candidate must confirm its check-in before starting a potentially long package
+        // operation. Otherwise the startup watchdog could interrupt dpkg mid-install.
+        if (pendingActions.length > 0 && updater?.read()?.phase !== "starting") {
+          console.log(`poll: applying ${pendingActions.length} package action(s)`);
+          actionResults = await applyPackageActions(pendingActions);
+          pendingActions = [];
         }
 
         // Starts a scan or a scanner install in the background if one is due. Returns at once.
@@ -222,7 +233,9 @@ export async function runAgentLoop(
         const hardeningBaseline = readHardeningBaseline();
         const installedScanner = scanManager.installedScanner();
         const vulnerabilityScan = scanManager.pendingReport();
+        const agentUpdate = updater?.report(AGENT_VERSION);
         await reportObservedState(session.bearerToken, {
+          ...(agentUpdate ? { agentUpdate } : {}),
           agentVersion: AGENT_VERSION,
           observedAt: new Date().toISOString(),
           installedPackages,
@@ -249,6 +262,18 @@ export async function runAgentLoop(
         });
         // Reached only when the report went through. A failed report throws above.
         if (vulnerabilityScan) scanManager.acknowledge(vulnerabilityScan.scanId);
+
+        updater?.acknowledge(agentUpdate?.observations.map((o) => o.id) ?? [], AGENT_VERSION);
+        if (
+          updater &&
+          (await updater.prepare(
+            agentRelease,
+            AGENT_VERSION,
+            session.machineId,
+            httpDownloader(config.controlPlaneUrl),
+          ))
+        )
+          process.exit(UPDATE_EXIT);
 
         attempt = 0;
         await waker.wait(POLL_INTERVAL_MS);

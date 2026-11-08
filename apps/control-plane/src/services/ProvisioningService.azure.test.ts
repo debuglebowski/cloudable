@@ -170,11 +170,20 @@ describe("cloudInitFor", () => {
   test("both binaries are downloaded from this control plane's own public base URL", () => {
     const script = decode();
     expect(script).toContain(
-      `curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-agent-linux-$ARCH"`,
+      `curl -fsS "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-agent-linux-$ARCH"`,
     );
     expect(script).toContain(
       `curl -fsSL "${config.controlPlaneBaseUrl}/_internal/binaries/cloudable-tunnel-daemon-linux-$ARCH"`,
     );
+  });
+
+  test("agent checksum is verified before the staged file replaces the installed binary", () => {
+    const script = decode();
+    expect(script).toContain("/_internal/binaries/agent-manifest.json");
+    expect(script.indexOf("sha256sum --check --status")).toBeLessThan(
+      script.indexOf("mv /opt/cloudable/agent.download /opt/cloudable/agent"),
+    );
+    expect(script).toContain("-o /opt/cloudable/agent.download");
   });
 
   // ---------------------------------------------------------------------------
