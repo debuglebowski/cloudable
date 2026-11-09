@@ -681,3 +681,23 @@ tagged domain errors (`SshCaError`, `TunnelError`) each service raises.
   `Db`/`EventBus`/`Signer` present in the final merged context alongside the services themselves,
   which is what a method invoked later, elsewhere in the same program, needs to see. See the
   comment in `apps/control-plane/src/layers.ts` and the two service test files.
+
+## Permission-grant log export
+
+After `EventBus.publish` successfully appends an event, the control plane writes one
+JSON line to stdout for an admin/owner role change, an approver grant, or creation
+or reactivation of a privileged person through the people API. These tier-1 events
+are always retained regardless of the configured logging tier.
+
+Records have `source: "cloudable"`, `type: "security"`, `schemaVersion: 1`,
+`outcome: "success"`, the event name and persisted event ID, organization ID, actor
+ID/type, target person ID, timestamps, and the relevant previous/current privilege
+fields under `detail`. Existing event names stay unchanged; person payload fields
+are additive and optional for compatibility with old records. The stdout export
+uses an explicit allowlist: no email, credentials, or complete event payload.
+
+Deployments can route these records to their log collector and alert per `eventId`.
+Duplicate delivery can be deduplicated by that ID. Forwarding is best effort: a crash
+between the database append and stdout write can lose the forwarded copy. The
+append-only database event log remains authoritative. This is not an outbox or a
+retroactive export, and direct transactional event inserts do not use this exporter.

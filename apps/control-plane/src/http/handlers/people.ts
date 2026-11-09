@@ -91,7 +91,13 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
         yield* requireAdminUser(currentUser, "Only an admin can add a person.");
         const row = yield* createPerson({ ...payload, orgId: currentUser.orgId });
         yield* publish([
-          personEvent(currentUser, ulid(), "person.added", { email: row.email, source: "manual" }),
+          personEvent(currentUser, ulid(), "person.added", {
+            email: row.email,
+            source: "manual",
+            personId: row.id,
+            role: row.role,
+            approver: row.approver,
+          }),
         ]);
         return row;
       }).pipe(
@@ -133,6 +139,7 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
         if (before && before.role !== row.role) {
           events.push(
             personEvent(currentUser, correlationId, "person.role_changed", {
+              personId: row.id,
               previous: before.role,
               current: row.role,
             }),
@@ -141,6 +148,7 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
         if (before && before.approver !== row.approver) {
           events.push(
             personEvent(currentUser, correlationId, "person.approver_changed", {
+              personId: row.id,
               previous: before.approver,
               current: row.approver,
             }),
@@ -174,7 +182,11 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
         if (before && before.active !== row.active) {
           yield* publish([
             row.active
-              ? personEvent(currentUser, ulid(), "person.activated", {})
+              ? personEvent(currentUser, ulid(), "person.activated", {
+                  personId: row.id,
+                  role: row.role,
+                  approver: row.approver,
+                })
               : personEvent(currentUser, ulid(), "person.deactivated", { source: row.source }),
           ]);
         }

@@ -3,6 +3,7 @@ import { events } from "@cloudable/schema";
 import { Data, Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../db/layer";
+import { toSecurityAuditRecord } from "../logging/security-audit";
 import { filterByLoggingTier } from "../logging/tier-filter";
 
 export class EventBusError extends Data.TaggedError("EventBusError")<{
@@ -58,10 +59,18 @@ export class EventBus extends Effect.Service<EventBus>()("EventBus", {
         );
         if (allowed.length === 0) return;
 
+        const rows = toEventRows(allowed);
         yield* Effect.tryPromise({
-          try: () => db.insert(events).values(toEventRows(allowed)),
+          try: () => db.insert(events).values(rows),
           catch: (cause) => new EventBusError({ reason: "insert_failed", cause }),
         });
+
+        // Export only after the insert succeeds, using the persisted event IDs.
+        // JSON lines bypass the operational logger's formatting and log-level filter.
+        for (const row of rows) {
+          const record = toSecurityAuditRecord(row);
+          if (record) console.info(JSON.stringify(record));
+        }
       });
 
     return { publish } as const;
