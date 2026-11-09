@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { machinePackages, machines, orgs } from "@cloudable/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { startTestDb } from "../../../test/testcontainers";
 import { Db } from "../../db/layer";
@@ -127,6 +127,33 @@ describe("noUndeclaredSoftwareCheck", () => {
     const findings = await evaluate();
     expect(findings.find((f) => f.machineId === machine.id)?.detail).toEqual({
       undeclaredPackages: ["gh"],
+    });
+  });
+
+  test("a part is allowed with its parent and flagged again once the parent goes", async () => {
+    const machine = await makeMachine();
+    await setInventory(machine.id, [...BASELINE, "npm:playwright", "xvfb"]);
+    await allowPackage(machine.id, "npm:playwright");
+    await db.insert(machinePackages).values({
+      scopeType: "machine",
+      scopeId: machine.id,
+      packageName: "xvfb",
+      partOf: "npm:playwright",
+      source: "machine",
+    });
+
+    expect((await evaluate()).find((f) => f.machineId === machine.id)).toBeUndefined();
+
+    await db
+      .delete(machinePackages)
+      .where(
+        and(
+          eq(machinePackages.scopeId, machine.id),
+          eq(machinePackages.packageName, "npm:playwright"),
+        ),
+      );
+    expect((await evaluate()).find((f) => f.machineId === machine.id)?.detail).toEqual({
+      undeclaredPackages: ["npm:playwright", "xvfb"],
     });
   });
 

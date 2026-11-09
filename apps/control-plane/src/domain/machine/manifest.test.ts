@@ -44,6 +44,7 @@ describe("resolveManifest", () => {
         excluded: false,
         source: "machine",
         resolvedFromScopeId: "machine-1",
+        partOf: null,
       },
     ]);
   });
@@ -90,6 +91,7 @@ describe("resolveManifest", () => {
         excluded: false,
         source: "org",
         resolvedFromScopeId: "org-1",
+        partOf: null,
       },
       {
         packageName: "nodejs",
@@ -98,6 +100,7 @@ describe("resolveManifest", () => {
         excluded: false,
         source: "machine",
         resolvedFromScopeId: "machine-1",
+        partOf: null,
       },
     ]);
   });

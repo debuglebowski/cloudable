@@ -70,6 +70,9 @@ function PackageRow({ entry }: { entry: OrgPackageEntry }) {
         <span className="text-sm font-medium">{entry.packageName}</span>
         <span className="font-mono text-sm text-muted-foreground">{entry.versionPin ?? "any"}</span>
         {entry.pinned && <Badge variant="outline">pinned</Badge>}
+        {entry.partOf && (
+          <span className="text-xs text-muted-foreground">part of {entry.partOf}</span>
+        )}
       </div>
       <Button
         variant="ghost"
@@ -88,10 +91,12 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
   const nameId = useId();
   const versionId = useId();
   const pinnedId = useId();
+  const partOfId = useId();
 
   const [packageName, setPackageName] = useState("");
   const [versionPin, setVersionPin] = useState("");
   const [pinned, setPinned] = useState(false);
+  const [partOf, setPartOf] = useState("");
 
   const trimmedName = packageName.trim();
   const isDuplicate = existing.some((entry) => entry.packageName === trimmedName);
@@ -104,12 +109,14 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
         packageName: trimmedName,
         versionPin: versionPin.trim() === "" ? null : versionPin.trim(),
         pinned,
+        ...(partOf.trim() === "" ? {} : { partOf: partOf.trim() }),
       },
       {
         onSuccess: () => {
           setPackageName("");
           setVersionPin("");
           setPinned(false);
+          setPartOf("");
         },
       },
     );
@@ -130,8 +137,8 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
             onKeyDown={(event) => {
               if (event.key === "Enter") submit();
             }}
-            placeholder="docker"
-            className="w-40"
+            placeholder="docker or npm:playwright"
+            className="w-52"
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -147,6 +154,21 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
             }}
             placeholder="any"
             className="w-32"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={partOfId} className="text-xs text-muted-foreground">
+            Part of
+          </label>
+          <Input
+            id={partOfId}
+            value={partOf}
+            onChange={(event) => setPartOf(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") submit();
+            }}
+            placeholder="none"
+            className="w-44"
           />
         </div>
         <div className="flex items-center gap-1.5 pb-1.5">

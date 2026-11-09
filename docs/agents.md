@@ -146,6 +146,10 @@ intentionally simple:
   keeps a result until a report is acknowledged and sends it again if it was not, and `scanId`
   makes the repeat harmless. If the control plane cannot store it, the report fails so the agent
   sends it again. See `docs/vulnerability-scanning.md`.
+- `installedPackages` holds apt packages by bare name, plus global npm, pipx and cargo tools as
+  `npm:<name>`, `pipx:<name>`, `cargo:<name>`. The agent asks those managers as the machine's own
+  user (`runuser`, through that user's shell setup, bounded by `timeout`), at most every five
+  minutes. `manuallyInstalledPackages` is `apt-mark showmanual`. See `docs/inheritance.md`.
 - Otherwise, an **in-memory**, per-process diff of `installedPackages` /
   `openPorts` / `configState.runningAccessMethods` against the previous
   report → `machine.state_reported` if anything changed, nothing if it

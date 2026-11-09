@@ -41,6 +41,7 @@ interface OrgPackageEntry {
   packageName: string;
   versionPin: string | null;
   pinned: boolean;
+  partOf?: string | null;
 }
 
 /** "1 machine overrides it", not "1 machines override it". */
@@ -211,20 +212,24 @@ export async function runOrgPackagesListCommand(argv: ReadonlyArray<string>): Pr
     return;
   }
   printTable(
-    ["package", "version", "pinned"],
+    ["package", "version", "pinned", "part of"],
     res.items.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
       entry.pinned ? "yes" : "no",
+      dash(entry.partOf ?? null),
     ]),
   );
 }
 
 export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "org packages set [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>]",
+    "org packages set [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--part-of <parent>] [--standalone <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>.",
   );
-  const args = parseArgs(argv, readSpec({ repeatable: ["add", "pin", "remove"] }));
+  const args = parseArgs(
+    argv,
+    readSpec({ values: ["part-of"], repeatable: ["add", "pin", "remove", "standalone"] }),
+  );
   const { upserts, removals } = packageEdits(args);
   if (upserts.length === 0 && removals.length === 0) {
     throw new UsageError(`nothing to change\n\n${usage}`);
@@ -243,11 +248,12 @@ export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Pro
   }
   console.log("Org manifest updated. Every machine inherits it on its next reconcile.");
   printTable(
-    ["package", "version", "pinned"],
+    ["package", "version", "pinned", "part of"],
     res.items.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
       entry.pinned ? "yes" : "no",
+      dash(entry.partOf ?? null),
     ]),
   );
 }

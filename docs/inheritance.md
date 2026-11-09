@@ -203,6 +203,34 @@ apt, so it is still judged on its own. Two limits: a dependency left behind afte
 removed is not flagged, and an agent that cannot tell (no apt, or an older agent) reports nothing, so
 every installed package counts, as before.
 
+### Other package managers, and the home folder
+
+A manifest entry is an apt name, or `<manager>:<name>` for anything else (`PACKAGE_MANAGERS` in
+`packages/contracts/src/domains/agent-protocol.ts`). apt names cannot contain a colon, so existing
+names keep their meaning.
+
+| Prefix | What | Reported by the agent |
+| :--- | :--- | :--- |
+| none | apt package | yes, `dpkg-query` |
+| `npm:` | global npm tool (`npm:@openai/codex`) | yes, `npm ls -g` as the machine's user |
+| `pipx:` | pipx tool | yes, `pipx list` as the machine's user |
+| `cargo:` | `cargo install`ed crate | yes, `cargo install --list` as the machine's user |
+| `home:` | software in the home folder no manager knows about (Playwright's Chromium) | no, declaration only |
+
+Only global tools. Project dependencies (`node_modules`, virtualenvs) are not reported, and nothing
+scans folders, so a `home:` entry is a record of what is allowed, never a detection. Only apt
+packages can be installed through Cloudable: a package action rejects any name with a colon.
+
+### Parts
+
+An entry can name another declared entry as its parent (`partOf`). A part is allowed only while its
+parent is: not excluded, present in the resolved manifest, and itself allowed if it is a part. Remove
+or exclude the parent and every part reads as undeclared again. A cycle of parts allows nothing. The
+parent can be from another manager and another scope: `xvfb` and `home:playwright-chromium` are
+parts of `npm:playwright`. This is for links apt cannot see. Plain apt dependencies need no part
+entry, as above. `allowedPackageNames` in `domain/machine/manifest.ts` is the one rule, used by the
+check, the packages table and the allowed list the agent polls.
+
 One definition, two consumers, deliberately: the table a person looks at and the finding an auditor
 reads are computed by the same function, so they cannot disagree. Neither has any license to act —
 removing a package is always an explicit per-package action someone asked for.
@@ -212,7 +240,7 @@ removing a package is always an explicit per-package action someone asked for.
 `MachineService` emits `machine.created` on creation and one `machine.setting_changed` event per
 edited package name on a successful `updatePackages` call (all sharing one `correlationId` per
 request) — see `apps/control-plane/src/domain/machine/events.ts`. Each `machine.setting_changed`
-payload's `previous`/`current` are the resolved value (`{ versionPin, pinned, excluded }` or `null`
+payload's `previous`/`current` are the resolved value (`{ versionPin, pinned, excluded, partOf }` or `null`
 if the package isn't in the manifest on that side) computed via `resolveManifest()` *before* and
 *after* the write, and `overridesLevel` is the `source` of the *previous* resolved value (or
 `"none"` if the package had no prior resolved value at all) — i.e. which level's effective value

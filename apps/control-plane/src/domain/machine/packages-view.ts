@@ -4,7 +4,7 @@ import type {
   PackagePermission,
   PendingPackageActionView,
 } from "@cloudable/contracts";
-import type { ResolvedManifestEntry } from "./manifest";
+import { type ResolvedManifestEntry, allowedPackageNames } from "./manifest";
 
 /**
  * Builds a machine's packages table: one row per package across the union of
@@ -42,15 +42,27 @@ export interface PackagesViewInput {
   pendingActions?: ReadonlyMap<string, PendingPackageActionView> | undefined;
 }
 
-const permissionOf = (entry: ResolvedManifestEntry | undefined): PackagePermission => {
+/**
+ * A part whose parent is not allowed has no permission of its own: it reads
+ * exactly like a package nobody declared, which is what it now is.
+ */
+const permissionOf = (
+  entry: ResolvedManifestEntry | undefined,
+  allowed: ReadonlySet<string>,
+): PackagePermission => {
   if (!entry) return null;
-  return entry.excluded ? "disallowed" : "allowed";
+  if (entry.excluded) return "disallowed";
+  return allowed.has(entry.packageName) ? "allowed" : null;
 };
+
+/** apt is the only manager that records whether a package was installed as a dependency. */
+const isAptName = (packageName: string): boolean => !packageName.includes(":");
 
 export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[] {
   const { manifest, installedPackages, baselinePackages, declaredPackageVersions } = input;
 
   const declaredByName = new Map(manifest.map((entry) => [entry.packageName, entry]));
+  const allowed = allowedPackageNames(manifest);
   const installedSet = installedPackages === null ? null : new Set(installedPackages);
   const baselineSet = new Set(baselinePackages ?? []);
   const manualSet =
@@ -89,15 +101,19 @@ export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[]
 
     rows.push({
       packageName,
-      permission: permissionOf(entry),
+      permission: permissionOf(entry, allowed),
       versionPin: entry?.versionPin ?? null,
       source: entry?.source ?? null,
       installed,
       ...(installedVersion !== undefined ? { installedVersion } : {}),
       versionMismatch,
       isBaseline: baselineSet.has(packageName),
+      partOf: entry?.partOf ?? null,
       installedAsDependency:
-        manualSet !== null && installed === "installed" && !manualSet.has(packageName),
+        manualSet !== null &&
+        installed === "installed" &&
+        isAptName(packageName) &&
+        !manualSet.has(packageName),
       ...(pendingAction ? { pendingAction } : {}),
     });
   }

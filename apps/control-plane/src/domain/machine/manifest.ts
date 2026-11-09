@@ -18,6 +18,8 @@ export interface MachinePackageRow {
   pinned: boolean;
   /** Machine scope only — see the column comment in `machine-package.ts`. */
   excluded: boolean;
+  /** See the column comment in `machine-package.ts`. Absent reads as null. */
+  partOf?: string | null;
   source: ManifestScope;
 }
 
@@ -25,6 +27,7 @@ export interface PackageManifestValue {
   versionPin: string | null;
   pinned: boolean;
   excluded: boolean;
+  partOf: string | null;
 }
 
 export interface ResolvedManifestEntry {
@@ -38,6 +41,8 @@ export interface ResolvedManifestEntry {
    * effective install set go through `declaredPackages`.
    */
   excluded: boolean;
+  /** The parent declaration, null for an ordinary entry. */
+  partOf: string | null;
   /** Which scope level's row won resolution — feeds `LineageGutter`/`SettingRow` (docs/frontend.md). */
   source: ManifestScope;
   resolvedFromScopeId: string;
@@ -62,7 +67,12 @@ export function resolveManifest(
     scopeType: row.scopeType,
     scopeId: row.scopeId,
     key: row.packageName,
-    value: { versionPin: row.versionPin, pinned: row.pinned, excluded: row.excluded },
+    value: {
+      versionPin: row.versionPin,
+      pinned: row.pinned,
+      excluded: row.excluded,
+      partOf: row.partOf ?? null,
+    },
     source: row.source,
   }));
 
@@ -75,6 +85,7 @@ export function resolveManifest(
       versionPin: winner.value.versionPin,
       pinned: winner.value.pinned,
       excluded: winner.value.excluded,
+      partOf: winner.value.partOf,
       source: winner.source,
       resolvedFromScopeId: winner.resolvedFromScopeId,
     });
@@ -95,7 +106,35 @@ export function resolveManifest(
 export function declaredPackages(
   manifest: ReadonlyArray<ResolvedManifestEntry>,
 ): ResolvedManifestEntry[] {
-  return manifest.filter((entry) => !entry.excluded);
+  const allowed = allowedPackageNames(manifest);
+  return manifest.filter((entry) => allowed.has(entry.packageName));
+}
+
+/**
+ * The names the manifest actually allows: not excluded, and, for a part,
+ * only while its parent is allowed. A part whose parent is missing, excluded
+ * or itself orphaned is not allowed. A cycle of parts allows nothing.
+ */
+export function allowedPackageNames(
+  manifest: ReadonlyArray<Pick<ResolvedManifestEntry, "packageName" | "excluded" | "partOf">>,
+): Set<string> {
+  const byName = new Map(manifest.map((entry) => [entry.packageName, entry]));
+  const memo = new Map<string, boolean>();
+  const isAllowed = (name: string, seen: Set<string>): boolean => {
+    const cached = memo.get(name);
+    if (cached !== undefined) return cached;
+    const entry = byName.get(name);
+    let result: boolean;
+    if (!entry || entry.excluded || seen.has(name)) result = false;
+    else if (!entry.partOf) result = true;
+    else result = isAllowed(entry.partOf, new Set([...seen, name]));
+    memo.set(name, result);
+    return result;
+  };
+  const allowed = new Set<string>();
+  for (const entry of manifest)
+    if (isAllowed(entry.packageName, new Set())) allowed.add(entry.packageName);
+  return allowed;
 }
 
 /**

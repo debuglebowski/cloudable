@@ -10,6 +10,7 @@ const entry = (overrides: Partial<ResolvedManifestEntry> = {}): ResolvedManifest
   excluded: false,
   source: "org",
   resolvedFromScopeId: "org-1",
+  partOf: null,
   ...overrides,
 });
 
@@ -262,5 +263,57 @@ describe("baseline capture", () => {
     });
     expect(undeclaredFromView(rows).sort()).toEqual(["gcc", "gh"]);
     expect(rowFor(rows, "gcc").installedAsDependency).toBe(false);
+  });
+
+  test("a part is allowed while its parent is, across package managers", () => {
+    const manifest = [
+      entry({ packageName: "npm:playwright", partOf: null }),
+      entry({ packageName: "xvfb", partOf: "npm:playwright" }),
+      entry({ packageName: "home:playwright-chromium", partOf: "npm:playwright" }),
+    ];
+    const rows = buildPackagesView({
+      manifest,
+      installedPackages: ["npm:playwright", "xvfb", "npm:other"],
+      baselinePackages: [],
+      manuallyInstalledPackages: ["xvfb"],
+    });
+    expect(rowFor(rows, "xvfb")).toMatchObject({ permission: "allowed", partOf: "npm:playwright" });
+    // Global tools are never "dependencies": apt's marks do not cover them.
+    expect(rowFor(rows, "npm:other").installedAsDependency).toBe(false);
+    expect(undeclaredFromView(rows)).toEqual(["npm:other"]);
+  });
+
+  test("remove the parent and its parts read as undeclared again", () => {
+    const rows = buildPackagesView({
+      manifest: [entry({ packageName: "xvfb", partOf: "npm:playwright" })],
+      installedPackages: ["xvfb"],
+      baselinePackages: [],
+    });
+    expect(rowFor(rows, "xvfb").permission).toBeNull();
+    expect(undeclaredFromView(rows)).toEqual(["xvfb"]);
+  });
+
+  test("a cycle of parts allows nothing", () => {
+    const rows = buildPackagesView({
+      manifest: [
+        entry({ packageName: "a", partOf: "b" }),
+        entry({ packageName: "b", partOf: "a" }),
+      ],
+      installedPackages: ["a", "b"],
+      baselinePackages: [],
+    });
+    expect(undeclaredFromView(rows).sort()).toEqual(["a", "b"]);
+  });
+
+  test("an excluded parent takes its parts with it", () => {
+    const rows = buildPackagesView({
+      manifest: [
+        entry({ packageName: "npm:playwright", excluded: true }),
+        entry({ packageName: "xvfb", partOf: "npm:playwright" }),
+      ],
+      installedPackages: ["xvfb"],
+      baselinePackages: [],
+    });
+    expect(undeclaredFromView(rows)).toEqual(["xvfb"]);
   });
 });

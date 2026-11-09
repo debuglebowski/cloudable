@@ -83,12 +83,15 @@ export interface OrgPackageEntry {
   packageName: string;
   versionPin: string | null;
   pinned: boolean;
+  /** The declared parent this package is part of, or null. */
+  partOf?: string | null;
 }
 
 export interface OrgPackageEdit {
   packageName: string;
   versionPin?: string | null;
   pinned?: boolean;
+  partOf?: string | null;
 }
 
 interface OrgPackagesResponse {

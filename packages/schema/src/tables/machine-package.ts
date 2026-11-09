@@ -44,6 +44,11 @@ export const machinePackages = pgTable(
     // `domain/machine/manifest.ts`), so a package that is excluded and
     // installed anyway reads as undeclared software and surfaces as drift.
     excluded: boolean("excluded").notNull().default(false),
+    // The declared package this entry is part of (`npm:playwright` for its
+    // Chromium and the apt libraries it needs). A part is allowed only while
+    // its parent is. Null for an ordinary entry. A name, not a foreign key:
+    // the parent can be declared at another scope.
+    partOf: text("part_of"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

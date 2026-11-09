@@ -116,6 +116,8 @@ export interface PackageManifestEdit {
   pinned?: boolean | undefined;
   /** `true` declares "this package must not be on this machine", overriding the org. */
   excluded?: boolean | undefined;
+  /** The declared parent this package is part of; null clears it, omitted keeps it. */
+  partOf?: string | null | undefined;
 }
 
 export interface UpdateMachinePackagesInput {
@@ -159,6 +161,7 @@ const toManifestRow = (row: MachinePackageTableRow): MachinePackageRow => ({
   versionPin: row.versionPin,
   pinned: row.pinned,
   excluded: row.excluded,
+  partOf: row.partOf,
   source: row.source,
 });
 
@@ -737,8 +740,10 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             upsert.excluded === false &&
             upsert.versionPin === undefined &&
             upsert.pinned === undefined &&
+            upsert.partOf === undefined &&
             previous.versionPin === null &&
-            previous.pinned === false
+            previous.pinned === false &&
+            (previous.partOf ?? null) === null
           );
         };
 
@@ -758,6 +763,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
               pinned: upsert.pinned !== undefined ? upsert.pinned : (previous?.pinned ?? false),
               excluded:
                 upsert.excluded !== undefined ? upsert.excluded : (previous?.excluded ?? false),
+              partOf: upsert.partOf !== undefined ? upsert.partOf : (previous?.partOf ?? null),
             };
           });
 
@@ -773,6 +779,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   versionPin: upsert.versionPin,
                   pinned: upsert.pinned,
                   excluded: upsert.excluded,
+                  partOf: upsert.partOf,
                   source: "machine",
                 })
                 .onConflictDoUpdate({
@@ -785,6 +792,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                     versionPin: upsert.versionPin,
                     pinned: upsert.pinned,
                     excluded: upsert.excluded,
+                    partOf: upsert.partOf,
                     source: "machine",
                     updatedAt: new Date(),
                   },
@@ -831,6 +839,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   versionPin: previous.versionPin,
                   pinned: previous.pinned,
                   excluded: previous.excluded,
+                  partOf: previous.partOf,
                 }
               : null,
             current: current
@@ -838,6 +847,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   versionPin: current.versionPin,
                   pinned: current.pinned,
                   excluded: current.excluded,
+                  partOf: current.partOf,
                 }
               : null,
             overridesLevel: previous?.source ?? "none",

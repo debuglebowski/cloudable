@@ -1,3 +1,4 @@
+import { isValidDeclaredPackageName } from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import { PackagePinConflictError } from "../../domain/machine/errors";
@@ -67,16 +68,30 @@ const UpdateOrgSettingsPayload = Schema.Struct({
 // Org-scope package manifest entries. Sibling of `PATCH /api/v1/machines/:id/packages`
 // (`http/routes/machines.ts`) but for the `org`-scoped rows of the same
 // `machine_packages` table — see `domain/organisation/packages.ts`.
+// An apt name, or `<manager>:<name>`. See `PACKAGE_MANAGERS` in the contracts package.
+const DeclaredPackageName = Schema.String.pipe(
+  Schema.filter(isValidDeclaredPackageName, {
+    message: () => "not a valid package name: use an apt name or <npm|pipx|cargo|home>:<name>",
+  }),
+);
+
 const PackageManifestEntry = Schema.Struct({
-  packageName: Schema.String.pipe(Schema.minLength(1)),
+  packageName: DeclaredPackageName,
   versionPin: Schema.optional(Schema.NullOr(Schema.String)),
   pinned: Schema.optional(Schema.Boolean),
-});
+  // The declared parent this package is part of. Null clears it.
+  partOf: Schema.optional(Schema.NullOr(DeclaredPackageName)),
+}).pipe(
+  Schema.filter((entry) => entry.partOf !== entry.packageName, {
+    message: () => "a package cannot be part of itself",
+  }),
+);
 
 const OrgPackageEntryResource = Schema.Struct({
   packageName: Schema.String,
   versionPin: Schema.NullOr(Schema.String),
   pinned: Schema.Boolean,
+  partOf: Schema.NullOr(Schema.String),
 });
 
 const ListOrgPackagesResponse = Schema.Struct({ items: Schema.Array(OrgPackageEntryResource) });

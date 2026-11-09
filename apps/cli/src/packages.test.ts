@@ -49,3 +49,38 @@ test("--exclude and --include are upserts, not removals", () => {
   ]);
   expect(removals).toEqual([]);
 });
+
+test("a prefixed npm name keeps its scope; a pin after it still splits", () => {
+  expect(parsePackageArg("npm:@openai/codex", false)).toEqual({
+    packageName: "npm:@openai/codex",
+    versionPin: null,
+    pinned: false,
+  });
+  expect(parsePackageArg("npm:@openai/codex@0.5.0", false).versionPin).toBe("0.5.0");
+});
+
+test("--part-of applies to every add and pin; --standalone clears a parent", () => {
+  const args = parseArgs(
+    [
+      "--add",
+      "xvfb",
+      "--add",
+      "home:playwright-chromium",
+      "--part-of",
+      "npm:playwright",
+      "--standalone",
+      "gh",
+    ],
+    { values: ["part-of"], repeatable: ["add", "pin", "remove", "standalone"] },
+  );
+  expect(packageEdits(args).upserts).toEqual([
+    { packageName: "xvfb", versionPin: null, pinned: false, partOf: "npm:playwright" },
+    {
+      packageName: "home:playwright-chromium",
+      versionPin: null,
+      pinned: false,
+      partOf: "npm:playwright",
+    },
+    { packageName: "gh", partOf: null },
+  ]);
+});

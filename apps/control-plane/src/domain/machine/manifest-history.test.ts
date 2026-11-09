@@ -99,9 +99,24 @@ describe("manifest history", () => {
     expect(page.items.map((entry) => entry.packageName)).toEqual(["ripgrep", "ripgrep", "ripgrep"]);
     expect(page.items.every((entry) => entry.scope === "machine")).toBe(true);
     // Newest first, so the exclusion leads.
-    expect(page.items[0]?.current).toEqual({ versionPin: "14", pinned: false, excluded: true });
-    expect(page.items[1]?.previous).toEqual({ versionPin: null, pinned: false, excluded: false });
-    expect(page.items[1]?.current).toEqual({ versionPin: "14", pinned: false, excluded: false });
+    expect(page.items[0]?.current).toEqual({
+      versionPin: "14",
+      pinned: false,
+      excluded: true,
+      partOf: null,
+    });
+    expect(page.items[1]?.previous).toEqual({
+      versionPin: null,
+      pinned: false,
+      excluded: false,
+      partOf: null,
+    });
+    expect(page.items[1]?.current).toEqual({
+      versionPin: "14",
+      pinned: false,
+      excluded: false,
+      partOf: null,
+    });
     // An add reads as "had nothing before".
     expect(page.items[2]?.previous).toBeNull();
   });

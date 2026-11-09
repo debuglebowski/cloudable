@@ -67,6 +67,51 @@ export const isValidPackageName = (value: string): boolean =>
   value.length <= 128 && PACKAGE_NAME_PATTERN.test(value);
 
 /**
+ * Where a declared or reported package lives. `apt` is the default and carries
+ * no prefix, so every existing name keeps its meaning. The others are written
+ * `<manager>:<name>` (`npm:@openai/codex`, `pipx:black`, `cargo:ripgrep`):
+ * apt names cannot contain a colon, so the two never collide.
+ *
+ * `npm`, `pipx` and `cargo` mean globally installed tools, which the agent
+ * reports. `home` is declaration only: software in the owner's home folder
+ * that no package manager knows about (Playwright's Chromium). Nothing scans
+ * for it, so it is a record of what is allowed, never a detection.
+ *
+ * Only `apt` packages can be installed through Cloudable. `isValidPackageName`
+ * rejects a colon, so a package action can never name another manager.
+ */
+export const PACKAGE_MANAGERS = ["apt", "npm", "pipx", "cargo", "home"] as const;
+export type PackageManagerName = (typeof PACKAGE_MANAGERS)[number];
+
+const PREFIXED_NAME_PATTERNS: Record<Exclude<PackageManagerName, "apt">, RegExp> = {
+  // npm allows a scope and lowercase names; uppercase is tolerated for old packages.
+  npm: /^(@[a-zA-Z0-9][a-zA-Z0-9._~-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._~-]*$/,
+  pipx: /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/,
+  cargo: /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/,
+  home: /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/,
+};
+
+/** Splits a declared name into its manager and bare name. Unknown prefixes return null. */
+export const parseDeclaredPackageName = (
+  value: string,
+): { manager: PackageManagerName; name: string } | null => {
+  const colon = value.indexOf(":");
+  if (colon < 0) return { manager: "apt", name: value };
+  const manager = value.slice(0, colon);
+  if (!(PACKAGE_MANAGERS as readonly string[]).includes(manager) || manager === "apt") return null;
+  return { manager: manager as PackageManagerName, name: value.slice(colon + 1) };
+};
+
+/** The grammar a manifest entry's name must follow: an apt name, or `<manager>:<name>`. */
+export const isValidDeclaredPackageName = (value: string): boolean => {
+  if (value.length > 160) return false;
+  const parsed = parseDeclaredPackageName(value);
+  if (!parsed) return false;
+  if (parsed.manager === "apt") return isValidPackageName(parsed.name);
+  return parsed.name.length > 0 && PREFIXED_NAME_PATTERNS[parsed.manager].test(parsed.name);
+};
+
+/**
  * `GET /api/v1/agent/poll` response body (200 only — a 304 has none).
  * Additive fields only, never a breaking reshape.
  *

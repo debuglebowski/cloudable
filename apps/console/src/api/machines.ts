@@ -60,6 +60,8 @@ export interface ManifestEntry {
    * Different from the package simply not being listed, which means "inherit".
    */
   excluded: boolean;
+  /** The declared parent this package is part of, or null. */
+  partOf: string | null;
   /** Count of machines that override this entry below the level shown here. No real endpoint
    * aggregates this yet (see `getMachineManifest` below) — always undefined against real data. */
   overriddenBelow?: number;
@@ -97,6 +99,7 @@ export interface MachinePackageRow {
   installedVersion?: string;
   versionMismatch: boolean;
   isBaseline: boolean;
+  partOf?: string | null;
   installedAsDependency?: boolean;
   pendingAction?: PendingPackageActionView;
 }
@@ -169,6 +172,7 @@ interface ResolvedManifestEntryWire {
   versionPin: string | null;
   pinned: boolean;
   excluded: boolean;
+  partOf?: string | null;
   source: SettingLevel;
   resolvedFromScopeId: string;
 }
@@ -184,6 +188,7 @@ function toManifestEntry(wire: ResolvedManifestEntryWire): ManifestEntry {
     source: wire.source,
     pinned: wire.pinned,
     excluded: wire.excluded,
+    partOf: wire.partOf ?? null,
   };
 }
 
@@ -227,6 +232,8 @@ export interface MachinePackageEdit {
   /** Omit to keep the machine row's current pin rather than clearing it. */
   versionPin?: string | null;
   excluded?: boolean;
+  /** The declared parent; null clears it, omitted keeps it. */
+  partOf?: string | null;
 }
 
 /**
@@ -266,6 +273,7 @@ export interface ManifestHistoryState {
   versionPin: string | null;
   pinned: boolean;
   excluded: boolean;
+  partOf?: string | null;
 }
 
 export interface ManifestHistoryEntry {

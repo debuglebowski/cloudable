@@ -33,12 +33,16 @@ export interface OrgPackageEntry {
   packageName: string;
   versionPin: string | null;
   pinned: boolean;
+  /** The declared parent this package is part of, or null. */
+  partOf: string | null;
 }
 
 export interface OrgPackageEdit {
   packageName: string;
   versionPin?: string | null | undefined;
   pinned?: boolean | undefined;
+  /** Null clears it; omitted keeps the current value. */
+  partOf?: string | null | undefined;
 }
 
 export interface OrgPackagesActor {
@@ -68,11 +72,12 @@ export interface UpdateOrgPackagesInput {
 export const orgPackageSettingKey = packageSettingKey;
 
 const toEntry = (
-  row: Pick<MachinePackageRow, "packageName" | "versionPin" | "pinned">,
+  row: Pick<MachinePackageRow, "packageName" | "versionPin" | "pinned" | "partOf">,
 ): OrgPackageEntry => ({
   packageName: row.packageName,
   versionPin: row.versionPin,
   pinned: row.pinned,
+  partOf: row.partOf ?? null,
 });
 
 const byPackageName = (a: OrgPackageEntry, b: OrgPackageEntry) =>
@@ -205,6 +210,7 @@ export const updateOrgPackages = (
         versionPin:
           upsert.versionPin !== undefined ? upsert.versionPin : (previous?.versionPin ?? null),
         pinned: upsert.pinned !== undefined ? upsert.pinned : (previous?.pinned ?? false),
+        partOf: upsert.partOf !== undefined ? upsert.partOf : (previous?.partOf ?? null),
       };
     });
 
@@ -220,6 +226,7 @@ export const updateOrgPackages = (
                 packageName: upsert.packageName,
                 versionPin: upsert.versionPin,
                 pinned: upsert.pinned,
+                partOf: upsert.partOf,
                 source: "org",
               })
               .onConflictDoUpdate({
@@ -231,6 +238,7 @@ export const updateOrgPackages = (
                 set: {
                   versionPin: upsert.versionPin,
                   pinned: upsert.pinned,
+                  partOf: upsert.partOf,
                   source: "org",
                   updatedAt: new Date(),
                 },
@@ -257,6 +265,7 @@ export const updateOrgPackages = (
         packageName: upsert.packageName,
         versionPin: upsert.versionPin,
         pinned: upsert.pinned,
+        partOf: upsert.partOf,
       });
     }
     for (const packageName of removals) {

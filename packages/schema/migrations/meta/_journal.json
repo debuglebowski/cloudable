@@ -211,6 +211,13 @@
       "when": 1794237325096,
       "tag": "0029_manually_installed_packages",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794251466545,
+      "tag": "0030_package_part_of",
+      "breakpoints": true
     }
   ]
 }

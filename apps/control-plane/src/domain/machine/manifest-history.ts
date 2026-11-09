@@ -17,6 +17,8 @@ export interface ManifestHistoryState {
   versionPin: string | null;
   pinned: boolean;
   excluded: boolean;
+  /** The parent declaration, null when none (and for rows written before parts existed). */
+  partOf: string | null;
 }
 
 export interface ManifestHistoryEntry {
@@ -56,11 +58,17 @@ const HISTORY_EVENT_TYPES = ["machine.setting_changed", "org.setting_changed"] a
  */
 function toState(raw: unknown): ManifestHistoryState | null {
   if (raw === null || raw === undefined || typeof raw !== "object") return null;
-  const value = raw as { versionPin?: unknown; pinned?: unknown; excluded?: unknown };
+  const value = raw as {
+    versionPin?: unknown;
+    pinned?: unknown;
+    excluded?: unknown;
+    partOf?: unknown;
+  };
   return {
     versionPin: typeof value.versionPin === "string" ? value.versionPin : null,
     pinned: value.pinned === true,
     excluded: value.excluded === true,
+    partOf: typeof value.partOf === "string" ? value.partOf : null,
   };
 }
 

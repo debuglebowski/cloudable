@@ -123,16 +123,19 @@ function AddPackageForm({
 }) {
   const nameId = useId();
   const versionId = useId();
+  const partOfId = useId();
   const [packageName, setPackageName] = useState("");
   const [versionPin, setVersionPin] = useState("");
+  const [partOf, setPartOf] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const addMutation = useMutation({
-    mutationFn: (entry: { packageName: string; versionPin: string | null }) =>
+    mutationFn: (entry: { packageName: string; versionPin: string | null; partOf?: string }) =>
       updateMachinePackages(machineId, { upserts: [entry] }),
     onSuccess: (_manifest, entry) => {
       setPackageName("");
       setVersionPin("");
+      setPartOf("");
       setError(null);
       onDone();
       toast.success(`"${entry.packageName}" declared on this machine`);
@@ -157,9 +160,11 @@ function AddPackageForm({
   function submit() {
     if (!canAdd) return;
     const trimmedVersion = versionPin.trim();
+    const trimmedParent = partOf.trim();
     addMutation.mutate({
       packageName: trimmedName,
       versionPin: trimmedVersion === "" ? null : trimmedVersion,
+      ...(trimmedParent === "" ? {} : { partOf: trimmedParent }),
     });
   }
 
@@ -178,8 +183,8 @@ function AddPackageForm({
             onKeyDown={(event) => {
               if (event.key === "Enter") submit();
             }}
-            placeholder="ripgrep"
-            className="w-40"
+            placeholder="ripgrep or npm:playwright"
+            className="w-52"
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -197,6 +202,29 @@ function AddPackageForm({
             className="w-32"
           />
         </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={partOfId} className="text-xs text-muted-foreground">
+            Part of
+          </label>
+          <Input
+            id={partOfId}
+            value={partOf}
+            onChange={(event) => setPartOf(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") submit();
+            }}
+            placeholder="none"
+            list={`${partOfId}-options`}
+            className="w-44"
+          />
+          <datalist id={`${partOfId}-options`}>
+            {existing
+              .filter((entry) => !entry.excluded)
+              .map((entry) => (
+                <option key={entry.package} value={entry.package} />
+              ))}
+          </datalist>
+        </div>
         <Button size="sm" onClick={submit} disabled={!canAdd}>
           {addMutation.isPending ? "Adding…" : "Add package"}
         </Button>
@@ -206,6 +234,11 @@ function AddPackageForm({
           "{trimmedName}" is already set on this machine — edit the row above instead.
         </p>
       )}
+      <p className="text-xs text-muted-foreground">
+        Not from apt? Prefix it: <code>npm:</code>, <code>pipx:</code>, <code>cargo:</code> for
+        global tools, <code>home:</code> for software in the home folder. A part is allowed only
+        while what it is part of is.
+      </p>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
@@ -216,7 +249,8 @@ function describeState(state: ManifestHistoryState | null): string {
   if (state === null) return "not declared";
   if (state.excluded) return "excluded";
   const version = state.versionPin ?? "any version";
-  return state.pinned ? `${version}, pinned` : version;
+  const described = state.pinned ? `${version}, pinned` : version;
+  return state.partOf ? `${described}, part of ${state.partOf}` : described;
 }
 
 function ManifestHistoryCard({

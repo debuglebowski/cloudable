@@ -1,4 +1,4 @@
-import type { AccessMethodsEnabled } from "@cloudable/contracts";
+import { type AccessMethodsEnabled, isValidDeclaredPackageName } from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import {
@@ -29,6 +29,7 @@ const resolvedManifestEntrySchema = Schema.Struct({
   versionPin: Schema.NullOr(Schema.String),
   pinned: Schema.Boolean,
   excluded: Schema.Boolean,
+  partOf: Schema.NullOr(Schema.String),
   source: manifestScopeSchema,
   resolvedFromScopeId: Schema.String,
 });
@@ -155,15 +156,29 @@ const listMachinesResponseSchema = Schema.Struct({
 
 const machineIdPathSchema = Schema.Struct({ id: Schema.UUID });
 
+// An apt name, or `<manager>:<name>` (`npm:playwright`, `home:playwright-chromium`).
+// See `PACKAGE_MANAGERS` in the contracts package.
+const declaredPackageNameSchema = Schema.String.pipe(
+  Schema.filter(isValidDeclaredPackageName, {
+    message: () => "not a valid package name: use an apt name or <npm|pipx|cargo|home>:<name>",
+  }),
+);
+
 const packageManifestEntrySchema = Schema.Struct({
-  packageName: Schema.String.pipe(Schema.minLength(1)),
+  packageName: declaredPackageNameSchema,
   versionPin: Schema.optional(Schema.NullOr(Schema.String)),
   pinned: Schema.optional(Schema.Boolean),
   // `true` writes "not on this machine", overriding the org's entry. An
   // omitted field keeps the machine row's current value, so this never
   // silently resets a pin (see `MachineService.updatePackages`).
   excluded: Schema.optional(Schema.Boolean),
-});
+  // The declared parent this package is part of. Null clears it.
+  partOf: Schema.optional(Schema.NullOr(declaredPackageNameSchema)),
+}).pipe(
+  Schema.filter((entry) => entry.partOf !== entry.packageName, {
+    message: () => "a package cannot be part of itself",
+  }),
+);
 
 const updateMachinePackagesPayloadSchema = Schema.Struct({
   upserts: Schema.optional(Schema.Array(packageManifestEntrySchema)),
@@ -178,6 +193,7 @@ const manifestHistoryStateSchema = Schema.Struct({
   versionPin: Schema.NullOr(Schema.String),
   pinned: Schema.Boolean,
   excluded: Schema.Boolean,
+  partOf: Schema.NullOr(Schema.String),
 });
 
 /**
@@ -211,6 +227,8 @@ const packageRowSchema = Schema.Struct({
   installedVersion: Schema.optional(Schema.String),
   versionMismatch: Schema.Boolean,
   isBaseline: Schema.Boolean,
+  partOf: Schema.optional(Schema.NullOr(Schema.String)),
+  installedAsDependency: Schema.optional(Schema.Boolean),
   pendingAction: Schema.optional(
     Schema.Struct({
       id: Schema.String,

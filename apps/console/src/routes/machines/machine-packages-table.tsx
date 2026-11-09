@@ -120,8 +120,12 @@ export function MachinePackagesTable({
   });
 
   const allRows = packagesQuery.data?.items ?? [];
-  const rows = showBaseline ? allRows : allRows.filter((row) => !row.isBaseline);
-  const baselineCount = allRows.length - allRows.filter((row) => !row.isBaseline).length;
+  // Image packages and apt-pulled dependencies are hidden together by default:
+  // neither is something a person chose, and both run to hundreds of rows.
+  const isBackground = (row: MachinePackageRow) =>
+    row.isBaseline || (row.installedAsDependency === true && row.permission === null);
+  const rows = nestParts(showBaseline ? allRows : allRows.filter((row) => !isBackground(row)));
+  const baselineCount = allRows.filter(isBackground).length;
   const neverReported = packagesQuery.data?.lastReportedAt === null;
 
   return (
@@ -195,7 +199,7 @@ export function MachinePackagesTable({
             onCheckedChange={(checked) => setShowBaseline(checked === true)}
           />
           <Label htmlFor={`show-baseline-${machineId}`} className="text-sm font-normal">
-            Show base image packages ({baselineCount})
+            Show image packages and dependencies ({baselineCount})
           </Label>
         </div>
       )}
@@ -369,8 +373,12 @@ function PackageRow({
 
   return (
     <TableRow className={row.isBaseline ? "opacity-70" : undefined}>
-      <TableCell className="font-medium">
+      <TableCell className={row.partOf ? "pl-8 font-medium" : "font-medium"}>
+        {row.partOf && <span className="mr-1 text-muted-foreground">↳</span>}
         {row.packageName}
+        {row.partOf && (
+          <span className="ml-2 text-xs text-muted-foreground">part of {row.partOf}</span>
+        )}
         {row.versionPin && (
           <span className="ml-2 font-mono text-xs text-muted-foreground">
             pinned {row.versionPin}
@@ -410,4 +418,33 @@ function PackageRow({
       </TableCell>
     </TableRow>
   );
+}
+
+/**
+ * Puts each declared part directly under its parent, keeping the server's
+ * order otherwise. A part whose parent is not in the list stays where it was.
+ */
+export function nestParts(rows: ReadonlyArray<MachinePackageRow>): MachinePackageRow[] {
+  const present = new Set(rows.map((row) => row.packageName));
+  const partsByParent = new Map<string, MachinePackageRow[]>();
+  for (const row of rows) {
+    if (row.partOf && present.has(row.partOf)) {
+      partsByParent.set(row.partOf, [...(partsByParent.get(row.partOf) ?? []), row]);
+    }
+  }
+  const placed = new Set<string>();
+  const out: MachinePackageRow[] = [];
+  const place = (row: MachinePackageRow) => {
+    if (placed.has(row.packageName)) return;
+    placed.add(row.packageName);
+    out.push(row);
+    for (const part of partsByParent.get(row.packageName) ?? []) place(part);
+  };
+  for (const row of rows) {
+    if (row.partOf && present.has(row.partOf)) continue;
+    place(row);
+  }
+  // Anything left is in a cycle of parts; show it rather than lose it.
+  for (const row of rows) place(row);
+  return out;
 }

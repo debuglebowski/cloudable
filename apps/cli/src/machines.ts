@@ -96,12 +96,13 @@ function printManifest(manifest: ReadonlyArray<ResolvedPackageManifestEntry>): v
   }
   console.log("\npackages:");
   printTable(
-    ["package", "version", "pinned", "excluded", "from"],
+    ["package", "version", "pinned", "excluded", "part of", "from"],
     manifest.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
       entry.pinned ? "yes" : "no",
       entry.excluded ? "yes" : "no",
+      dash(entry.partOf ?? null),
       entry.source,
     ]),
   );
@@ -277,11 +278,18 @@ export async function runMachinesArchiveCommand(argv: ReadonlyArray<string>): Pr
 // packages
 // ---------------------------------------------------------------------------
 
-/** `curl` or `curl@8.5.0` — the pin travels with the name, as it does in the manifest. */
+/**
+ * `curl` or `curl@8.5.0` — the pin travels with the name, as it does in the
+ * manifest. Other package managers take a prefix: `npm:playwright`,
+ * `npm:@openai/codex@0.5.0`, `pipx:black`, `cargo:ripgrep`, `home:<name>`. The
+ * `@` that opens an npm scope is part of the name, not a pin.
+ */
 export function parsePackageArg(value: string, pinned: boolean): PackageManifestEdit {
+  const nameStart = value.indexOf(":") + 1;
   const at = value.lastIndexOf("@");
-  const packageName = at > 0 ? value.slice(0, at) : value;
-  const versionPin = at > 0 ? value.slice(at + 1) : undefined;
+  const hasPin = at > nameStart;
+  const packageName = hasPin ? value.slice(0, at) : value;
+  const versionPin = hasPin ? value.slice(at + 1) : undefined;
   if (packageName === "") throw new UsageError(`'${value}' is not a package name`);
   // Both fields are always sent: the wire schema takes them as optional, but
   // the contracts type has them explicit, and "no pin" is a value, not a gap.
@@ -294,16 +302,24 @@ export function parsePackageArg(value: string, pinned: boolean): PackageManifest
  * `--exclude` writes a row saying the package must not be here at all, which
  * beats the org. `--include` undoes an exclusion without touching the pin or
  * version the row already carries.
+ *
+ * `--part-of <parent>` makes every `--add`/`--pin` in the same command a part
+ * of that declared parent: allowed only while the parent is. `--standalone
+ * <pkg>` clears a package's parent.
  */
 export function packageEdits(args: Args): {
   upserts: PackageManifestEdit[];
   removals: string[];
 } {
+  const partOf = args.flags["part-of"];
+  const withParent = (edit: PackageManifestEdit): PackageManifestEdit =>
+    partOf ? { ...edit, partOf } : edit;
   const upserts = [
-    ...(args.all.add ?? []).map((value) => parsePackageArg(value, false)),
-    ...(args.all.pin ?? []).map((value) => parsePackageArg(value, true)),
+    ...(args.all.add ?? []).map((value) => withParent(parsePackageArg(value, false))),
+    ...(args.all.pin ?? []).map((value) => withParent(parsePackageArg(value, true))),
     ...(args.all.exclude ?? []).map((packageName) => ({ packageName, excluded: true })),
     ...(args.all.include ?? []).map((packageName) => ({ packageName, excluded: false })),
+    ...(args.all.standalone ?? []).map((packageName) => ({ packageName, partOf: null })),
   ];
   return { upserts, removals: [...(args.all.remove ?? [])] };
 }
@@ -323,12 +339,13 @@ export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>
     return;
   }
   printTable(
-    ["package", "version", "pinned", "excluded", "from"],
+    ["package", "version", "pinned", "excluded", "part of", "from"],
     machine.manifest.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
       entry.pinned ? "yes" : "no",
       entry.excluded ? "yes" : "no",
+      dash(entry.partOf ?? null),
       entry.source,
     ]),
   );
@@ -336,11 +353,14 @@ export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>
 
 export async function runMachinesPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--exclude <pkg>] [--include <pkg>]",
+    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--exclude <pkg>] [--include <pkg>] [--part-of <parent>] [--standalone <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>.",
   );
   const args = parseArgs(
     argv,
-    readSpec({ repeatable: ["add", "pin", "remove", "exclude", "include"] }),
+    readSpec({
+      values: ["part-of"],
+      repeatable: ["add", "pin", "remove", "exclude", "include", "standalone"],
+    }),
   );
   const id = await machineId(required(args, 0, "a machine", usage));
   const { upserts, removals } = packageEdits(args);

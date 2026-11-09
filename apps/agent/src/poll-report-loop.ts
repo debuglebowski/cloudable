@@ -6,9 +6,13 @@ import { applyPackageActions, declaredPackageVersions } from "./apply-packages";
 import { AttestationRejectedError, attest, clearCachedSession } from "./attestation";
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
+import { cachedGlobalTools } from "./global-tools";
 import { readHardeningBaseline } from "./hardening-baseline";
 import { ApiError } from "./http-client";
 import { listInstalledPackages, listManuallyInstalledPackages } from "./installed-packages";
+
+/** Global npm/pipx/cargo tools, asked for at most every five minutes. See `global-tools.ts`. */
+const listGlobalToolsCached = cachedGlobalTools();
 import { listOpenPorts } from "./open-ports";
 import { readAllVolumeUsage } from "./volume-usage";
 import { type ScanManager, createScanManager } from "./vulnerability-scan/scan-manager";
@@ -220,13 +224,15 @@ export async function runAgentLoop(
         // no data dependency on each other, so they run concurrently rather than
         // one after another.
         const [
-          installedPackages,
+          aptPackages,
+          globalTools,
           manuallyInstalledPackages,
           openPorts,
           runningAccessMethods,
           packageVersions,
         ] = await Promise.all([
           listInstalledPackages(),
+          listGlobalToolsCached(),
           listManuallyInstalledPackages(),
           listOpenPorts(),
           listRunningAccessMethods(),
@@ -234,6 +240,8 @@ export async function runAgentLoop(
           // declared entries carry pins.
           declaredPackageVersions(allowedPackages),
         ]);
+        // One inventory: apt names bare, other managers' global tools as `<manager>:<name>`.
+        const installedPackages = [...aptPackages, ...globalTools];
         // Synchronous and cheap (two statfs calls), so it stays out of the Promise.all.
         const volumeUsage = readAllVolumeUsage();
         const hardeningBaseline = readHardeningBaseline();

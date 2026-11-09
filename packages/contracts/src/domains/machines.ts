@@ -115,6 +115,13 @@ export interface PackageManifestEntry {
    * reports it installed drifts.
    */
   excluded: boolean;
+  /**
+   * The declared package this one is part of, or null. A part is allowed only
+   * while its parent is: Playwright's Chromium and the apt libraries it
+   * needs are declared as parts of `npm:playwright`. Remove the parent and the
+   * parts read as undeclared again.
+   */
+  partOf?: string | null;
 }
 
 export interface ResolvedPackageManifestEntry extends PackageManifestEntry {
@@ -195,6 +202,8 @@ export interface PackageManifestEdit {
   versionPin?: string | null;
   pinned?: boolean;
   excluded?: boolean;
+  /** Parent declaration; null clears it. Omitted keeps the current value. */
+  partOf?: string | null;
 }
 
 /**
@@ -286,6 +295,8 @@ export interface MachinePackageRow {
    * listing them all buries the handful anyone cares about.
    */
   isBaseline: boolean;
+  /** The declared parent this package is part of, from the manifest. */
+  partOf?: string | null;
   /**
    * Installed only because another package needed it (apt's own record). Not
    * judged on its own by the "no undeclared software" check: the package that
