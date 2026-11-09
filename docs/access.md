@@ -104,16 +104,21 @@ approver flag:
   SSH certificate they hold ends. They get back in once the IdP gives them a role.
 
 **The hourly recheck.** A role holds only while it rests on a verified assertion younger than
-`IDP_RECHECK_INTERVAL_SECONDS` (default and maximum 3600). Cloudable stores, per person, a lower
-bound on when their last assertion was issued (`people.idp_roles_verified_at`: receipt time minus
-the 5-minute AuthnRequest lifetime, since an accepted assertion must answer a request at most that
-old). Every way in checks it, not a background job:
+`IDP_RECHECK_INTERVAL_SECONDS` (default and maximum 3600). Cloudable stores, per person, when their
+last accepted assertion was issued, by its own signed `IssueInstant`
+(`people.idp_roles_verified_at`). The shared contract's rule decides freshness, in whole seconds:
+evidence is stale from the start of second `floor(verified) + interval`. Every way in checks it
+itself, not a background job:
 
 - every API request, from the console's session cookie and from CLI bearer tokens
-  (`http/middleware/auth.ts`), and the web terminal's websocket, which runs the same check;
+  (`http/middleware/auth.ts`), and the web terminal's websocket attach, which runs the same check;
 - a CLI sign-in code when `cloudable login` redeems it (`http/handlers/access.ts`);
-- open terminal, files and SSH tunnels, which the expiry sweep closes once their person no longer
-  passes (`tunnel/relay.ts`, every 60-second pass);
+- open terminal, files and SSH tunnels (`http/handlers/tunnel.ts`): a watcher ends each one at
+  its person's exact deadline without reading anything first, re-reads the person every 10
+  seconds before that (revocation, deactivation, a fresh SSO extending the deadline), and treats a
+  failed or slow read as a lapse. Every frame in both directions is also checked against the
+  deadline, so nothing reaches the machine or the browser after it. The 60-second expiry sweep
+  (`tunnel/relay.ts`) stays as a backstop for sessions whose watcher is gone (a replica that died);
 - SSH certificates, which never last past the person's deadline.
 
 Past the deadline the API answers 401 `idp_reauthentication_required`. The console starts a fresh
@@ -122,22 +127,57 @@ password or MFA prompt. The CLI says to run `cloudable login`. There is no refre
 so a new verified assertion is the only renewal. A change at the IdP therefore applies within the
 interval, or at the next sign-in if sooner.
 
-**What protects a SAML assertion.** `@better-auth/sso` verifies the signature (the assertion
-itself must be signed in this mode), audience, recipient, destination, NotBefore and NotOnOrAfter
-(required), and that it answers an AuthnRequest this deployment issued less than 5 minutes ago,
-each usable once. Unsolicited IdP-initiated responses are refused. Assertion IDs are recorded as
-used so a replay is refused. Both records live in the database, so a restart forgets neither. The
-options are pinned in `auth.ts`. Only the provider declared in deployment config carries roles;
-a sign-in through any other is refused.
+**What makes an assertion count as evidence.** `@better-auth/sso` verifies the signature (the
+assertion itself must be signed in this mode), audience, recipient, destination, NotBefore and
+NotOnOrAfter (required), and that the Response's `InResponseTo` names an AuthnRequest this
+deployment issued less than 5 minutes ago, each usable once. Unsolicited IdP-initiated responses
+are refused. Used assertion IDs and consumed requests are stored in the database, so a restart
+forgets neither.
+
+The Response's `InResponseTo` is not covered by the assertion's signature, so on its own it does
+not prove the assertion was issued for that request. Cloudable therefore also reads the signed
+assertion's own fields (`idp-roles/saml-assertion.ts`, checked in the sign-in hook after the
+plugin's checks pass):
+
+- exactly one plaintext assertion (encrypted assertions are not supported in this mode);
+- every bearer `SubjectConfirmationData` carries `InResponseTo`, equal to the request the plugin
+  consumed, so the signed assertion itself answers that request and an older signed assertion
+  cannot be re-wrapped in a new envelope;
+- its signed `IssueInstant` is at most 5 minutes old (60 seconds of future clock skew allowed) and
+  not older than the evidence already recorded.
+
+The IdP must therefore put `InResponseTo` on `SubjectConfirmationData` (Entra ID, Okta, Google and
+Keycloak do for SP-initiated sign-in) and sign the assertion. Only the provider declared in
+deployment config carries roles; a sign-in through any other is refused. `saml-acs.integration.test.ts`
+runs all of this through the real endpoint with real signed XML.
+
+**Replicas must agree (the mode fence).** Every request, CLI code redemption and live tunnel
+compares this replica's config with the persisted mode (`idp-roles/mode-fence.ts`). A replica whose
+config does not match (mode off while the persisted mode is on, on while it is off, or a different
+fingerprint) answers every authenticated request with 401 `idp_roles_config_mismatch`, refuses SSO
+sign-ins with `idp_roles_config_changed`, and keeps no tunnel open. So during a rollout that
+switches the mode, changes its config, or rotates IdP certificates, old replicas stop serving as
+soon as the first new one applies the activation. Roll out every replica with the same config; a
+mismatch is a refusal, not a fallback. Off everywhere and never switched on: no change.
 
 **Switching the mode on (activation).** At startup the control plane compares its config with the
-persisted mode (`idp_role_mode`). Switching it on, or changing the claim or mapping while on, is a
-new activation, applied once: every person's credentials are revoked (`credentials_revoked_at`),
+persisted mode (`idp_role_mode`). Switching it on, or changing anything role evidence depends on
+while on (the claim, the mapping, the interval, or the IdP's provider id, entity id, SSO URL, email
+domains or signing certificates, compared as a SHA-256 fingerprint), is a new activation, applied
+once: every person's credentials are revoked (`credentials_revoked_at`),
 role evidence is cleared, console sessions are deleted, and live SSH certificates are marked
 revoked. Everyone signs in through SSO again, and those new sessions are valid. A restart with
 unchanged config does nothing. Switching off is recorded and revokes nothing; roles stay as last
 set and admins manage them again. Requests wait until the activation is applied. Machine agent
-credentials are not human credentials and are never touched.
+credentials are not human credentials and are never touched. An IdP certificate rollover is a new
+activation too: evidence verified under one set of trust anchors is never carried over to another.
+
+**CLI sign-in codes.** `cloudable login` gets a 60-second code from the console and redeems it for
+a CLI token and an SSH certificate. Redemption checks the person and the mode fence when it starts,
+and again under database locks after the certificate is signed, so a revocation or activation that
+lands in between hands out nothing (and revokes the certificate just stored). The CLI token is
+dated by the code's issue time, not the redemption time, so a revocation after the code was
+issued refuses the token too, even after a later fresh SSO sign-in.
 
 **What Cloudable refuses.** Role and approver changes from the People page, the API and the CLI
 answer 409 `ROLES_MANAGED_BY_IDP`, "Roles are managed by your identity provider." Adding a person
@@ -145,14 +185,27 @@ still works, as a member; their first sign-in sets the real role. Email changes,
 offboarding still work. The bootstrap admin is added as a member: nothing is promoted locally.
 Recovery when the IdP is unavailable is server administration: switch the mode off and restart.
 
-**SSH certificates and revocation.** No machine trusts the Cloudable SSH CA today:
-`TrustedUserCAKeys` is set nowhere, machines take no inbound traffic, and the tunnel's `ssh`
-method opens a shell in the tunnel daemon behind the control plane's checks. So a certificate
-issued before a refusal or an activation reaches nothing, and refusing the person's control-plane
-credentials plus closing their tunnels is the revocation. That rests on the CA staying untrusted;
-`idp-roles/ssh-ca-trust.guard.test.ts` fails if machine setup ever trusts it without a revocation
-list (`RevokedKeys`). Capping certificate lifetime at the role deadline bounds how long one could
-live, but it is not revocation, and is not relied on as such.
+**SSH certificates and revocation.** Cloudable cannot revoke an SSH certificate once issued: there
+is no key revocation list (KRL) on any machine (see "Revocation" below). What keeps that from
+mattering is that, as this repository sets machines up, nothing trusts the Cloudable CA:
+
+- *What the code guarantees.* No machine setup in this repository tells sshd or authorized_keys to
+  accept a user CA (`TrustedUserCAKeys`, `cert-authority`, `AuthorizedPrincipalsFile`). The tunnel's
+  `ssh` method opens a shell inside the tunnel daemon, behind the control plane's per-request
+  checks, not a connection to sshd. `idp-roles/ssh-ca-trust.guard.test.ts` fails if any tracked or
+  untracked file under the agent, tunnel daemon, control plane, infra or scripts introduces such
+  trust, and has no escape hatch: trusting the CA must ship together with a working KRL.
+- *What it assumes about the deployment, and does not verify.* That machines are set up only by
+  this code, and nobody adds CA trust by hand or in an image (the CA public key is inside every
+  certificate, so it is not secret). That machines take no inbound traffic: this repository's
+  Terraform denies all inbound traffic on the machines subnet it creates, but the Azure provisioner
+  accepts any `AZURE_MACHINES_SUBNET_ID` and gives each machine a public IP, so a deployment using
+  another subnet must enforce this itself. Cloudable does not attest either from the machines.
+
+If those assumptions fail, a certificate issued before a refusal or an activation keeps working
+against sshd until it expires: at most 8 hours with the mode off, at most the person's role
+deadline with it on. That cap bounds the exposure. It is not revocation, and nothing here relies
+on it as such.
 
 **What is recorded.** Every decision writes one of the shared contract's events, with the fields
 `service`, `actor`, `subject`, `source`, `previousGrants`, `newGrants` and `reason`, and the same

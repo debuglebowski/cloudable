@@ -41,6 +41,9 @@ function describe(status: number, body: unknown): string {
     ) {
       return "your role must be confirmed by your identity provider again (at least hourly). Run `cloudable login`.";
     }
+    if (record._tag === "AuthenticationRequired" && record.reason === "idp_roles_config_mismatch") {
+      return "this deployment's sign-in settings are changing (replicas disagree). Try again shortly.";
+    }
     // An Effect tagged error: the tag is the reason, the rest is the detail.
     if (typeof record._tag === "string") {
       const detail = Object.entries(record)
