@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { ROLES_MANAGED_BY_IDP, useRolesFromIdp } from "@/api/auth";
 import { addPerson, peopleKeys } from "@/api/people";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,9 +27,15 @@ export function AddPersonDialog({ open, onOpenChange }: AddPersonDialogProps) {
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState(DEFAULT_ROLE);
+  // With roles from the IdP everyone starts as a member; their first sign-in sets the real role.
+  const rolesFromIdp = useRolesFromIdp();
 
   const mutation = useMutation({
-    mutationFn: () => addPerson({ email: email.trim(), role: role.trim() || DEFAULT_ROLE }),
+    mutationFn: () =>
+      addPerson({
+        email: email.trim(),
+        role: rolesFromIdp ? DEFAULT_ROLE : role.trim() || DEFAULT_ROLE,
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: peopleKeys.list() });
       reset();
@@ -77,12 +84,18 @@ export function AddPersonDialog({ open, onOpenChange }: AddPersonDialogProps) {
           </div>
           <div className="flex flex-col gap-1">
             <Label htmlFor="add-person-role">Role</Label>
-            <Input
-              id="add-person-role"
-              value={role}
-              onChange={(event) => setRole(event.target.value)}
-              placeholder={DEFAULT_ROLE}
-            />
+            {rolesFromIdp ? (
+              <p id="add-person-role" className="text-sm text-muted-foreground">
+                {ROLES_MANAGED_BY_IDP} They start as a member; their first sign-in sets the role.
+              </p>
+            ) : (
+              <Input
+                id="add-person-role"
+                value={role}
+                onChange={(event) => setRole(event.target.value)}
+                placeholder={DEFAULT_ROLE}
+              />
+            )}
           </div>
           {mutation.isError && <p className="text-sm text-destructive">{mutation.error.message}</p>}
           <DialogFooter>

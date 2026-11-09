@@ -4,9 +4,14 @@ import { issueCliAuthCode, verifyCliAuthCode } from "./CliAuthCode";
 
 describe("CliAuthCode", () => {
   test("issued code round-trips through verifyCliAuthCode", () => {
+    const before = Date.now();
     const code = issueCliAuthCode({ personId: "person-1", orgId: "org-1" });
     const result = verifyCliAuthCode(code);
-    expect(result).toEqual({ ok: true, personId: "person-1", orgId: "org-1" });
+    expect(result).toMatchObject({ ok: true, personId: "person-1", orgId: "org-1" });
+    // Redemption compares this with the person's credential revocation time.
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.issuedAt).toBeGreaterThanOrEqual(before);
+    expect(result.issuedAt).toBeLessThanOrEqual(Date.now());
   });
 
   test("rejects a garbage code as malformed", () => {

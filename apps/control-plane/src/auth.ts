@@ -14,6 +14,9 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { CONFIGURED_IDP_PROVIDER_ID, config } from "./config";
 import { openPostgres } from "./db/connect";
+import { withAssertionFacts } from "./idp-roles/saml-assertion";
+import { IDP_ROLE_CLAIM_FIELD, idpRoleProvisioning } from "./idp-roles/sign-in";
+import { SAML_REQUEST_TTL_MS } from "./idp-roles/sync";
 import { spIssuer } from "./services/saml-metadata";
 
 // BetterAuth baseline: email/password, plus SAML SSO via `@better-auth/sso`
@@ -117,6 +120,22 @@ const configuredIdp = (() => {
     samlConfig: {
       issuer: spIssuer(),
       entryPoint: idp.ssoUrl,
+      // Roles from the IdP: copy the role attribute into the sign-in's user info, where
+      // `provisionUser` reads it. `email` and `name` repeat the plugin's own defaults, which this
+      // object would otherwise replace.
+      //
+      // And require the assertion itself to be signed, not only the enclosing response: the
+      // role attribute lives in the assertion, so that is what has to be authenticated.
+      ...(config.idpRoles
+        ? {
+            wantAssertionsSigned: true,
+            mapping: {
+              email: "email",
+              name: "displayName",
+              extraFields: { [IDP_ROLE_CLAIM_FIELD]: config.idpRoles.claim },
+            },
+          }
+        : {}),
       // entityID + cert instead of the metadata XML: the plugin accepts
       // either, and the document is not stable enough to be configuration
       // (Entra regenerates its ID and Signature per request). Passing every
@@ -184,6 +203,30 @@ const options = {
       // `auth.default-sso.test.ts` fails loudly if the option stops being
       // accepted on an upgrade.
       ...(configuredIdp ? { defaultSSO: [configuredIdp] } : {}),
+      // Roles from the IdP, when the operator turned them on: every SSO sign-in, not only the
+      // first, sets the person's role from the claim or refuses the sign-in. Absent when off, so
+      // sign-in behaves exactly as it did before the mode existed.
+      //
+      // A refused sign-in lands on `<BETTER_AUTH_URL>/login`: in production one origin serves
+      // both the API and the console (see `trustedOrigins` below).
+      ...(config.idpRoles
+        ? {
+            ...idpRoleProvisioning(authDb, config.idpRoles, `${config.betterAuthUrl}/login`),
+            // Pinned, not left to the plugin's defaults, because role evidence rests on them:
+            // every assertion must answer an AuthnRequest this deployment issued (single-use,
+            // stored in the database so a restart does not forget it, and at most
+            // SAML_REQUEST_TTL_MS old), unsolicited IdP-initiated responses are refused, and
+            // NotBefore/NotOnOrAfter must be present. Assertion IDs are recorded as used, also in
+            // the database, so a replay is refused across restarts. Signature, audience,
+            // recipient and destination checks are the plugin's and always on.
+            saml: {
+              enableInResponseToValidation: true,
+              allowIdpInitiated: false,
+              requestTTL: SAML_REQUEST_TTL_MS,
+              requireTimestamps: true,
+            },
+          }
+        : {}),
     }),
   ],
   // BetterAuth's own CSRF/origin check (separate from `HttpMiddleware.cors`
@@ -273,4 +316,13 @@ const options = {
   },
 } satisfies BetterAuthOptions;
 
-export const auth: AuthInstance = betterAuth(options);
+const instance: AuthInstance = betterAuth(options);
+
+/**
+ * With roles from the identity provider on, every request goes through `withAssertionFacts`, so
+ * the sign-in hook can check the posted SAML assertion's own signed fields (request binding and
+ * issue time, `idp-roles/saml-assertion.ts`). Mode off: the BetterAuth instance, untouched.
+ */
+export const auth: AuthInstance = config.idpRoles
+  ? { ...instance, handler: (request) => withAssertionFacts(request, instance.handler) }
+  : instance;

@@ -51,3 +51,15 @@ export const toSecurityAuditRecord = (event: DomainEvent) => {
       return null;
   }
 };
+
+/**
+ * Writes one JSON line to stdout per permission grant in `rows`. Call only after `rows` are
+ * durably appended (the insert succeeded, or its transaction committed), with their persisted
+ * IDs. JSON lines bypass the operational logger's formatting and log-level filter.
+ */
+export const exportSecurityAuditRecords = (rows: readonly DomainEvent[]) => {
+  for (const row of rows) {
+    const record = toSecurityAuditRecord(row);
+    if (record) console.info(JSON.stringify(record));
+  }
+};

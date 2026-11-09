@@ -43,6 +43,8 @@ COPY packages/schema/package.json packages/schema/package.json
 COPY packages/events/package.json packages/events/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/session-token/package.json packages/session-token/package.json
+# The shared IdP role contract, an immutable vendored tarball (see vendor/README.md).
+COPY vendor vendor
 
 # --ignore-scripts: several devDependencies (e.g. @testcontainers/postgresql,
 # via ssh2/cpu-features) carry optional native-binding install scripts with

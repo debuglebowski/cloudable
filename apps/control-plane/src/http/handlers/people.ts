@@ -2,6 +2,7 @@ import type { DomainEvent } from "@cloudable/events";
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import { ulid } from "ulid";
+import { config } from "../../config";
 import { NotPermittedError, isApproverOrAdmin, requireAdminUser } from "../../domain/authz";
 import {
   type PersonRow,
@@ -11,6 +12,10 @@ import {
   setPersonActive,
   updatePerson,
 } from "../../domain/people/people";
+import { rolesManagedByIdp } from "../../domain/people/roles-managed-by-idp";
+import { logAudit, toDomainEvent } from "../../idp-roles/audit";
+import { type AuditEvent, SERVICE } from "../../idp-roles/contract";
+import { grantsOf } from "../../idp-roles/precedence";
 import { EventBus } from "../../services/EventBus";
 import { Api } from "../api";
 import { type CurrentUser, CurrentUserTag } from "../middleware/auth";
@@ -48,6 +53,52 @@ const personEvent = <T extends DomainEvent["type"]>(
     type,
     payload,
   }) as DomainEvent;
+
+/**
+ * Refuses a role or approver change when roles come from the identity provider
+ * (`config.idpRoles`): 409 `ROLES_MANAGED_BY_IDP`, recorded as `idp_roles.local_change_refused`
+ * and logged. A no-op with the mode off. Read per call, not captured, so tests can switch it.
+ *
+ * Checked before the admin check on purpose: with the mode on nobody may change a role here, so
+ * the answer is the same for everyone and names the real reason.
+ */
+const refuseIfRolesFromIdp = (
+  actor: CurrentUser,
+  attempt: { readonly personId?: string; readonly role?: string; readonly approver?: boolean },
+) =>
+  Effect.gen(function* () {
+    if (config.idpRoles === null) return;
+    if (attempt.role === undefined && attempt.approver === undefined) return;
+    const target = attempt.personId ? yield* getPersonById(attempt.personId) : undefined;
+    // Only a target in the caller's own org is named; anything else is reported as unknown.
+    const current = target && target.orgId === actor.orgId ? target : undefined;
+    const previousGrants = current ? grantsOf(current) : [];
+    const asked = {
+      role: attempt.role ?? current?.role ?? "member",
+      approver: attempt.approver ?? current?.approver ?? false,
+    };
+    const audit: AuditEvent = {
+      event: "idp_roles.local_change_refused",
+      service: SERVICE,
+      actor: actor.personId,
+      subject: current?.id ?? (attempt.personId ? "unknown_person" : "new_person"),
+      source: "local",
+      previousGrants,
+      newGrants: grantsOf(asked),
+      reason: "roles_managed_by_idp",
+    };
+    yield* publish([
+      toDomainEvent(audit, {
+        orgId: actor.orgId,
+        actorType: "person",
+        actorId: actor.personId,
+        correlationId: ulid(),
+        at: new Date(),
+      }),
+    ]);
+    logAudit(audit);
+    return yield* Effect.fail(rolesManagedByIdp());
+  });
 
 const publish = (events: DomainEvent[]) =>
   events.length === 0
@@ -88,6 +139,11 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
     .handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        // With roles from the IdP a new person starts as a member; their first sign-in sets the
+        // real role. Asking for anything else is a role change.
+        yield* refuseIfRolesFromIdp(currentUser, {
+          ...(payload.role !== "member" ? { role: payload.role } : {}),
+        });
         yield* requireAdminUser(currentUser, "Only an admin can add a person.");
         const row = yield* createPerson({ ...payload, orgId: currentUser.orgId });
         yield* publish([
@@ -108,6 +164,11 @@ export const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
     .handle("update", ({ path, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
+        yield* refuseIfRolesFromIdp(currentUser, {
+          personId: path.id,
+          ...(payload.role !== undefined ? { role: payload.role } : {}),
+          ...(payload.approver !== undefined ? { approver: payload.approver } : {}),
+        });
         // Email, role and the approver flag are all admin's to change. Email above all: the
         // console resolves a sign-in to a person by email, so whoever can change it can make
         // their own sign-in arrive as someone else.
