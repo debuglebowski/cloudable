@@ -357,6 +357,7 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
           .recordReportedPackages({
             machineId: machine.id,
             installedPackages: payload.installedPackages,
+            manuallyInstalledPackages: payload.manuallyInstalledPackages,
             declaredPackageVersions: payload.declaredPackageVersions,
             observedAt: now,
           })

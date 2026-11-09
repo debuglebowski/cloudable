@@ -32,6 +32,12 @@ export interface PackagesViewInput {
   declaredPackageVersions?: Readonly<Record<string, string>> | undefined;
   /** What the image shipped with. Null before the first report. */
   baselinePackages: ReadonlyArray<string> | null;
+  /**
+   * What someone installed on purpose; everything else installed came in as a
+   * dependency. Null or absent when the agent did not say, and then no row is
+   * treated as a dependency.
+   */
+  manuallyInstalledPackages?: ReadonlyArray<string> | null | undefined;
   /** Outstanding actions by package name. */
   pendingActions?: ReadonlyMap<string, PendingPackageActionView> | undefined;
 }
@@ -47,6 +53,8 @@ export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[]
   const declaredByName = new Map(manifest.map((entry) => [entry.packageName, entry]));
   const installedSet = installedPackages === null ? null : new Set(installedPackages);
   const baselineSet = new Set(baselinePackages ?? []);
+  const manualSet =
+    input.manuallyInstalledPackages == null ? null : new Set(input.manuallyInstalledPackages);
   const pendingActions = input.pendingActions ?? new Map<string, PendingPackageActionView>();
 
   const names = new Set<string>([
@@ -88,6 +96,8 @@ export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[]
       ...(installedVersion !== undefined ? { installedVersion } : {}),
       versionMismatch,
       isBaseline: baselineSet.has(packageName),
+      installedAsDependency:
+        manualSet !== null && installed === "installed" && !manualSet.has(packageName),
       ...(pendingAction ? { pendingAction } : {}),
     });
   }
@@ -102,7 +112,7 @@ function rank(row: MachinePackageRow): number {
   if (row.pendingAction) return 0;
   if (row.permission === "disallowed" && row.installed === "installed") return 1;
   if (row.versionMismatch) return 2;
-  if (row.permission === null && !row.isBaseline) return 3;
+  if (row.permission === null && !row.isBaseline && !row.installedAsDependency) return 3;
   if (row.permission === "allowed") return 4;
   return row.isBaseline ? 6 : 5;
 }
@@ -114,11 +124,20 @@ function rank(row: MachinePackageRow): number {
  * Subtracting the baseline is what makes this usable. Without it every package
  * the image shipped with reads as undeclared software installed by nobody,
  * which is several hundred findings per machine and no signal at all.
+ *
+ * Dependencies are subtracted for the same reason. The package someone asked
+ * for is what gets judged; what apt pulled in to satisfy it follows from that.
+ * An undeclared package still reads as undeclared, and so does anything named
+ * explicitly on an install command line, since apt marks those manual.
  */
 export function undeclaredFromView(rows: ReadonlyArray<MachinePackageRow>): string[] {
   return rows
     .filter(
-      (row) => row.installed === "installed" && !row.isBaseline && row.permission !== "allowed",
+      (row) =>
+        row.installed === "installed" &&
+        !row.isBaseline &&
+        !row.installedAsDependency &&
+        row.permission !== "allowed",
     )
     .map((row) => row.packageName);
 }

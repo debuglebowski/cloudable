@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { CommandResult, CommandRunner } from "./installed-packages";
-import { listInstalledPackages } from "./installed-packages";
+import { listInstalledPackages, listManuallyInstalledPackages } from "./installed-packages";
 
 /** A fake `CommandRunner` keyed by binary name — `undefined` means "not present"
  * (mirrors `bunCommandRunner` returning `null` on ENOENT). */
@@ -50,5 +50,23 @@ describe("listInstalledPackages", () => {
       "dpkg-query": { stdout: "docker\n\n  curl  \n\n", exitCode: 0 },
     });
     expect(await listInstalledPackages(runner)).toEqual(["docker", "curl"]);
+  });
+});
+
+describe("listManuallyInstalledPackages", () => {
+  test("parses apt-mark showmanual", async () => {
+    const runner = fakeRunner({
+      "apt-mark": { stdout: "build-essential\ngh\n\ngh\n", exitCode: 0 },
+    });
+    expect(await listManuallyInstalledPackages(runner)).toEqual(["build-essential", "gh"]);
+  });
+
+  test("is unknown, not empty, without apt", async () => {
+    expect(await listManuallyInstalledPackages(fakeRunner({}))).toBeNull();
+  });
+
+  test("is unknown, not empty, when apt-mark fails", async () => {
+    const runner = fakeRunner({ "apt-mark": { stdout: "", exitCode: 100 } });
+    expect(await listManuallyInstalledPackages(runner)).toBeNull();
   });
 });

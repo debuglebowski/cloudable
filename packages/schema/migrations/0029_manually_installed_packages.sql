@@ -1,0 +1,1 @@
+ALTER TABLE "machines" ADD COLUMN "manually_installed_packages" jsonb;

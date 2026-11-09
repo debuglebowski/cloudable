@@ -141,6 +141,8 @@ const ReportPayload = Schema.Struct({
   agentVersion: Schema.String,
   observedAt: Schema.String,
   installedPackages: Schema.Array(Schema.String),
+  // Installed on purpose, not as a dependency — see `AgentReportRequest`.
+  manuallyInstalledPackages: Schema.optional(Schema.Array(Schema.String)),
   // Declared packages only — see `AgentReportRequest`.
   declaredPackageVersions: Schema.optional(
     Schema.Record({ key: Schema.String, value: Schema.String }),

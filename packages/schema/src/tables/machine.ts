@@ -110,6 +110,13 @@ export const machines = pgTable("machines", {
    * as part of the baseline, which is what it was.
    */
   baselinePackages: jsonb("baseline_packages"),
+  /**
+   * The part of `installedPackages` someone installed on purpose, from the
+   * agent's last report (`apt-mark showmanual`). The rest came in as
+   * dependencies. Null when the agent could not tell; the "no undeclared
+   * software" check then treats every installed package as possibly intended.
+   */
+  manuallyInstalledPackages: jsonb("manually_installed_packages"),
   baselineCapturedAt: timestamp("baseline_captured_at", { withTimezone: true }),
   /**
    * Installed version per package, for declared packages only — the set a

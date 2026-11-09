@@ -238,4 +238,29 @@ describe("baseline capture", () => {
     });
     expect(undeclaredFromView(withBaseline)).toEqual(["nmap"]);
   });
+
+  test("dependencies of a declared package are not undeclared", () => {
+    // golden-comet, 2026-11-09: build-essential was declared and installed
+    // through Cloudable, and the check still failed on gcc, make and binutils.
+    const rows = buildPackagesView({
+      manifest: [entry({ packageName: "build-essential", source: "machine" })],
+      installedPackages: ["bash", "build-essential", "gcc", "make", "gh", "libgh-dep"],
+      baselinePackages: ["bash"],
+      manuallyInstalledPackages: ["bash", "build-essential", "gh"],
+    });
+    expect(undeclaredFromView(rows)).toEqual(["gh"]);
+    expect(rowFor(rows, "gcc").installedAsDependency).toBe(true);
+    expect(rowFor(rows, "gh").installedAsDependency).toBe(false);
+  });
+
+  test("without a manual list every installed package counts, as before", () => {
+    const rows = buildPackagesView({
+      manifest: [],
+      installedPackages: ["gcc", "gh"],
+      baselinePackages: [],
+      manuallyInstalledPackages: null,
+    });
+    expect(undeclaredFromView(rows).sort()).toEqual(["gcc", "gh"]);
+    expect(rowFor(rows, "gcc").installedAsDependency).toBe(false);
+  });
 });

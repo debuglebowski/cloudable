@@ -97,6 +97,7 @@ export interface MachinePackageRow {
   installedVersion?: string;
   versionMismatch: boolean;
   isBaseline: boolean;
+  installedAsDependency?: boolean;
   pendingAction?: PendingPackageActionView;
 }
 

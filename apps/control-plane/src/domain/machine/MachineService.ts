@@ -909,6 +909,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
     const recordReportedPackages = (input: {
       machineId: string;
       installedPackages: ReadonlyArray<string>;
+      manuallyInstalledPackages?: ReadonlyArray<string> | undefined;
       declaredPackageVersions?: Readonly<Record<string, string>> | undefined;
       observedAt: Date;
     }) =>
@@ -918,6 +919,11 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             .update(machines)
             .set({
               installedPackages: [...input.installedPackages],
+              // Overwritten every report, including with null: an answer from an
+              // earlier agent must not outlive the inventory it described.
+              manuallyInstalledPackages: input.manuallyInstalledPackages
+                ? [...input.manuallyInstalledPackages]
+                : null,
               declaredPackageVersions: input.declaredPackageVersions ?? {},
               baselinePackages: sql`coalesce(${machines.baselinePackages}, ${JSON.stringify([...input.installedPackages])}::jsonb)`,
               // ISO string with an explicit cast, not the Date itself: a JS Date
@@ -951,6 +957,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
               | Record<string, string>
               | undefined,
             baselinePackages: stringArray(machine.baselinePackages),
+            manuallyInstalledPackages: stringArray(machine.manuallyInstalledPackages),
             pendingActions,
           }),
           lastReportedAt: machine.lastVerifiedAt?.toISOString() ?? null,

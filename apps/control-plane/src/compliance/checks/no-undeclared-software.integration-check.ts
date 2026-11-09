@@ -115,6 +115,21 @@ describe("noUndeclaredSoftwareCheck", () => {
     expect(findings.find((f) => f.machineId === machine.id)).toBeUndefined();
   });
 
+  test("dependencies of an allowed package -> no finding; an undeclared one -> finding", async () => {
+    const machine = await makeMachine();
+    await setInventory(machine.id, [...BASELINE, "build-essential", "gcc", "make", "gh"]);
+    await db
+      .update(machines)
+      .set({ manuallyInstalledPackages: [...BASELINE, "build-essential", "gh"] })
+      .where(eq(machines.id, machine.id));
+    await allowPackage(machine.id, "build-essential");
+
+    const findings = await evaluate();
+    expect(findings.find((f) => f.machineId === machine.id)?.detail).toEqual({
+      undeclaredPackages: ["gh"],
+    });
+  });
+
   test("machine that has never reported an inventory -> no finding", async () => {
     // Silence is not evidence of cleanliness. A machine that has told us nothing is
     // the "machines are reporting" check's business, not this one's.

@@ -286,6 +286,13 @@ export interface MachinePackageRow {
    * listing them all buries the handful anyone cares about.
    */
   isBaseline: boolean;
+  /**
+   * Installed only because another package needed it (apt's own record). Not
+   * judged on its own by the "no undeclared software" check: the package that
+   * pulled it in is. False when the agent did not report which packages were
+   * installed on purpose.
+   */
+  installedAsDependency?: boolean;
   /** Set while an action is outstanding, so the row can show progress. */
   pendingAction?: PendingPackageActionView;
 }

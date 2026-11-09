@@ -8,7 +8,7 @@ import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
 import { readHardeningBaseline } from "./hardening-baseline";
 import { ApiError } from "./http-client";
-import { listInstalledPackages } from "./installed-packages";
+import { listInstalledPackages, listManuallyInstalledPackages } from "./installed-packages";
 import { listOpenPorts } from "./open-ports";
 import { readAllVolumeUsage } from "./volume-usage";
 import { type ScanManager, createScanManager } from "./vulnerability-scan/scan-manager";
@@ -219,15 +219,21 @@ export async function runAgentLoop(
         // `access-methods.ts` — not hardcoded placeholders. The three scans have
         // no data dependency on each other, so they run concurrently rather than
         // one after another.
-        const [installedPackages, openPorts, runningAccessMethods, packageVersions] =
-          await Promise.all([
-            listInstalledPackages(),
-            listOpenPorts(),
-            listRunningAccessMethods(),
-            // Only the allowed set — versions exist to check pins, and only
-            // declared entries carry pins.
-            declaredPackageVersions(allowedPackages),
-          ]);
+        const [
+          installedPackages,
+          manuallyInstalledPackages,
+          openPorts,
+          runningAccessMethods,
+          packageVersions,
+        ] = await Promise.all([
+          listInstalledPackages(),
+          listManuallyInstalledPackages(),
+          listOpenPorts(),
+          listRunningAccessMethods(),
+          // Only the allowed set — versions exist to check pins, and only
+          // declared entries carry pins.
+          declaredPackageVersions(allowedPackages),
+        ]);
         // Synchronous and cheap (two statfs calls), so it stays out of the Promise.all.
         const volumeUsage = readAllVolumeUsage();
         const hardeningBaseline = readHardeningBaseline();
@@ -239,6 +245,9 @@ export async function runAgentLoop(
           agentVersion: AGENT_VERSION,
           observedAt: new Date().toISOString(),
           installedPackages,
+          // Omitted when unknown, so the control plane keeps treating every
+          // installed package as possibly intended rather than none of them.
+          ...(manuallyInstalledPackages ? { manuallyInstalledPackages } : {}),
           ...(Object.keys(packageVersions).length > 0
             ? { declaredPackageVersions: packageVersions }
             : {}),

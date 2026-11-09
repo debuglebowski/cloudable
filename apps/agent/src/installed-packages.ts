@@ -88,6 +88,29 @@ export const bunCommandRunner: CommandRunner = {
 /** Tries each known package manager in order, returns the first whose binary is
  * present and exits cleanly. `runner` defaults to actually shelling out
  * (`bunCommandRunner`); tests inject a fake one instead. */
+/**
+ * The packages someone installed on purpose, as opposed to the ones apt pulled
+ * in to satisfy them. `apt-mark showmanual` reads apt's own record of that
+ * (`/var/lib/apt/extended_states`).
+ *
+ * Reported so the "no undeclared software" check can ask the question it means:
+ * did someone install something nobody allowed? Without it, declaring
+ * `build-essential` and installing it through Cloudable still reads as several
+ * dozen undeclared packages, because gcc, make and binutils came with it.
+ *
+ * Returns `null` when the answer is not known: no apt (an rpm machine), or the
+ * command failed. `null` and `[]` mean different things, exactly as for the
+ * installed list, and the control plane falls back to treating every installed
+ * package as possibly intended.
+ */
+export async function listManuallyInstalledPackages(
+  runner: CommandRunner = bunCommandRunner,
+): Promise<string[] | null> {
+  const result = await runner.run("apt-mark", ["showmanual"]);
+  if (result === null || result.exitCode !== 0) return null;
+  return [...new Set(linesOf(result.stdout))];
+}
+
 export async function listInstalledPackages(
   runner: CommandRunner = bunCommandRunner,
 ): Promise<string[]> {

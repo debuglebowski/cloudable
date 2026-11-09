@@ -140,6 +140,13 @@ export interface AgentReportRequest {
   readonly observedAt: string;
   readonly installedPackages: readonly string[];
   /**
+   * The subset of `installedPackages` someone installed on purpose
+   * (`apt-mark showmanual`). Everything else was pulled in as a dependency.
+   * Absent when the agent cannot tell (no apt, or an older agent): then every
+   * installed package counts as possibly intended.
+   */
+  readonly manuallyInstalledPackages?: readonly string[];
+  /**
    * Installed version per package, but only for packages the poll named as
    * allowed — not the whole inventory.
    *

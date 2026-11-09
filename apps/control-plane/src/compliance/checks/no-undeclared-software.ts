@@ -28,7 +28,11 @@ const stringArray = (value: unknown): string[] | null =>
  * check passed everywhere by construction. `machine.drift_resolved` was never
  * emitted by anything, so a finding it did open could never close.
  *
- * Now: reported inventory, minus the image baseline, minus anything allowed.
+ * Now: reported inventory, minus the image baseline, minus anything allowed,
+ * minus what apt installed only as a dependency (when the agent reports which
+ * packages were installed on purpose). Declaring `build-essential` must not
+ * leave gcc, make and binutils reading as undeclared. Known limit: a dependency
+ * left behind after its parent is removed is not flagged.
  * The same set the machine's packages table shows with its toggle off, via the
  * same `buildPackagesView` — one definition of "undeclared", not two that can
  * drift apart.
@@ -121,6 +125,7 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
             manifest,
             installedPackages,
             baselinePackages: stringArray(machine.baselinePackages),
+            manuallyInstalledPackages: stringArray(machine.manuallyInstalledPackages),
           }),
         );
 

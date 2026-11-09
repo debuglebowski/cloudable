@@ -245,6 +245,9 @@ function PermissionCell({
   if (row.isBaseline && row.permission === null) {
     return <span className="text-sm text-muted-foreground">from the image</span>;
   }
+  if (row.installedAsDependency && row.permission === null) {
+    return <span className="text-sm text-muted-foreground">dependency</span>;
+  }
   if (!canEdit) {
     return row.permission === "disallowed" ? (
       <Badge variant="outline">disallowed</Badge>

@@ -195,6 +195,14 @@ return what is installed that nothing allows and that did not ship with the imag
 Subtracting the baseline is what makes the answer usable. A real Ubuntu server image carries several
 hundred packages; without it, every machine reports several hundred findings on its first check-in.
 
+Dependencies are subtracted too. The agent reports which installed packages someone asked for on
+purpose (`apt-mark showmanual`). Anything else came in because one of those needed it, and is judged
+through the package that pulled it in. Declaring `build-essential` therefore does not leave gcc, make
+and binutils reading as undeclared. A package named on an install command line is marked manual by
+apt, so it is still judged on its own. Two limits: a dependency left behind after its parent is
+removed is not flagged, and an agent that cannot tell (no apt, or an older agent) reports nothing, so
+every installed package counts, as before.
+
 One definition, two consumers, deliberately: the table a person looks at and the finding an auditor
 reads are computed by the same function, so they cannot disagree. Neither has any license to act —
 removing a package is always an explicit per-package action someone asked for.
