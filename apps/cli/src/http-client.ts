@@ -33,6 +33,14 @@ function describe(status: number, body: unknown): string {
     }
     if (typeof record.message === "string" && record.message !== "") return record.message;
 
+    // Roles from the identity provider: the role behind this token is older than the recheck
+    // interval. Only a fresh SSO sign-in renews it, and `cloudable login` is that sign-in.
+    if (
+      record._tag === "AuthenticationRequired" &&
+      record.reason === "idp_reauthentication_required"
+    ) {
+      return "your role must be confirmed by your identity provider again (at least hourly). Run `cloudable login`.";
+    }
     // An Effect tagged error: the tag is the reason, the rest is the detail.
     if (typeof record._tag === "string") {
       const detail = Object.entries(record)

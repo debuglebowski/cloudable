@@ -80,8 +80,9 @@ export function useSignOutMutation() {
   });
 }
 
-/** Shown wherever a role or approver flag would otherwise be editable. Same words as the API's refusal. */
-export const ROLES_MANAGED_BY_IDP = "Roles are managed by your identity provider.";
+/** Shown wherever a role or approver flag would otherwise be editable: the shared contract's
+ * refusal message, the same words the API's 409 carries. */
+export { ROLES_MANAGED_MESSAGE as ROLES_MANAGED_BY_IDP } from "@normain/idp-role-contract";
 
 /** Whether roles come from the identity provider. False until the server has said so: the API refuses changes either way. */
 export function useRolesFromIdp(): boolean {
