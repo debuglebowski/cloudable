@@ -1,11 +1,12 @@
-import { certificates, machines, people, sessions } from "@cloudable/schema";
+import { certificates, idpRoleMode, machines, people, sessions } from "@cloudable/schema";
 import { HttpApiBuilder } from "@effect/platform";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { isAdmin } from "../../domain/authz";
-import { ensureActivation } from "../../idp-roles/activation";
+import { MODE_ROW_ID, ensureActivation } from "../../idp-roles/activation";
+import { checkModeFence } from "../../idp-roles/mode-fence";
 import { checkStanding, roleEvidenceDeadline } from "../../idp-roles/standing";
 import { verifyCliAuthCode } from "../../services/CliAuthCode";
 import { CLI_TOKEN_TTL_MS, issueCliToken } from "../../services/CliToken";
@@ -86,6 +87,13 @@ const requirePersonStanding = (personId: string, codeIssuedAt: number) =>
     const db = yield* Db;
     const idpRoles = config.idpRoles;
     if (idpRoles !== null) yield* Effect.promise(() => ensureActivation(db, idpRoles));
+    if ((yield* Effect.promise(() => checkModeFence(db, idpRoles))) !== "ok") {
+      return yield* Effect.fail({
+        code: "denied" as const,
+        message:
+          "Sign-in settings are changing on this deployment. Try `cloudable login` again shortly.",
+      });
+    }
     const rows = yield* Effect.tryPromise(() =>
       db
         .select({
@@ -124,6 +132,63 @@ const requirePersonStanding = (personId: string, codeIssuedAt: number) =>
     }
   });
 
+/**
+ * The last check before credentials leave: the persisted mode and the person, read under share
+ * locks. Activation (`idp_role_mode` FOR UPDATE) and a refused sign-in (`people` FOR UPDATE)
+ * cannot commit while this holds them, so either they committed before (and this refuses, and
+ * revokes the certificate just stored) or they commit after (and the code-dated token is refused
+ * by them). Mode off: the same check, minus freshness, exactly as at the start of redemption.
+ */
+const confirmStandingAtIssue = (personId: string, codeIssuedAt: number, certificateId: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const idpRoles = config.idpRoles;
+    const refusal = yield* Effect.tryPromise(() =>
+      db.transaction(async (tx) => {
+        const [mode] = await tx
+          .select({
+            enabled: idpRoleMode.enabled,
+            configFingerprint: idpRoleMode.configFingerprint,
+          })
+          .from(idpRoleMode)
+          .where(eq(idpRoleMode.id, MODE_ROW_ID))
+          .for("share");
+        const persistedOn = mode?.enabled === true;
+        const fenced =
+          idpRoles === null
+            ? !persistedOn
+            : persistedOn && mode?.configFingerprint === idpRoles.fingerprint;
+        const [person] = await tx
+          .select({
+            active: people.active,
+            credentialsRevokedAt: people.credentialsRevokedAt,
+            idpRolesVerifiedAt: people.idpRolesVerifiedAt,
+          })
+          .from(people)
+          .where(eq(people.id, personId))
+          .for("share");
+        const result = !fenced
+          ? "idp_roles_config_mismatch"
+          : person
+            ? checkStanding(person, codeIssuedAt, Date.now(), idpRoles)
+            : "deactivated";
+        if (result !== null) {
+          await tx
+            .update(certificates)
+            .set({ revokedAt: new Date(), revokedReason: "revoked_during_issue" })
+            .where(eq(certificates.id, certificateId));
+        }
+        return result;
+      }),
+    ).pipe(Effect.orDie);
+    if (refusal !== null) {
+      return yield* Effect.fail({
+        code: "denied" as const,
+        message: "Your access changed while signing in. Run `cloudable login` again.",
+      });
+    }
+  });
+
 export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
   handlers
     .handle("issueCertificate", ({ payload }) =>
@@ -158,6 +223,12 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
           subjectPublicKeyRaw,
           notAfter: roleEvidenceEnds ?? undefined,
         });
+        // Signing and storing the certificate took time. Check the person once more, under
+        // locks that a refused sign-in or an activation must wait for, so nothing is handed
+        // out that was revoked meanwhile. Revocations after this commit still apply: the
+        // token below carries the code's issue time, not now.
+        yield* confirmStandingAtIssue(verified.personId, verified.issuedAt, issued.certificateId);
+
         // One sign-in, both credentials. The certificate is for sshd on the
         // machine, which verifies it offline; the token is for this API,
         // which re-checks the person on every call. See `CliToken.ts` for
@@ -167,8 +238,8 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
           certificate: issued.certificate,
           fingerprint: issued.fingerprint,
           expiresAt: issued.expiresAt.toISOString(),
-          token: issueCliToken({ personId: verified.personId }),
-          tokenExpiresAt: new Date(Date.now() + CLI_TOKEN_TTL_MS).toISOString(),
+          token: issueCliToken({ personId: verified.personId, issuedAt: verified.issuedAt }),
+          tokenExpiresAt: new Date(verified.issuedAt + CLI_TOKEN_TTL_MS).toISOString(),
         };
       }).pipe(Effect.catchTag("SshCaError", (e) => Effect.fail(asAccessError(e)))),
     )

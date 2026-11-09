@@ -1,5 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { fingerprintOf, readIdpRolesConfig } from "./config";
+import { type IdpTrust, fingerprintOf, readIdpRolesConfig } from "./config";
+
+const IDP: IdpTrust = {
+  providerId: "configured",
+  entityId: "https://sts.windows.net/tenant/",
+  ssoUrl: "https://login.microsoftonline.com/tenant/saml2",
+  emailDomains: "example.com",
+  certs: ["MIIC-cert-a"],
+};
 
 const CLAIM = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role";
 const ON = {
@@ -12,9 +20,9 @@ const ON = {
   }),
 };
 
-const refused = (env: Record<string, string | undefined>, idpConfigured = true) => {
+const refused = (env: Record<string, string | undefined>, idp: IdpTrust | null = IDP) => {
   try {
-    readIdpRolesConfig(env, idpConfigured);
+    readIdpRolesConfig(env, idp);
     return undefined;
   } catch (error) {
     return error as { code?: string; message: string };
@@ -23,12 +31,12 @@ const refused = (env: Record<string, string | undefined>, idpConfigured = true) 
 
 describe("readIdpRolesConfig (shared parseConfig + Cloudable's startup rules)", () => {
   it("is off by default and when explicitly off", () => {
-    expect(readIdpRolesConfig({}, false)).toBeNull();
-    expect(readIdpRolesConfig({ IDP_ROLES_ENABLED: "false" }, false)).toBeNull();
+    expect(readIdpRolesConfig({}, null)).toBeNull();
+    expect(readIdpRolesConfig({ IDP_ROLES_ENABLED: "false" }, null)).toBeNull();
   });
 
   it("reads the canonical keys, with a one-hour default interval", () => {
-    const parsed = readIdpRolesConfig(ON, true);
+    const parsed = readIdpRolesConfig(ON, IDP);
     expect(parsed).toMatchObject({
       enabled: true,
       claim: CLAIM,
@@ -37,7 +45,7 @@ describe("readIdpRolesConfig (shared parseConfig + Cloudable's startup rules)", 
     });
     expect(parsed?.fingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(
-      readIdpRolesConfig({ ...ON, IDP_RECHECK_INTERVAL_SECONDS: "900" }, true)?.intervalSec,
+      readIdpRolesConfig({ ...ON, IDP_RECHECK_INTERVAL_SECONDS: "900" }, IDP)?.intervalSec,
     ).toBe(900);
   });
 
@@ -58,29 +66,36 @@ describe("readIdpRolesConfig (shared parseConfig + Cloudable's startup rules)", 
   });
 
   it("needs the identity provider declared in deployment config", () => {
-    expect(refused(ON, false)?.message).toContain("IDP_SAML_CONFIG");
+    expect(refused(ON, null)?.message).toContain("IDP_SAML_CONFIG");
   });
 
   it("cannot be combined with password sign-in", () => {
     expect(refused({ ...ON, PASSWORD_SIGN_IN: "on" })?.message).toContain("PASSWORD_SIGN_IN");
   });
 
-  it("fingerprints the claim and mapping, not their order", () => {
-    const a = fingerprintOf({
+  it("fingerprints claim, mapping, interval and the provider's identity and trust, not their order", () => {
+    const base = {
       claim: "roles",
       mapping: { A: ["admin", "approver"], B: ["member"] },
-    });
-    const b = fingerprintOf({
-      claim: "roles",
-      mapping: { B: ["member"], A: ["approver", "admin"] },
-    });
-    const c = fingerprintOf({ claim: "roles", mapping: { A: ["admin"], B: ["member"] } });
-    const d = fingerprintOf({
-      claim: "groups",
-      mapping: { B: ["member"], A: ["approver", "admin"] },
-    });
-    expect(a).toBe(b);
-    expect(a).not.toBe(c);
-    expect(a).not.toBe(d);
+      intervalSec: 3600,
+    };
+    const a = fingerprintOf(base, IDP);
+    expect(
+      fingerprintOf({ ...base, mapping: { B: ["member"], A: ["approver", "admin"] } }, IDP),
+    ).toBe(a);
+    expect(fingerprintOf(base, { ...IDP, certs: ["MIIC-cert-a"] })).toBe(a);
+    for (const changed of [
+      fingerprintOf({ ...base, mapping: { A: ["admin"], B: ["member"] } }, IDP),
+      fingerprintOf({ ...base, claim: "groups" }, IDP),
+      fingerprintOf({ ...base, intervalSec: 1800 }, IDP),
+      fingerprintOf(base, { ...IDP, entityId: "https://other-idp.example/" }),
+      fingerprintOf(base, { ...IDP, certs: ["MIIC-cert-b"] }),
+      fingerprintOf(base, { ...IDP, emailDomains: "other.example" }),
+      fingerprintOf(base, { ...IDP, ssoUrl: "https://other-idp.example/sso" }),
+    ]) {
+      expect(changed).not.toBe(a);
+    }
+    // Certificates are digested, never stored.
+    expect(a).not.toContain("MIIC");
   });
 });

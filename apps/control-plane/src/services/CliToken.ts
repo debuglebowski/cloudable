@@ -57,11 +57,18 @@ const isCliTokenPayload = (value: unknown): value is CliTokenPayload => {
   );
 };
 
-export const issueCliToken = (input: { personId: string }): string => {
+/**
+ * `issuedAt` (ms) dates the token earlier than now. `cloudable login` passes the CLI sign-in
+ * code's own issue time, so the token's authority starts where the code's did: a revocation
+ * after the code was issued (a refused sign-in, the identity-provider mode switching on) refuses
+ * the token too, however long redemption took. Never later than now.
+ */
+export const issueCliToken = (input: { personId: string; issuedAt?: number }): string => {
+  const now = Date.now();
   const payload: CliTokenPayload = {
     purpose: PURPOSE,
     personId: input.personId,
-    iat: Date.now(),
+    iat: input.issuedAt !== undefined ? Math.min(input.issuedAt, now) : now,
   };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${PURPOSE}.${body}.${sign(`${PURPOSE}.${body}`)}`;

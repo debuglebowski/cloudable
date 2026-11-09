@@ -6,6 +6,7 @@ import { auth } from "../../auth";
 import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { ensureActivation } from "../../idp-roles/activation";
+import { checkModeFence } from "../../idp-roles/mode-fence";
 import { checkStanding } from "../../idp-roles/standing";
 import { verifyCliToken } from "../../services/CliToken";
 
@@ -49,6 +50,10 @@ export class AuthenticationRequired extends Schema.TaggedError<AuthenticationReq
       // older than the recheck interval (or none at all). A fresh SSO sign-in fixes it; the
       // console starts one, the CLI says to run `cloudable login`.
       "idp_reauthentication_required",
+      // This replica's roles-from-the-IdP config does not match the persisted mode (a rollout in
+      // progress, or replicas configured differently). Refused until they agree. See
+      // `idp-roles/mode-fence.ts`.
+      "idp_roles_config_mismatch",
     ),
   },
   HttpApiSchema.annotations({ status: 401 }),
@@ -137,6 +142,13 @@ export const CurrentUserAuthenticationLive = Layer.effect(
         // applied; the next request tries again. After the first request this is a resolved
         // promise.
         yield* Effect.promise(() => ensureActivation(db, idpRoles));
+      }
+      // Every request, both modes: this replica's config must match the persisted mode. With
+      // the mode off and never switched on this always passes, so nothing changes there.
+      if ((yield* Effect.promise(() => checkModeFence(db, idpRoles))) !== "ok") {
+        return yield* Effect.fail(
+          new AuthenticationRequired({ reason: "idp_roles_config_mismatch" }),
+        );
       }
 
       const token = bearerToken(request.headers);

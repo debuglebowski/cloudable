@@ -1,23 +1,53 @@
 import { createHash } from "node:crypto";
 import { CLOUDABLE_TARGETS, IdpRoleError, type RoleConfig, parseConfig } from "./contract";
 
+/** The parts of the configured identity provider that decide whose assertions are trusted. */
+export interface IdpTrust {
+  readonly providerId: string;
+  readonly entityId: string;
+  readonly ssoUrl: string;
+  readonly emailDomains: string;
+  readonly certs: readonly string[];
+}
+
 /** Roles from the identity provider, switched on. `null` everywhere else means off. */
 export interface IdpRolesConfig extends RoleConfig {
   readonly enabled: true;
   /**
-   * SHA-256 of the claim name and mapping. Stored with the activation (`idp_role_mode`), so a
-   * change to either is a new activation: everyone signs in again under the new rules.
+   * SHA-256 of everything role evidence depends on: the claim name, the mapping, the recheck
+   * interval, and the identity provider's identity and trust anchors (provider id, entity id, SSO
+   * URL, email domains, signing certificates). Stored with the activation (`idp_role_mode`), so a
+   * change to any of them is a new activation: every human credential ends and everyone signs in
+   * again, so evidence from one provider or policy can never be reused under another. A routine
+   * IdP certificate rollover is therefore also a (cheap) new activation: one SSO redirect each.
    */
   readonly fingerprint: string;
 }
 
-export const fingerprintOf = (config: Pick<RoleConfig, "claim" | "mapping">): string => {
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+
+export const fingerprintOf = (
+  config: Pick<RoleConfig, "claim" | "mapping" | "intervalSec">,
+  idp: IdpTrust,
+): string => {
   const mapping = Object.keys(config.mapping)
     .sort()
     .map((key) => [key, [...(config.mapping[key] ?? [])].sort()]);
-  return createHash("sha256")
-    .update(JSON.stringify({ claim: config.claim, mapping }))
-    .digest("hex");
+  return sha256(
+    JSON.stringify({
+      claim: config.claim,
+      mapping,
+      intervalSec: config.intervalSec,
+      idp: {
+        providerId: idp.providerId,
+        entityId: idp.entityId,
+        ssoUrl: idp.ssoUrl,
+        emailDomains: idp.emailDomains,
+        // Digests only: the fingerprint is stored and compared, never the certificates.
+        certs: idp.certs.map(sha256).sort(),
+      },
+    }),
+  );
 };
 
 /**
@@ -34,11 +64,11 @@ export const fingerprintOf = (config: Pick<RoleConfig, "claim" | "mapping">): st
  */
 export const readIdpRolesConfig = (
   env: Readonly<Record<string, string | undefined>>,
-  idpConfigured: boolean,
+  idp: IdpTrust | null,
 ): IdpRolesConfig | null => {
   const parsed = parseConfig(env, CLOUDABLE_TARGETS);
   if (!parsed.enabled) return null;
-  if (!idpConfigured) {
+  if (idp === null) {
     throw new IdpRoleError(
       "INVALID_IDP_ROLE_CONFIG",
       "IDP_ROLES_ENABLED=true needs the identity provider declared in deployment config (IDP_METADATA_URL and IDP_SAML_CONFIG).",
@@ -50,5 +80,5 @@ export const readIdpRolesConfig = (
       "IDP_ROLES_ENABLED=true cannot be combined with PASSWORD_SIGN_IN=on: a password sign-in carries no role evidence.",
     );
   }
-  return { ...parsed, enabled: true, fingerprint: fingerprintOf(parsed) };
+  return { ...parsed, enabled: true, fingerprint: fingerprintOf(parsed, idp) };
 };
