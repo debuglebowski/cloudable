@@ -3,6 +3,7 @@ import { CONFIGURED_IDP_PROVIDER_ID } from "../config";
 import type { AnyPgDb } from "./activation";
 import { logAudit } from "./audit";
 import type { IdpRolesConfig } from "./config";
+import { checkFreshAssertion, currentAssertionFacts } from "./saml-assertion";
 import { applyVerifiedAssertion } from "./sync";
 
 /**
@@ -22,6 +23,8 @@ const DESCRIPTIONS: Record<string, string> = {
   role_provider_not_trusted: "Sign in through your organisation's identity provider.",
   no_matching_person: "No Cloudable person exists for this account. Ask an org admin.",
   idp_roles_config_changed: "Cloudable is restarting with new sign-in settings. Try again shortly.",
+  saml_assertion_rejected:
+    "Your identity provider's sign-in could not be used as proof of your role. Sign in again.",
 };
 
 /**
@@ -62,13 +65,26 @@ export const idpRoleProvisioning = (db: AnyPgDb, config: IdpRolesConfig, loginUr
       );
       return refuse(loginUrl, "role_provider_not_trusted");
     }
+    // The plugin has verified the assertion's signature, audience, recipient and the outer
+    // InResponseTo by now. What it does not check is that the signed assertion itself answers
+    // that request, and how old it is: `checkFreshAssertion` does, from the assertion's own
+    // signed fields. Its IssueInstant becomes the time of the role evidence.
+    const fresh = checkFreshAssertion(currentAssertionFacts(), Date.now());
+    if (!fresh.ok) {
+      console.warn(`[security] idp-roles sign-in refused: ${fresh.reason}`);
+      return refuse(loginUrl, "saml_assertion_rejected");
+    }
     const result = await applyVerifiedAssertion(db, config, {
       email: user.email,
       authUserId: user.id,
       providerId: provider.providerId,
       claim: userInfo[IDP_ROLE_CLAIM_FIELD],
-      receivedAt: new Date(),
+      assertionIssuedAt: fresh.issuedAt,
     });
+    if (result.kind === "stale_evidence") {
+      console.warn("[security] idp-roles sign-in refused: assertion older than recorded evidence");
+      return refuse(loginUrl, "saml_assertion_rejected");
+    }
     if (result.kind === "no_person") {
       console.warn("[security] idp-roles sign-in refused: no person for the signed-in account");
       return refuse(loginUrl, "no_matching_person");

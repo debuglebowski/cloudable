@@ -14,6 +14,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { CONFIGURED_IDP_PROVIDER_ID, config } from "./config";
 import { openPostgres } from "./db/connect";
+import { withAssertionFacts } from "./idp-roles/saml-assertion";
 import { IDP_ROLE_CLAIM_FIELD, idpRoleProvisioning } from "./idp-roles/sign-in";
 import { SAML_REQUEST_TTL_MS } from "./idp-roles/sync";
 import { spIssuer } from "./services/saml-metadata";
@@ -315,4 +316,13 @@ const options = {
   },
 } satisfies BetterAuthOptions;
 
-export const auth: AuthInstance = betterAuth(options);
+const instance: AuthInstance = betterAuth(options);
+
+/**
+ * With roles from the identity provider on, every request goes through `withAssertionFacts`, so
+ * the sign-in hook can check the posted SAML assertion's own signed fields (request binding and
+ * issue time, `idp-roles/saml-assertion.ts`). Mode off: the BetterAuth instance, untouched.
+ */
+export const auth: AuthInstance = config.idpRoles
+  ? { ...instance, handler: (request) => withAssertionFacts(request, instance.handler) }
+  : instance;

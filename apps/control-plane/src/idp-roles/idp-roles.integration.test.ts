@@ -45,6 +45,7 @@ import {
 } from "./activation";
 import { type IdpRolesConfig, readIdpRolesConfig } from "./config";
 import { ROLES_MANAGED_BY_IDP, ROLES_MANAGED_HTTP_STATUS, ROLES_MANAGED_MESSAGE } from "./contract";
+import { type AssertionFacts, runWithAssertionFacts } from "./saml-assertion";
 import { IDP_ROLE_CLAIM_FIELD, idpRoleProvisioning } from "./sign-in";
 import { SAML_REQUEST_TTL_MS } from "./sync";
 
@@ -67,6 +68,13 @@ const BASE_URL =
 const reachable = await isDbReachable(BASE_URL);
 
 const CLAIM = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role";
+const TEST_IDP = {
+  providerId: CONFIGURED_IDP_PROVIDER_ID,
+  entityId: "https://sts.windows.net/tenant/",
+  ssoUrl: "https://login.microsoftonline.com/tenant/saml2",
+  emailDomains: "example.com",
+  certs: ["MIIC-fake-cert"],
+};
 const MANAGED = readIdpRolesConfig(
   {
     IDP_ROLES_ENABLED: "true",
@@ -77,7 +85,7 @@ const MANAGED = readIdpRolesConfig(
       "Cloudable.Approver": ["approver"],
     }),
   },
-  true,
+  TEST_IDP,
 ) as IdpRolesConfig;
 const REMAPPED = readIdpRolesConfig(
   {
@@ -85,7 +93,7 @@ const REMAPPED = readIdpRolesConfig(
     IDP_ROLE_CLAIM: CLAIM,
     IDP_ROLE_MAPPING: JSON.stringify({ "Cloudable.Admin": ["admin", "approver"] }),
   },
-  true,
+  TEST_IDP,
 ) as IdpRolesConfig;
 const LOGIN_URL = "https://cloudable.example.com/login";
 
@@ -224,14 +232,31 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
   };
 
   /** What BetterAuth's SSO plugin does after verifying an assertion: call the provisioning hook. */
-  const signIn = async (who: Seeded, claim: unknown, mode = MANAGED) => {
+  /** Facts of a fresh signed assertion answering a request, as `withAssertionFacts` reads them.
+   * The XML and signature path itself is covered by `saml-acs.integration.test.ts`. */
+  const freshFacts = (issuedAt = Date.now() - 1000): AssertionFacts => ({
+    responseInResponseTo: "_req",
+    assertionCount: 1,
+    encryptedCount: 0,
+    issueInstant: issuedAt,
+    signedInResponseTo: ["_req"],
+  });
+
+  const signIn = async (
+    who: Seeded,
+    claim: unknown,
+    mode = MANAGED,
+    facts: AssertionFacts | null = freshFacts(),
+  ) => {
     const hook = idpRoleProvisioning(iso.db, mode, LOGIN_URL);
     try {
-      await hook.provisionUser({
-        user: { id: who.authUserId, email: who.email },
-        userInfo: { email: who.email, [IDP_ROLE_CLAIM_FIELD]: claim },
-        provider: { providerId: CONFIGURED_IDP_PROVIDER_ID },
-      });
+      await runWithAssertionFacts(facts ?? undefined, () =>
+        hook.provisionUser({
+          user: { id: who.authUserId, email: who.email },
+          userInfo: { email: who.email, [IDP_ROLE_CLAIM_FIELD]: claim },
+          provider: { providerId: CONFIGURED_IDP_PROVIDER_ID },
+        }),
+      );
       await tick();
       return { refused: null as string | null };
     } catch (error) {
@@ -325,14 +350,16 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
   test("grant: a verified sign-in sets role and flag, stores evidence no later than the assertion, and is audited", async () => {
     await forceModeRow(MANAGED);
     const who = await seed("member");
-    const before = Date.now();
-    expect((await signIn(who, ["Cloudable.Admin", "Cloudable.Approver"])).refused).toBeNull();
+    const issuedAt = Date.now() - 90_000;
+    expect(
+      (await signIn(who, ["Cloudable.Admin", "Cloudable.Approver"], MANAGED, freshFacts(issuedAt)))
+        .refused,
+    ).toBeNull();
     const row = await personRow(who.personId);
     expect(grantsOfRow(row)).toEqual(["admin", "approver"]);
-    // A lower bound on when the assertion was issued, never receipt time.
+    // The role evidence is dated by the assertion's own signed IssueInstant, not receipt time.
     const verifiedAt = row.idpRolesVerifiedAt?.getTime() ?? 0;
-    expect(verifiedAt).toBeLessThanOrEqual(Date.now() - SAML_REQUEST_TTL_MS + 1000);
-    expect(verifiedAt).toBeGreaterThanOrEqual(before - SAML_REQUEST_TTL_MS - 1000);
+    expect(verifiedAt).toBe(issuedAt);
     expect((await me(issueCliToken({ personId: who.personId }))).status).toBe(200);
 
     const granted = await auditEvents(who.orgId, "idp_roles.granted");
@@ -360,9 +387,87 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
     );
   });
 
+  test("the hook refuses an assertion not bound to the request, too old, or older than recorded evidence", async () => {
+    await forceModeRow(MANAGED);
+    const who = await seed("member");
+    for (const facts of [
+      null,
+      { ...freshFacts(), signedInResponseTo: ["_old_request"] },
+      { ...freshFacts(), signedInResponseTo: [] },
+      { ...freshFacts(), encryptedCount: 1 },
+      { ...freshFacts(), assertionCount: 2 },
+      freshFacts(Date.now() - SAML_REQUEST_TTL_MS - 1000),
+      freshFacts(Date.now() + 120_000),
+    ]) {
+      expect((await signIn(who, "Cloudable.Admin", MANAGED, facts)).refused).toBe(
+        "saml_assertion_rejected",
+      );
+    }
+    expect((await personRow(who.personId)).role).toBe("member");
+    expect(
+      (await signIn(who, "Cloudable.Admin", MANAGED, freshFacts(Date.now() - 1000))).refused,
+    ).toBeNull();
+    expect(
+      (await signIn(who, "Cloudable.Admin", MANAGED, freshFacts(Date.now() - 60_000))).refused,
+    ).toBe("saml_assertion_rejected");
+  });
+
+  test("a new identity provider cannot reuse evidence from the previous one", async () => {
+    await forceModeRow(null);
+    const who = await seed("member");
+    expect((await reconcileActivation(iso.db, MANAGED)).kind).toBe("activated");
+    setMode(MANAGED);
+    expect((await signIn(who, "Cloudable.Admin")).refused).toBeNull();
+    const token = issueCliToken({ personId: who.personId });
+    expect((await me(token)).status).toBe(200);
+
+    const otherIdp = readIdpRolesConfig(
+      {
+        IDP_ROLES_ENABLED: "true",
+        IDP_ROLE_CLAIM: CLAIM,
+        IDP_ROLE_MAPPING: JSON.stringify({
+          "Cloudable.Admin": ["admin"],
+          "Cloudable.Member": ["member"],
+          "Cloudable.Approver": ["approver"],
+        }),
+      },
+      { ...TEST_IDP, entityId: "https://other-idp.example/", certs: ["MIIC-other"] },
+    ) as IdpRolesConfig;
+    expect(otherIdp.fingerprint).not.toBe(MANAGED.fingerprint);
+    // A replica still on the old provider is fenced off as soon as the new one is persisted.
+    expect((await reconcileActivation(iso.db, otherIdp)).kind).toBe("activated");
+    expect((await me(token)).status).toBe(401);
+    expect((await me(token)).body.reason).toBe("idp_roles_config_mismatch");
+    setMode(otherIdp);
+    // Under the new provider: old evidence cleared, old credentials refused.
+    expect((await personRow(who.personId)).idpRolesVerifiedAt).toBeNull();
+    expect((await me(token)).status).toBe(401);
+    // And a sign-in under the old provider's config cannot write evidence any more.
+    expect((await signIn(who, "Cloudable.Admin", MANAGED)).refused).toBe(
+      "idp_roles_config_changed",
+    );
+    expect((await signIn(who, "Cloudable.Admin", otherIdp)).refused).toBeNull();
+    expect((await me(issueCliToken({ personId: who.personId }))).status).toBe(200);
+  });
+
+  test("mixed replicas: a mode-off replica refuses everything while the persisted mode is on, and vice versa", async () => {
+    await forceModeRow(MANAGED);
+    const who = await seed("owner", { verifiedAt: new Date() });
+    const token = issueCliToken({ personId: who.personId });
+    // This replica: mode off. Persisted: on. Refused, not served unmanaged.
+    setMode(null);
+    const refused = await me(token);
+    expect(refused.status).toBe(401);
+    expect(refused.body.reason).toBe("idp_roles_config_mismatch");
+    expect((await redeemCode(who)).status).toBe(403);
+    // Persisted off, replica off: today's behaviour.
+    await forceModeRow(null);
+    expect((await me(token)).status).toBe(200);
+  });
+
   test("approver alone is not a role: refused", async () => {
     await forceModeRow(MANAGED);
-    const who = await seed("admin", { approver: true, verifiedAt: new Date() });
+    const who = await seed("admin", { approver: true, verifiedAt: new Date(Date.now() - 60_000) });
     expect((await signIn(who, "Cloudable.Approver")).refused).toBe("no_mapped_role");
     expect(grantsOfRow(await personRow(who.personId))).toEqual(["member"]);
   });
@@ -625,7 +730,10 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
         }
         case "remove": {
           await forceModeRow(MANAGED);
-          const who = await seed("admin", { approver: true, verifiedAt: new Date() });
+          const who = await seed("admin", {
+            approver: true,
+            verifiedAt: new Date(Date.now() - 60_000),
+          });
           const previousGrants = grantsOfRow(await personRow(who.personId));
           await signIn(who, "Cloudable.Member");
           return {
@@ -639,7 +747,10 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
         case "invalid_claim":
         case "credentials_revoked": {
           await forceModeRow(MANAGED);
-          const who = await seed("admin", { approver: true, verifiedAt: new Date() });
+          const who = await seed("admin", {
+            approver: true,
+            verifiedAt: new Date(Date.now() - 60_000),
+          });
           const oldToken = issueCliToken({ personId: who.personId });
           const machineCred = (await agentToken()).mint({
             orgId: who.orgId,

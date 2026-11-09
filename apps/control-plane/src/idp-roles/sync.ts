@@ -10,11 +10,9 @@ import { type AuditEvent, SERVICE, resolveGrants } from "./contract";
 import { decideCloudableRole, grantsOf } from "./precedence";
 
 /**
- * How old a verified assertion can be when it arrives. Every accepted assertion answers an
- * AuthnRequest this deployment issued, consumed once, and kept for at most this long
- * (`@better-auth/sso` `saml.requestTTL`, set in `auth.ts`). So the assertion was issued no
- * earlier than this before it was received, and receipt minus this is a safe lower bound on its
- * issue time. Recording that bound, not receipt time, keeps the freshness window honest.
+ * The AuthnRequest lifetime (`@better-auth/sso` `saml.requestTTL`, set in `auth.ts`): how long a
+ * request this deployment issued stays answerable. A signed assertion must answer one, and be at
+ * most this old by its own IssueInstant (`saml-assertion.ts`).
  */
 export const SAML_REQUEST_TTL_MS = 5 * 60 * 1000;
 
@@ -27,8 +25,9 @@ export interface VerifiedAssertion {
   readonly providerId: string;
   /** The raw role attribute from the assertion: a string, an array of strings, or absent. */
   readonly claim: unknown;
-  /** When the assertion was received and verified. */
-  readonly receivedAt: Date;
+  /** The verified assertion's own signed IssueInstant (`checkFreshAssertion`). Recorded as the
+   * time of the role evidence. */
+  readonly assertionIssuedAt: Date;
 }
 
 export type SyncResult =
@@ -39,7 +38,8 @@ export type SyncResult =
       readonly audit: AuditEvent;
     }
   | { readonly kind: "no_person" }
-  | { readonly kind: "mode_mismatch" };
+  | { readonly kind: "mode_mismatch" }
+  | { readonly kind: "stale_evidence" };
 
 /**
  * Applies one verified SAML assertion to the person it names, in one transaction with the audit
@@ -63,7 +63,7 @@ export const applyVerifiedAssertion = async (
   const targets = resolveGrants({ [config.claim]: input.claim }, config);
   const decision = decideCloudableRole(targets);
   const email = input.email.trim().toLowerCase();
-  const now = input.receivedAt;
+  const now = new Date();
 
   return db.transaction(async (tx) => {
     const [mode] = await tx
@@ -94,17 +94,17 @@ export const applyVerifiedAssertion = async (
       at: now,
     };
 
+    // Evidence only moves forward: an assertion issued before the one already recorded is not
+    // newer proof, whatever it says.
+    if (person.idpRolesVerifiedAt && input.assertionIssuedAt < person.idpRolesVerifiedAt) {
+      return { kind: "stale_evidence" } as const;
+    }
+
     let audit: AuditEvent;
     let next: { role: string; approver: boolean };
     if (decision.kind === "granted") {
       next = { role: decision.role, approver: decision.approver };
-      // Never rounded up to the activation time: that could overstate freshness. Activation
-      // already cleared every earlier verification and revoked every earlier credential.
-      const issuedNoEarlierThan = new Date(now.getTime() - SAML_REQUEST_TTL_MS);
-      const verifiedAt =
-        person.idpRolesVerifiedAt && person.idpRolesVerifiedAt > issuedNoEarlierThan
-          ? person.idpRolesVerifiedAt
-          : issuedNoEarlierThan;
+      const verifiedAt = input.assertionIssuedAt;
       await tx
         .update(people)
         .set({ ...next, idpRolesVerifiedAt: verifiedAt })
