@@ -12,6 +12,10 @@ import {
   setPersonActive,
   updatePerson,
 } from "../../domain/people/people";
+import { rolesManagedByIdp } from "../../domain/people/roles-managed-by-idp";
+import { logAudit, toDomainEvent } from "../../idp-roles/audit";
+import { type AuditEvent, SERVICE } from "../../idp-roles/contract";
+import { grantsOf } from "../../idp-roles/precedence";
 import { EventBus } from "../../services/EventBus";
 import { Api } from "../api";
 import { type CurrentUser, CurrentUserTag } from "../middleware/auth";
@@ -50,14 +54,13 @@ const personEvent = <T extends DomainEvent["type"]>(
     payload,
   }) as DomainEvent;
 
-/** What an in-tool role change gets when roles come from the identity provider. */
-export const ROLES_MANAGED_BY_IDP =
-  "Roles are managed by your identity provider. Change the role there; it applies at the person's next sign-in.";
-
 /**
- * Refuses a role or approver change when the operator turned on roles from the IdP
- * (`config.idpRoles`), and logs the attempt. A no-op otherwise. Read per call, not captured, so
- * tests can flip the mode.
+ * Refuses a role or approver change when roles come from the identity provider
+ * (`config.idpRoles`): 409 `ROLES_MANAGED_BY_IDP`, recorded as `idp_roles.local_change_refused`
+ * and logged. A no-op with the mode off. Read per call, not captured, so tests can switch it.
+ *
+ * Checked before the admin check on purpose: with the mode on nobody may change a role here, so
+ * the answer is the same for everyone and names the real reason.
  */
 const refuseIfRolesFromIdp = (
   actor: CurrentUser,
@@ -66,16 +69,35 @@ const refuseIfRolesFromIdp = (
   Effect.gen(function* () {
     if (config.idpRoles === null) return;
     if (attempt.role === undefined && attempt.approver === undefined) return;
-    const asked = [
-      attempt.role !== undefined ? `role=${attempt.role}` : null,
-      attempt.approver !== undefined ? `approver=${attempt.approver}` : null,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    console.warn(
-      `[security] idp-role: refused in-tool role change by ${actor.email} (person ${actor.personId}) for ${attempt.personId ?? "a new person"}: ${asked}`,
-    );
-    return yield* Effect.fail(new NotPermittedError({ reason: ROLES_MANAGED_BY_IDP }));
+    const target = attempt.personId ? yield* getPersonById(attempt.personId) : undefined;
+    // Only a target in the caller's own org is named; anything else is reported as unknown.
+    const current = target && target.orgId === actor.orgId ? target : undefined;
+    const previousGrants = current ? grantsOf(current) : [];
+    const asked = {
+      role: attempt.role ?? current?.role ?? "member",
+      approver: attempt.approver ?? current?.approver ?? false,
+    };
+    const audit: AuditEvent = {
+      event: "idp_roles.local_change_refused",
+      service: SERVICE,
+      actor: actor.personId,
+      subject: current?.id ?? (attempt.personId ? "unknown_person" : "new_person"),
+      source: "local",
+      previousGrants,
+      newGrants: grantsOf(asked),
+      reason: "roles_managed_by_idp",
+    };
+    yield* publish([
+      toDomainEvent(audit, {
+        orgId: actor.orgId,
+        actorType: "person",
+        actorId: actor.personId,
+        correlationId: ulid(),
+        at: new Date(),
+      }),
+    ]);
+    logAudit(audit);
+    return yield* Effect.fail(rolesManagedByIdp());
   });
 
 const publish = (events: DomainEvent[]) =>

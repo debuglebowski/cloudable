@@ -15,6 +15,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { CONFIGURED_IDP_PROVIDER_ID, config } from "./config";
 import { openPostgres } from "./db/connect";
 import { IDP_ROLE_CLAIM_FIELD, idpRoleProvisioning } from "./idp-roles/sign-in";
+import { SAML_REQUEST_TTL_MS } from "./idp-roles/sync";
 import { spIssuer } from "./services/saml-metadata";
 
 // BetterAuth baseline: email/password, plus SAML SSO via `@better-auth/sso`
@@ -121,8 +122,12 @@ const configuredIdp = (() => {
       // Roles from the IdP: copy the role attribute into the sign-in's user info, where
       // `provisionUser` reads it. `email` and `name` repeat the plugin's own defaults, which this
       // object would otherwise replace.
+      //
+      // And require the assertion itself to be signed, not only the enclosing response: the
+      // role attribute lives in the assertion, so that is what has to be authenticated.
       ...(config.idpRoles
         ? {
+            wantAssertionsSigned: true,
             mapping: {
               email: "email",
               name: "displayName",
@@ -204,7 +209,22 @@ const options = {
       // A refused sign-in lands on `<BETTER_AUTH_URL>/login`: in production one origin serves
       // both the API and the console (see `trustedOrigins` below).
       ...(config.idpRoles
-        ? idpRoleProvisioning(authDb, config.idpRoles, `${config.betterAuthUrl}/login`)
+        ? {
+            ...idpRoleProvisioning(authDb, config.idpRoles, `${config.betterAuthUrl}/login`),
+            // Pinned, not left to the plugin's defaults, because role evidence rests on them:
+            // every assertion must answer an AuthnRequest this deployment issued (single-use,
+            // stored in the database so a restart does not forget it, and at most
+            // SAML_REQUEST_TTL_MS old), unsolicited IdP-initiated responses are refused, and
+            // NotBefore/NotOnOrAfter must be present. Assertion IDs are recorded as used, also in
+            // the database, so a replay is refused across restarts. Signature, audience,
+            // recipient and destination checks are the plugin's and always on.
+            saml: {
+              enableInResponseToValidation: true,
+              allowIdpInitiated: false,
+              requestTTL: SAML_REQUEST_TTL_MS,
+              requireTimestamps: true,
+            },
+          }
         : {}),
     }),
   ],

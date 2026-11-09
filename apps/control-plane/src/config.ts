@@ -1,5 +1,5 @@
 import { Context, Layer } from "effect";
-import { type IdpRolesConfig, parseIdpRolesConfig } from "./idp-roles/config";
+import { type IdpRolesConfig, readIdpRolesConfig } from "./idp-roles/config";
 
 /**
  * Control-plane configuration, read once from `process.env` with sane dev
@@ -227,11 +227,13 @@ export interface AppConfig {
    */
   readonly adminAccessPolicy: "never" | "with_approval" | "always";
   /**
-   * Roles from the identity provider (`ROLES_FROM_IDP=on`, with `IDP_ROLE_CLAIM`,
-   * `IDP_ROLE_MAPPING` and `IDP_ROLE_UNMAPPED`). `null`, the default, leaves roles to admins in
-   * the console, API and CLI. When set, every sign-in sets the person's role and approver flag
-   * from the claim, and in-tool role changes are refused. See `idp-roles/config.ts` and
-   * `docs/access.md`, "Roles from the identity provider".
+   * Roles from the identity provider (`IDP_ROLES_ENABLED=true`, with `IDP_ROLE_CLAIM`,
+   * `IDP_ROLE_MAPPING` and `IDP_RECHECK_INTERVAL_SECONDS`, parsed by the shared IdP role
+   * contract). `null`, the default, leaves roles to admins in the console, API and CLI. When set,
+   * every verified SAML sign-in sets the person's role and approver flag, role evidence older
+   * than the interval (at most an hour) refuses every request until a fresh SSO sign-in, and
+   * in-tool role changes are refused. See `idp-roles/` and `docs/access.md`, "Roles from the
+   * identity provider".
    */
   readonly idpRoles: IdpRolesConfig | null;
 }
@@ -307,6 +309,8 @@ const readConfig = (): AppConfig => {
   const idpConfigured =
     (process.env.IDP_METADATA_URL ?? "").length > 0 &&
     (process.env.IDP_SAML_CONFIG ?? "").length > 0;
+  // Before everything else: with the mode on, password sign-in is off whatever else is set.
+  const idpRoles = readIdpRolesConfig(process.env, idpConfigured);
   return {
     databaseUrl:
       process.env.DATABASE_URL ?? "postgres://cloudable:cloudable@localhost:5442/cloudable",
@@ -343,13 +347,11 @@ const readConfig = (): AppConfig => {
     idpMetadataUrl: idpConfigured ? (process.env.IDP_METADATA_URL ?? null) : null,
     idpSamlConfig: idpConfigured ? parseIdpSamlConfig(process.env.IDP_SAML_CONFIG) : null,
     idpDisplayName: process.env.IDP_DISPLAY_NAME ?? "Microsoft Entra ID",
-    passwordSignInEnabled: parseOnOff(
-      "PASSWORD_SIGN_IN",
-      process.env.PASSWORD_SIGN_IN,
-      !idpConfigured,
-    ),
+    passwordSignInEnabled:
+      idpRoles === null &&
+      parseOnOff("PASSWORD_SIGN_IN", process.env.PASSWORD_SIGN_IN, !idpConfigured),
     adminAccessPolicy: parseAdminAccessPolicy(process.env.ADMIN_ACCESS_POLICY),
-    idpRoles: parseIdpRolesConfig(process.env, idpConfigured),
+    idpRoles,
   };
 };
 

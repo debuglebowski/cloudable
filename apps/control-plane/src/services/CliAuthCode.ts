@@ -60,7 +60,9 @@ export type CliAuthCodeError =
 
 export const verifyCliAuthCode = (
   code: string,
-): { ok: true; personId: string; orgId: string } | { ok: false; error: CliAuthCodeError } => {
+):
+  | { ok: true; personId: string; orgId: string; issuedAt: number }
+  | { ok: false; error: CliAuthCodeError } => {
   const parts = code.split(".");
   if (parts.length !== 3 || parts[0] !== PURPOSE) {
     return { ok: false, error: { reason: "malformed_code" } };
@@ -88,5 +90,7 @@ export const verifyCliAuthCode = (
     return { ok: false, error: { reason: "expired" } };
   }
 
-  return { ok: true, personId: decoded.personId, orgId: decoded.orgId };
+  // `issuedAt` lets redemption apply the same credential-revocation cut-off as every other
+  // credential: a code minted before the person's credentials were revoked is refused.
+  return { ok: true, personId: decoded.personId, orgId: decoded.orgId, issuedAt: decoded.iat };
 };

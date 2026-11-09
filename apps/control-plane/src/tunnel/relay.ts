@@ -10,11 +10,13 @@
 // sites and, even called directly, would have left a live browser<->daemon
 // relay running with a database row saying the session was over.
 // ---------------------------------------------------------------------------
-import { machines, sessions } from "@cloudable/schema";
+import { machines, people, sessions } from "@cloudable/schema";
 import { eq, isNull } from "drizzle-orm";
 import { Effect } from "effect";
+import { config } from "../config";
 import { Db } from "../db/layer";
 import { isAuthorizedToInspectSnapshot } from "../domain/archive/inspect-authorization";
+import { checkStanding } from "../idp-roles/standing";
 import { isAuthorizedForInteractiveAccess } from "./access-authorization";
 import { TunnelRegistry } from "./registry";
 import { type EndSessionInput, TunnelError, TunnelServer } from "./server";
@@ -146,16 +148,43 @@ export const closeSessionsWithLapsedAuthorization = (): Effect.Effect<
             personId: sessions.personId,
             machineId: sessions.machineId,
             method: sessions.method,
+            startedAt: sessions.startedAt,
             ownerPersonId: machines.ownerPersonId,
+            person: {
+              active: people.active,
+              credentialsRevokedAt: people.credentialsRevokedAt,
+              idpRolesVerifiedAt: people.idpRolesVerifiedAt,
+            },
           })
           .from(sessions)
           .innerJoin(machines, eq(sessions.machineId, machines.id))
+          .leftJoin(people, eq(sessions.personId, people.id))
           .where(isNull(sessions.endedAt)),
       catch: (cause) => new TunnelError({ reason: "lookup_failed", cause }),
     });
 
+    // Roles from the identity provider: a live terminal, files or SSH session lasts only as long
+    // as its person's standing does. Once their role evidence passes the recheck deadline, or a
+    // refused sign-in or the mode's activation revokes their credentials, the session closes on
+    // this pass, the same way a lapsed elevation closes it. Mode off: unchanged.
+    const idpRoles = config.idpRoles;
+    const nowMs = Date.now();
     let closedCount = 0;
     for (const row of openSessions) {
+      if (
+        idpRoles !== null &&
+        (row.person === null ||
+          checkStanding(row.person, row.startedAt.getTime(), nowMs, idpRoles) !== null)
+      ) {
+        yield* relay.endSession({
+          sessionId: row.sessionId,
+          orgId: row.orgId,
+          reason: "policy_terminated",
+          actor: { actorType: "system", actorId: "idp-role-recheck" },
+        });
+        closedCount++;
+        continue;
+      }
       // `row.method`, not a fixed level: the sweep must ask the same question `mintSession`
       // asked about THIS session. Asking the terminal question about a files session would
       // close every file session held on a `file_recovery` grant on the very next tick —

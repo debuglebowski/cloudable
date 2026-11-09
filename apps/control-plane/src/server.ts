@@ -6,6 +6,7 @@ import {
 } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Cause, Effect, Layer, Option } from "effect";
+import { authDb } from "./auth";
 import { bootstrapDefaultAdmin } from "./bootstrap-default-admin";
 import { config } from "./config";
 import { DbLive } from "./db/layer";
@@ -16,6 +17,7 @@ import { AgentWakeRouteLive, WakeRegistry } from "./http/routes/agent-wake";
 import { AuthRouteLive } from "./http/routes/auth";
 import { BinariesRouteLive } from "./http/routes/binaries";
 import { ConsoleStaticRouteLive } from "./http/routes/console";
+import { ensureActivation } from "./idp-roles/activation";
 import { buildAppLive } from "./layers";
 import { migrateOnBoot } from "./migrate-on-boot";
 import { seedAzureImages } from "./services/CloudCatalogService";
@@ -190,6 +192,9 @@ Layer.launch(ServerLive).pipe(BunRuntime.runMain);
 // server above is already listening, so this exits a container that had
 // briefly looked ready, not one still failing its startup probe).
 migrateOnBoot()
+  // Roles from the identity provider: apply a mode change (on, off, remapped) once, before
+  // anything else touches people. Runs with the mode off too, so switching it off is recorded.
+  .then(() => ensureActivation(authDb, config.idpRoles))
   .then(() => bootstrapDefaultAdmin())
   .then(() => Effect.runPromise(seedCatalogDefaults))
   .catch((err) => {

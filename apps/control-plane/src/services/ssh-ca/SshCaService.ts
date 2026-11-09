@@ -44,6 +44,12 @@ export interface IssueCertificateInput {
   machineScope: MachineScope;
   /** Raw 32-byte Ed25519 point of the caller's ephemeral keypair — not SSH-wire-framed, not a private key. */
   subjectPublicKeyRaw: Uint8Array;
+  /**
+   * The certificate expires no later than this, if sooner than the usual TTL. Roles from the
+   * identity provider pass the person's role-evidence deadline, so a certificate never outlives
+   * the role it was issued under.
+   */
+  notAfter?: Date | undefined;
 }
 
 export interface IssuedCertificate {
@@ -103,7 +109,8 @@ export class SshCaService extends Effect.Service<SshCaService>()("SshCaService",
         const caBlob = yield* caPublicKeyBlob();
 
         const now = new Date();
-        const expiresAt = new Date(now.getTime() + CERTIFICATE_TTL_SECONDS * 1000);
+        const ttlEnd = new Date(now.getTime() + CERTIFICATE_TTL_SECONDS * 1000);
+        const expiresAt = input.notAfter && input.notAfter < ttlEnd ? input.notAfter : ttlEnd;
         const nonce = crypto.getRandomValues(new Uint8Array(32));
 
         const fields: CertificateFields = {

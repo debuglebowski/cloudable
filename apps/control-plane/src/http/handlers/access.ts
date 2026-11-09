@@ -2,8 +2,11 @@ import { certificates, machines, people, sessions } from "@cloudable/schema";
 import { HttpApiBuilder } from "@effect/platform";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
+import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { isAdmin } from "../../domain/authz";
+import { ensureActivation } from "../../idp-roles/activation";
+import { checkStanding, roleEvidenceDeadline } from "../../idp-roles/standing";
 import { verifyCliAuthCode } from "../../services/CliAuthCode";
 import { CLI_TOKEN_TTL_MS, issueCliToken } from "../../services/CliToken";
 import { SignerTag } from "../../services/Signer";
@@ -70,18 +73,54 @@ const resolveCertificateScope = (
     return requested;
   });
 
-/** Whether a person is still active. The CLI sign-in code alone does not say. */
-const requireActivePerson = (personId: string) =>
+/**
+ * The person's standing at the moment a CLI sign-in code is redeemed: the same check the API
+ * applies to every console session and CLI token (`idp-roles/standing.ts`), with the code's own
+ * issue time. So a code minted before the person was deactivated, before their credentials were
+ * revoked (an email change, a refused SSO sign-in, the identity-provider mode switching on), or
+ * once their role evidence is stale, mints nothing. Returns the role-evidence deadline when roles
+ * come from the identity provider, which caps the certificate.
+ */
+const requirePersonStanding = (personId: string, codeIssuedAt: number) =>
   Effect.gen(function* () {
     const db = yield* Db;
+    const idpRoles = config.idpRoles;
+    if (idpRoles !== null) yield* Effect.promise(() => ensureActivation(db, idpRoles));
     const rows = yield* Effect.tryPromise(() =>
-      db.select({ active: people.active }).from(people).where(eq(people.id, personId)).limit(1),
+      db
+        .select({
+          active: people.active,
+          credentialsRevokedAt: people.credentialsRevokedAt,
+          idpRolesVerifiedAt: people.idpRolesVerifiedAt,
+        })
+        .from(people)
+        .where(eq(people.id, personId))
+        .limit(1),
     ).pipe(Effect.orDie);
-    if (!rows[0]?.active) {
-      return yield* Effect.fail({
-        code: "denied" as const,
-        message: "This person is deactivated. Ask an org admin.",
-      });
+    const person = rows[0];
+    const refusal = person
+      ? checkStanding(person, codeIssuedAt, Date.now(), idpRoles)
+      : "deactivated";
+    switch (refusal) {
+      case null:
+        return person && idpRoles ? roleEvidenceDeadline(person, idpRoles) : null;
+      case "deactivated":
+        return yield* Effect.fail({
+          code: "denied" as const,
+          message: "This person is deactivated. Ask an org admin.",
+        });
+      case "credentials_revoked":
+        return yield* Effect.fail({
+          code: "denied" as const,
+          message:
+            "This sign-in code was issued before your credentials were revoked. Run `cloudable login` again.",
+        });
+      case "idp_reauthentication_required":
+        return yield* Effect.fail({
+          code: "denied" as const,
+          message:
+            "Your role must be confirmed by your identity provider again. Run `cloudable login` to sign in through SSO.",
+        });
     }
   });
 
@@ -102,7 +141,7 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
           });
         }
 
-        yield* requireActivePerson(verified.personId);
+        const roleEvidenceEnds = yield* requirePersonStanding(verified.personId, verified.issuedAt);
         const machineScope = yield* resolveCertificateScope(
           verified.personId,
           verified.orgId,
@@ -117,6 +156,7 @@ export const AccessLive = HttpApiBuilder.group(Api, "access", (handlers) =>
           osUser: payload.osUser,
           machineScope,
           subjectPublicKeyRaw,
+          notAfter: roleEvidenceEnds ?? undefined,
         });
         // One sign-in, both credentials. The certificate is for sshd on the
         // machine, which verifies it offline; the token is for this API,

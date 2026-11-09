@@ -301,6 +301,17 @@ function summarize(row: RawEventRow): string {
     case "agent.attestation_failed":
       return `Control agent attestation failed via ${event.payload.method}: ${event.payload.reason}.`;
 
+    case "idp_roles.granted":
+      return `The identity provider set person ${event.payload.subject}'s grants to [${event.payload.newGrants.join(", ")}] (were [${event.payload.previousGrants.join(", ")}]).`;
+    case "idp_roles.revalidated":
+      return `The identity provider confirmed person ${event.payload.subject}'s grants [${event.payload.newGrants.join(", ")}].`;
+    case "idp_roles.denied":
+      return `Sign-in refused for person ${event.payload.subject} (${event.payload.reason}): grants [${event.payload.previousGrants.join(", ")}] removed, every session and credential ended.`;
+    case "idp_roles.local_change_refused":
+      return `A role change for ${event.payload.subject} in Cloudable was refused: roles are managed by the identity provider.`;
+    case "idp_roles.activation":
+      return `Roles from the identity provider: ${event.payload.reason}.`;
+
     default:
       return assertNever(event);
   }
@@ -382,6 +393,11 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "machine.scanner_installed":
     case "agent.attested":
     case "agent.attestation_failed":
+    case "idp_roles.granted":
+    case "idp_roles.revalidated":
+    case "idp_roles.denied":
+    case "idp_roles.local_change_refused":
+    case "idp_roles.activation":
       return undefined;
 
     default:
