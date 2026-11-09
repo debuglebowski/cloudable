@@ -23,6 +23,11 @@ export const people = pgTable("people", {
   // deleted when it is set, and a CLI token whose `iat` is older fails authentication. Set when an
   // admin changes the person's email, so a sign-in under the old address cannot outlive it.
   credentialsRevokedAt: timestamp("credentials_revoked_at", { withTimezone: true }),
+  // Roles from the identity provider only: when this person's role last came from a verified
+  // SAML assertion. With the mode on, every request is refused once it is older than the recheck
+  // interval (at most an hour), until a fresh SSO sign-in sets it again. Null means never, or
+  // that the last sign-in was refused. Unused with the mode off.
+  idpRolesVerifiedAt: timestamp("idp_roles_verified_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
 });

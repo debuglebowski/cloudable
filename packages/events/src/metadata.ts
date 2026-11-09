@@ -62,6 +62,32 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
     description: "A person's role was changed.",
   },
 
+  // --- idp_roles --- (tier 1: every role decision from the identity provider is audited)
+  "idp_roles.granted": {
+    tier: 1,
+    description:
+      "A verified identity provider sign-in set a person's role or approver flag to something new.",
+  },
+  "idp_roles.denied": {
+    tier: 1,
+    description:
+      "A sign-in carried no mapped role: refused, role removed, every session and CLI token ended.",
+  },
+  "idp_roles.revalidated": {
+    tier: 1,
+    description: "A verified identity provider sign-in confirmed a person's role unchanged.",
+  },
+  "idp_roles.local_change_refused": {
+    tier: 1,
+    description:
+      "A role or approver change in Cloudable was refused because roles come from the identity provider.",
+  },
+  "idp_roles.activation": {
+    tier: 1,
+    description:
+      "Roles from the identity provider were switched on, off, or remapped. Switching on or remapping ended every human session and credential.",
+  },
+
   // --- machine --- (tier 1 by default; setting_changed/state_reported/
   // reconciled are tier 2, routine operational updates)
   "machine.created": {

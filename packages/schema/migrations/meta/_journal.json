@@ -190,6 +190,13 @@
       "when": 1793915834052,
       "tag": "0026_rbac_roles_and_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794221645512,
+      "tag": "0027_idp_roles",
+      "breakpoints": true
     }
   ]
 }
