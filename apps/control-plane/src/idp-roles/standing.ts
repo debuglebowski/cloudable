@@ -52,11 +52,18 @@ export const isRoleEvidenceFresh = (
   );
 };
 
-/** When the person's current role evidence runs out, for credentials that should not outlive it. */
+/**
+ * The first instant the person's role evidence is stale, by the shared contract's own rule:
+ * `freshness` works in whole seconds and calls evidence stale once the elapsed seconds reach the
+ * interval, so it lapses at the start of second `floor(verifiedAt) + interval`. Used to cap
+ * credentials and to close live tunnels exactly then.
+ */
 export const roleEvidenceDeadline = (
   person: Pick<PersonStanding, "idpRolesVerifiedAt">,
   idpRoles: IdpRolesConfig,
 ): Date | null =>
   person.idpRolesVerifiedAt === null
     ? null
-    : new Date(person.idpRolesVerifiedAt.getTime() + idpRoles.intervalSec * 1000);
+    : new Date(
+        (Math.floor(person.idpRolesVerifiedAt.getTime() / 1000) + idpRoles.intervalSec) * 1000,
+      );
