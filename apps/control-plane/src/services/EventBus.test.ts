@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import type { DomainEvent } from "@cloudable/events";
 import type * as schema from "@cloudable/schema";
 import { events as eventsTable, settingValues } from "@cloudable/schema";
@@ -162,5 +162,53 @@ describe("EventBus.publish — logging tier filtering", () => {
     const rows = await rowsForOrg(orgId);
     expect(rows[0]?.id).not.toBe("placeholder");
     expect(rows[0]?.id.length).toBeGreaterThan(0);
+  });
+});
+
+describe("EventBus.publish — security export", () => {
+  const grant = (orgId: string): DomainEvent => ({
+    ...tier1Event(orgId),
+    type: "person.role_changed",
+    payload: { personId: "target-1", previous: "member", current: "admin" },
+  });
+
+  test("exports the persisted ID after append, even at logging tier 1", async () => {
+    const orgId = freshOrgId();
+    await seedLoggingTier(orgId, 1);
+    const output = spyOn(console, "info").mockImplementation(() => {});
+    try {
+      await publishViaBus([grant(orgId)]);
+      const rows = await rowsForOrg(orgId);
+      const records = output.mock.calls.map(([line]) => JSON.parse(String(line)));
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        eventId: rows[0]?.id,
+        subjectPersonId: "target-1",
+        actorId: "person-1",
+      });
+      expect(records[0].eventId).not.toBe("placeholder");
+    } finally {
+      output.mockRestore();
+    }
+  });
+
+  test("does not export an event whose append fails", async () => {
+    const output = spyOn(console, "info").mockImplementation(() => {});
+    // Tier-1-only batches do not query logging settings. Fail precisely at append.
+    const failingDb = {
+      insert: () => ({ values: () => Promise.reject(new Error("database unavailable")) }),
+    } as unknown as typeof db;
+    try {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const bus = yield* EventBus;
+          return yield* Effect.either(bus.publish([grant(crypto.randomUUID())]));
+        }).pipe(Effect.provide(EventBus.Default.pipe(Layer.provide(Layer.succeed(Db, failingDb))))),
+      );
+      expect(result._tag).toBe("Left");
+      expect(output).not.toHaveBeenCalled();
+    } finally {
+      output.mockRestore();
+    }
   });
 });

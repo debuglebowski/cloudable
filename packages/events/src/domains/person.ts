@@ -7,11 +7,18 @@ import type { EventEnvelope } from "../envelope";
 export type PersonEvent =
   | (EventEnvelope & {
       type: "person.added";
-      payload: { email: string; source: "manual" | "scim" };
+      payload: {
+        email: string;
+        source: "manual" | "scim";
+        /** Optional for compatibility with previously recorded events. */
+        personId?: string;
+        role?: string;
+        approver?: boolean;
+      };
     })
   | (EventEnvelope & {
       type: "person.activated";
-      payload: Record<string, never>;
+      payload: { personId?: string; role?: string; approver?: boolean };
     })
   | (EventEnvelope & {
       type: "person.deactivated";
@@ -19,7 +26,7 @@ export type PersonEvent =
     })
   | (EventEnvelope & {
       type: "person.role_changed";
-      payload: { previous: string; current: string };
+      payload: { previous: string; current: string; personId?: string };
     })
   | (EventEnvelope & {
       type: "person.email_changed";
@@ -28,5 +35,5 @@ export type PersonEvent =
     })
   | (EventEnvelope & {
       type: "person.approver_changed";
-      payload: { previous: boolean; current: boolean };
+      payload: { previous: boolean; current: boolean; personId?: string };
     });

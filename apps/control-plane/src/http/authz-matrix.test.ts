@@ -791,6 +791,62 @@ describe.skipIf(!postgresReachable)(
       }
     }
 
+    test("people permission events identify the actor, target and granted privileges", async () => {
+      const f = await seed();
+      const created = await call(f.tokens.admin, "POST", "/api/v1/people", {
+        email: `privileged-${crypto.randomUUID()}@example.com`,
+        role: "admin",
+      });
+      expect(created.status).toBe(201);
+      const personId = (created.body as { id: string }).id;
+      expect(
+        (
+          await call(f.tokens.admin, "PATCH", `/api/v1/people/${personId}`, {
+            role: "owner",
+            approver: true,
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await call(f.tokens.admin, "PATCH", `/api/v1/people/${personId}/active`, {
+            active: false,
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (await call(f.tokens.admin, "PATCH", `/api/v1/people/${personId}/active`, { active: true }))
+          .status,
+      ).toBe(200);
+      const rows = await db.select().from(events).where(eq(events.orgId, f.orgId));
+      for (const type of [
+        "person.added",
+        "person.role_changed",
+        "person.approver_changed",
+        "person.activated",
+      ]) {
+        const event = rows.find((row) => row.type === type);
+        expect(event?.actorId).toBe(f.people.admin);
+        expect(event?.payload).toMatchObject({ personId });
+      }
+      expect(rows.find((row) => row.type === "person.added")?.payload).toMatchObject({
+        role: "admin",
+        approver: false,
+      });
+      expect(rows.find((row) => row.type === "person.role_changed")?.payload).toMatchObject({
+        previous: "admin",
+        current: "owner",
+      });
+      expect(rows.find((row) => row.type === "person.approver_changed")?.payload).toMatchObject({
+        previous: false,
+        current: true,
+      });
+      expect(rows.find((row) => row.type === "person.activated")?.payload).toMatchObject({
+        role: "owner",
+        approver: true,
+      });
+    });
+
     test("a deactivated person is refused on every endpoint, with 401", async () => {
       const f = await seed();
       for (const c of CASES) {
