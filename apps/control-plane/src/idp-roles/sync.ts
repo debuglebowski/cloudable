@@ -2,6 +2,7 @@ import type { DomainEvent } from "@cloudable/events";
 import { events, authSession, certificates, idpRoleMode, people } from "@cloudable/schema";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { ulid } from "ulid";
+import { exportSecurityAuditRecords } from "../logging/security-audit";
 import { toEventRows } from "../services/EventBus";
 import { type AnyPgDb, MODE_ROW_ID } from "./activation";
 import { toDomainEvent } from "./audit";
@@ -65,7 +66,9 @@ export const applyVerifiedAssertion = async (
   const email = input.email.trim().toLowerCase();
   const now = new Date();
 
-  return db.transaction(async (tx) => {
+  // Rows appended by the transaction below, exported to the security log only once it commits.
+  let appended: DomainEvent[] = [];
+  const result = await db.transaction(async (tx) => {
     const [mode] = await tx
       .select()
       .from(idpRoleMode)
@@ -166,18 +169,20 @@ export const applyVerifiedAssertion = async (
       batch.push({
         ...toDomainEvent(audit, envelope),
         type: "person.role_changed",
-        payload: { previous: person.role, current: next.role },
+        payload: { personId: person.id, previous: person.role, current: next.role },
       } as DomainEvent);
     }
     if (person.approver !== next.approver) {
       batch.push({
         ...toDomainEvent(audit, envelope),
         type: "person.approver_changed",
-        payload: { previous: person.approver, current: next.approver },
+        payload: { personId: person.id, previous: person.approver, current: next.approver },
       } as DomainEvent);
     }
     batch.push(toDomainEvent(audit, envelope));
-    await tx.insert(events).values(toEventRows(batch));
+    const rows = toEventRows(batch);
+    await tx.insert(events).values(rows);
+    appended = rows;
 
     return {
       kind: decision.kind,
@@ -186,4 +191,8 @@ export const applyVerifiedAssertion = async (
       audit,
     } as const;
   });
+  // A grant from the identity provider is a permission grant like an admin's, so it reaches the
+  // same stdout export (`docs/access.md`, permission-grant log export), as actor type `idp`.
+  exportSecurityAuditRecords(appended);
+  return result;
 };

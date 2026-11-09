@@ -18,7 +18,7 @@ import {
   runAdapterAcceptance,
 } from "@normain/idp-role-contract/fixtures";
 import { APIError } from "better-auth";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { CONFIGURED_IDP_PROVIDER_ID, config } from "../config";
 import { DbLive } from "../db/layer";
@@ -351,10 +351,53 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
     await forceModeRow(MANAGED);
     const who = await seed("member");
     const issuedAt = Date.now() - 90_000;
-    expect(
-      (await signIn(who, ["Cloudable.Admin", "Cloudable.Approver"], MANAGED, freshFacts(issuedAt)))
-        .refused,
-    ).toBeNull();
+    const securityLog = spyOn(console, "info").mockImplementation(() => {});
+    try {
+      expect(
+        (
+          await signIn(
+            who,
+            ["Cloudable.Admin", "Cloudable.Approver"],
+            MANAGED,
+            freshFacts(issuedAt),
+          )
+        ).refused,
+      ).toBeNull();
+      // The grant reaches the permission-grant stdout export like an admin's, after commit, with
+      // the persisted event IDs and the identity provider as actor.
+      const exported = securityLog.mock.calls
+        .map(([line]) => JSON.parse(String(line)))
+        .filter((r) => r.subjectPersonId === who.personId);
+      const persisted = await iso.db
+        .select()
+        .from(events)
+        .where(
+          and(
+            eq(events.orgId, who.orgId),
+            inArray(events.type, ["person.role_changed", "person.approver_changed"]),
+          ),
+        );
+      expect(exported.map((r) => r.event).sort()).toEqual([
+        "person.approver_changed",
+        "person.role_changed",
+      ]);
+      expect(exported.map((r) => r.eventId).sort()).toEqual(persisted.map((r) => r.id).sort());
+      for (const r of exported) {
+        expect(r).toMatchObject({
+          source: "cloudable",
+          type: "security",
+          orgId: who.orgId,
+          actorType: "idp",
+          actorId: CONFIGURED_IDP_PROVIDER_ID,
+        });
+      }
+      expect(exported.find((r) => r.event === "person.role_changed")?.detail).toEqual({
+        previousRole: "member",
+        role: "admin",
+      });
+    } finally {
+      securityLog.mockRestore();
+    }
     const row = await personRow(who.personId);
     expect(grantsOfRow(row)).toEqual(["admin", "approver"]);
     // The role evidence is dated by the assertion's own signed IssueInstant, not receipt time.

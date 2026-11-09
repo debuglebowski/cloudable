@@ -875,7 +875,10 @@ tagged domain errors (`SshCaError`, `TunnelError`) each service raises.
 
 After `EventBus.publish` successfully appends an event, the control plane writes one
 JSON line to stdout for an admin/owner role change, an approver grant, or creation
-or reactivation of a privileged person through the people API. These tier-1 events
+or reactivation of a privileged person through the people API. With roles from the
+identity provider on, a sign-in that grants admin/owner or the approver flag is
+exported the same way once its transaction commits, with `actorType: "idp"` and the
+provider ID as `actorId`. These tier-1 events
 are always retained regardless of the configured logging tier.
 
 Records have `source: "cloudable"`, `type: "security"`, `schemaVersion: 1`,
@@ -889,4 +892,4 @@ Deployments can route these records to their log collector and alert per `eventI
 Duplicate delivery can be deduplicated by that ID. Forwarding is best effort: a crash
 between the database append and stdout write can lose the forwarded copy. The
 append-only database event log remains authoritative. This is not an outbox or a
-retroactive export, and direct transactional event inserts do not use this exporter.
+retroactive export. Other direct transactional event inserts do not use this exporter.
