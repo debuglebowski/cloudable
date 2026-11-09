@@ -1,6 +1,14 @@
 import type { DomainEvent } from "@cloudable/events";
-import { events, authSession, certificates, idpRoleMode, orgs, people } from "@cloudable/schema";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import {
+  events,
+  authSession,
+  authVerification,
+  certificates,
+  idpRoleMode,
+  orgs,
+  people,
+} from "@cloudable/schema";
+import { and, eq, gt, isNull, like } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { ulid } from "ulid";
 import { toEventRows } from "../services/EventBus";
@@ -28,7 +36,8 @@ export type ActivationOutcome =
  *   ends: `people.credentials_revoked_at` moves to now (refuses every console session, CLI
  *   token and CLI sign-in code issued before), `idp_roles_verified_at` is cleared (every person
  *   needs a verified SSO sign-in under the new rules), console sessions are deleted, and live SSH
- *   certificates are marked revoked. Machine agent tokens are untouched: they are not human
+ *   certificates are marked revoked, and pending SAML AuthnRequests are dropped. Machine agent
+ *   tokens are untouched: they are not human
  *   credentials. Open terminal, files and SSH tunnels close on the next sweep, because their
  *   owners' role evidence is gone (`tunnel/relay.ts`).
  * - **On → off.** Recorded; nothing is revoked. Roles stay as last set and admins manage them
@@ -77,6 +86,11 @@ export const reconcileActivation = async (
         .where(eq(idpRoleMode.id, MODE_ROW_ID));
       await tx.update(people).set({ credentialsRevokedAt: now, idpRolesVerifiedAt: null });
       await tx.delete(authSession);
+      // Pending SAML AuthnRequests from before this epoch can no longer be answered. (The
+      // sign-in also refuses any assertion issued before `activatedAt`; this closes it earlier.)
+      await tx
+        .delete(authVerification)
+        .where(like(authVerification.identifier, "saml-authn-request:%"));
       await tx
         .update(certificates)
         .set({ revokedAt: now, revokedReason: "idp_roles_activation" })

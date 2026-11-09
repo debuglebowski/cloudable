@@ -12,7 +12,16 @@ import { SignedXml } from "xml-crypto";
 
 type Step =
   | { kind: "post"; name: string; email: string; roles: string[]; variant: Variant }
-  | { kind: "replay"; name: string; body: string };
+  | { kind: "replay"; name: string; body: string }
+  | {
+      kind: "across_epoch";
+      name: string;
+      email: string;
+      roles: string[];
+      /** Put the pre-epoch AuthnRequest back after activation dropped it, so only Cloudable's
+       * own epoch check stands between the old assertion and a session. */
+      restoreRequest: boolean;
+    };
 type Variant =
   | "valid"
   | "rewrapped_old_assertion"
@@ -31,7 +40,9 @@ const claim = process.env.IDP_ROLE_CLAIM ?? "";
 const { auth } = await import("../auth");
 const { config } = await import("../config");
 const { authDb } = await import("../auth");
-const { ensureActivation } = await import("./activation");
+const { ensureActivation, reconcileActivation } = await import("./activation");
+const { authVerification } = await import("@cloudable/schema");
+const { eq } = await import("drizzle-orm");
 await ensureActivation(authDb, config.idpRoles);
 
 const acs = `${base}/api/auth/sso/saml2/sp/acs/configured`;
@@ -121,9 +132,46 @@ for (const step of steps) {
     results[step.name] = await post(step.body);
     continue;
   }
+  if (step.kind === "across_epoch") {
+    // Request and signed assertion before the switch; the switch (off, then on again: a new
+    // activation epoch); the post after it, well inside the assertion's 5 minutes.
+    const request = await startSignIn();
+    const issueInstant = Date.now();
+    const assertion = sign(
+      assertionXml({
+        id: `_a${crypto.randomUUID()}`,
+        issueInstant,
+        scdInResponseTo: request.id,
+        email: step.email,
+        roles: step.roles,
+      }),
+    );
+    const key = `saml-authn-request:${request.id}`;
+    const [pending] = await authDb
+      .select()
+      .from(authVerification)
+      .where(eq(authVerification.identifier, key));
+    await new Promise((r) => setTimeout(r, 10));
+    await reconcileActivation(authDb, null);
+    await reconcileActivation(authDb, config.idpRoles);
+    const dropped =
+      (await authDb.select().from(authVerification).where(eq(authVerification.identifier, key)))
+        .length === 0;
+    if (step.restoreRequest && pending) await authDb.insert(authVerification).values(pending);
+    const body = new URLSearchParams({
+      SAMLResponse: Buffer.from(responseXml(request.id, assertion)).toString("base64"),
+      RelayState: request.relayState,
+    }).toString();
+    results[step.name] = {
+      ...(await post(body)),
+      issueInstant,
+      requestDroppedByActivation: dropped,
+    };
+    continue;
+  }
   const request = await startSignIn();
   const assertionId = `_a${crypto.randomUUID()}`;
-  let issueInstant = Date.now() - 1000;
+  let issueInstant = Date.now();
   let scd: string | null = request.id;
   if (step.variant === "rewrapped_old_assertion") {
     // A signed assertion issued for an earlier request, never used, still inside NotOnOrAfter,

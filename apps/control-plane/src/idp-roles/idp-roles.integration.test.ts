@@ -152,7 +152,7 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
   /** Puts the persisted mode where a scenario needs it, without going through activation. */
   const forceModeRow = async (
     mode: IdpRolesConfig | null,
-    activatedAt = new Date(Date.now() - 60_000),
+    activatedAt = new Date(Date.now() - 600_000),
   ) => {
     await iso.db.delete(idpRoleMode);
     await iso.db.insert(idpRoleMode).values({
@@ -234,7 +234,7 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
   /** What BetterAuth's SSO plugin does after verifying an assertion: call the provisioning hook. */
   /** Facts of a fresh signed assertion answering a request, as `withAssertionFacts` reads them.
    * The XML and signature path itself is covered by `saml-acs.integration.test.ts`. */
-  const freshFacts = (issuedAt = Date.now() - 1000): AssertionFacts => ({
+  const freshFacts = (issuedAt = Date.now()): AssertionFacts => ({
     responseInResponseTo: "_req",
     assertionCount: 1,
     encryptedCount: 0,
@@ -463,6 +463,30 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
     // Persisted off, replica off: today's behaviour.
     await forceModeRow(null);
     expect((await me(token)).status).toBe(200);
+  });
+
+  test("an assertion issued before the current epoch or the person's last revocation counts for nothing", async () => {
+    // Activated 10s ago; an assertion issued 30s ago, inside its 5 minutes, arrives now.
+    await forceModeRow(MANAGED, new Date(Date.now() - 10_000));
+    const who = await seed("member");
+    expect(
+      (await signIn(who, "Cloudable.Admin", MANAGED, freshFacts(Date.now() - 30_000))).refused,
+    ).toBe("saml_assertion_rejected");
+    expect((await personRow(who.personId)).role).toBe("member");
+    expect(
+      (await signIn(who, "Cloudable.Admin", MANAGED, freshFacts(Date.now()))).refused,
+    ).toBeNull();
+
+    // Refused at T (credentials revoked); an assertion issued before T, arriving after, grants nothing.
+    const beforeDenial = Date.now();
+    await tick();
+    expect((await signIn(who, [])).refused).toBe("no_mapped_role");
+    expect((await signIn(who, "Cloudable.Admin", MANAGED, freshFacts(beforeDenial))).refused).toBe(
+      "saml_assertion_rejected",
+    );
+    expect((await personRow(who.personId)).role).toBe("member");
+    await tick();
+    expect((await signIn(who, "Cloudable.Admin")).refused).toBeNull();
   });
 
   test("approver alone is not a role: refused", async () => {

@@ -197,14 +197,49 @@ describe.skipIf(!reachable || !hasOpenssl)("SAML assertions through the real ACS
     // A restart (a new process), then the accepted response posted again: refused.
     const second = run([
       { kind: "replay", name: "replay", body: first.valid?.body ?? "" },
-      { kind: "post", name: "no_role", email, roles: [], variant: "valid" },
+      // A request and signed assertion from before an off/on switch, posted after it.
+      {
+        kind: "across_epoch",
+        name: "pre_epoch",
+        email,
+        roles: ["Cloudable.Admin", "Cloudable.Approver"],
+        restoreRequest: false,
+      },
+      {
+        kind: "across_epoch",
+        name: "pre_epoch_request_restored",
+        email,
+        roles: ["Cloudable.Admin", "Cloudable.Approver"],
+        restoreRequest: true,
+      },
+      { kind: "post", name: "after_epoch", email, roles: ["Cloudable.Admin"], variant: "valid" },
     ]);
     expect(second.replay?.error).not.toBeNull();
     expect(second.replay?.sessionCookie).toBe(false);
 
+    // Activation drops pending requests, so the plugin refuses the first outright...
+    expect(
+      (second.pre_epoch as unknown as { requestDroppedByActivation: boolean })
+        .requestDroppedByActivation,
+    ).toBe(true);
+    expect(second.pre_epoch?.error).not.toBeNull();
+    expect(second.pre_epoch?.sessionCookie).toBe(false);
+    // ...and with the request put back, Cloudable's own epoch check refuses it.
+    expect(second.pre_epoch_request_restored?.error).toBe("saml_assertion_rejected");
+    expect(second.pre_epoch_request_restored?.sessionCookie).toBe(false);
+    // A fresh sign-in after the switch works; the pre-epoch ones granted nothing (no approver).
+    expect(second.after_epoch?.error).toBeNull();
+    expect(second.after_epoch?.sessionCookie).toBe(true);
+    const afterEpoch = await person();
+    expect(afterEpoch.role).toBe("admin");
+    expect(afterEpoch.approver).toBe(false);
+    expect(afterEpoch.idpRolesVerifiedAt?.getTime()).toBe(second.after_epoch?.issueInstant);
+
+    const third = run([{ kind: "post", name: "no_role", email, roles: [], variant: "valid" }]);
+
     // A genuine assertion with no role: denied, demoted, recorded.
-    expect(second.no_role?.error).toBe("no_mapped_role");
-    expect(second.no_role?.sessionCookie).toBe(false);
+    expect(third.no_role?.error).toBe("no_mapped_role");
+    expect(third.no_role?.sessionCookie).toBe(false);
     const denied = await person();
     expect(denied.role).toBe("member");
     expect(denied.idpRolesVerifiedAt).toBeNull();

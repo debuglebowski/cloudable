@@ -94,9 +94,19 @@ export const applyVerifiedAssertion = async (
       at: now,
     };
 
-    // Evidence only moves forward: an assertion issued before the one already recorded is not
-    // newer proof, whatever it says.
-    if (person.idpRolesVerifiedAt && input.assertionIssuedAt < person.idpRolesVerifiedAt) {
+    // Evidence only moves forward. An assertion counts only if it was issued strictly after
+    // the current activation epoch and after the person's last credential revocation (a refused
+    // sign-in, an email change, the activation itself): an assertion the IdP signed for a
+    // request made before either is from a world that has since been revoked, even if it
+    // arrives inside its 5 minutes. Nor may it be older than the evidence already recorded.
+    const cutoff = Math.max(
+      mode.activatedAt.getTime(),
+      person.credentialsRevokedAt?.getTime() ?? Number.NEGATIVE_INFINITY,
+    );
+    if (
+      input.assertionIssuedAt.getTime() <= cutoff ||
+      (person.idpRolesVerifiedAt && input.assertionIssuedAt < person.idpRolesVerifiedAt)
+    ) {
       return { kind: "stale_evidence" } as const;
     }
 

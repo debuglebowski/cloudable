@@ -143,8 +143,11 @@ plugin's checks pass):
 - every bearer `SubjectConfirmationData` carries `InResponseTo`, equal to the request the plugin
   consumed, so the signed assertion itself answers that request and an older signed assertion
   cannot be re-wrapped in a new envelope;
-- its signed `IssueInstant` is at most 5 minutes old (60 seconds of future clock skew allowed) and
-  not older than the evidence already recorded.
+- its signed `IssueInstant` is at most 5 minutes old (60 seconds of future clock skew allowed),
+  not older than the evidence already recorded, and strictly after both the current activation
+  and the person's last credential revocation. An assertion signed for a request made before an
+  activation or a revocation counts for nothing, even inside its 5 minutes. Activation also drops
+  every pending AuthnRequest, so such a request cannot be answered at all.
 
 The IdP must therefore put `InResponseTo` on `SubjectConfirmationData` (Entra ID, Okta, Google and
 Keycloak do for SP-initiated sign-in) and sign the assertion. Only the provider declared in

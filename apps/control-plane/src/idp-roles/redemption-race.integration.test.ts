@@ -238,6 +238,7 @@ describe.skipIf(!reachable)("CLI sign-in code redemption racing a revocation", (
     // Under the new config, after a fresh SSO sign-in, the old code still mints nothing.
     (config as { idpRoles: IdpRolesConfig | null }).idpRoles = REMAPPED;
     resetActivationForTest();
+    await new Promise((r) => setTimeout(r, 5));
     expect(await signIn(who, "Cloudable.Admin", REMAPPED)).toBe("ok");
     expect((await redeem(code)).status).toBe(403);
   });
@@ -252,6 +253,7 @@ describe.skipIf(!reachable)("CLI sign-in code redemption racing a revocation", (
     expect((await call("GET", "/api/v1/me", undefined, token)).status).toBe(200);
     await new Promise((r) => setTimeout(r, 5));
     expect(await signIn(who, [])).toBe("refused");
+    await new Promise((r) => setTimeout(r, 5));
     expect(await signIn(who, "Cloudable.Admin")).toBe("ok");
     // The person is back in, with fresh evidence; the token from before the refusal is not.
     expect(
