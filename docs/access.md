@@ -80,6 +80,195 @@ whoever can change an email can sign in as someone else. When an admin changes o
 session and CLI token the person held is revoked (`people.credentials_revoked_at`) and a
 `person.email_changed` event is written.
 
+### Roles from the identity provider
+
+Off by default. The operator who deploys Cloudable can turn it on. Then the identity provider (IdP)
+decides every person's role and approver flag, not admins in Cloudable. Role definitions and what
+each role may do stay Cloudable's (the tables above); the IdP decides who holds which.
+
+Cloudable implements the shared IdP role contract (`@normain/idp-role-contract` 0.1.0, vendored in
+`vendor/`, see `vendor/README.md`), the same release Kahuna and SlayZone pin. Config parsing, claim
+reading, role mapping, the freshness rule and the audit event shape come from it. Cloudable's own
+parts are in `apps/control-plane/src/idp-roles/`.
+
+**Sign-in.** SSO only, through the IdP declared in deployment config, over SAML. Password sign-in
+is forced off. Every verified SAML sign-in reads the role attribute and sets the person's role and
+approver flag:
+
+- Values map exactly, case included, through `IDP_ROLE_MAPPING`. Unknown values are ignored.
+- Several mapped roles: the highest wins (`owner`, then `admin`, then `member`). A value mapped to
+  `approver` adds the approver flag. The flag alone is not a role.
+- No mapped role (no attribute, an empty one, only unknown values, or only `approver`): the
+  sign-in is refused and the login page says why. The person also becomes a member without the
+  flag, their role evidence is cleared, and every console session, CLI token, CLI sign-in code and
+  SSH certificate they hold ends. They get back in once the IdP gives them a role.
+
+**The hourly recheck.** A role holds only while it rests on a verified assertion younger than
+`IDP_RECHECK_INTERVAL_SECONDS` (default and maximum 3600). Cloudable stores, per person, when their
+last accepted assertion was issued, by its own signed `IssueInstant`
+(`people.idp_roles_verified_at`). The shared contract's rule decides freshness, in whole seconds:
+evidence is stale from the start of second `floor(verified) + interval`. Every way in checks it
+itself, not a background job:
+
+- every API request, from the console's session cookie and from CLI bearer tokens
+  (`http/middleware/auth.ts`), and the web terminal's websocket attach, which runs the same check;
+- a CLI sign-in code when `cloudable login` redeems it (`http/handlers/access.ts`);
+- open terminal, files and SSH tunnels (`http/handlers/tunnel.ts`): a watcher ends each one at
+  its person's exact deadline without reading anything first, re-reads the person every 10
+  seconds before that (revocation, deactivation, a fresh SSO extending the deadline), and treats a
+  failed or slow read as a lapse. Every frame in both directions is also checked against the
+  deadline, so nothing reaches the machine or the browser after it. The 60-second expiry sweep
+  (`tunnel/relay.ts`) stays as a backstop for sessions whose watcher is gone (a replica that died);
+- SSH certificates, which never last past the person's deadline.
+
+Past the deadline the API answers 401 `idp_reauthentication_required`. The console starts a fresh
+SSO sign-in that comes back to the same page; with the IdP's own session still open this needs no
+password or MFA prompt. The CLI says to run `cloudable login`. There is no refresh token in SAML,
+so a new verified assertion is the only renewal. A change at the IdP therefore applies within the
+interval, or at the next sign-in if sooner.
+
+**What makes an assertion count as evidence.** `@better-auth/sso` verifies the signature (the
+assertion itself must be signed in this mode), audience, recipient, destination, NotBefore and
+NotOnOrAfter (required), and that the Response's `InResponseTo` names an AuthnRequest this
+deployment issued less than 5 minutes ago, each usable once. Unsolicited IdP-initiated responses
+are refused. Used assertion IDs and consumed requests are stored in the database, so a restart
+forgets neither.
+
+The Response's `InResponseTo` is not covered by the assertion's signature, so on its own it does
+not prove the assertion was issued for that request. Cloudable therefore also reads the signed
+assertion's own fields (`idp-roles/saml-assertion.ts`, checked in the sign-in hook after the
+plugin's checks pass):
+
+- exactly one plaintext assertion (encrypted assertions are not supported in this mode);
+- every bearer `SubjectConfirmationData` carries `InResponseTo`, equal to the request the plugin
+  consumed, so the signed assertion itself answers that request and an older signed assertion
+  cannot be re-wrapped in a new envelope;
+- its signed `IssueInstant` is at most 5 minutes old (60 seconds of future clock skew allowed),
+  not older than the evidence already recorded, and strictly after both the current activation
+  and the person's last credential revocation. An assertion signed for a request made before an
+  activation or a revocation counts for nothing, even inside its 5 minutes. Activation also drops
+  every pending AuthnRequest, so such a request cannot be answered at all.
+
+The IdP must therefore put `InResponseTo` on `SubjectConfirmationData` (Entra ID, Okta, Google and
+Keycloak do for SP-initiated sign-in) and sign the assertion. Only the provider declared in
+deployment config carries roles; a sign-in through any other is refused. `saml-acs.integration.test.ts`
+runs all of this through the real endpoint with real signed XML.
+
+**Replicas must agree (the mode fence).** Every request, CLI code redemption and live tunnel
+compares this replica's config with the persisted mode (`idp-roles/mode-fence.ts`). A replica whose
+config does not match (mode off while the persisted mode is on, on while it is off, or a different
+fingerprint) answers every authenticated request with 401 `idp_roles_config_mismatch`, refuses SSO
+sign-ins with `idp_roles_config_changed`, and keeps no tunnel open. So during a rollout that
+switches the mode, changes its config, or rotates IdP certificates, old replicas stop serving as
+soon as the first new one applies the activation. Roll out every replica with the same config; a
+mismatch is a refusal, not a fallback. Off everywhere and never switched on: no change.
+
+**Switching the mode on (activation).** At startup the control plane compares its config with the
+persisted mode (`idp_role_mode`). Switching it on, or changing anything role evidence depends on
+while on (the claim, the mapping, the interval, or the IdP's provider id, entity id, SSO URL, email
+domains or signing certificates, compared as a SHA-256 fingerprint), is a new activation, applied
+once: every person's credentials are revoked (`credentials_revoked_at`),
+role evidence is cleared, console sessions are deleted, and live SSH certificates are marked
+revoked. Everyone signs in through SSO again, and those new sessions are valid. A restart with
+unchanged config does nothing. Switching off is recorded and revokes nothing; roles stay as last
+set and admins manage them again. Requests wait until the activation is applied. Machine agent
+credentials are not human credentials and are never touched. An IdP certificate rollover is a new
+activation too: evidence verified under one set of trust anchors is never carried over to another.
+
+**CLI sign-in codes.** `cloudable login` gets a 60-second code from the console and redeems it for
+a CLI token and an SSH certificate. Redemption checks the person and the mode fence when it starts,
+and again under database locks after the certificate is signed, so a revocation or activation that
+lands in between hands out nothing (and revokes the certificate just stored). The CLI token is
+dated by the code's issue time, not the redemption time, so a revocation after the code was
+issued refuses the token too, even after a later fresh SSO sign-in.
+
+**What Cloudable refuses.** Role and approver changes from the People page, the API and the CLI
+answer 409 `ROLES_MANAGED_BY_IDP`, "Roles are managed by your identity provider." Adding a person
+still works, as a member; their first sign-in sets the real role. Email changes, deactivation and
+offboarding still work. The bootstrap admin is added as a member: nothing is promoted locally.
+Recovery when the IdP is unavailable is server administration: switch the mode off and restart.
+
+**SSH certificates and revocation.** Cloudable cannot revoke an SSH certificate once issued: there
+is no key revocation list (KRL) on any machine (see "Revocation" below). What keeps that from
+mattering is that, as this repository sets machines up, nothing trusts the Cloudable CA:
+
+- *What the code guarantees.* No machine setup in this repository tells sshd or authorized_keys to
+  accept a user CA (`TrustedUserCAKeys`, `cert-authority`, `AuthorizedPrincipalsFile`). The tunnel's
+  `ssh` method opens a shell inside the tunnel daemon, behind the control plane's per-request
+  checks, not a connection to sshd. `idp-roles/ssh-ca-trust.guard.test.ts` fails if any tracked or
+  untracked file under the agent, tunnel daemon, control plane, infra or scripts introduces such
+  trust, and has no escape hatch: trusting the CA must ship together with a working KRL.
+- *What it assumes about the deployment, and does not verify.* That machines are set up only by
+  this code, and nobody adds CA trust by hand or in an image (the CA public key is inside every
+  certificate, so it is not secret). That machines take no inbound traffic: this repository's
+  Terraform denies all inbound traffic on the machines subnet it creates, but the Azure provisioner
+  accepts any `AZURE_MACHINES_SUBNET_ID` and gives each machine a public IP, so a deployment using
+  another subnet must enforce this itself. Cloudable does not attest either from the machines.
+
+If those assumptions fail, a certificate issued before a refusal or an activation keeps working
+against sshd until it expires: at most 8 hours with the mode off, at most the person's role
+deadline with it on. That cap bounds the exposure. It is not revocation, and nothing here relies
+on it as such.
+
+**What is recorded.** Every decision writes one of the shared contract's events, with the fields
+`service`, `actor`, `subject`, `source`, `previousGrants`, `newGrants` and `reason`, and the same
+JSON on a `[security] idp-roles` log line. No tokens or assertion content are recorded.
+
+| Event | When |
+| :--- | :--- |
+| `idp_roles.granted` | A verified sign-in set new grants. Actor type `idp`. |
+| `idp_roles.revalidated` | A verified sign-in confirmed the same grants. |
+| `idp_roles.denied` | A sign-in had no mapped role. Credentials ended. |
+| `idp_roles.local_change_refused` | A role or approver change in Cloudable was refused. |
+| `idp_roles.activation` | The mode was switched on, off, or remapped (one per org). |
+
+`person.role_changed` and `person.approver_changed` are still written alongside, with actor type
+`idp`, so existing readers see every change.
+
+**Configuration** (environment of the control-plane container)
+
+| Variable | Default | Meaning |
+| :--- | :--- | :--- |
+| `IDP_ROLES_ENABLED` | `false` | `true` or `false`, exactly. |
+| `IDP_ROLE_CLAIM` | none, required when on | The SAML attribute name holding the roles, matched exactly. |
+| `IDP_ROLE_MAPPING` | none, required when on | JSON object: claim value to a list of `owner`, `admin`, `member`, `approver`. |
+| `IDP_RECHECK_INTERVAL_SECONDS` | `3600` | Whole seconds, 1 to 3600. |
+
+The control plane refuses to start on a bad value, on unknown targets, with the mode on but no IdP
+declared in deployment config (`IDP_METADATA_URL`, `IDP_SAML_CONFIG`), or with
+`PASSWORD_SIGN_IN=on`. With the mode off, malformed role settings are still refused.
+
+**Moving from older names.** `ROLES_FROM_IDP` and `IDP_ROLE_UNMAPPED` (an earlier, unreleased
+version of this mode) are refused, even next to the new names. Replace `ROLES_FROM_IDP=on` with
+`IDP_ROLES_ENABLED=true`, set `IDP_ROLE_CLAIM` explicitly (there is no default any more), turn each
+mapping value into a list (`"admin"` becomes `["admin"]`), and drop `IDP_ROLE_UNMAPPED`: a sign-in
+with no mapped role is always refused.
+
+Any SAML IdP works (Entra ID, Okta, Google Workspace, Keycloak, AD FS): send the roles as one
+attribute, single- or multi-valued, and name it in `IDP_ROLE_CLAIM`.
+
+**Example: Entra ID**
+
+1. In the Cloudable enterprise application's app registration, open **App roles** and create one
+   role per Cloudable role, for users: for example `Cloudable.Admin`, `Cloudable.Member` and
+   `Cloudable.Approver` (the **Value** is what the attribute carries).
+2. In the enterprise application, **Users and groups**: assign each person or group a role. A
+   person can hold several; assign `Cloudable.Approver` next to a base role.
+3. Entra sends assigned app roles as
+   `http://schemas.microsoft.com/ws/2008/06/identity/claims/role`. Under **Single sign-on**,
+   **Attributes & Claims**, check that no rule removes it. Keep assertion signing on (the Entra
+   default).
+4. Set on the control plane:
+
+```
+IDP_ROLES_ENABLED=true
+IDP_ROLE_CLAIM=http://schemas.microsoft.com/ws/2008/06/identity/claims/role
+IDP_ROLE_MAPPING={"Cloudable.Admin":["admin"],"Cloudable.Member":["member"],"Cloudable.Approver":["approver"]}
+IDP_RECHECK_INTERVAL_SECONDS=3600
+```
+
+A person with no Cloudable app role is then refused at sign-in.
+
 ### Approvals that replace open paths
 
 - **Package installs** need an approval, by default from one person (`package_install` on the

@@ -2,6 +2,7 @@ import type { AccessEvent } from "./domains/access";
 import type { AgentEvent } from "./domains/agent";
 import type { ApprovalEvent } from "./domains/approval";
 import type { CloudEvent } from "./domains/cloud";
+import type { IdpRolesEvent } from "./domains/idp-roles";
 import type { MachineEvent } from "./domains/machine";
 import type { OrgEvent } from "./domains/org";
 import type { PersonEvent } from "./domains/person";
@@ -15,7 +16,8 @@ export type DomainEvent =
   | ApprovalEvent
   | SnapshotEvent
   | CloudEvent
-  | AgentEvent;
+  | AgentEvent
+  | IdpRolesEvent;
 
 /**
  * The full, ordered catalogue of event type names.
@@ -100,4 +102,11 @@ export const EVENT_TYPES = [
   // --- person (added later; kept at the end so nothing above moves) ---
   "person.email_changed",
   "person.approver_changed",
+
+  // --- idp_roles (roles from the identity provider; names shared with Kahuna and SlayZone) ---
+  "idp_roles.granted",
+  "idp_roles.denied",
+  "idp_roles.revalidated",
+  "idp_roles.local_change_refused",
+  "idp_roles.activation",
 ] as const satisfies ReadonlyArray<DomainEvent["type"]>;

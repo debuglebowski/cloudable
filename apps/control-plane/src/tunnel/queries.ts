@@ -15,6 +15,8 @@ export interface SessionForAttach {
   machineId: string;
   personId: string;
   sessionToken: string | null;
+  /** When the session was minted. Roles from the IdP: a revocation after it ends the session. */
+  startedAt: Date;
   endedAt: Date | null;
 }
 
@@ -41,6 +43,7 @@ export const fetchSessionForAttach = (
             machineId: sessions.machineId,
             personId: sessions.personId,
             sessionToken: sessions.sessionToken,
+            startedAt: sessions.startedAt,
             endedAt: sessions.endedAt,
           })
           .from(sessions)

@@ -21,7 +21,21 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `person.deactivated` | 1 | A person's account was deactivated, manually or via SCIM. |
 | `person.role_changed` | 1 | A person's role was changed. |
 | `person.email_changed` | 1 | An admin changed a person's email. Every session and CLI token the person held was revoked. |
-| `person.approver_changed` | 1 | An admin made a person an approver, or took the approver flag away. |
+| `person.approver_changed` | 1 | A person was made an approver, or lost the flag: by an admin, or at sign-in when roles come from the identity provider. |
+
+## IdP roles
+
+Roles from the identity provider (`docs/access.md`). Names and payload fields are the shared IdP
+role contract's, the same in Kahuna and SlayZone: `service`, `actor`, `subject`, `source`,
+`previousGrants`, `newGrants`, `reason`.
+
+| Type | Tier | Description |
+| :--- | :--- | :--- |
+| `idp_roles.granted` | 1 | A verified identity provider sign-in set a person's role or approver flag to something new. |
+| `idp_roles.denied` | 1 | A sign-in carried no mapped role: refused, role removed, every session and CLI token ended. |
+| `idp_roles.revalidated` | 1 | A verified identity provider sign-in confirmed a person's role unchanged. |
+| `idp_roles.local_change_refused` | 1 | A role or approver change in Cloudable was refused because roles come from the identity provider. |
+| `idp_roles.activation` | 1 | Roles from the identity provider were switched on, off, or remapped. Switching on or remapping ended every human session and credential. |
 
 ## Machine
 

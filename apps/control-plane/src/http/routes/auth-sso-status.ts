@@ -13,6 +13,9 @@ const SsoProviderStatus = Schema.Struct({
   providerId: Schema.NullOr(Schema.String),
   // Whether the login page should offer email and password at all (`config.passwordSignInEnabled`).
   passwordSignIn: Schema.Boolean,
+  // Whether roles come from the identity provider (`config.idpRoles`). The console then shows
+  // roles read-only. The API refuses changes either way; this only saves a doomed click.
+  rolesFromIdp: Schema.Boolean,
 });
 
 export const AuthSsoStatusGroup = HttpApiGroup.make("authSsoStatus").add(

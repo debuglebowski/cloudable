@@ -6,6 +6,7 @@ import {
   PersonNotFoundError,
   PersonNotManuallyManagedError,
 } from "../../domain/people/people";
+import { RolesManagedByIdpError } from "../../domain/people/roles-managed-by-idp";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
 // Real backend for the People page ("People is top-level and
@@ -57,7 +58,8 @@ export const PeopleGroup = HttpApiGroup.make("people")
       .setPayload(CreatePersonPayload)
       .addSuccess(Person, { status: 201 })
       .addError(AdminRoleRequiredError, { status: 403 })
-      .addError(PersonAlreadyExistsError, { status: 409 }),
+      .addError(PersonAlreadyExistsError, { status: 409 })
+      .addError(RolesManagedByIdpError),
   )
   .add(
     HttpApiEndpoint.patch("update", "/api/v1/people/:id")
@@ -66,7 +68,8 @@ export const PeopleGroup = HttpApiGroup.make("people")
       .addSuccess(Person)
       .addError(AdminRoleRequiredError, { status: 403 })
       .addError(PersonNotFoundError, { status: 404 })
-      .addError(PersonNotManuallyManagedError, { status: 409 }),
+      .addError(PersonNotManuallyManagedError, { status: 409 })
+      .addError(RolesManagedByIdpError),
   )
   .add(
     HttpApiEndpoint.patch("setActive", "/api/v1/people/:id/active")

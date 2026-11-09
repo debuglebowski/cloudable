@@ -27,6 +27,34 @@ export function setUnauthorizedHandler(handler: () => void): void {
   onUnauthorized = handler;
 }
 
+/**
+ * Fires on a 401 with `reason: "idp_reauthentication_required"`: roles come from the identity
+ * provider and this person's role evidence is older than the recheck interval (at most an hour).
+ * The session cookie is still valid, so signing out would only loop through `/login`; `main.tsx`
+ * wires this to starting a fresh SSO sign-in that returns to the current page. With an IdP session
+ * still open that round trip needs no password or MFA prompt.
+ */
+let onReauthRequired: (() => void) | undefined;
+
+export function setReauthRequiredHandler(handler: () => void): void {
+  onReauthRequired = handler;
+}
+
+export function isReauthRequired(body: unknown): boolean {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    (body as Record<string, unknown>)._tag === "AuthenticationRequired" &&
+    (body as Record<string, unknown>).reason === "idp_reauthentication_required"
+  );
+}
+
+function notifyUnauthorized(status: number, body: unknown): void {
+  if (status !== 401) return;
+  if (isExpiredSession(body)) onUnauthorized?.();
+  else if (isReauthRequired(body)) onReauthRequired?.();
+}
+
 function isExpiredSession(body: unknown): boolean {
   return (
     typeof body === "object" &&
@@ -107,9 +135,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       .clone()
       .json()
       .catch(() => undefined);
-    if (res.status === 401 && isExpiredSession(body)) {
-      onUnauthorized?.();
-    }
+    notifyUnauthorized(res.status, body);
     throw new ApiError(res.status, path, method, body);
   }
 
@@ -148,9 +174,7 @@ export async function apiGetText(path: string): Promise<string> {
       .clone()
       .json()
       .catch(() => undefined);
-    if (res.status === 401 && isExpiredSession(body)) {
-      onUnauthorized?.();
-    }
+    notifyUnauthorized(res.status, body);
     throw new ApiError(res.status, path, "GET", body);
   }
   return res.text();
@@ -165,9 +189,7 @@ export async function apiGetBytes(path: string): Promise<Uint8Array> {
       .clone()
       .json()
       .catch(() => undefined);
-    if (res.status === 401 && isExpiredSession(body)) {
-      onUnauthorized?.();
-    }
+    notifyUnauthorized(res.status, body);
     throw new ApiError(res.status, path, "GET", body);
   }
   return new Uint8Array(await res.arrayBuffer());

@@ -7,6 +7,7 @@ export { EVENT_METADATA } from "./metadata";
 
 export type { OrgEvent } from "./domains/org";
 export type { PersonEvent } from "./domains/person";
+export type { IdpRolesAuditPayload, IdpRolesEvent } from "./domains/idp-roles";
 export type { MachineEvent } from "./domains/machine";
 export type { AccessEvent } from "./domains/access";
 export type { ApprovalEvent } from "./domains/approval";

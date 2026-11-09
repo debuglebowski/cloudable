@@ -27,6 +27,7 @@ const ALLOWED = new Set([
   "services/reconcile-diff.integration.ts",
   "testing/db-reachable.ts",
   "test-support/db.ts",
+  "test-support/isolated-db.ts",
 ]);
 
 const walk = (dir: string): string[] =>

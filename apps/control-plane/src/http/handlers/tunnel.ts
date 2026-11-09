@@ -1,4 +1,5 @@
 import type { TunnelFrame } from "@cloudable/contracts";
+import { people } from "@cloudable/schema";
 import {
   HttpApiBuilder,
   HttpRouter,
@@ -6,10 +7,18 @@ import {
   HttpServerResponse,
   Socket,
 } from "@effect/platform";
-import { Deferred, Duration, Effect } from "effect";
+import { eq } from "drizzle-orm";
+import { Deferred, Duration, Effect, Fiber, Ref } from "effect";
 import { config } from "../../config";
 import { Db } from "../../db/layer";
 import { MachineService } from "../../domain/machine/MachineService";
+import {
+  STANDING_READ_TIMEOUT_MS,
+  allowedUntil,
+  isPastDeadline,
+  watchLiveSession,
+} from "../../idp-roles/live-session-watch";
+import { checkModeFence } from "../../idp-roles/mode-fence";
 import { SignerTag } from "../../services/Signer";
 import { AgentSessionToken } from "../../services/attestation/AgentSessionToken";
 import { fetchSessionForAttach } from "../../tunnel/queries";
@@ -217,6 +226,21 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
     // `CurrentUserAuthenticationLive` documents for capturing it the same way.
     const db = yield* Db;
 
+    /** A person's standing and the mode fence, read fresh (roles from the IdP only). */
+    const readStanding = (personId: string) =>
+      Effect.tryPromise(async () => {
+        const [person] = await db
+          .select({
+            active: people.active,
+            credentialsRevokedAt: people.credentialsRevokedAt,
+            idpRolesVerifiedAt: people.idpRolesVerifiedAt,
+          })
+          .from(people)
+          .where(eq(people.id, personId))
+          .limit(1);
+        return { person, fence: await checkModeFence(db, config.idpRoles) };
+      });
+
     /**
      * A session is over the moment either leg drops. `closeRelay` sends the daemon a
      * `close` frame, which is a `pty.kill()` (`apps/tunnel-daemon/src/session-manager.ts`),
@@ -324,17 +348,67 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
         const cols = parseSize(searchParams.cols, 80);
         const rows = parseSize(searchParams.rows, 24);
 
+        // Roles from the identity provider: the session may run only while its person's role
+        // evidence is fresh, measured from when it was minted. Checked before the upgrade, and
+        // the deadline it yields gates every frame in both directions from the first one. A
+        // watcher fiber (below) ends the session at that deadline, or sooner on revocation.
+        // Mode off: no deadline, no watcher, no gates.
+        const idpRoles = config.idpRoles;
+        const deadline = yield* Ref.make(Number.POSITIVE_INFINITY);
+        const lapseReason = "idp_reauthentication_required";
+        // Ends the session and always closes the transport, even if recording the end fails.
+        const lapse = endSessionOnDisconnect(sessionId, sessionRow.orgId, lapseReason).pipe(
+          Effect.timeout(Duration.seconds(5)),
+          Effect.catchAllCause(() => Effect.void),
+          Effect.ensuring(registry.closeRelay(sessionId, lapseReason)),
+        );
+        if (idpRoles) {
+          const read = yield* readStanding(currentUser.personId).pipe(
+            Effect.timeout(Duration.millis(STANDING_READ_TIMEOUT_MS)),
+            Effect.option,
+          );
+          const until =
+            read._tag === "Some"
+              ? allowedUntil(read.value, sessionRow.startedAt.getTime(), Date.now(), idpRoles)
+              : null;
+          if (until === null) {
+            yield* lapse;
+            return HttpServerResponse.unsafeJson({ reason: lapseReason }, { status: 401 });
+          }
+          yield* Ref.set(deadline, until);
+        }
+
         const socket = yield* request.upgrade;
         const write = yield* socket.writer;
 
         const browserSocket: TunnelSocket = {
-          send: (frame) => write(JSON.stringify(frame)).pipe(Effect.catchAll(() => Effect.void)),
+          send: (frame) =>
+            Effect.gen(function* () {
+              // Nothing from the machine reaches the browser after the deadline. `close`
+              // frames still go, so the browser learns why it ended.
+              if (idpRoles && frame.kind !== "close" && (yield* isPastDeadline(deadline))) return;
+              yield* write(JSON.stringify(frame)).pipe(Effect.catchAll(() => Effect.void));
+            }),
           close: () =>
             write(new Socket.CloseEvent(1000, "closed")).pipe(Effect.catchAll(() => Effect.void)),
         };
 
         yield* registry.registerRelay(sessionId, sessionRow.machineId, browserSocket);
         yield* Effect.logInfo(`tunnel: browser attaching session ${sessionId}`);
+
+        // From the moment the relay exists, so the deadline holds through the attach handshake
+        // too. A child of this request's fiber: it stops when the request ends, however it ends.
+        const watcher = idpRoles
+          ? yield* Effect.fork(
+              watchLiveSession({
+                idpRoles,
+                issuedAtMs: sessionRow.startedAt.getTime(),
+                readStanding: readStanding(currentUser.personId),
+                onLapse: lapse,
+                deadline,
+              }),
+            )
+          : undefined;
 
         const handshake = yield* registry.beginHandshake(sessionId);
         yield* daemon.send({
@@ -388,6 +462,10 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
                 return;
               }
               const kind = (parsed as { kind: string }).kind;
+              if (idpRoles && (yield* isPastDeadline(deadline))) {
+                yield* lapse;
+                return;
+              }
               if (kind === "data") {
                 const dataBase64 = (parsed as { dataBase64?: unknown }).dataBase64;
                 if (typeof dataBase64 === "string") {
@@ -437,7 +515,8 @@ export const AccessAttachRouteLive = HttpApiBuilder.Router.use((router) =>
             // socket is a harmless no-op (its `send`/`close` swallow write errors, same as
             // the daemon-connect route's).
             Effect.ensuring(
-              Effect.logInfo(`tunnel: browser left session ${sessionId}`).pipe(
+              (watcher ? Fiber.interrupt(watcher) : Effect.void).pipe(
+                Effect.zipRight(Effect.logInfo(`tunnel: browser left session ${sessionId}`)),
                 Effect.zipRight(
                   endSessionOnDisconnect(sessionId, sessionRow.orgId, "connection_lost"),
                 ),

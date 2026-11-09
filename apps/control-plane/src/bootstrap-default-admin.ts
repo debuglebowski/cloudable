@@ -78,7 +78,10 @@ export async function bootstrapDefaultAdmin(
           email: normalizedEmail,
           source: "manual",
           active: true,
-          role: "owner",
+          // With roles from the identity provider, nobody is promoted here: the first verified
+          // SSO sign-in sets the role from the claim. Recovery goes through server
+          // administration (switch the mode off), never a built-in admin.
+          role: config.idpRoles ? "member" : "owner",
         })
         .returning();
     }
