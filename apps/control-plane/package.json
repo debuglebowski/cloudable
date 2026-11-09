@@ -27,6 +27,7 @@
     "@better-auth/sso": "1.7.2",
     "@effect/platform": "0.97.1",
     "@effect/platform-bun": "0.91.2",
+    "@normain/idp-role-contract": "file:../../vendor/normain-idp-role-contract-0.1.0.tgz",
     "better-auth": "1.7.2",
     "drizzle-orm": "0.45.2",
     "effect": "^3",
