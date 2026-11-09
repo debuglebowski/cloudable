@@ -84,3 +84,13 @@ test("--part-of applies to every add and pin; --standalone clears a parent", () 
     { packageName: "gh", partOf: null },
   ]);
 });
+
+test("--description applies to every add in the command", () => {
+  const args = parseArgs(["--add", "gh", "--description", "GitHub CLI for PR work"], {
+    values: ["part-of", "description"],
+    repeatable: ["add", "pin", "remove", "standalone"],
+  });
+  expect(packageEdits(args).upserts).toEqual([
+    { packageName: "gh", versionPin: null, pinned: false, description: "GitHub CLI for PR work" },
+  ]);
+});

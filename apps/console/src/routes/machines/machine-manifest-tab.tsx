@@ -124,18 +124,25 @@ function AddPackageForm({
   const nameId = useId();
   const versionId = useId();
   const partOfId = useId();
+  const descriptionId = useId();
   const [packageName, setPackageName] = useState("");
   const [versionPin, setVersionPin] = useState("");
   const [partOf, setPartOf] = useState("");
+  const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const addMutation = useMutation({
-    mutationFn: (entry: { packageName: string; versionPin: string | null; partOf?: string }) =>
-      updateMachinePackages(machineId, { upserts: [entry] }),
+    mutationFn: (entry: {
+      packageName: string;
+      versionPin: string | null;
+      partOf?: string;
+      description?: string;
+    }) => updateMachinePackages(machineId, { upserts: [entry] }),
     onSuccess: (_manifest, entry) => {
       setPackageName("");
       setVersionPin("");
       setPartOf("");
+      setDescription("");
       setError(null);
       onDone();
       toast.success(`"${entry.packageName}" declared on this machine`);
@@ -165,6 +172,7 @@ function AddPackageForm({
       packageName: trimmedName,
       versionPin: trimmedVersion === "" ? null : trimmedVersion,
       ...(trimmedParent === "" ? {} : { partOf: trimmedParent }),
+      ...(description.trim() === "" ? {} : { description: description.trim() }),
     });
   }
 
@@ -224,6 +232,22 @@ function AddPackageForm({
                 <option key={entry.package} value={entry.package} />
               ))}
           </datalist>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={descriptionId} className="text-xs text-muted-foreground">
+            Why
+          </label>
+          <Input
+            id={descriptionId}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") submit();
+            }}
+            placeholder="GitHub CLI for PR work"
+            maxLength={500}
+            className="w-64"
+          />
         </div>
         <Button size="sm" onClick={submit} disabled={!canAdd}>
           {addMutation.isPending ? "Adding…" : "Add package"}

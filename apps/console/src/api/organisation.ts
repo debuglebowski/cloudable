@@ -85,6 +85,8 @@ export interface OrgPackageEntry {
   pinned: boolean;
   /** The declared parent this package is part of, or null. */
   partOf?: string | null;
+  /** Why it is allowed, or null. */
+  description?: string | null;
 }
 
 export interface OrgPackageEdit {
@@ -92,6 +94,7 @@ export interface OrgPackageEdit {
   versionPin?: string | null;
   pinned?: boolean;
   partOf?: string | null;
+  description?: string | null;
 }
 
 interface OrgPackagesResponse {

@@ -19,6 +19,8 @@ export interface ManifestHistoryState {
   excluded: boolean;
   /** The parent declaration, null when none (and for rows written before parts existed). */
   partOf: string | null;
+  /** Why it was allowed, null when not given. */
+  description: string | null;
 }
 
 export interface ManifestHistoryEntry {
@@ -63,12 +65,14 @@ function toState(raw: unknown): ManifestHistoryState | null {
     pinned?: unknown;
     excluded?: unknown;
     partOf?: unknown;
+    description?: unknown;
   };
   return {
     versionPin: typeof value.versionPin === "string" ? value.versionPin : null,
     pinned: value.pinned === true,
     excluded: value.excluded === true,
     partOf: typeof value.partOf === "string" ? value.partOf : null,
+    description: typeof value.description === "string" ? value.description : null,
   };
 }
 

@@ -109,6 +109,7 @@ export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[]
       versionMismatch,
       isBaseline: baselineSet.has(packageName),
       partOf: entry?.partOf ?? null,
+      description: entry?.description ?? null,
       installedAsDependency:
         manualSet !== null &&
         installed === "installed" &&

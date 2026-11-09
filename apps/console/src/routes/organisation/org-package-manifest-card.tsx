@@ -73,6 +73,9 @@ function PackageRow({ entry }: { entry: OrgPackageEntry }) {
         {entry.partOf && (
           <span className="text-xs text-muted-foreground">part of {entry.partOf}</span>
         )}
+        {entry.description && (
+          <span className="text-xs text-muted-foreground">· {entry.description}</span>
+        )}
       </div>
       <Button
         variant="ghost"
@@ -92,11 +95,13 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
   const versionId = useId();
   const pinnedId = useId();
   const partOfId = useId();
+  const descriptionId = useId();
 
   const [packageName, setPackageName] = useState("");
   const [versionPin, setVersionPin] = useState("");
   const [pinned, setPinned] = useState(false);
   const [partOf, setPartOf] = useState("");
+  const [description, setDescription] = useState("");
 
   const trimmedName = packageName.trim();
   const isDuplicate = existing.some((entry) => entry.packageName === trimmedName);
@@ -110,6 +115,7 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
         versionPin: versionPin.trim() === "" ? null : versionPin.trim(),
         pinned,
         ...(partOf.trim() === "" ? {} : { partOf: partOf.trim() }),
+        ...(description.trim() === "" ? {} : { description: description.trim() }),
       },
       {
         onSuccess: () => {
@@ -117,6 +123,7 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
           setVersionPin("");
           setPinned(false);
           setPartOf("");
+          setDescription("");
         },
       },
     );
@@ -169,6 +176,22 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
             }}
             placeholder="none"
             className="w-44"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={descriptionId} className="text-xs text-muted-foreground">
+            Why
+          </label>
+          <Input
+            id={descriptionId}
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") submit();
+            }}
+            placeholder="Defender, installed by Azure"
+            maxLength={500}
+            className="w-64"
           />
         </div>
         <div className="flex items-center gap-1.5 pb-1.5">

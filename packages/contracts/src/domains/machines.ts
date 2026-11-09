@@ -122,6 +122,8 @@ export interface PackageManifestEntry {
    * parts read as undeclared again.
    */
   partOf?: string | null;
+  /** Why this package is allowed, in a person's words. Nothing acts on it. */
+  description?: string | null;
 }
 
 export interface ResolvedPackageManifestEntry extends PackageManifestEntry {
@@ -204,6 +206,8 @@ export interface PackageManifestEdit {
   excluded?: boolean;
   /** Parent declaration; null clears it. Omitted keeps the current value. */
   partOf?: string | null;
+  /** Why it is allowed; null clears it. Omitted keeps the current value. */
+  description?: string | null;
 }
 
 /**
@@ -297,6 +301,8 @@ export interface MachinePackageRow {
   isBaseline: boolean;
   /** The declared parent this package is part of, from the manifest. */
   partOf?: string | null;
+  /** The manifest entry's description, if any. */
+  description?: string | null;
   /**
    * Installed only because another package needed it (apt's own record). Not
    * judged on its own by the "no undeclared software" check: the package that

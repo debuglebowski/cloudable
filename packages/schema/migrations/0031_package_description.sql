@@ -1,0 +1,1 @@
+ALTER TABLE "machine_packages" ADD COLUMN "description" text;

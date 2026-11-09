@@ -81,6 +81,8 @@ const PackageManifestEntry = Schema.Struct({
   pinned: Schema.optional(Schema.Boolean),
   // The declared parent this package is part of. Null clears it.
   partOf: Schema.optional(Schema.NullOr(DeclaredPackageName)),
+  // Why it is allowed. Free text for people; nothing acts on it.
+  description: Schema.optional(Schema.NullOr(Schema.String.pipe(Schema.maxLength(500)))),
 }).pipe(
   Schema.filter((entry) => entry.partOf !== entry.packageName, {
     message: () => "a package cannot be part of itself",
@@ -92,6 +94,7 @@ const OrgPackageEntryResource = Schema.Struct({
   versionPin: Schema.NullOr(Schema.String),
   pinned: Schema.Boolean,
   partOf: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
 });
 
 const ListOrgPackagesResponse = Schema.Struct({ items: Schema.Array(OrgPackageEntryResource) });

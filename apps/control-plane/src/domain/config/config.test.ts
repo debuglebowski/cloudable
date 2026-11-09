@@ -860,7 +860,13 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       expect(eventA?.payload).toEqual({
         key: "package:docker",
         previous: null,
-        current: { versionPin: "24", pinned: false, excluded: false, partOf: null },
+        current: {
+          versionPin: "24",
+          pinned: false,
+          excluded: false,
+          partOf: null,
+          description: null,
+        },
         overridesLevel: "none",
       });
       expect(eventB?.payload).toEqual({

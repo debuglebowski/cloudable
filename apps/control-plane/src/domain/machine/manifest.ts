@@ -20,6 +20,8 @@ export interface MachinePackageRow {
   excluded: boolean;
   /** See the column comment in `machine-package.ts`. Absent reads as null. */
   partOf?: string | null;
+  /** Free text: why it is allowed. Absent reads as null. */
+  description?: string | null;
   source: ManifestScope;
 }
 
@@ -28,6 +30,7 @@ export interface PackageManifestValue {
   pinned: boolean;
   excluded: boolean;
   partOf: string | null;
+  description: string | null;
 }
 
 export interface ResolvedManifestEntry {
@@ -43,6 +46,8 @@ export interface ResolvedManifestEntry {
   excluded: boolean;
   /** The parent declaration, null for an ordinary entry. */
   partOf: string | null;
+  /** Why it is allowed, in a person's words; null when not given. */
+  description: string | null;
   /** Which scope level's row won resolution — feeds `LineageGutter`/`SettingRow` (docs/frontend.md). */
   source: ManifestScope;
   resolvedFromScopeId: string;
@@ -72,6 +77,7 @@ export function resolveManifest(
       pinned: row.pinned,
       excluded: row.excluded,
       partOf: row.partOf ?? null,
+      description: row.description ?? null,
     },
     source: row.source,
   }));
@@ -86,6 +92,7 @@ export function resolveManifest(
       pinned: winner.value.pinned,
       excluded: winner.value.excluded,
       partOf: winner.value.partOf,
+      description: winner.value.description,
       source: winner.source,
       resolvedFromScopeId: winner.resolvedFromScopeId,
     });

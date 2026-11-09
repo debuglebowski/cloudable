@@ -30,6 +30,7 @@ const resolvedManifestEntrySchema = Schema.Struct({
   pinned: Schema.Boolean,
   excluded: Schema.Boolean,
   partOf: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
   source: manifestScopeSchema,
   resolvedFromScopeId: Schema.String,
 });
@@ -174,6 +175,8 @@ const packageManifestEntrySchema = Schema.Struct({
   excluded: Schema.optional(Schema.Boolean),
   // The declared parent this package is part of. Null clears it.
   partOf: Schema.optional(Schema.NullOr(declaredPackageNameSchema)),
+  // Why it is allowed. Free text for people; nothing acts on it.
+  description: Schema.optional(Schema.NullOr(Schema.String.pipe(Schema.maxLength(500)))),
 }).pipe(
   Schema.filter((entry) => entry.partOf !== entry.packageName, {
     message: () => "a package cannot be part of itself",
@@ -194,6 +197,7 @@ const manifestHistoryStateSchema = Schema.Struct({
   pinned: Schema.Boolean,
   excluded: Schema.Boolean,
   partOf: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
 });
 
 /**
@@ -228,6 +232,7 @@ const packageRowSchema = Schema.Struct({
   versionMismatch: Schema.Boolean,
   isBaseline: Schema.Boolean,
   partOf: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
   installedAsDependency: Schema.optional(Schema.Boolean),
   pendingAction: Schema.optional(
     Schema.Struct({

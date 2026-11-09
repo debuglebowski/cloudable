@@ -45,6 +45,7 @@ describe("resolveManifest", () => {
         source: "machine",
         resolvedFromScopeId: "machine-1",
         partOf: null,
+        description: null,
       },
     ]);
   });
@@ -92,6 +93,7 @@ describe("resolveManifest", () => {
         source: "org",
         resolvedFromScopeId: "org-1",
         partOf: null,
+        description: null,
       },
       {
         packageName: "nodejs",
@@ -101,6 +103,7 @@ describe("resolveManifest", () => {
         source: "machine",
         resolvedFromScopeId: "machine-1",
         partOf: null,
+        description: null,
       },
     ]);
   });

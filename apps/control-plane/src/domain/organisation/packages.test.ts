@@ -82,7 +82,15 @@ describe("org-scope package manifest write path", () => {
     await run(
       updateOrgPackages({
         orgId: org.id,
-        upserts: [{ packageName: "docker", versionPin: "24", pinned: false, partOf: null }],
+        upserts: [
+          {
+            packageName: "docker",
+            versionPin: "24",
+            pinned: false,
+            partOf: null,
+            description: null,
+          },
+        ],
         actor: { actorType: "system", actorId: "test" },
       }),
     );
@@ -101,6 +109,7 @@ describe("org-scope package manifest write path", () => {
         pinned: false,
         excluded: false,
         partOf: null,
+        description: null,
         source: "org",
         resolvedFromScopeId: org.id,
       },
@@ -114,7 +123,15 @@ describe("org-scope package manifest write path", () => {
     await run(
       updateOrgPackages({
         orgId: org.id,
-        upserts: [{ packageName: "docker", versionPin: "24", pinned: true, partOf: null }],
+        upserts: [
+          {
+            packageName: "docker",
+            versionPin: "24",
+            pinned: true,
+            partOf: null,
+            description: null,
+          },
+        ],
         actor: { actorType: "system", actorId: "test" },
       }),
     );
@@ -158,7 +175,15 @@ describe("org-scope package manifest write path", () => {
     await run(
       updateOrgPackages({
         orgId: org.id,
-        upserts: [{ packageName: "docker", versionPin: "24", pinned: true, partOf: null }],
+        upserts: [
+          {
+            packageName: "docker",
+            versionPin: "24",
+            pinned: true,
+            partOf: null,
+            description: null,
+          },
+        ],
         actor: { actorType: "system", actorId: "test" },
       }),
     );
@@ -196,7 +221,15 @@ describe("org-scope package manifest write path", () => {
     await run(
       updateOrgPackages({
         orgId: org.id,
-        upserts: [{ packageName: "docker", versionPin: "24", pinned: false, partOf: null }],
+        upserts: [
+          {
+            packageName: "docker",
+            versionPin: "24",
+            pinned: false,
+            partOf: null,
+            description: null,
+          },
+        ],
         actor: { actorType: "system", actorId: "test" },
       }),
     );
@@ -222,6 +255,7 @@ describe("org-scope package manifest write path", () => {
         pinned: false,
         excluded: true,
         partOf: null,
+        description: null,
         source: "machine",
         resolvedFromScopeId: machine.id,
       },
@@ -247,6 +281,7 @@ describe("org-scope package manifest write path", () => {
         pinned: false,
         excluded: false,
         partOf: null,
+        description: null,
         source: "org",
         resolvedFromScopeId: org.id,
       },
@@ -274,7 +309,7 @@ describe("org-scope package manifest write path", () => {
       }),
     );
     expect(await run(listOrgPackages(org.id))).toEqual([
-      { packageName: "nodejs", versionPin: "20", pinned: false, partOf: null },
+      { packageName: "nodejs", versionPin: "20", pinned: false, partOf: null, description: null },
     ]);
 
     await run(
@@ -317,7 +352,15 @@ describe("org-scope package manifest write path", () => {
     await run(
       updateOrgPackages({
         orgId: org.id,
-        upserts: [{ packageName: "docker", versionPin: "24", pinned: true, partOf: null }],
+        upserts: [
+          {
+            packageName: "docker",
+            versionPin: "24",
+            pinned: true,
+            partOf: null,
+            description: null,
+          },
+        ],
         actor: { actorType: "system", actorId: "test" },
       }),
     );
@@ -332,10 +375,10 @@ describe("org-scope package manifest write path", () => {
     );
 
     expect(result).toEqual([
-      { packageName: "docker", versionPin: "26", pinned: true, partOf: null },
+      { packageName: "docker", versionPin: "26", pinned: true, partOf: null, description: null },
     ]);
     expect(await run(listOrgPackages(org.id))).toEqual([
-      { packageName: "docker", versionPin: "26", pinned: true, partOf: null },
+      { packageName: "docker", versionPin: "26", pinned: true, partOf: null, description: null },
     ]);
   });
 

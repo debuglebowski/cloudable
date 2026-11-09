@@ -11,6 +11,7 @@ const entry = (overrides: Partial<ResolvedManifestEntry> = {}): ResolvedManifest
   source: "org",
   resolvedFromScopeId: "org-1",
   partOf: null,
+  description: null,
   ...overrides,
 });
 

@@ -96,7 +96,7 @@ function printManifest(manifest: ReadonlyArray<ResolvedPackageManifestEntry>): v
   }
   console.log("\npackages:");
   printTable(
-    ["package", "version", "pinned", "excluded", "part of", "from"],
+    ["package", "version", "pinned", "excluded", "part of", "from", "description"],
     manifest.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
@@ -104,6 +104,7 @@ function printManifest(manifest: ReadonlyArray<ResolvedPackageManifestEntry>): v
       entry.excluded ? "yes" : "no",
       dash(entry.partOf ?? null),
       entry.source,
+      dash(entry.description ?? null),
     ]),
   );
 }
@@ -305,15 +306,20 @@ export function parsePackageArg(value: string, pinned: boolean): PackageManifest
  *
  * `--part-of <parent>` makes every `--add`/`--pin` in the same command a part
  * of that declared parent: allowed only while the parent is. `--standalone
- * <pkg>` clears a package's parent.
+ * <pkg>` clears a package's parent. `--description <text>` records why every
+ * `--add`/`--pin` in the command is allowed.
  */
 export function packageEdits(args: Args): {
   upserts: PackageManifestEdit[];
   removals: string[];
 } {
   const partOf = args.flags["part-of"];
-  const withParent = (edit: PackageManifestEdit): PackageManifestEdit =>
-    partOf ? { ...edit, partOf } : edit;
+  const description = args.flags.description;
+  const withParent = (edit: PackageManifestEdit): PackageManifestEdit => ({
+    ...edit,
+    ...(partOf ? { partOf } : {}),
+    ...(description ? { description } : {}),
+  });
   const upserts = [
     ...(args.all.add ?? []).map((value) => withParent(parsePackageArg(value, false))),
     ...(args.all.pin ?? []).map((value) => withParent(parsePackageArg(value, true))),
@@ -339,7 +345,7 @@ export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>
     return;
   }
   printTable(
-    ["package", "version", "pinned", "excluded", "part of", "from"],
+    ["package", "version", "pinned", "excluded", "part of", "from", "description"],
     machine.manifest.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
@@ -347,18 +353,19 @@ export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>
       entry.excluded ? "yes" : "no",
       dash(entry.partOf ?? null),
       entry.source,
+      dash(entry.description ?? null),
     ]),
   );
 }
 
 export async function runMachinesPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--exclude <pkg>] [--include <pkg>] [--part-of <parent>] [--standalone <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>.",
+    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--exclude <pkg>] [--include <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>.",
   );
   const args = parseArgs(
     argv,
     readSpec({
-      values: ["part-of"],
+      values: ["part-of", "description"],
       repeatable: ["add", "pin", "remove", "exclude", "include", "standalone"],
     }),
   );

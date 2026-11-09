@@ -49,6 +49,10 @@ export const machinePackages = pgTable(
     // its parent is. Null for an ordinary entry. A name, not a foreign key:
     // the parent can be declared at another scope.
     partOf: text("part_of"),
+    // Why this package is allowed, in a person's words ("GitHub CLI for PR
+    // work"). Free text for the reader of the manifest and the audit trail;
+    // nothing acts on it.
+    description: text("description"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

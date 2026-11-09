@@ -104,18 +104,21 @@ describe("manifest history", () => {
       pinned: false,
       excluded: true,
       partOf: null,
+      description: null,
     });
     expect(page.items[1]?.previous).toEqual({
       versionPin: null,
       pinned: false,
       excluded: false,
       partOf: null,
+      description: null,
     });
     expect(page.items[1]?.current).toEqual({
       versionPin: "14",
       pinned: false,
       excluded: false,
       partOf: null,
+      description: null,
     });
     // An add reads as "had nothing before".
     expect(page.items[2]?.previous).toBeNull();

@@ -379,6 +379,9 @@ function PackageRow({
         {row.partOf && (
           <span className="ml-2 text-xs text-muted-foreground">part of {row.partOf}</span>
         )}
+        {row.description && (
+          <span className="block text-xs font-normal text-muted-foreground">{row.description}</span>
+        )}
         {row.versionPin && (
           <span className="ml-2 font-mono text-xs text-muted-foreground">
             pinned {row.versionPin}
