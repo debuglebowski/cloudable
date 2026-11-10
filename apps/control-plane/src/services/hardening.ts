@@ -113,6 +113,20 @@ export const HARDENING_EXCEPTIONS: readonly HardeningException[] = [
     reason:
       "Patching is meant to follow the operator's remediation deadlines through an operator-triggered action, which does not exist yet.",
   },
+  {
+    id: "host-firewall",
+    control: "A host firewall is active with a default deny policy",
+    deviation: "No host firewall is configured.",
+    reason:
+      "No inbound access reaches a machine by design: the machines subnet's network security group denies all inbound traffic, agents poll and tunnels are outbound. A host firewall would also interfere with Docker's own rules.",
+  },
+  {
+    id: "home-nodev",
+    control: "/home is mounted with nodev",
+    deviation: "/home, the persistent data disk, is mounted without nodev.",
+    reason:
+      "Not yet applied to the mount Cloudable writes. Creating a device file needs root, which the owner already has through sudo, so the option adds little on a single-owner machine.",
+  },
 ];
 
 /** Kernel modules a server never needs. udf and squashfs are exceptions above. */

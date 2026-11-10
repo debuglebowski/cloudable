@@ -71,6 +71,8 @@ and `HARDENING_EXCEPTIONS` drift apart.
 | `cron-restriction` | cron and at are restricted to authorized users | The machine's user may schedule jobs | Scheduled jobs are an ordinary part of working on one's own machine |
 | `default-umask` | Default umask is 027 or stricter | Distro default kept | One person owns each machine; a stricter umask breaks files shared with containers and service users |
 | `bootloader-password` | Bootloader password is set | Not set | There is no physical console; serial console access is governed by Azure RBAC |
+| `host-firewall` | A host firewall is active with a default deny policy | No host firewall is configured | No inbound access by design: the machines subnet's network security group denies all inbound, agents poll and tunnels are outbound. A host firewall would also fight Docker's own rules |
+| `home-nodev` | `/home` is mounted nodev | `/home`, the persistent data disk, is mounted without `nodev` | Not yet applied to the mount Cloudable writes. Creating a device file needs root, which the owner has through sudo anyway |
 | `automatic-updates` | Updates and patches are installed | The distro's own automatic security updates are left as shipped; Cloudable does not manage patching yet | Patching should follow the operator's remediation deadlines through an operator-triggered action, which does not exist yet |
 
 ## Optional malware protection
