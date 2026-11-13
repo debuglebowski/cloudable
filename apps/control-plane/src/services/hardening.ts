@@ -22,7 +22,7 @@ import { HARDENING_STAMP_PATH } from "@cloudable/contracts";
  */
 
 /** Written to the stamp file and reported by the agent. Bump when the control list changes. */
-export const HARDENING_BASELINE = "cis-ubuntu-l1-v1";
+export const HARDENING_BASELINE = "cis-ubuntu-l1-v2";
 
 export { HARDENING_STAMP_PATH };
 
@@ -255,9 +255,16 @@ EOF
     rm -f /etc/ssh/sshd_config.d/00-cloudable-hardening.conf
     fail "sshd rejected the hardening drop-in, removed it"
   fi
-  # No-op when sshd is not running (socket-activated images read the file on first use).
-  systemctl try-reload-or-restart ssh || true
 fi
+
+# --- Disable inbound SSH ---
+# Both units matter: Ubuntu's socket can listen even when ssh.service is stopped.
+# Cloudable terminal/files access uses the outbound daemon, not sshd.
+systemctl mask --now ssh.socket ssh.service
+for unit in ssh.socket ssh.service; do
+  expect "$unit masked" "$(systemctl is-enabled "$unit" 2>/dev/null || true)" masked
+  expect "$unit stopped" "$(systemctl is-active "$unit" 2>/dev/null || true)" inactive
+done
 
 # --- sudo ---
 cat > /etc/sudoers.d/60-cloudable-hardening <<'EOF'
