@@ -115,6 +115,38 @@ echo ok`,
     expect(mkdir).toBeLessThan(script.indexOf("sshd -t"));
   });
 
+  test("stops and masks both SSH activation paths, refusing an ineffective mask", () => {
+    const script = extractScript();
+    const section = script.slice(
+      script.indexOf("# --- Disable inbound SSH ---"),
+      script.indexOf("# --- sudo ---"),
+    );
+    expect(section).toContain("systemctl mask --now ssh.socket ssh.service");
+    const run = (maskFails: boolean, stillActive: boolean) =>
+      Bun.spawnSync([
+        "bash",
+        "-c",
+        `set -euo pipefail
+fail() { echo "FAIL $1"; exit 1; }
+expect() { [ "$2" = "$3" ] || fail "$1"; }
+systemctl() {
+  case "$1" in
+    mask) return ${maskFails ? 1 : 0} ;;
+    is-enabled) echo masked; return 1 ;;
+    is-active) if [ "$2" = ssh.socket ] && ${stillActive ? "true" : "false"}; then echo active; return 0; fi; echo inactive; return 3 ;;
+    *) exit 99 ;;
+  esac
+}
+${section}
+echo verified`,
+      ]);
+    const success = run(false, false);
+    expect(success.exitCode).toBe(0);
+    expect(success.stdout.toString()).toBe("verified\n");
+    expect(run(true, false).exitCode).not.toBe(0);
+    expect(run(false, true).exitCode).not.toBe(0);
+  });
+
   test("does not use a JS template interpolation by accident inside the bash", () => {
     // A stray `${` in the source would have been consumed by TypeScript.
     expect(extractScript()).not.toContain("undefined");

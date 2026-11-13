@@ -25,10 +25,10 @@ number, because numbering differs between the 22.04 and 24.04 benchmark versions
 When the script succeeds it writes `/etc/cloudable/hardening.json`:
 
 ```json
-{"baseline":"cis-ubuntu-l1-v1","appliedAt":"2026-01-01T00:00:00Z","exceptions":["ip-forwarding", "..."]}
+{"baseline":"cis-ubuntu-l1-v2","appliedAt":"2026-01-01T00:00:00Z","exceptions":["ip-forwarding", "..."]}
 ```
 
-`cis-ubuntu-l1-v1` is the label of the control list this build applies. It changes only when
+`cis-ubuntu-l1-v2` is the label of the control list this build applies. It changes only when
 the list does. The agent reads the label and reports it like any other observed state; the
 control plane stores it and prints it in the asset inventory export as `hardening_baseline`.
 A machine with no stamp (it predates the baseline, or the baseline failed) reads `none`.
@@ -43,7 +43,7 @@ ran can be read, not just claimed.
 | Kernel modules | `cramfs`, `freevxfs`, `hfs`, `hfsplus`, `jffs2`, `usb-storage` cannot be loaded |
 | Network | No redirects sent or accepted, no source routing, martian packets logged, reverse-path filtering, SYN cookies, broadcast and bogus ICMP ignored (IPv4, and IPv6 where present) |
 | Kernel | Address space randomization on, ptrace restricted where the kernel supports it, setuid programs cannot dump core |
-| sshd | No root login, no password or keyboard-interactive login, no empty passwords, no host-based auth, no `.rhosts`, no user environment, no X11 forwarding, 4 attempts, 60 s grace, idle connections probed |
+| sshd | SSH service and socket stopped and masked; no root login, no password or keyboard-interactive login, no empty passwords, no host-based auth, no `.rhosts`, no user environment, no X11 forwarding, 4 attempts, 60 s grace, idle connections probed |
 | sudo | Commands run in a pty and are logged to `/var/log/sudo.log` |
 | Permissions | `/etc/passwd` and `/etc/group` 644, `/etc/shadow` and `/etc/gshadow` 640 `root:shadow`, cron files and directories root-only |
 | Login banner | `/etc/issue` and `/etc/issue.net` carry no OS or version detail |
@@ -52,6 +52,10 @@ ran can be read, not just claimed.
 
 The sshd settings are a drop-in that sorts before the cloud image's own file. Certificate
 trust (`TrustedUserCAKeys`) is not touched here; see `docs/access.md`.
+The SSH service and socket are both stopped and masked. Ordinary direct SSH is unavailable;
+`cloudable connect` and the web terminal use the outbound tunnel daemon. The baseline checks
+both masks and inactive states before recording success. This does not patch kernel CVEs.
+Existing machines are unchanged; their earlier `cis-ubuntu-l1-v1` stamp does not claim SSH is off.
 
 ## Documented exceptions
 
