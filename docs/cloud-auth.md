@@ -64,7 +64,13 @@ Never Contributor. Never subscription scope.** `infra/terraform/control-plane/ma
 `enable_self_managed_machines = true`, the default) creates the resource group, subnet, and
 deny-all-inbound NSG the control plane's machines live in, and grants its own managed identity
 the "Cloudable Machine Operator" role scoped to just that resource group — read/write/delete/
-start/stop/restart on a VM plus its disk, NIC, and public IP, nothing else. (The now-removed
+start/stop/restart on a VM plus its disk and NIC, with public-IP permissions retained for
+legacy cleanup. Newly created NICs, including during restore, have no public IP. A restore
+that reuses an existing NIC preserves its current configuration. The configured subnet
+must supply outbound connectivity for bootstrap, agent polling and tunnels (NAT, routed
+egress, or Azure default outbound access where still enabled). There is no public-IP fallback.
+Existing machines are unchanged; removing their public IP is an explicit operator action.
+(The now-removed
 `infra/terraform/federated-credential/` module defined the same role for the BYOC path above —
 gone along with the rest of it, see above.)
 
