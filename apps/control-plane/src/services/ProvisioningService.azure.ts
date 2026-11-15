@@ -10,13 +10,13 @@
 //
 // Network shell (VNet/subnet/NSG) and RBAC are Terraform's job
 // (infra/terraform/control-plane/main.tf's `enable_self_managed_machines`
-// resources) — this adapter only ever creates VMs/disks/NICs/public IPs
+// resources) — this adapter only ever creates VMs/disks/private NICs
 // that join a subnet Terraform already created and locked down (no inbound
 // — invariant 7). It never creates or modifies a VNet, subnet, or NSG
 // itself; the granted RBAC role doesn't even allow that (see that
 // Terraform file's own comment).
 import { ComputeManagementClient } from "@azure/arm-compute";
-import type { NetworkInterface, PublicIPAddress } from "@azure/arm-network";
+import type { NetworkInterface } from "@azure/arm-network";
 import { NetworkManagementClient } from "@azure/arm-network";
 import { DefaultAzureCredential } from "@azure/identity";
 import { MACHINE_OS_USER } from "@cloudable/contracts";
@@ -611,34 +611,25 @@ export function throwawayAdminPassword(): string {
   return `Cldm-${crypto.randomUUID()}`;
 }
 
-const createNetworking = (
+export const createNetworking = (
   clients: ArmClients,
   resourceGroup: string,
   location: string,
   names: ReturnType<typeof namesFor>,
 ): Effect.Effect<NetworkInterface, ProvisioningError> =>
-  Effect.gen(function* () {
-    const pip: PublicIPAddress = yield* runArm(() =>
-      clients.network.publicIPAddresses.beginCreateOrUpdateAndWait(resourceGroup, names.pip, {
-        location,
-        sku: { name: "Standard" },
-        publicIPAllocationMethod: "Static",
-      }),
-    );
-
-    return yield* runArm(() =>
-      clients.network.networkInterfaces.beginCreateOrUpdateAndWait(resourceGroup, names.nic, {
-        location,
-        ipConfigurations: [
-          {
-            name: "ipconfig1",
-            subnet: { id: clients.subnetId },
-            publicIPAddress: { id: pip.id as string },
-          },
-        ],
-      }),
-    );
-  });
+  // Outbound connectivity belongs to the configured subnet. Never attach a public IP
+  // as an implicit egress fallback. Keep legacy PIP names/deletes for older machines.
+  runArm(() =>
+    clients.network.networkInterfaces.beginCreateOrUpdateAndWait(resourceGroup, names.nic, {
+      location,
+      ipConfigurations: [
+        {
+          name: "ipconfig1",
+          subnet: { id: clients.subnetId },
+        },
+      ],
+    }),
+  );
 
 /**
  * Reads a captured snapshot back off the provider: proves it still exists, and reports the
@@ -1344,7 +1335,7 @@ const service: ProvisioningService = {
 
       // Reuse the NIC and public IP when they survived. Recreating them would move a live
       // machine to a different address for what was asked to be a data restore; an
-      // archived machine has neither and gets new ones.
+      // archived machine has neither and gets a new private NIC, without a public IP.
       const existingNic = yield* tolerateAlreadyGone(
         runArm(() => clients.network.networkInterfaces.get(rg, names.nic)),
       );

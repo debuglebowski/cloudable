@@ -6,6 +6,7 @@ import {
   DEFENDER_EXTENSION,
   classifyAzureError,
   cloudInitFor,
+  createNetworking,
   defenderExtensionFor,
   imageReferenceFor,
   installProtectionIfRequested,
@@ -14,6 +15,61 @@ import {
   parseVmNameFromResourceId,
   throwawayAdminPassword,
 } from "./ProvisioningService.azure";
+
+describe("private machine networking", () => {
+  test("creates a NIC on the configured subnet without provisioning or attaching a public IP", async () => {
+    const calls: unknown[][] = [];
+    const nic = { id: "/nic/private-machine" };
+    const clients = {
+      subnetId: "/subnets/machines",
+      network: {
+        // Any attempted public-IP operation fails: no public-IP client is supplied.
+        networkInterfaces: {
+          beginCreateOrUpdateAndWait: async (...args: unknown[]) => {
+            calls.push(args);
+            return nic;
+          },
+        },
+      },
+    } as unknown as ArmClients;
+    const names = namesFor("11111111-2222-3333-4444-555555555555");
+
+    expect(await Effect.runPromise(createNetworking(clients, "rg", "northeurope", names))).toBe(
+      nic,
+    );
+    expect(calls).toEqual([
+      [
+        "rg",
+        names.nic,
+        {
+          location: "northeurope",
+          ipConfigurations: [{ name: "ipconfig1", subnet: { id: "/subnets/machines" } }],
+        },
+      ],
+    ]);
+  });
+
+  test("propagates NIC failure without falling back to a public IP", async () => {
+    const clients = {
+      subnetId: "/subnets/machines",
+      network: {
+        networkInterfaces: {
+          beginCreateOrUpdateAndWait: async () => {
+            throw { statusCode: 403 };
+          },
+        },
+      },
+    } as unknown as ArmClients;
+    const result = await Effect.runPromise(
+      Effect.either(createNetworking(clients, "rg", "northeurope", namesFor("test"))),
+    );
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      expect(result.left.reason).toBe("provider_error");
+      expect(result.left.cause).toEqual({ statusCode: 403 });
+    }
+  });
+});
 
 describe("imageReferenceFor", () => {
   test("maps known Ubuntu versions to Canonical gallery images", () => {
