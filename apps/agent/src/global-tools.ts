@@ -115,7 +115,14 @@ export function parseCargoList(stdout: string): UserPackage[] {
 export interface NixProfileElement extends UserPackage {
   /** What `nix profile remove` takes for it: the element's index (Nix 2.18) or name (2.20+). */
   readonly handle: string;
+  /** The element's first store path: what it installed. */
+  readonly storePath?: string;
+  /** The nixpkgs commit it was installed from, when its locked URL names one. */
+  readonly nixpkgsCommit?: string;
 }
+
+const LOCKED_NIXPKGS_URL = /^github:NixOS\/nixpkgs\/([0-9a-f]{40})(?:[?#].*)?$/;
+const STORE_PATH = /^\/nix\/store\/[0-9a-df-np-sv-z]{32}-[A-Za-z0-9+._?=-]+$/;
 
 /**
  * The version in a store path's name. Nix's own rule: the name ends where a `-` is
@@ -159,13 +166,25 @@ export function parseNixProfile(stdout: string): NixProfileElement[] {
     const elements: NixProfileElement[] = [];
     for (const [handle, element] of entries) {
       if (!element || typeof element !== "object") continue;
-      const { attrPath, storePaths } = element as { attrPath?: unknown; storePaths?: unknown };
+      const { attrPath, storePaths, url } = element as {
+        attrPath?: unknown;
+        storePaths?: unknown;
+        url?: unknown;
+      };
       if (!hasText(attrPath)) continue;
       const name = attrFromPath(attrPath);
       if (!name || !isValidDeclaredPackageName(`nix:${name}`)) continue;
       const firstPath = Array.isArray(storePaths) ? storePaths[0] : undefined;
-      const version = hasText(firstPath) ? versionFromStorePath(firstPath) : undefined;
-      elements.push(version ? { name, version, handle } : { name, handle });
+      const storePath = hasText(firstPath) && STORE_PATH.test(firstPath) ? firstPath : undefined;
+      const version = storePath ? versionFromStorePath(storePath) : undefined;
+      const commit = hasText(url) ? LOCKED_NIXPKGS_URL.exec(url)?.[1] : undefined;
+      elements.push({
+        name,
+        handle,
+        ...(version ? { version } : {}),
+        ...(storePath ? { storePath } : {}),
+        ...(commit ? { nixpkgsCommit: commit } : {}),
+      });
     }
     return elements;
   } catch {

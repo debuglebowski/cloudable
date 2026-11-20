@@ -2,6 +2,7 @@ import path from "node:path";
 import { HttpApiBuilder, HttpRouter, HttpServerResponse } from "@effect/platform";
 import { Effect } from "effect";
 import { config } from "../../config";
+import { CARGO_AUDITABLE_BINARY_FILES } from "../../domain/vulnerability-scan/scan-tools-release";
 import { SCANNER_BINARY_FILES } from "../../domain/vulnerability-scan/scanner-release";
 
 /**
@@ -36,6 +37,9 @@ const TARGETS: Record<string, string> = {
   // Names come from `SCANNER_BINARY_FILES`, the same list the manifest reader accepts.
   [SCANNER_BINARY_FILES["linux-x64"]]: SCANNER_BINARY_FILES["linux-x64"],
   [SCANNER_BINARY_FILES["linux-arm64"]]: SCANNER_BINARY_FILES["linux-arm64"],
+  // cargo-auditable, for scope os_and_tools. Same rules as the scanner.
+  [CARGO_AUDITABLE_BINARY_FILES["linux-x64"]]: CARGO_AUDITABLE_BINARY_FILES["linux-x64"],
+  [CARGO_AUDITABLE_BINARY_FILES["linux-arm64"]]: CARGO_AUDITABLE_BINARY_FILES["linux-arm64"],
 };
 
 export const BinariesRouteLive = HttpApiBuilder.Router.use((router) =>

@@ -3,6 +3,7 @@ import {
   MAX_REPORTED_FINDINGS,
   SCAN_FAILURE_REASONS,
   SCAN_SCOPES,
+  SCAN_TOOLS,
   VULNERABILITY_ECOSYSTEMS,
 } from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
@@ -123,6 +124,12 @@ const InstalledScanner = Schema.Struct({
   version: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
 });
 
+/** Mirrors `InstalledScanTool`. */
+const InstalledScanTool = Schema.Struct({
+  name: Schema.Literal(...SCAN_TOOLS),
+  version: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
+});
+
 const UpdateObservation = Schema.Struct({
   id: Schema.String.pipe(Schema.pattern(/^[a-f0-9-]{36}$/)),
   observedAt: Schema.String.pipe(Schema.maxLength(64)),
@@ -176,6 +183,7 @@ const ReportPayload = Schema.Struct({
   ),
   actionResults: Schema.optional(Schema.Array(PackageActionResult)),
   scanner: Schema.optional(InstalledScanner),
+  scanTools: Schema.optional(Schema.Array(InstalledScanTool).pipe(Schema.maxItems(8))),
   vulnerabilityScan: Schema.optional(VulnerabilityScanReport),
 });
 

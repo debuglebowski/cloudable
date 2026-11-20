@@ -153,7 +153,7 @@ describe("nix", () => {
   const profile = (elements: unknown[]) => ok(JSON.stringify({ version: 2, elements }));
   const ripgrep = {
     attrPath: "legacyPackages.x86_64-linux.ripgrep",
-    storePaths: ["/nix/store/h-ripgrep-14.1.0"],
+    storePaths: ["/nix/store/0123456789abcdfghijklmnpqrsvwxyz-ripgrep-14.1.0"],
   };
 
   const nixRunner = (installed: unknown[], version = "nix (Nix) 2.18.1") =>

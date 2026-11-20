@@ -85,14 +85,17 @@ describe("Nix profile", () => {
     const out = JSON.stringify({
       version: 2,
       elements: [
-        element("legacyPackages.x86_64-linux.ripgrep", "/nix/store/h-ripgrep-14.1.0"),
+        element(
+          "legacyPackages.x86_64-linux.ripgrep",
+          "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-ripgrep-14.1.0",
+        ),
         element(
           "legacyPackages.aarch64-linux.python3Packages.black",
-          "/nix/store/h-python3.12-black-24.1.0",
+          "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-python3.12-black-24.1.0",
         ),
       ],
     });
-    expect(parseNixProfile(out)).toEqual([
+    expect(parseNixProfile(out)).toMatchObject([
       { name: "ripgrep", version: "14.1.0", handle: "0" },
       { name: "python3Packages.black", version: "24.1.0", handle: "1" },
     ]);
@@ -102,10 +105,13 @@ describe("Nix profile", () => {
     const out = JSON.stringify({
       version: 3,
       elements: {
-        ripgrep: element("legacyPackages.x86_64-linux.ripgrep", "/nix/store/h-ripgrep-14.1.0"),
+        ripgrep: element(
+          "legacyPackages.x86_64-linux.ripgrep",
+          "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-ripgrep-14.1.0",
+        ),
       },
     });
-    expect(parseNixProfile(out)).toEqual([
+    expect(parseNixProfile(out)).toMatchObject([
       { name: "ripgrep", version: "14.1.0", handle: "ripgrep" },
     ]);
   });
@@ -114,9 +120,12 @@ describe("Nix profile", () => {
     const out = JSON.stringify({
       version: 2,
       elements: [
-        { storePaths: ["/nix/store/h-thing-1.0"] },
-        element("", "/nix/store/h-x-1"),
-        element("legacyPackages.x86_64-linux.bad'name", "/nix/store/h-x-1"),
+        { storePaths: ["/nix/store/0123456789abcdfghijklmnpqrsvwxyz-thing-1.0"] },
+        element("", "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-x-1"),
+        element(
+          "legacyPackages.x86_64-linux.bad'name",
+          "/nix/store/0123456789abcdfghijklmnpqrsvwxyz-x-1",
+        ),
       ],
     });
     expect(parseNixProfile(out)).toEqual([]);
@@ -177,7 +186,10 @@ describe("listUserPackages", () => {
           stdout: JSON.stringify({
             version: 2,
             elements: [
-              { attrPath: "legacyPackages.x86_64-linux.jq", storePaths: ["/nix/store/h-jq-1.7.1"] },
+              {
+                attrPath: "legacyPackages.x86_64-linux.jq",
+                storePaths: ["/nix/store/0123456789abcdfghijklmnpqrsvwxyz-jq-1.7.1"],
+              },
             ],
           }),
           exitCode: 0,

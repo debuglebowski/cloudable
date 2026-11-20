@@ -11,6 +11,8 @@ export interface MachineRecord {
   /** The scanner and version the agent last reported. Optional so a record built by hand stays valid. */
   readonly scanner?: string | null;
   readonly scannerVersion?: string | null;
+  /** The other scan tools the agent last reported (cargo-auditable, vulnix). */
+  readonly scanTools?: ReadonlyArray<{ name: string; version: string }> | null;
 }
 
 /**

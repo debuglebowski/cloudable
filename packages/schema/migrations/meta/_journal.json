@@ -232,6 +232,13 @@
       "when": 1795200042097,
       "tag": "0032_package_ensure",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795202530450,
+      "tag": "0033_machine_scan_tools",
+      "breakpoints": true
     }
   ]
 }

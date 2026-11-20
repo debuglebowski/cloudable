@@ -16,10 +16,12 @@ import {
 } from "../../domain/machine/package-actions";
 import { nixpkgsCommitFor, readNixSnapshot } from "../../domain/organisation/nix-snapshot";
 import {
+  recordReportedScanTools,
   recordReportedScanner,
   recordVulnerabilityScan,
 } from "../../domain/vulnerability-scan/ingest";
 import { pollSettingsFor } from "../../domain/vulnerability-scan/poll-settings";
+import { scanToolsEtagSuffix } from "../../domain/vulnerability-scan/scan-tools-release";
 import { scannerEtagSuffix } from "../../domain/vulnerability-scan/scanner-release";
 import { EventBus } from "../../services/EventBus";
 import { AgentSessionToken } from "../../services/attestation/AgentSessionToken";
@@ -225,7 +227,7 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
         // The bundled scanner's version rides along, so a control plane that ships a different
         // scanner gives every machine one fresh answer carrying the new release.
         const agentRelease = getAgentRelease();
-        const etag = `"${desired.version}${scannerEtagSuffix()}${agentRelease ? `+agent-${agentRelease.releaseId}` : ""}"`;
+        const etag = `"${desired.version}${scannerEtagSuffix()}${scanToolsEtagSuffix()}${agentRelease ? `+agent-${agentRelease.releaseId}` : ""}"`;
 
         // A 304 must not swallow work. Collecting below is a write, so the
         // early return is only safe because a new action always bumps
@@ -486,6 +488,20 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
           Effect.catchAll((error) =>
             Effect.logWarning(
               `report: failed to record scanner for ${machine.id}: ${error.message}`,
+            ),
+          ),
+        );
+
+        // cargo-auditable and vulnix, the same way.
+        yield* recordReportedScanTools(db, {
+          orgId: identity.orgId,
+          machineId: machine.id,
+          previous: machine.scanTools ?? null,
+          reported: payload.scanTools,
+        }).pipe(
+          Effect.catchAll((error) =>
+            Effect.logWarning(
+              `report: failed to record scan tools for ${machine.id}: ${error.message}`,
             ),
           ),
         );

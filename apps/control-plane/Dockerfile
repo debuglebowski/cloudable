@@ -143,6 +143,36 @@ RUN set -eu \
  && printf '{"scanner":"trivy","version":"%s","artifacts":{"linux-x64":{"file":"trivy-linux-x64","sha256":"%s"},"linux-arm64":{"file":"trivy-linux-arm64","sha256":"%s"}}}\n' \
       "${TRIVY_VERSION}" "${X64}" "${ARM64}" > /out/scanner-manifest.json
 
+# cargo-auditable, for scans with scope os_and_tools: Cloudable's own cargo installs go through it,
+# so the binaries they build record their dependencies and Trivy can scan them. A monitoring tool on
+# the closed list in docs/agents.md, delivered exactly like the scanner. The static (musl) builds,
+# pinned by version and by the SHA-256 the release publishes next to each tarball
+# (<tarball>.sha256). To bump: change CARGO_AUDITABLE_VERSION, check both .sha256 files from the
+# release page against a fresh download, and copy the two hashes. The manifest holds the hash of
+# each extracted executable, which is what an agent checks.
+ARG CARGO_AUDITABLE_VERSION=0.7.7
+ARG CARGO_AUDITABLE_SHA256_X64=7676443367c5e33d9fb22acef63cccb5e9202de12dae1b0579995eb3e2bc7a18
+ARG CARGO_AUDITABLE_SHA256_ARM64=c324af56990601354bbf40080f582ba46f8ec8b807a1388e25bb7e429d285c18
+ADD --checksum=sha256:${CARGO_AUDITABLE_SHA256_X64} \
+  https://github.com/rust-secure-code/cargo-auditable/releases/download/v${CARGO_AUDITABLE_VERSION}/cargo-auditable-x86_64-unknown-linux-musl.tar.xz \
+  /tmp/cargo-auditable-x64.tar.xz
+ADD --checksum=sha256:${CARGO_AUDITABLE_SHA256_ARM64} \
+  https://github.com/rust-secure-code/cargo-auditable/releases/download/v${CARGO_AUDITABLE_VERSION}/cargo-auditable-aarch64-unknown-linux-musl.tar.xz \
+  /tmp/cargo-auditable-arm64.tar.xz
+RUN set -eu \
+ && apt-get update -qq && apt-get install -y -qq --no-install-recommends xz-utils >/dev/null \
+ && mkdir -p /tmp/ca-x64 /tmp/ca-arm64 \
+ && tar -xJf /tmp/cargo-auditable-x64.tar.xz -C /tmp/ca-x64 --strip-components=1 \
+ && tar -xJf /tmp/cargo-auditable-arm64.tar.xz -C /tmp/ca-arm64 --strip-components=1 \
+ && install -m 0755 /tmp/ca-x64/cargo-auditable /out/cargo-auditable-linux-x64 \
+ && install -m 0755 /tmp/ca-arm64/cargo-auditable /out/cargo-auditable-linux-arm64 \
+ && cp /tmp/ca-x64/LICENSE-MIT /licenses/cargo-auditable-LICENSE-MIT \
+ && cp /tmp/ca-x64/LICENSE-APACHE /licenses/cargo-auditable-LICENSE-APACHE \
+ && X64="$(sha256sum /out/cargo-auditable-linux-x64 | cut -d' ' -f1)" \
+ && ARM64="$(sha256sum /out/cargo-auditable-linux-arm64 | cut -d' ' -f1)" \
+ && printf '{"tool":"cargo-auditable","version":"%s","artifacts":{"linux-x64":{"file":"cargo-auditable-linux-x64","sha256":"%s"},"linux-arm64":{"file":"cargo-auditable-linux-arm64","sha256":"%s"}}}\n' \
+      "${CARGO_AUDITABLE_VERSION}" "${X64}" "${ARM64}" > /out/cargo-auditable-manifest.json
+
 # ---- Runtime ------------------------------------------------------------
 ARG BUN_VERSION
 FROM oven/bun:${BUN_VERSION}-slim AS runtime
@@ -174,7 +204,8 @@ COPY --from=builder --chown=bun:bun /app/apps/tunnel-daemon/dist/cloudable-tunne
 
 # The vulnerability scanner for each CPU type and the manifest describing it, served by the same
 # route (a fixed allowlist in http/routes/binaries.ts). Machines fetch it only after an admin turns
-# scanning on. Trivy is Apache-2.0, so its licence text travels with it.
+# scanning on. Trivy is Apache-2.0, so its licence text travels with it. cargo-auditable (MIT or
+# Apache-2.0) comes from the same stage, with its licences.
 COPY --from=scanner --chown=bun:bun /out/ /app/binaries/
 COPY --from=scanner --chown=bun:bun /licenses/ /app/licenses/
 

@@ -230,6 +230,7 @@ function fakeScanManager(init: {
       calls.ticks += 1;
     },
     installedScanner: () => init.scanner,
+    installedScanTools: () => [],
     pendingReport: () => pending,
     acknowledge: (scanId) => {
       calls.acknowledged.push(scanId);

@@ -281,6 +281,7 @@ export async function runAgentLoop(
         const volumeUsage = readAllVolumeUsage();
         const hardeningBaseline = readHardeningBaseline();
         const installedScanner = scanManager.installedScanner();
+        const scanTools = scanManager.installedScanTools();
         const vulnerabilityScan = scanManager.pendingReport();
         const agentUpdate = updater?.report(AGENT_VERSION);
         await reportObservedState(session.bearerToken, {
@@ -311,6 +312,8 @@ export async function runAgentLoop(
           // The scanner as it sits on this machine, so the control plane can notice when it
           // changes. The agent never says "I installed it": that is the control plane's call.
           ...(installedScanner ? { scanner: installedScanner } : {}),
+          // cargo-auditable and vulnix, the same way.
+          ...(scanTools.length > 0 ? { scanTools } : {}),
           // A finished scan nobody has acknowledged yet. Sent again next cycle if this report
           // fails, which is safe: the control plane ignores a scan id it has already stored.
           ...(vulnerabilityScan ? { vulnerabilityScan } : {}),

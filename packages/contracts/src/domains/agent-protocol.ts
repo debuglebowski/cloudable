@@ -1,5 +1,9 @@
 import type { AgentRelease, AgentUpdateReport } from "./agent-update";
-import type { InstalledScanner, VulnerabilityScanReport } from "./vulnerability-scan";
+import type {
+  InstalledScanTool,
+  InstalledScanner,
+  VulnerabilityScanReport,
+} from "./vulnerability-scan";
 
 /**
  * Wire types for the control agent protocol: attest, poll,
@@ -302,6 +306,11 @@ export interface AgentReportRequest {
    * `machine.scanner_installed` when it changed; the agent never says "I installed it".
    */
   readonly scanner?: InstalledScanner;
+  /**
+   * The other scan tools on this machine (cargo-auditable, vulnix), as found. Compared the
+   * same way as `scanner`, each change recorded as `machine.scanner_installed`.
+   */
+  readonly scanTools?: readonly InstalledScanTool[];
   /**
    * The result of a scan that finished since the last acknowledged report. Sent again on
    * the next report if this one is not acknowledged; `scanId` makes that safe.

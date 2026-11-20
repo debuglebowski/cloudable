@@ -143,6 +143,12 @@ export const machines = pgTable("machines", {
    */
   scanner: text("scanner"),
   scannerVersion: text("scanner_version"),
+  /**
+   * The other scan tools the agent last reported (cargo-auditable, vulnix), as
+   * `[{ name, version }]`. Null until an agent that reports them checks in. Compared the same
+   * way as `scannerVersion`, each change recorded as `machine.scanner_installed`.
+   */
+  scanTools: jsonb("scan_tools").$type<Array<{ name: string; version: string }>>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   legalHold: boolean("legal_hold").notNull().default(false),
