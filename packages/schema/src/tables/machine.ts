@@ -129,6 +129,13 @@ export const machines = pgTable("machines", {
    */
   declaredPackageVersions: jsonb("declared_package_versions"),
   /**
+   * For the same declared set: the newest version the machine's package
+   * repository offers, as the agent last saw it. Compared with
+   * `declaredPackageVersions` to decide whether an *Ensure latest version*
+   * package needs updating. Null until an agent that reports it checks in.
+   */
+  availablePackageVersions: jsonb("available_package_versions"),
+  /**
    * The vulnerability scanner the agent last reported as installed, and its version. Both null
    * until one is. Overwritten each report so a scanner that has gone reads as none; the control
    * plane compares the reported version with this column to derive `machine.scanner_installed`.

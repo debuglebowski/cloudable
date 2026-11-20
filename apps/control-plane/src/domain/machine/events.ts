@@ -381,7 +381,13 @@ export interface PackageActionEventInput extends ActorContext {
  * (invariant 12).
  */
 export function machinePackageActionRequestedEvent(
-  input: PackageActionEventInput & { versionPin: string | null },
+  input: PackageActionEventInput & {
+    versionPin: string | null;
+    trigger?: "person" | "ensure_installed" | "ensure_latest";
+    ensureReason?: "missing" | "outdated";
+    fromVersion?: string | null;
+    toVersion?: string | null;
+  },
 ): MachineEvent {
   return {
     id: PLACEHOLDER_ID,
@@ -399,6 +405,10 @@ export function machinePackageActionRequestedEvent(
       packageName: input.packageName,
       op: input.op,
       versionPin: input.versionPin,
+      ...(input.trigger ? { trigger: input.trigger } : {}),
+      ...(input.ensureReason ? { ensureReason: input.ensureReason } : {}),
+      ...(input.fromVersion !== undefined ? { fromVersion: input.fromVersion } : {}),
+      ...(input.toVersion !== undefined ? { toVersion: input.toVersion } : {}),
     },
   };
 }

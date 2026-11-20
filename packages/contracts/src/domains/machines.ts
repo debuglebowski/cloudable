@@ -103,6 +103,27 @@ export interface ListMachinesResponse {
   pageInfo: PageInfo;
 }
 
+/**
+ * What Cloudable does about a declared package.
+ *
+ * - `allowed`: a machine may have it. A person installs it.
+ * - `ensure_installed`: Cloudable installs it when it is missing.
+ * - `ensure_latest`: Cloudable also updates it when the package repository has
+ *   a newer version. Cannot be combined with a version pin.
+ *
+ * Setting a package to either ensure value, or between them, needs an
+ * approval (`package_ensure`). The installs it then causes do not.
+ */
+export type PackageSetting = "allowed" | "ensure_installed" | "ensure_latest";
+
+export const PACKAGE_SETTINGS: readonly PackageSetting[] = [
+  "allowed",
+  "ensure_installed",
+  "ensure_latest",
+];
+
+export const isEnsureSetting = (setting: PackageSetting): boolean => setting !== "allowed";
+
 /** A declared package manifest entry: a name and an optional version pin. No dependency resolution. */
 export interface PackageManifestEntry {
   packageName: string;
@@ -124,6 +145,8 @@ export interface PackageManifestEntry {
   partOf?: string | null;
   /** Why this package is allowed, in a person's words. Nothing acts on it. */
   description?: string | null;
+  /** Absent reads as `allowed`. */
+  setting?: PackageSetting;
 }
 
 export interface ResolvedPackageManifestEntry extends PackageManifestEntry {
@@ -208,6 +231,12 @@ export interface PackageManifestEdit {
   partOf?: string | null;
   /** Why it is allowed; null clears it. Omitted keeps the current value. */
   description?: string | null;
+  /**
+   * Omitted keeps the current value. Moving to an ensure setting, or between
+   * the two, does not apply straight away: it asks for a `package_ensure`
+   * approval, and the edit is written once that is granted.
+   */
+  setting?: PackageSetting;
 }
 
 /**
@@ -227,6 +256,18 @@ export interface UpdateMachinePackagesRequest {
 
 export interface UpdateMachinePackagesResponse {
   manifest: ResolvedPackageManifestEntry[];
+  /**
+   * One per edit that set an ensure setting. Those edits are not in `manifest`
+   * yet: each waits for its approval, unless the org's `package_ensure` mode is
+   * `none`, in which case `status` is already `approved` and it was applied.
+   */
+  ensureApprovals?: PackageEnsureApprovalView[];
+}
+
+export interface PackageEnsureApprovalView {
+  packageName: string;
+  approvalId: string;
+  status: "pending" | "approved" | "rejected" | "expired";
 }
 
 /** 422 body detail when an edit would override a pinned entry below its scope. */
@@ -260,9 +301,14 @@ export type PackageActionOp = "install" | "uninstall";
 
 export type PackageActionStatus = "pending" | "running" | "succeeded" | "failed" | "expired";
 
+/** Why a package action exists: a person asked, or an ensure setting required it. */
+export type PackageActionTrigger = "person" | "ensure_installed" | "ensure_latest";
+
 export interface PendingPackageActionView {
   id: string;
   op: PackageActionOp;
+  /** Absent reads as `person`. */
+  trigger?: PackageActionTrigger;
   status: PackageActionStatus;
   requestedAt: string;
   failureReason?: string;
@@ -312,6 +358,23 @@ export interface MachinePackageRow {
   installedAsDependency?: boolean;
   /** Set while an action is outstanding, so the row can show progress. */
   pendingAction?: PendingPackageActionView;
+  /** The manifest entry's setting; absent when there is no entry or it is `allowed`. */
+  setting?: PackageSetting;
+  /**
+   * The newest version the machine's package repository offers, as the agent
+   * last reported it. Only reported for allowed apt packages, and only by
+   * agents new enough to know how.
+   */
+  availableVersion?: string;
+  /**
+   * Set when Cloudable's last ensure install of this package failed or
+   * expired. It tries again at `nextAttemptAt`, after the org's retry wait.
+   */
+  ensureFailure?: {
+    failedAt: string;
+    reason: string;
+    nextAttemptAt: string;
+  };
 }
 
 export interface MachinePackagesResponse {

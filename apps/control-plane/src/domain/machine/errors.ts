@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ulid } from "ulid";
 
 /**
  * Typed HTTP errors for the machines API. Declared with `Schema.TaggedError`
@@ -100,8 +101,50 @@ export class PackageActionRejected extends Schema.TaggedError<PackageActionRejec
       "already_pending",
       "write_failed",
       "reason_required",
+      // Uninstalling a package set to Ensure: Cloudable would put it straight back.
+      "ensured_package",
     ),
     message: Schema.String,
     requestId: Schema.String,
   }),
 }) {}
+
+/**
+ * An edit whose *Ensure* setting cannot hold: the package is not one Cloudable
+ * can install, or *Ensure latest version* is combined with a version pin.
+ * HTTP 422, checked before anything is written or any approval is asked for.
+ */
+export class PackageEnsureSettingError extends Schema.TaggedError<PackageEnsureSettingError>(
+  "PackageEnsureSettingError",
+)("PackageEnsureSettingError", {
+  error: Schema.Struct({
+    code: Schema.Literal("invalid_ensure_setting"),
+    message: Schema.String,
+    requestId: Schema.String,
+    details: Schema.Struct({
+      problems: Schema.Array(
+        Schema.Struct({
+          packageName: Schema.String,
+          reason: Schema.Literal("not_installable", "ensure_latest_with_pin"),
+          message: Schema.String,
+        }),
+      ),
+    }),
+  }),
+}) {}
+
+export const ensureSettingError = (
+  problems: ReadonlyArray<{
+    packageName: string;
+    reason: "not_installable" | "ensure_latest_with_pin";
+    message: string;
+  }>,
+): PackageEnsureSettingError =>
+  new PackageEnsureSettingError({
+    error: {
+      code: "invalid_ensure_setting",
+      message: problems.map((problem) => problem.message).join(" "),
+      requestId: ulid(),
+      details: { problems: [...problems] },
+    },
+  });

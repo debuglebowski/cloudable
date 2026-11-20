@@ -115,6 +115,17 @@ export type MachineEvent =
         packageName: string;
         op: "install" | "uninstall";
         versionPin: string | null;
+        /**
+         * Why the action exists. Absent on events recorded before ensure settings
+         * existed, which were all asked for by a person. For `ensure_installed` /
+         * `ensure_latest` the actor is `system`, and the setting's own approval
+         * and `setting_changed` event name the people behind it.
+         */
+        trigger?: "person" | "ensure_installed" | "ensure_latest";
+        /** For an ensure action: `missing`, or `outdated` with the versions it moves between. */
+        ensureReason?: "missing" | "outdated";
+        fromVersion?: string | null;
+        toVersion?: string | null;
       };
     })
   | (EventEnvelope & {

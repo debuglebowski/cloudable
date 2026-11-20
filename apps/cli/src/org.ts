@@ -33,6 +33,7 @@ const APPROVAL_ACTIONS = [
   "admin_access",
   "offboarding",
   "package_install",
+  "package_ensure",
 ] as const;
 const APPROVAL_MODES = ["none", "single", "dual"] as const;
 const RETENTION_LOCATIONS = ["customer", "cloudable_sweden_central"] as const;

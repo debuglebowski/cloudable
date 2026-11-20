@@ -20,7 +20,8 @@ export type ApprovalActionType =
   | "break_glass"
   | "admin_access"
   | "offboarding"
-  | "package_install";
+  | "package_install"
+  | "package_ensure";
 
 /** Matches `approvals.mode`. */
 export type ApprovalMode = "none" | "single" | "dual";
@@ -52,6 +53,7 @@ export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
   "admin_access",
   "offboarding",
   "package_install",
+  "package_ensure",
 ];
 
 export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
@@ -60,6 +62,7 @@ export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
   admin_access: "Admin access to an unowned machine",
   offboarding: "Offboarding",
   package_install: "Package install",
+  package_ensure: "Setting a package to Ensure",
 };
 
 export const LOGGING_TIER_LABELS: Record<LoggingTier, string> = {

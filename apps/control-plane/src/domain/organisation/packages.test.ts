@@ -89,6 +89,7 @@ describe("org-scope package manifest write path", () => {
             pinned: false,
             partOf: null,
             description: null,
+            setting: "allowed",
           },
         ],
         actor: { actorType: "system", actorId: "test" },
@@ -110,6 +111,7 @@ describe("org-scope package manifest write path", () => {
         excluded: false,
         partOf: null,
         description: null,
+        setting: "allowed",
         source: "org",
         resolvedFromScopeId: org.id,
       },
@@ -130,6 +132,7 @@ describe("org-scope package manifest write path", () => {
             pinned: true,
             partOf: null,
             description: null,
+            setting: "allowed",
           },
         ],
         actor: { actorType: "system", actorId: "test" },
@@ -182,6 +185,7 @@ describe("org-scope package manifest write path", () => {
             pinned: true,
             partOf: null,
             description: null,
+            setting: "allowed",
           },
         ],
         actor: { actorType: "system", actorId: "test" },
@@ -228,6 +232,7 @@ describe("org-scope package manifest write path", () => {
             pinned: false,
             partOf: null,
             description: null,
+            setting: "allowed",
           },
         ],
         actor: { actorType: "system", actorId: "test" },
@@ -256,6 +261,7 @@ describe("org-scope package manifest write path", () => {
         excluded: true,
         partOf: null,
         description: null,
+        setting: "allowed",
         source: "machine",
         resolvedFromScopeId: machine.id,
       },
@@ -282,6 +288,7 @@ describe("org-scope package manifest write path", () => {
         excluded: false,
         partOf: null,
         description: null,
+        setting: "allowed",
         source: "org",
         resolvedFromScopeId: org.id,
       },
@@ -309,7 +316,14 @@ describe("org-scope package manifest write path", () => {
       }),
     );
     expect(await run(listOrgPackages(org.id))).toEqual([
-      { packageName: "nodejs", versionPin: "20", pinned: false, partOf: null, description: null },
+      {
+        packageName: "nodejs",
+        versionPin: "20",
+        pinned: false,
+        partOf: null,
+        description: null,
+        setting: "allowed",
+      },
     ]);
 
     await run(
@@ -359,6 +373,7 @@ describe("org-scope package manifest write path", () => {
             pinned: true,
             partOf: null,
             description: null,
+            setting: "allowed",
           },
         ],
         actor: { actorType: "system", actorId: "test" },
@@ -375,10 +390,24 @@ describe("org-scope package manifest write path", () => {
     );
 
     expect(result).toEqual([
-      { packageName: "docker", versionPin: "26", pinned: true, partOf: null, description: null },
+      {
+        packageName: "docker",
+        versionPin: "26",
+        pinned: true,
+        partOf: null,
+        description: null,
+        setting: "allowed",
+      },
     ]);
     expect(await run(listOrgPackages(org.id))).toEqual([
-      { packageName: "docker", versionPin: "26", pinned: true, partOf: null, description: null },
+      {
+        packageName: "docker",
+        versionPin: "26",
+        pinned: true,
+        partOf: null,
+        description: null,
+        setting: "allowed",
+      },
     ]);
   });
 

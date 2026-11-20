@@ -225,6 +225,13 @@
       "when": 1794254102181,
       "tag": "0031_package_description",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795200042097,
+      "tag": "0032_package_ensure",
+      "breakpoints": true
     }
   ]
 }

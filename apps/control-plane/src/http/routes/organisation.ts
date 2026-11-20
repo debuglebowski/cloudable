@@ -1,11 +1,12 @@
 import { isValidDeclaredPackageName } from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
-import { PackagePinConflictError } from "../../domain/machine/errors";
+import { PackageEnsureSettingError, PackagePinConflictError } from "../../domain/machine/errors";
 import { OrgPackagesError } from "../../domain/organisation/packages";
 import { OrgSettingsError } from "../../domain/organisation/settings";
 import { CurrentUserAuthentication } from "../middleware/auth";
 import { ApprovalResource } from "./approvals";
+import { ensureApprovalSchema, packageSettingSchema } from "./machines";
 
 // Real backend for the Organisation page. An aggregate
 // read/write over settings that already live in, and are governed by,
@@ -29,6 +30,7 @@ const ApprovalActionType = Schema.Literal(
   "admin_access",
   "offboarding",
   "package_install",
+  "package_ensure",
 );
 const ApprovalMode = Schema.Literal("none", "single", "dual");
 const LoggingTier = Schema.Literal(1, 2);
@@ -46,6 +48,7 @@ const OrgSettingsResource = Schema.Struct({
   loggingTierOverrideCount: Schema.Number,
   retentionDefaultDays: Schema.Number,
   eventRetentionDays: Schema.Number,
+  ensureRetryHours: Schema.Number,
   retentionLocation: RetentionLocation,
 });
 
@@ -62,6 +65,8 @@ const UpdateOrgSettingsPayload = Schema.Struct({
   loggingTier: Schema.optional(LoggingTier),
   retentionDefaultDays: Schema.optional(Schema.Number),
   eventRetentionDays: Schema.optional(Schema.Number),
+  // Hours before a failed Ensure install is tried again, 1 to 720.
+  ensureRetryHours: Schema.optional(Schema.Number),
   retentionLocation: Schema.optional(RetentionLocation),
 });
 
@@ -83,6 +88,8 @@ const PackageManifestEntry = Schema.Struct({
   partOf: Schema.optional(Schema.NullOr(DeclaredPackageName)),
   // Why it is allowed. Free text for people; nothing acts on it.
   description: Schema.optional(Schema.NullOr(Schema.String.pipe(Schema.maxLength(500)))),
+  // Moving to an ensure setting waits for a `package_ensure` approval.
+  setting: Schema.optional(packageSettingSchema),
 }).pipe(
   Schema.filter((entry) => entry.partOf !== entry.packageName, {
     message: () => "a package cannot be part of itself",
@@ -95,6 +102,7 @@ const OrgPackageEntryResource = Schema.Struct({
   pinned: Schema.Boolean,
   partOf: Schema.NullOr(Schema.String),
   description: Schema.NullOr(Schema.String),
+  setting: packageSettingSchema,
 });
 
 const ListOrgPackagesResponse = Schema.Struct({ items: Schema.Array(OrgPackageEntryResource) });
@@ -104,7 +112,11 @@ const UpdateOrgPackagesPayload = Schema.Struct({
   removals: Schema.optional(Schema.Array(Schema.String.pipe(Schema.minLength(1)))),
 });
 
-const UpdateOrgPackagesResponse = Schema.Struct({ items: Schema.Array(OrgPackageEntryResource) });
+const UpdateOrgPackagesResponse = Schema.Struct({
+  items: Schema.Array(OrgPackageEntryResource),
+  // One per edit that set an ensure setting; those wait for their approval.
+  ensureApprovals: Schema.optional(Schema.Array(ensureApprovalSchema)),
+});
 
 export const OrganisationGroup = HttpApiGroup.make("organisation")
   .add(
@@ -140,6 +152,7 @@ export const OrganisationGroup = HttpApiGroup.make("organisation")
       .setPayload(UpdateOrgPackagesPayload)
       .addSuccess(UpdateOrgPackagesResponse)
       .addError(PackagePinConflictError, { status: 422 })
+      .addError(PackageEnsureSettingError, { status: 422 })
       .addError(OrgPackagesError, { status: 404 })
       .middleware(CurrentUserAuthentication),
   );

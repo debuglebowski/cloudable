@@ -46,10 +46,15 @@ export const machinePackageActions = pgTable(
      * Null means no pin, i.e. whatever the distro's repo offers.
      */
     versionPin: text("version_pin"),
-    // Always a person. Nothing enqueues these on its own — that is the whole
-    // point of the design (invariants 4 and 5: nothing installs or removes
-    // software without someone asking for it).
-    requestedByPersonId: uuid("requested_by_person_id").notNull(),
+    // The person who asked. Null when an approved *Ensure* setting caused the
+    // action instead (`trigger` says which); the person who set it is on the
+    // `setting_changed` event and the `package_ensure` approval.
+    requestedByPersonId: uuid("requested_by_person_id"),
+    // Why this action exists: a person asked (`person`), or a package's
+    // *Ensure installed* / *Ensure latest version* setting required it.
+    trigger: text("trigger", { enum: ["person", "ensure_installed", "ensure_latest"] })
+      .notNull()
+      .default("person"),
     requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
     // Set when a poll hands the action to the agent. The expiry clock runs
     // from here, not from `requestedAt` — a machine that is asleep or slow to

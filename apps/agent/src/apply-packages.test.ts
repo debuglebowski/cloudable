@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { PendingPackageAction } from "@cloudable/contracts";
-import { applyPackageAction, applyPackageActions, declaredPackageVersions } from "./apply-packages";
+import {
+  applyPackageAction,
+  applyPackageActions,
+  declaredPackageVersions,
+  parseAptCachePolicy,
+} from "./apply-packages";
 import type { CommandResult, CommandRunner } from "./installed-packages";
 
 /**
@@ -242,5 +247,31 @@ describe("declaredPackageVersions", () => {
     });
 
     expect(await declaredPackageVersions(["ripgrep"], runner)).toEqual({});
+  });
+});
+
+describe("parseAptCachePolicy", () => {
+  test("reads each package's candidate, skipping (none) and dropping the architecture", () => {
+    const output = [
+      "ripgrep:",
+      "  Installed: 13.0.0-4",
+      "  Candidate: 14.1.0-1",
+      "  Version table:",
+      " *** 13.0.0-4 100",
+      "jq:",
+      "  Installed: (none)",
+      "  Candidate: 1.7.1-3",
+      "gone:",
+      "  Installed: (none)",
+      "  Candidate: (none)",
+      "libfoo:i386:",
+      "  Installed: 1.0",
+      "  Candidate: 1.1",
+    ].join("\n");
+    expect(parseAptCachePolicy(output)).toEqual({
+      ripgrep: "14.1.0-1",
+      jq: "1.7.1-3",
+      libfoo: "1.1",
+    });
   });
 });

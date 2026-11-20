@@ -11,6 +11,7 @@ export const approvals = pgTable("approvals", {
       "admin_access",
       "offboarding",
       "package_install",
+      "package_ensure",
       "approval_settings_change",
     ],
   }).notNull(),
@@ -29,7 +30,8 @@ export const approvals = pgTable("approvals", {
   targetPersonId: uuid("target_person_id"),
   reason: text("reason").notNull(),
   // What exactly was asked for, for the action types whose target alone does not say it:
-  // `package_install` stores `{ packageName, op, versionPin }`, `approval_settings_change` stores
+  // `package_install` stores `{ packageName, op, versionPin }`, `package_ensure` stores
+  // the manifest edit (`{ scope, machineId, edit }`), `approval_settings_change` stores
   // `{ approvalModes }`. Written once at request time and never changed, so what the approver saw
   // is what gets carried out. Null for every other action type.
   payload: jsonb("payload"),
