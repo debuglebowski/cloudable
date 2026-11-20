@@ -64,7 +64,8 @@ A machine fails when:
 - `fix_overdue`: a **Critical** with a fix available has been open longer than the org's Critical
   window (7 days by default), or a **High** longer than its window (30 days by default). The
   clock starts when a fix first exists, not when the vulnerability was first seen. Vulnerabilities
-  with no fix, and Medium and Low ones, are shown in the console and the export but never fail the
+  with no fix (including every Nix finding: vulnix reports none), and Medium and Low ones, are
+  shown in the console and the export but never fail the
   check. Applies to every machine that is not archived, running or not.
 - `scan_overdue`: the last completed scan is older than the longest gap between the org's scan days
   plus 24 hours (8 days for a weekly schedule). Running machines only.

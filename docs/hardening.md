@@ -113,6 +113,24 @@ Check the first live install before relying on it.
 Cloudable does not read protection health back. Whether the agent is running and reporting is
 visible in the Defender portal, not in Cloudable.
 
+## Machines with Nix
+
+Nix is not part of the baseline. It arrives only when a person asks for the apt package
+`nix-setup-systemd` (Ubuntu 24.04), and what it brings is recorded with that one action
+(`docs/inheritance.md`, "Installing through other managers"). What it adds to the machine:
+
+| What | Detail | Why it is acceptable |
+| :--- | :--- | :--- |
+| `nix-daemon` service and socket | Runs as root, builds and fetches into `/nix/store` | The daemon is how an unprivileged user installs software without root. Socket folder `root:nix-users`, mode 770 |
+| 10 `nixbld` build users, group `nixbld` | No login shell, no home | Nix runs builds as these users, isolated from each other and from the person |
+| Group `nix-users` | The machine user is added by Cloudable's install action | The daemon serves only this group. Removing the package removes the user from it |
+| `/etc/profile.d/cloudable-nix.sh` | Puts `~/.nix-profile/bin` on PATH | Written and removed by Cloudable with the package. Nothing else is changed in `/etc/profile.d` or `/etc/bash.bashrc` |
+| `/etc/nix/nix.conf` | As the package ships it: `sandbox = true`. Cloudable does not edit it | Builds run sandboxed. `trusted-users` stays root only, so the machine user cannot skip the binary cache's signature check |
+
+The hardening script runs at first boot, before any of this exists, and does not touch it. Nix
+packages are not apt packages: the undeclared-software check sees them as `nix:` entries, and the
+vulnerability scan covers them only with scope `os_and_tools` (vulnix, no fixed versions).
+
 ## Evidence
 
 | Control | Evidence source | How to export |
@@ -126,6 +144,8 @@ visible in the Defender portal, not in Cloudable.
 | Encryption at rest, drift, patch status | Existing columns of the same asset inventory | Same export |
 | Who turned vulnerability scanning on, and when it was scheduled | `org.setting_changed` events for the `security.vulnerabilityScan.*` keys | `cloudable events` |
 | The scanner was installed on a machine, and which version | `machine.scanner_installed` events (version and previous version) | `cloudable events` |
+| cargo-auditable and vulnix were installed on a machine (scope `os_and_tools`) | `machine.scanner_installed` events with scanner `cargo-auditable` or `vulnix`; the machine's `scan_tools` column holds the current list | `cloudable events` |
+| Nix was put on a machine, and the user given access to it | The `nix-setup-systemd` package action events; their result names the `nix-users` change and the PATH file | `cloudable events` |
 | Where each machine stands on scanning | `vulnerability_scan_status`, `last_scan_at`, `open_critical` and `open_high` columns of the asset inventory | `cloudable export asset-inventory` |
 | Known vulnerabilities per machine: package, severity, fixed version, first seen, fix available since, resolved when | One row per finding, open and resolved, kept for the event retention window | `cloudable export vulnerabilities`, or `GET /api/v1/compliance/exports/vulnerabilities.csv` |
 | Each scan, its counts and the age of the vulnerability database it used | `machine.vulnerability_scan_completed` and `machine.vulnerability_scan_failed` events | `cloudable events` |

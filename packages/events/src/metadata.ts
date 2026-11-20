@@ -191,7 +191,7 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   "machine.scanner_installed": {
     tier: 1,
     description:
-      "The vulnerability scanner was installed on a machine, or replaced by another version. An admin asked for it by turning scanning on for the org.",
+      "The vulnerability scanner, or one of its scan tools (cargo-auditable, vulnix; field `scanner`), was installed on a machine, or replaced by another version. An admin asked for it by turning scanning on for the org, or for the tools by setting the scan scope to `os_and_tools`.",
   },
 
   // --- access --- (certificates, denials, and elevation are always

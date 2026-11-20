@@ -15,6 +15,13 @@
 # real source is the sibling `apps/tunnel-daemon` package — see that
 # function's own comment for why (the repo root's `.dockerignore` excludes
 # `**/dist`, so the build context can't simply move to the repo root).
+#
+# Package managers are deliberately NOT baked in: as on a real machine, a person asks
+# for `npm`, `pipx`, `cargo` or `nix-setup-systemd` through apt (invariant 4), and the
+# agent installs it. One limit here: a container has no systemd, so after
+# `nix-setup-systemd` installs, nothing starts `nix-daemon`, and `nix:` installs fail
+# until someone runs `/usr/bin/nix-daemon &` in the container. Nix also needs a 24.04
+# base image (Nix 2.18); 22.04's Nix 2.6 is refused.
 ARG BASE_IMAGE=ubuntu:22.04
 FROM ${BASE_IMAGE}
 

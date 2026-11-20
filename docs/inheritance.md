@@ -302,11 +302,49 @@ names keep their meaning.
 | `npm:` | global npm tool (`npm:@openai/codex`) | yes, `npm ls -g` as the machine's user |
 | `pipx:` | pipx tool | yes, `pipx list` as the machine's user |
 | `cargo:` | `cargo install`ed crate | yes, `cargo install --list` as the machine's user |
+| `nix:` | package in the machine user's Nix profile, by nixpkgs attribute (`nix:ripgrep`, `nix:python3Packages.black`) | yes, `nix profile list` as the machine's user |
 | `home:` | software in the home folder no manager knows about (Playwright's Chromium) | no, declaration only |
 
 Only global tools. Project dependencies (`node_modules`, virtualenvs) are not reported, and nothing
-scans folders, so a `home:` entry is a record of what is allowed, never a detection. Only apt
-packages can be installed through Cloudable: a package action rejects any name with a colon.
+scans folders, so a `home:` entry is a record of what is allowed, never a detection.
+
+### Installing through other managers
+
+apt, npm, pipx, cargo and Nix packages can all be installed through Cloudable, by a person or by
+an Ensure setting (`INSTALLABLE_PACKAGE_MANAGERS` in the contracts package). `home:` cannot. The
+same `package_install` approval covers every manager.
+
+apt runs as root. The other four run as the machine user (`apps/agent/src/user-package-actions.ts`),
+because that is where their tools live and where the agent reads them from, and so package install
+scripts never run as root.
+
+- **The manager must already be there.** Cloudable never installs one on its own. A person asks
+  for `npm`, `pipx`, `cargo` or `nix-setup-systemd` through apt first. Without it the install
+  fails with "npm is not installed for user cloudable".
+- **npm.** Ubuntu's npm installs global tools into `/usr`, which the user cannot write. Before
+  the first Cloudable npm install, if the user's global folder is not writable, the agent points
+  it at `~/.local` in the user's `~/.npmrc` and says so in the action result. The inventory reads
+  both `~/.local` and `/usr`, so a tool installed with sudo earlier still counts.
+- **cargo.** Compiles from source, so its actions may run for up to 35 minutes before they
+  expire. When the vulnerability scan has put cargo-auditable on the machine, installs go through
+  it so the result can be scanned.
+- **Nix** needs Ubuntu 24.04 (Nix 2.18). Ubuntu 22.04's Nix 2.6 is refused. Installing the apt
+  package `nix-setup-systemd` also adds the machine user to `nix-users`, which the Nix daemon
+  requires, and writes `/etc/profile.d/cloudable-nix.sh` to put `~/.nix-profile/bin` on PATH.
+  Both are part of that one recorded action, and removing the package undoes them.
+
+**Version pins per manager.** A pin on an npm, pipx or cargo package is a version in that
+manager's own syntax (`^3.3.0`, `24.1.0`). apt pins are free text, as before. A Nix pin is
+different: Nix has no per-package version. A **nixpkgs commit** fixes the version of every package
+in it. So an org sets one commit, `packages.nix.snapshot` (an admin, on the Organisation page or
+`cloudable org update --nix-snapshot <commit>`), and every machine's `nix:` packages install from
+it. Moving it forward is how Nix packages get newer versions, and what *Ensure latest version*
+means for them. A `nix:` entry's own pin, a full 40-character commit, wins over the org's. With
+neither set, a Nix install is refused rather than take whatever nixpkgs is newest that day.
+
+Running actions expire per manager and per batch (`expiredActionIds` in
+`domain/machine/package-actions.ts`). The agent runs one poll's actions one at a time, so an apt
+install handed out together with a cargo build gets the build's time as well as its own.
 
 ### Parts
 

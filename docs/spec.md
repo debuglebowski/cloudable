@@ -106,7 +106,11 @@ An entry names a package and **optionally** pins a version. `docker` and `nodejs
 
 **Resolution: lowest level wins.** Machine beats template beats organisation.
 
-**Setting:** each entry is *Allowed* (the default), *Ensure installed* or *Ensure latest version*. Allowed means a machine may have it and a person installs it. Ensure installed means Cloudable installs it when it is missing. Ensure latest version also updates it when the package repository has a newer version. Setting Ensure needs an approval. Only apt packages can be ensured. See `docs/inheritance.md`.
+**Setting:** each entry is *Allowed* (the default), *Ensure installed* or *Ensure latest version*. Allowed means a machine may have it and a person installs it. Ensure installed means Cloudable installs it when it is missing. Ensure latest version also updates it when the package repository has a newer version. Setting Ensure needs an approval. apt, npm, pipx, cargo and Nix packages can be installed and ensured; `home:` entries cannot. See `docs/inheritance.md`.
+
+**Other managers, and why Nix on Ubuntu rather than NixOS.** People want tools from npm, pipx, cargo and Nix, so Cloudable installs through them too, one recorded request per package, as the machine user so no package install script runs as root. Nix is offered as a package manager on Ubuntu (24.04, the apt package `nix-setup-systemd`), not as NixOS. NixOS was assessed on 2026-11-19 and set aside: Defender for Endpoint does not support it, Trivy finds no packages on it, there is no CIS benchmark for it, and its model (converge the whole machine to a config) is the opposite of Cloudable's (nothing converges a machine except a recorded decision). Nix pins a nixpkgs commit, not a package version, so one org-wide commit (`packages.nix.snapshot`) decides every machine's Nix versions, which keeps machines alike and makes an update one admin decision.
+
+**Scanning what people install.** A scan can cover those tools too (scope `os_and_tools`). Trivy reads npm, pipx and cargo tools; cargo only when built with cargo-auditable, so Cloudable ships it as a scan tool. vulnix reads Nix packages and gives no fixed versions, so Nix findings are evidence but never fail the fixed-on-time check.
 
 **Pinning:** the organisation can mark an entry pinned. A pinned entry cannot be overridden below. Attempting to override one is a **validation error at edit time**, not a silent no-op at reconcile.
 

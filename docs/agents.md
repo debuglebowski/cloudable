@@ -119,16 +119,19 @@ body; it is bumped in the same transaction that records an action, which is what
 makes the `304` safe. `packages` is what the machine is *allowed* to have.
 `pendingActions` is the work to do, and collecting it is a write — the same
 `UPDATE ... RETURNING` claims and returns the rows, so two polls racing cannot
-hand the same install out twice.
+hand the same install out twice. An action for a `nix:` package also carries
+`nixpkgsCommit`: the package's own pin, else the org's `packages.nix.snapshot`.
 
 `settings` is what the org has configured that the agent acts on. It is empty unless
-something applies. Today the one key is `vulnerabilityScan`, present only while the org has
-vulnerability scanning on: the schedule, where to pull the vulnerability database from, and the
-scanner build to install with its hash. The agent validates every field before acting on it,
+something applies. `vulnerabilityScan` is present only while the org has vulnerability scanning
+on: the schedule, where to pull the vulnerability database from, and the scanner build to install
+with its hash; with scope `os_and_tools` also the cargo-auditable build and the vulnix store paths.
+`nix` (`{ snapshot }`) is present while the org has a nixpkgs snapshot set, so the agent knows what
+*Ensure latest version* means for a `nix:` package. The agent validates every field before acting on it,
 because it acts as root. Changing one of those settings bumps `desiredStateVersion` for every
 live machine in the org, so the `304` stops and the agent reads the new value. The ETag is the
 version with the bundled scanner's version appended (`"12+scanner-0.75.0"`) when the image carries
-one, so a control plane that ships a different scanner gives every machine one fresh answer
+one, and the scan tools' versions after it (`+cargo-auditable-0.7.7+vulnix-1.12.5`), so a control plane that ships a different scanner gives every machine one fresh answer
 carrying the new release. An agent keeps the last settings it was given and keeps acting on them
 across `304`s.
 
@@ -143,6 +146,8 @@ intentionally simple:
 - A `scanner` field (the vulnerability scanner as installed on the machine) that differs from
   what was last stored → `machine.scanner_installed`, with the previous version. The agent never
   says "I installed it"; it reports what is on disk and the control plane notices the change.
+- A `scanTools` field (cargo-auditable and vulnix as found) → one `machine.scanner_installed` per
+  tool whose version differs from `machines.scan_tools`, named in the event's `scanner` field.
 - A `vulnerabilityScan` field (the result of a finished scan) → the scan, its findings and a
   `machine.vulnerability_scan_completed` or `_failed` event, all in one transaction. The agent
   keeps a result until a report is acknowledged and sends it again if it was not, and `scanId`
@@ -241,6 +246,8 @@ covered by the invariant as written.
 | Control agent | cloud-init at provisioning, downloaded from `/_internal/binaries/` | Creating the machine | The machine's creation events; `machine.first_seen` carries the agent version |
 | Tunnel daemon | cloud-init at provisioning, same route | Creating the machine | The machine's creation events |
 | Vulnerability scanner (Trivy) | The agent, after a poll says scanning is on | An admin turning vulnerability scanning on for the org | `org.setting_changed` for `security.vulnerabilityScan.enabled`, with who and when; `machine.scanner_installed` for each machine, on install and on every update |
+| cargo-auditable | The agent, at a scan, when the machine user has cargo | An admin setting the scan scope to `os_and_tools` | `org.setting_changed` for `security.vulnerabilityScan.scope`; `machine.scanner_installed` (scanner `cargo-auditable`) on install and every update |
+| vulnix | Nix, asked by the agent at a scan, when the machine user has Nix packages | An admin setting the scan scope to `os_and_tools` | `org.setting_changed` for `security.vulnerabilityScan.scope`; `machine.scanner_installed` (scanner `vulnix`) on install and every update |
 
 Rules for the scanner row, which exist so this does not become a back door:
 
@@ -252,6 +259,19 @@ Rules for the scanner row, which exist so this does not become a back door:
   release to every machine that has scanning on, and each update is recorded.
 - It is not a package. It does not appear in the package manifest, and the undeclared-software
   check does not see it.
+
+The two scan tools follow the same rules, with these differences:
+
+- **cargo-auditable** rides in the control-plane image next to Trivy (`apps/control-plane/Dockerfile`),
+  pinned by version and by the SHA-256 the release publishes, and is installed to
+  `/opt/cloudable/cargo-auditable`. It is used only by Cloudable's own cargo installs, by full
+  path. It is not on the user's PATH, so their own builds do not change.
+- **vulnix** is not a file in the image. The poll names one exact Nix store path per CPU
+  (`VULNIX_RELEASE` in `domain/vulnerability-scan/scan-tools-release.ts`), and the agent asks Nix
+  to fetch it from cache.nixos.org, which Nix does only with the cache's signature. A store path
+  names its exact contents, so the pin is the build. It sits in the Nix store, not `/opt`.
+- Both are reported in the agent's `scanTools` field. The control plane keeps the last list in
+  `machines.scan_tools` and records a change the same way it does for the scanner.
 
 Adding a component to this list is a deliberate change to this table, to `CLAUDE.md` and to
 `docs/spec.md`.

@@ -7,7 +7,7 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | Type | Tier | Description |
 | :--- | :--- | :--- |
 | `org.created` | 1 | A new org was created. |
-| `org.setting_changed` | 1 | An org- or machine-level default setting was changed. An org package edit (key `package:<name>`) includes the package's `setting`. The Ensure retry wait is key `packages.ensureRetryHours`. |
+| `org.setting_changed` | 1 | An org- or machine-level default setting was changed. An org package edit (key `package:<name>`) includes the package's `setting`. The Ensure retry wait is key `packages.ensureRetryHours`. The nixpkgs commit `nix:` packages install from is key `packages.nix.snapshot`. |
 | `org.integration_connected` | 1 | An IdP, cloud, or secret store integration was connected to the org. |
 | `org.integration_removed` | 1 | An IdP, cloud, or secret store integration was removed from the org. |
 | `org.events_expired` | 1 | The retention sweep deleted events older than the org's retention window. Carries the cutoff and a count, nothing else. |
@@ -62,7 +62,7 @@ role contract's, the same in Kahuna and SlayZone: `service`, `actor`, `subject`,
 | `machine.package_action_failed` | 1 | A package install or removal failed on a machine, or was collected by the agent and never reported back. |
 | `machine.vulnerability_scan_completed` | 1 | A vulnerability scan of a machine finished. Carries counts and the new Critical and High CVE ids; the findings themselves are current state, not events. |
 | `machine.vulnerability_scan_failed` | 1 | A vulnerability scan of a machine started and produced no findings, with the reason (for example the vulnerability database was unreachable). |
-| `machine.scanner_installed` | 1 | The vulnerability scanner was installed on a machine, or replaced by another version. An admin asked for it by turning scanning on for the org. |
+| `machine.scanner_installed` | 1 | The vulnerability scanner, or one of its scan tools (cargo-auditable, vulnix; field `scanner`), was installed on a machine, or replaced by another version. An admin asked for it by turning scanning on for the org, or for the tools by setting the scan scope to `os_and_tools`. |
 | `machine.agent_update` | 1 | Agent release update attempted, confirmed by check-in, failed or rolled back. Includes old/new versions and bundled release identity. |
 
 ## Access
