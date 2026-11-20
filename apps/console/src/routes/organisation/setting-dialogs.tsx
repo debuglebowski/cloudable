@@ -6,6 +6,9 @@ import {
   APPROVAL_ACTION_LABELS,
   type ApprovalActionType,
   type ApprovalMode,
+  ENSURE_RETRY_HOURS_DEFAULT,
+  ENSURE_RETRY_HOURS_MAX,
+  ENSURE_RETRY_HOURS_MIN,
   LOGGING_TIER_LABELS,
   type LoggingTier,
   RETENTION_LOCATION_LABELS,
@@ -225,6 +228,58 @@ export function EventRetentionDialog({
           />
           <p className="text-xs text-muted-foreground">
             Minimum {EVENTS_RETENTION_MIN_DAYS} days. Default {EVENTS_RETENTION_DEFAULT_DAYS}.
+          </p>
+        </div>
+      )}
+    </ValueEditDialog>
+  );
+}
+
+export interface EnsureRetryHoursDialogProps {
+  open: boolean;
+  currentHours: number;
+  onOpenChange: (open: boolean) => void;
+  onSave: (hours: number) => void | Promise<void>;
+}
+
+/** How long Cloudable waits before it tries a failed Ensure install again. Whole hours. */
+export function EnsureRetryHoursDialog({
+  open,
+  currentHours,
+  onOpenChange,
+  onSave,
+}: EnsureRetryHoursDialogProps) {
+  const inputId = useId();
+
+  return (
+    <ValueEditDialog<number>
+      open={open}
+      currentValue={currentHours}
+      title="Retry a failed Ensure install after"
+      description="When Cloudable fails to install a package set to Ensure, it waits this long before it tries again on that machine."
+      onOpenChange={onOpenChange}
+      onSave={onSave}
+      isValid={(hours) =>
+        Number.isInteger(hours) &&
+        hours >= ENSURE_RETRY_HOURS_MIN &&
+        hours <= ENSURE_RETRY_HOURS_MAX
+      }
+    >
+      {(hours, setHours) => (
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={inputId}>Hours</Label>
+          <Input
+            id={inputId}
+            type="number"
+            step={1}
+            min={ENSURE_RETRY_HOURS_MIN}
+            max={ENSURE_RETRY_HOURS_MAX}
+            value={hours}
+            onChange={(event) => setHours(Number(event.target.value))}
+          />
+          <p className="text-xs text-muted-foreground">
+            {ENSURE_RETRY_HOURS_MIN} to {ENSURE_RETRY_HOURS_MAX} hours. Default{" "}
+            {ENSURE_RETRY_HOURS_DEFAULT}.
           </p>
         </div>
       )}

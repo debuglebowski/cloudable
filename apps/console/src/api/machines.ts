@@ -1,6 +1,13 @@
 import type { AuditActorType } from "@/api/audit";
 import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
-import type { ApiErrorBody } from "@cloudable/contracts";
+import type {
+  ApiErrorBody,
+  PackageActionTrigger,
+  PackageEnsureApprovalView,
+  PackageSetting,
+} from "@cloudable/contracts";
+
+export type { PackageActionTrigger, PackageEnsureApprovalView, PackageSetting };
 
 export type MachineState =
   | "provisioning"
@@ -64,6 +71,8 @@ export interface ManifestEntry {
   partOf: string | null;
   /** Why it is allowed, or null. */
   description: string | null;
+  /** What Cloudable does about it: only allow it, or ensure it. */
+  setting: PackageSetting;
   /** Count of machines that override this entry below the level shown here. No real endpoint
    * aggregates this yet (see `getMachineManifest` below) — always undefined against real data. */
   overriddenBelow?: number;
@@ -86,6 +95,8 @@ export type PackageActionStatus = "pending" | "running" | "succeeded" | "failed"
 export interface PendingPackageActionView {
   id: string;
   op: PackageActionOp;
+  /** Absent when a person asked. Set when an ensure setting made Cloudable queue it. */
+  trigger?: PackageActionTrigger;
   status: PackageActionStatus;
   requestedAt: string;
   failureReason?: string;
@@ -105,6 +116,16 @@ export interface MachinePackageRow {
   description?: string | null;
   installedAsDependency?: boolean;
   pendingAction?: PendingPackageActionView;
+  /** The manifest entry's setting; absent when there is no entry or it is `allowed`. */
+  setting?: PackageSetting;
+  /** The newest version the machine's package repository offers, as last reported. */
+  availableVersion?: string;
+  /** Cloudable's last ensure install of this package failed; it tries again at `nextAttemptAt`. */
+  ensureFailure?: {
+    failedAt: string;
+    reason: string;
+    nextAttemptAt: string;
+  };
 }
 
 export interface MachinePackagesResponse {
@@ -177,6 +198,7 @@ interface ResolvedManifestEntryWire {
   excluded: boolean;
   partOf?: string | null;
   description?: string | null;
+  setting?: PackageSetting;
   source: SettingLevel;
   resolvedFromScopeId: string;
 }
@@ -194,6 +216,7 @@ function toManifestEntry(wire: ResolvedManifestEntryWire): ManifestEntry {
     excluded: wire.excluded,
     partOf: wire.partOf ?? null,
     description: wire.description ?? null,
+    setting: wire.setting ?? "allowed",
   };
 }
 
@@ -241,6 +264,17 @@ export interface MachinePackageEdit {
   partOf?: string | null;
   /** Why it is allowed; null clears it, omitted keeps it. */
   description?: string | null;
+  /**
+   * Omitted keeps it. Moving to an ensure setting waits for an approval, so
+   * the edit is not in the returned manifest until then (see `ensureApprovals`).
+   */
+  setting?: PackageSetting;
+}
+
+export interface UpdateMachinePackagesResult {
+  manifest: ManifestEntry[];
+  /** One per edit that set an ensure setting. `approved` means it was applied already. */
+  ensureApprovals: PackageEnsureApprovalView[];
 }
 
 /**
@@ -253,17 +287,23 @@ export interface MachinePackageEdit {
  * below", and nothing sits below a machine, so it is an org control; the
  * server still rejects a machine edit that collides with an org pin (422,
  * `pinned_entry_conflict`), which is what `ManifestOverrideError` carries.
+ * It also carries the 422 for an ensure setting the entry cannot take
+ * (`invalid_ensure_setting`): a non-apt name, or Ensure latest version with
+ * a version pin.
  */
 export async function updateMachinePackages(
   machineId: string,
   edits: { upserts?: MachinePackageEdit[]; removals?: string[] },
-): Promise<ManifestEntry[]> {
+): Promise<UpdateMachinePackagesResult> {
   try {
-    const res = await apiPatch<{ manifest: ResolvedManifestEntryWire[] }>(
-      `/api/v1/machines/${machineId}/packages`,
-      edits,
-    );
-    return res.manifest.map(toManifestEntry);
+    const res = await apiPatch<{
+      manifest: ResolvedManifestEntryWire[];
+      ensureApprovals?: PackageEnsureApprovalView[];
+    }>(`/api/v1/machines/${machineId}/packages`, edits);
+    return {
+      manifest: res.manifest.map(toManifestEntry),
+      ensureApprovals: res.ensureApprovals ?? [],
+    };
   } catch (err) {
     if (err instanceof ApiError && err.body) {
       throw new ManifestOverrideError(err.body as ApiErrorBody);
@@ -282,6 +322,8 @@ export interface ManifestHistoryState {
   excluded: boolean;
   partOf?: string | null;
   description?: string | null;
+  /** Absent on changes recorded before settings existed: those were all `allowed`. */
+  setting?: PackageSetting;
 }
 
 export interface ManifestHistoryEntry {

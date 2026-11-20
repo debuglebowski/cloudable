@@ -46,6 +46,23 @@ describe("describePayload", () => {
     ).toBe("Install htop (version 3.3)");
   });
 
+  test("says which package, which setting, and where", () => {
+    expect(
+      describePayload("package_ensure", {
+        scope: "machine",
+        machineId: "m1",
+        edit: { packageName: "gh", setting: "ensure_latest" },
+      }),
+    ).toBe("Set gh to Ensure latest version");
+    expect(
+      describePayload("package_ensure", {
+        scope: "org",
+        machineId: null,
+        edit: { packageName: "gh", setting: "ensure_installed" },
+      }),
+    ).toBe("Set gh to Ensure installed for every machine");
+  });
+
   test("lists the requested approval modes", () => {
     expect(
       describePayload("approval_settings_change", { approvalModes: { package_install: "dual" } }),

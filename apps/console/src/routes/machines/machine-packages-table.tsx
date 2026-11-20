@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, CircleSlash, type LucideIcon, Package, ShieldCheck } from "lucide-react";
+import { Box, CircleSlash, type LucideIcon, Package, RefreshCw, ShieldCheck } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 
 import {
   type MachinePackageRow,
+  ManifestOverrideError,
   PackageActionError,
   type PackageActionOp,
+  type PackageSetting,
   createPackageAction,
   getMachinePackages,
   machinesKeys,
   updateMachinePackages,
 } from "@/api/machines";
+import { PackageSettingSelect } from "@/components/package-setting-select";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +30,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { refusalReason } from "@/lib/api-client";
+import {
+  PACKAGE_SETTING_LABELS,
+  describeSettingChange,
+  formatNextTry,
+} from "@/lib/package-setting";
 
 /**
  * A machine's packages: what it is allowed to have, what it actually has, and
@@ -37,6 +45,10 @@ import { refusalReason } from "@/lib/api-client";
  * yet, or present and disallowed because somebody installed it anyway — which
  * is exactly the case the compliance check exists to catch. Collapsing them
  * into one "status" would hide the interesting half.
+ *
+ * The Setting column says what Cloudable does about an allowed package: only
+ * allow it, or install it when missing (Ensure installed), or also update it
+ * (Ensure latest version). Moving to an ensure setting waits for an approval.
  *
  * Base image packages are hidden behind the toggle. A real Ubuntu server image
  * is several hundred packages, and listing them by default buries the handful
@@ -95,6 +107,46 @@ export function MachinePackagesTable({
       toast.error("Couldn't request that", {
         description:
           err instanceof PackageActionError
+            ? err.body.error.code === "ensured_package"
+              ? "This package is set to Ensure, so Cloudable would put it back. Set it to Allowed first."
+              : err.body.error.message
+            : (refusalReason(err) ?? err.message),
+      });
+    },
+  });
+
+  const settingMutation = useMutation({
+    mutationFn: (vars: { row: MachinePackageRow; setting: PackageSetting }) =>
+      updateMachinePackages(machineId, {
+        upserts: [
+          {
+            packageName: vars.row.packageName,
+            setting: vars.setting,
+            // A first machine row for an inherited entry would otherwise
+            // declare "any version" and quietly drop the org's version.
+            ...(vars.row.source !== "machine" && vars.row.versionPin
+              ? { versionPin: vars.row.versionPin }
+              : {}),
+          },
+        ],
+      }),
+    onSuccess: (result, vars) => {
+      invalidate();
+      const outcome = describeSettingChange(
+        vars.row.packageName,
+        vars.setting,
+        result.ensureApprovals,
+      );
+      if (result.ensureApprovals.some((approval) => approval.status === "pending")) {
+        void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      }
+      const show = outcome.kind === "success" ? toast.success : toast.error;
+      show(outcome.title, outcome.description ? { description: outcome.description } : undefined);
+    },
+    onError: (err) => {
+      toast.error("Couldn't change the setting", {
+        description:
+          err instanceof ManifestOverrideError
             ? err.body.error.message
             : (refusalReason(err) ?? err.message),
       });
@@ -144,6 +196,7 @@ export function MachinePackagesTable({
             <TableRow>
               <Th icon={Package}>Package</Th>
               <Th icon={ShieldCheck}>Permission</Th>
+              <Th icon={RefreshCw}>Setting</Th>
               <Th icon={Box}>Status</Th>
               <Th icon={CircleSlash}>From</Th>
               <TableHead className="text-right">Action</TableHead>
@@ -151,18 +204,18 @@ export function MachinePackagesTable({
           </TableHeader>
           <TableBody>
             {packagesQuery.isPending && (
-              <SkeletonRows widths={["w-32", "w-20", "w-24", "w-16", "w-20"]} />
+              <SkeletonRows widths={["w-32", "w-20", "w-28", "w-24", "w-16", "w-20"]} />
             )}
             {packagesQuery.isError && (
               <TableRow>
-                <TableCell colSpan={5} className="text-sm text-destructive">
+                <TableCell colSpan={6} className="text-sm text-destructive">
                   Failed to load packages.
                 </TableCell>
               </TableRow>
             )}
             {!packagesQuery.isPending && rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-sm text-muted-foreground">
+                <TableCell colSpan={6} className="text-sm text-muted-foreground">
                   {baselineCount > 0
                     ? "Nothing declared or added beyond the image this machine was built from."
                     : "No packages."}
@@ -177,7 +230,9 @@ export function MachinePackagesTable({
                   (actionMutation.isPending &&
                     actionMutation.variables?.packageName === row.packageName) ||
                   (permissionMutation.isPending &&
-                    permissionMutation.variables?.packageName === row.packageName)
+                    permissionMutation.variables?.packageName === row.packageName) ||
+                  (settingMutation.isPending &&
+                    settingMutation.variables?.row.packageName === row.packageName)
                 }
                 canEditPermission={canEditPermission}
                 canRequestActions={canRequestActions}
@@ -185,6 +240,7 @@ export function MachinePackagesTable({
                 onPermission={(allowed) =>
                   permissionMutation.mutate({ packageName: row.packageName, allowed })
                 }
+                onSetting={(setting) => settingMutation.mutate({ row, setting })}
               />
             ))}
           </TableBody>
@@ -302,12 +358,75 @@ function PermissionCell({
   );
 }
 
+function SettingCell({
+  row,
+  busy,
+  canEdit,
+  onSetting,
+}: {
+  row: MachinePackageRow;
+  busy: boolean;
+  canEdit: boolean;
+  onSetting: (setting: PackageSetting) => void;
+}) {
+  // Only a package the manifest allows has a setting. Anything else is not
+  // something Cloudable could ensure.
+  if (row.permission !== "allowed") {
+    return <span className="text-sm text-muted-foreground">—</span>;
+  }
+  const setting = row.setting ?? "allowed";
+  if (!canEdit) {
+    return (
+      <span className={setting === "allowed" ? "text-sm text-muted-foreground" : "text-sm"}>
+        {PACKAGE_SETTING_LABELS[setting]}
+      </span>
+    );
+  }
+  return (
+    <PackageSettingSelect
+      value={setting}
+      onChange={(next) => {
+        if (next !== setting) onSetting(next);
+      }}
+      packageName={row.packageName}
+      versionPin={row.versionPin}
+      disabled={busy}
+    />
+  );
+}
+
+/** Whether Cloudable queued this action for an ensure setting, rather than a person asking. */
+const isEnsureTriggered = (row: MachinePackageRow): boolean =>
+  row.pendingAction?.trigger === "ensure_installed" ||
+  row.pendingAction?.trigger === "ensure_latest";
+
 function StatusCell({ row }: { row: MachinePackageRow }) {
   const pending = row.pendingAction;
   if (pending && (pending.status === "pending" || pending.status === "running")) {
+    if (isEnsureTriggered(row)) {
+      // An install on a package that is already there is an update to a newer version.
+      return (
+        <span className="text-sm text-muted-foreground">
+          {row.installed === "installed"
+            ? `updating${row.availableVersion ? ` to ${row.availableVersion}` : ""} (Ensure)…`
+            : "installing (Ensure)…"}
+        </span>
+      );
+    }
     return (
       <span className="text-sm text-muted-foreground">
         {pending.op === "install" ? "installing…" : "removing…"}
+      </span>
+    );
+  }
+  if (row.ensureFailure) {
+    return (
+      <span className="flex items-center gap-1.5 text-sm">
+        <Badge variant="destructive">failed</Badge>
+        <span className="text-muted-foreground">
+          Install failed: {row.ensureFailure.reason}. Next try{" "}
+          {formatNextTry(row.ensureFailure.nextAttemptAt)}.
+        </span>
       </span>
     );
   }
@@ -348,6 +467,14 @@ function StatusCell({ row }: { row: MachinePackageRow }) {
           not the pinned version
         </Badge>
       )}
+      {row.setting === "ensure_latest" &&
+        row.availableVersion &&
+        row.availableVersion !== row.installedVersion && (
+          // Cloudable queues the update on the machine's next check-in.
+          <span className="text-xs text-muted-foreground">
+            update to <span className="font-mono">{row.availableVersion}</span> available
+          </span>
+        )}
     </span>
   );
 }
@@ -359,6 +486,7 @@ function PackageRow({
   canRequestActions,
   onAction,
   onPermission,
+  onSetting,
 }: {
   row: MachinePackageRow;
   busy: boolean;
@@ -366,10 +494,13 @@ function PackageRow({
   canRequestActions: boolean;
   onAction: (op: PackageActionOp) => void;
   onPermission: (allowed: boolean) => void;
+  onSetting: (setting: PackageSetting) => void;
 }) {
   const outstanding =
     row.pendingAction?.status === "pending" || row.pendingAction?.status === "running";
   const isInstalled = row.installed === "installed";
+  // Cloudable would put an ensured package straight back, so removing it is not offered.
+  const isEnsured = row.setting === "ensure_installed" || row.setting === "ensure_latest";
 
   return (
     <TableRow className={row.isBaseline ? "opacity-70" : undefined}>
@@ -397,6 +528,9 @@ function PackageRow({
         />
       </TableCell>
       <TableCell>
+        <SettingCell row={row} busy={busy} canEdit={canEditPermission} onSetting={onSetting} />
+      </TableCell>
+      <TableCell>
         <StatusCell row={row} />
       </TableCell>
       <TableCell className="text-sm text-muted-foreground">{row.source ?? "—"}</TableCell>
@@ -408,6 +542,13 @@ function PackageRow({
           <span className="text-xs text-muted-foreground">—</span>
         ) : row.installed === "unknown" ? (
           <span className="text-xs text-muted-foreground">waiting for the agent</span>
+        ) : isInstalled && isEnsured && !outstanding ? (
+          <span
+            className="text-xs text-muted-foreground"
+            title="Set it to Allowed to be able to remove it"
+          >
+            kept by Ensure
+          </span>
         ) : (
           <Button
             variant="outline"
