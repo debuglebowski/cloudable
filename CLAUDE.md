@@ -25,13 +25,13 @@ Never violate these. If one seems wrong, stop and say so — do not work around 
 1. No cloud credential is ever stored. Federation only, never client secrets.
 2. Events are append-only. No updates. The only delete is the retention sweep, which removes events older than the org's retention window.
 3. A machine has exactly one owner, always a person. No shared or unowned machines.
-4. Nothing installs or removes software unasked. A person asks, per package, and it is recorded. The one exception is Cloudable's own components: the agent, the tunnel daemon, and monitoring tools such as the vulnerability scanner. Monitoring tools install only after an admin turns them on for the org. Every install and update is recorded. The list is closed and lives in `docs/agents.md`.
-5. Drift is flagged, never auto-corrected.
+4. Software changes only through a recorded decision. A person asks for a package, or an admin sets it to *Ensure installed* or *Ensure latest version*. Cloudable's own components install without either. These are the agent, the tunnel daemon, and monitoring tools such as the vulnerability scanner. Monitoring tools install only after an admin turns them on for the org. That list is closed and lives in `docs/agents.md`. Every install, update and removal is recorded.
+5. Cloudable flags all drift. It fixes only what the package's setting covers. *Ensure installed* fixes a missing package. *Ensure latest version* also fixes an outdated one.
 6. Machines are archived, never deleted. Data expires; the record is permanent.
 7. No inbound access to any machine. Agents poll; tunnels are outbound.
 8. Cloudable injects secrets, never stores them.
 9. The CA private key never enters the control plane. Sign operations only.
-10. A machine changes only through an explicit, audited action. No background loop mutates one.
+10. A machine changes only through a recorded action, asked for by a person or required by an admin's *Ensure* setting.
 11. Event type names are a public interface. Additive only, no renaming.
 12. The agent never submits audit events. It reports state; the control plane derives.
 
@@ -86,8 +86,8 @@ Read the relevant file before working in that area.
 
 No templates. No Tailscale. No AWS or GCP. No billing. No idle suspend. No full command capture.
 
-Never build: SSH public key upload, per-machine passwords or 2FA codes, shared machines, auto-correcting drift, code-server, application hosting.
+Never build: SSH public key upload, per-machine passwords or 2FA codes, shared machines, auto-correcting drift beyond what an *Ensure* setting covers, code-server, application hosting.
 
-The package manifest is a **permission** list, not an install list. Declaring a package says a
-machine may have it; installing is a separate action a person takes per package. Nothing converges
-a machine towards its manifest on its own.
+Each package in the manifest has a setting. *Allowed* means a machine may have it, and a person
+installs it. *Ensure installed* means Cloudable installs it when missing. *Ensure latest version*
+also keeps it updated. Nothing else moves a machine towards its manifest.
