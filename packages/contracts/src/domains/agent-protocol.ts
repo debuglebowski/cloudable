@@ -54,6 +54,13 @@ export interface PendingPackageAction {
   readonly packageName: string;
   /** Exact version to install. Null means whatever the distro's repo offers. */
   readonly versionPin: string | null;
+  /**
+   * For a `nix:` package, the nixpkgs commit to install from: the package's own
+   * pin, else the org's `packages.nix.snapshot`. Absent for other managers, and
+   * for a `nix:` package when neither is set, which the agent refuses: an
+   * unpinned Nix install would take whatever nixpkgs is newest that day.
+   */
+  readonly nixpkgsCommit?: string;
 }
 
 /**
@@ -72,15 +79,16 @@ export const isValidPackageName = (value: string): boolean =>
  * `<manager>:<name>` (`npm:@openai/codex`, `pipx:black`, `cargo:ripgrep`):
  * apt names cannot contain a colon, so the two never collide.
  *
- * `npm`, `pipx` and `cargo` mean globally installed tools, which the agent
- * reports. `home` is declaration only: software in the owner's home folder
- * that no package manager knows about (Playwright's Chromium). Nothing scans
- * for it, so it is a record of what is allowed, never a detection.
+ * `npm`, `pipx` and `cargo` mean globally installed tools, and `nix` a package in
+ * the machine user's Nix profile, named by its nixpkgs attribute (`nix:ripgrep`,
+ * `nix:python3Packages.black`). The agent reports all four. `home` is declaration
+ * only: software in the owner's home folder that no package manager knows about
+ * (Playwright's Chromium). Nothing scans for it, so it is a record of what is
+ * allowed, never a detection.
  *
- * Only `apt` packages can be installed through Cloudable. `isValidPackageName`
- * rejects a colon, so a package action can never name another manager.
+ * Which of these Cloudable can install is `INSTALLABLE_PACKAGE_MANAGERS`.
  */
-export const PACKAGE_MANAGERS = ["apt", "npm", "pipx", "cargo", "home"] as const;
+export const PACKAGE_MANAGERS = ["apt", "npm", "pipx", "cargo", "home", "nix"] as const;
 export type PackageManagerName = (typeof PACKAGE_MANAGERS)[number];
 
 /**
@@ -89,7 +97,13 @@ export type PackageManagerName = (typeof PACKAGE_MANAGERS)[number];
  * teaching `apps/agent/src/apply-packages.ts` its commands) is all the ensure
  * feature needs to cover it.
  */
-export const INSTALLABLE_PACKAGE_MANAGERS: readonly PackageManagerName[] = ["apt"];
+export const INSTALLABLE_PACKAGE_MANAGERS: readonly PackageManagerName[] = [
+  "apt",
+  "npm",
+  "pipx",
+  "cargo",
+  "nix",
+];
 
 const PREFIXED_NAME_PATTERNS: Record<Exclude<PackageManagerName, "apt">, RegExp> = {
   // npm allows a scope and lowercase names; uppercase is tolerated for old packages.
@@ -97,6 +111,9 @@ const PREFIXED_NAME_PATTERNS: Record<Exclude<PackageManagerName, "apt">, RegExp>
   pipx: /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/,
   cargo: /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/,
   home: /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/,
+  // A nixpkgs attribute path: dot-separated identifiers (`python3Packages.black`).
+  // Nix identifiers allow `'`, which is left out: no package worth naming needs it.
+  nix: /^[a-zA-Z_][a-zA-Z0-9_+-]*(\.[a-zA-Z_][a-zA-Z0-9_+-]*)*$/,
 };
 
 /** Splits a declared name into its manager and bare name. Unknown prefixes return null. */
@@ -114,6 +131,34 @@ export const parseDeclaredPackageName = (
 export const isInstallablePackageName = (value: string): boolean => {
   const parsed = parseDeclaredPackageName(value);
   return parsed !== null && INSTALLABLE_PACKAGE_MANAGERS.includes(parsed.manager);
+};
+
+/**
+ * The grammar a version pin must follow, per manager. Pins end up as package
+ * manager arguments on the machine (never through a shell), and the `nix` one is
+ * spliced into a flake reference, so each is held to what its manager means by a
+ * version and nothing more.
+ *
+ * - apt, npm, pipx, cargo: a version or range, no whitespace or shell syntax.
+ * - nix: a nixpkgs commit (40 hex characters). Nix pins a snapshot of the whole
+ *   package collection, not a package version; see `packages.nix.snapshot`.
+ */
+const VERSION_PIN_PATTERNS: Record<Exclude<PackageManagerName, "home">, RegExp> = {
+  apt: /^[a-zA-Z0-9][a-zA-Z0-9.+~:-]*$/,
+  npm: /^[a-zA-Z0-9^~<>=*][a-zA-Z0-9^~<>=.*|-]*$/,
+  pipx: /^[a-zA-Z0-9][a-zA-Z0-9.!+*-]*$/,
+  cargo: /^[a-zA-Z0-9^~<>=*][a-zA-Z0-9^~<>=.*+-]*$/,
+  nix: /^[0-9a-f]{40}$/,
+};
+
+export const NIXPKGS_COMMIT_PATTERN = VERSION_PIN_PATTERNS.nix;
+
+/** Whether `pin` is a usable version pin for the package `packageName` (a declared name). */
+export const isValidVersionPin = (packageName: string, pin: string): boolean => {
+  if (pin.length === 0 || pin.length > 64) return false;
+  const parsed = parseDeclaredPackageName(packageName);
+  if (!parsed || parsed.manager === "home") return false;
+  return VERSION_PIN_PATTERNS[parsed.manager].test(pin);
 };
 
 /** The grammar a manifest entry's name must follow: an apt name, or `<manager>:<name>`. */

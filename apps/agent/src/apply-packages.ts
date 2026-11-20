@@ -1,6 +1,14 @@
-import { isValidPackageName } from "@cloudable/contracts";
+import { rmSync, writeFileSync } from "node:fs";
+import { MACHINE_OS_USER, isValidPackageName } from "@cloudable/contracts";
 import type { PackageActionResult, PendingPackageAction } from "@cloudable/contracts";
+import type { UserManager } from "./global-tools";
 import { type CommandRunner, bunCommandRunner } from "./installed-packages";
+import {
+  type UserActionContext,
+  applyUserPackageAction,
+  availableUserVersion,
+  userManagerOf,
+} from "./user-package-actions";
 
 /**
  * The agent's only ability to change the machine it runs on.
@@ -19,8 +27,9 @@ import { type CommandRunner, bunCommandRunner } from "./installed-packages";
  *   (invariants 4, 5 and 10).
  * - It never reports events, only outcomes. What those outcomes mean is the
  *   control plane's to decide and record (invariant 12).
- * - It runs as root, because the systemd unit has no `User=`. So nothing here
- *   builds a shell string. Every call is an argv array through `Bun.spawn`, and
+ * - It runs as root, because the systemd unit has no `User=`. apt runs as root;
+ *   npm, pipx, cargo and Nix run as the machine user (`user-package-actions.ts`).
+ *   Nothing here builds a shell string. Every call is an argv array through `Bun.spawn`, and
  *   the package name is re-validated here even though the control plane
  *   validated it twice already — this is the last line before the exec, and it
  *   is the one that matters if the others are ever refactored away.
@@ -104,6 +113,60 @@ const tail = (text: string): string => {
 };
 
 /**
+ * The apt package that brings Nix to Ubuntu (24.04 ships Nix 2.18). Installing it
+ * is not quite enough on its own, so the same action does two more things, and
+ * undoes them on uninstall:
+ *
+ * - The daemon's socket folder is `root:nix-users`, mode 770, so the machine user
+ *   cannot use Nix until it is in `nix-users`.
+ * - The package adds no shell hook, so nothing a person installs with Nix would be
+ *   on their PATH. A one-line file in `/etc/profile.d` adds `~/.nix-profile/bin`.
+ *
+ * Both are part of the one approved, recorded action a person asked for, and the
+ * action result says they happened.
+ */
+export const NIX_SETUP_PACKAGE = "nix-setup-systemd";
+export const NIX_PROFILE_HOOK = "/etc/profile.d/cloudable-nix.sh";
+const NIX_PROFILE_HOOK_CONTENT = `# Written by Cloudable when ${NIX_SETUP_PACKAGE} was installed. Removed with it.
+if [ -d "$HOME/.nix-profile/bin" ]; then PATH="$HOME/.nix-profile/bin:$PATH"; fi
+`;
+
+export interface FileWriter {
+  write(path: string, content: string): void;
+  remove(path: string): void;
+}
+
+const realFiles: FileWriter = {
+  write: (path, content) => writeFileSync(path, content, { mode: 0o644 }),
+  remove: (path) => rmSync(path, { force: true }),
+};
+
+async function nixSetup(
+  op: PendingPackageAction["op"],
+  runner: CommandRunner,
+  files: FileWriter,
+  user: string,
+): Promise<string> {
+  if (op === "install") {
+    const added = await runner.run("usermod", ["-aG", "nix-users", user]);
+    files.write(NIX_PROFILE_HOOK, NIX_PROFILE_HOOK_CONTENT);
+    return added?.exitCode === 0
+      ? `added ${user} to nix-users; wrote ${NIX_PROFILE_HOOK}`
+      : `could not add ${user} to nix-users (${tail(added?.stderr ?? "") || "usermod failed"}); wrote ${NIX_PROFILE_HOOK}`;
+  }
+  // The group may already be gone with the package. Either way the user is out of it.
+  await runner.run("gpasswd", ["-d", user, "nix-users"]);
+  files.remove(NIX_PROFILE_HOOK);
+  return `removed ${user} from nix-users; removed ${NIX_PROFILE_HOOK}`;
+}
+
+export interface ApplyOptions {
+  readonly user?: string;
+  readonly files?: FileWriter;
+  readonly cargoAuditableAvailable?: () => boolean;
+}
+
+/**
  * Performs one action and describes what happened.
  *
  * Never throws: a rejected action is a result to report, not a reason to break
@@ -115,7 +178,28 @@ const tail = (text: string): string => {
 export async function applyPackageAction(
   action: PendingPackageAction,
   runner: CommandRunner = bunCommandRunner,
+  options: ApplyOptions = {},
 ): Promise<PackageActionResult> {
+  const userManager = userManagerOf(action.packageName);
+  if (userManager) {
+    try {
+      const context: UserActionContext = {
+        runner,
+        ...(options.user ? { user: options.user } : {}),
+        ...(options.cargoAuditableAvailable
+          ? { cargoAuditableAvailable: options.cargoAuditableAvailable }
+          : {}),
+      };
+      return await applyUserPackageAction(action, userManager.manager, userManager.name, context);
+    } catch (error) {
+      return {
+        id: action.id,
+        outcome: "failed",
+        detail: tail(error instanceof Error ? error.message : String(error)),
+      };
+    }
+  }
+
   if (!isValidPackageName(action.packageName)) {
     return { id: action.id, outcome: "failed", detail: "rejected an invalid package name" };
   }
@@ -159,8 +243,19 @@ export async function applyPackageAction(
       };
     }
 
+    const setupNote =
+      action.packageName === NIX_SETUP_PACKAGE
+        ? await nixSetup(
+            action.op,
+            runner,
+            options.files ?? realFiles,
+            options.user ?? MACHINE_OS_USER,
+          )
+        : null;
+    const note = setupNote ? { detail: setupNote } : {};
+
     if (action.op === "uninstall") {
-      return { id: action.id, outcome: "succeeded" };
+      return { id: action.id, outcome: "succeeded", ...note };
     }
 
     // Report what actually landed, not what was asked for. Asking for a pin
@@ -170,6 +265,7 @@ export async function applyPackageAction(
     return {
       id: action.id,
       outcome: "succeeded",
+      ...note,
       ...(installedVersion !== undefined ? { installedVersion } : {}),
     };
   } catch (error) {
@@ -191,10 +287,11 @@ export async function applyPackageAction(
 export async function applyPackageActions(
   actions: readonly PendingPackageAction[],
   runner: CommandRunner = bunCommandRunner,
+  options: ApplyOptions = {},
 ): Promise<PackageActionResult[]> {
   const results: PackageActionResult[] = [];
   for (const action of actions) {
-    results.push(await applyPackageAction(action, runner));
+    results.push(await applyPackageAction(action, runner, options));
   }
   return results;
 }
@@ -267,4 +364,75 @@ export function parseAptCachePolicy(output: string): Record<string, string> {
     }
   }
   return versions;
+}
+
+/**
+ * Installed versions of the allowed npm, pipx, cargo and Nix packages, taken from
+ * the inventory the agent already gathered (`global-tools.ts`), so nothing runs twice.
+ */
+export function userPackageVersions(
+  allowedPackages: readonly string[],
+  installed: ReadonlyMap<string, string | undefined>,
+): Record<string, string> {
+  const versions: Record<string, string> = {};
+  for (const name of allowedPackages) {
+    if (!userManagerOf(name)) continue;
+    const version = installed.get(name);
+    if (version) versions[name] = version;
+  }
+  return versions;
+}
+
+/**
+ * The newest version each registry offers for the allowed npm, pipx, cargo and
+ * Nix packages, for *Ensure latest version*. Unlike apt there is no local list to
+ * read, so each one is a network request. They are made at most once an hour and
+ * in the background: a poll reports whatever the last round found and never
+ * waits for the registries.
+ */
+export function cachedAvailableUserVersions(
+  intervalMs = 60 * 60 * 1000,
+  lookup: (
+    manager: UserManager,
+    name: string,
+    nixSnapshot: string | undefined,
+  ) => Promise<string | undefined> = (manager, name, nixSnapshot) =>
+    availableUserVersion(bunCommandRunner, manager, name, nixSnapshot ? { nixSnapshot } : {}),
+  now: () => number = Date.now,
+) {
+  let versions: Record<string, string> = {};
+  let lastKey = "";
+  let lastAt = Number.NEGATIVE_INFINITY;
+  let running: Promise<void> | null = null;
+
+  const refresh = async (names: readonly string[], nixSnapshot: string | undefined) => {
+    const next: Record<string, string> = {};
+    for (const declared of names) {
+      const parsed = userManagerOf(declared);
+      if (!parsed) continue;
+      const version = await lookup(parsed.manager, parsed.name, nixSnapshot).catch(() => undefined);
+      if (version) next[declared] = version;
+    }
+    versions = next;
+  };
+
+  const current = (
+    allowedPackages: readonly string[],
+    nixSnapshot?: string,
+  ): Record<string, string> => {
+    const names = allowedPackages.filter((name) => userManagerOf(name) !== null).sort();
+    // A changed allow list or snapshot is worth asking again now, not in an hour.
+    const key = `${nixSnapshot ?? ""}|${names.join(",")}`;
+    if (!running && (key !== lastKey || now() - lastAt >= intervalMs)) {
+      lastKey = key;
+      lastAt = now();
+      running = refresh(names, nixSnapshot).finally(() => {
+        running = null;
+      });
+    }
+    return versions;
+  };
+  /** For tests: resolves when the refresh in flight, if any, is done. */
+  current.settled = () => running ?? Promise.resolve();
+  return current;
 }

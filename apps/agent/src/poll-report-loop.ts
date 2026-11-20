@@ -5,18 +5,32 @@ import { AgentUpdater, UPDATE_EXIT } from "./agent-update";
 import {
   applyPackageActions,
   availablePackageVersions,
+  cachedAvailableUserVersions,
   declaredPackageVersions,
+  userPackageVersions,
 } from "./apply-packages";
 import { AttestationRejectedError, attest, clearCachedSession } from "./attestation";
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
-import { cachedGlobalTools } from "./global-tools";
+import { cachedUserPackages } from "./global-tools";
 import { readHardeningBaseline } from "./hardening-baseline";
 import { ApiError } from "./http-client";
 import { listInstalledPackages, listManuallyInstalledPackages } from "./installed-packages";
 
-/** Global npm/pipx/cargo tools, asked for at most every five minutes. See `global-tools.ts`. */
-const listGlobalToolsCached = cachedGlobalTools();
+/** npm/pipx/cargo/Nix packages and versions, asked for at most every five minutes. See `global-tools.ts`. */
+const listUserPackagesCached = cachedUserPackages();
+/** What the npm/pipx/cargo/Nix registries offer, asked for at most hourly, in the background. */
+const availableUserVersions = cachedAvailableUserVersions();
+
+/** The org's nixpkgs snapshot from the poll's `settings.nix`, when one is set. */
+export function nixSnapshotFrom(
+  settings: Readonly<Record<string, unknown>> | undefined,
+): string | undefined {
+  const nix = settings?.nix;
+  if (!nix || typeof nix !== "object") return undefined;
+  const snapshot = (nix as { snapshot?: unknown }).snapshot;
+  return typeof snapshot === "string" ? snapshot : undefined;
+}
 import { listOpenPorts } from "./open-ports";
 import { readAllVolumeUsage } from "./volume-usage";
 import { type ScanManager, createScanManager } from "./vulnerability-scan/scan-manager";
@@ -164,6 +178,7 @@ export async function runAgentLoop(
   // Held across iterations because a 304 carries no body: the allowed list is
   // only resent when it changes, and the report needs it every time.
   let allowedPackages: readonly string[] = [];
+  let nixSnapshot: string | undefined;
   let pendingActions: PendingPackageAction[] = [];
   const waker = makeWaker(options.signal);
 
@@ -209,6 +224,7 @@ export async function runAgentLoop(
           // Only a 200 carries settings, and a 200 always carries all of them: a missing
           // vulnerabilityScan key means scanning is off, not "unchanged".
           scanManager.setSettings(poll.desiredState?.settings);
+          nixSnapshot = nixSnapshotFrom(poll.desiredState?.settings);
         }
 
         // A candidate must confirm its check-in before starting a potentially long package
@@ -217,6 +233,9 @@ export async function runAgentLoop(
           console.log(`poll: applying ${pendingActions.length} package action(s)`);
           actionResults = await applyPackageActions(pendingActions);
           pendingActions = [];
+          // The inventory below should show what the actions just did, not a cached
+          // answer from before them.
+          listUserPackagesCached.invalidate();
         }
 
         // Starts a scan or a scanner install in the background if one is due. Returns at once.
@@ -229,7 +248,7 @@ export async function runAgentLoop(
         // one after another.
         const [
           aptPackages,
-          globalTools,
+          userPackages,
           manuallyInstalledPackages,
           openPorts,
           runningAccessMethods,
@@ -237,7 +256,7 @@ export async function runAgentLoop(
           repoVersions,
         ] = await Promise.all([
           listInstalledPackages(),
-          listGlobalToolsCached(),
+          listUserPackagesCached(),
           listManuallyInstalledPackages(),
           listOpenPorts(),
           listRunningAccessMethods(),
@@ -248,8 +267,16 @@ export async function runAgentLoop(
           // update an *Ensure latest version* package. Read from existing lists.
           availablePackageVersions(allowedPackages),
         ]);
-        // One inventory: apt names bare, other managers' global tools as `<manager>:<name>`.
-        const installedPackages = [...aptPackages, ...globalTools];
+        // One inventory: apt names bare, other managers' packages as `<manager>:<name>`.
+        const installedPackages = [...aptPackages, ...[...userPackages.keys()].sort()];
+        const allPackageVersions = {
+          ...packageVersions,
+          ...userPackageVersions(allowedPackages, userPackages),
+        };
+        const allRepoVersions = {
+          ...repoVersions,
+          ...availableUserVersions(allowedPackages, nixSnapshot),
+        };
         // Synchronous and cheap (two statfs calls), so it stays out of the Promise.all.
         const volumeUsage = readAllVolumeUsage();
         const hardeningBaseline = readHardeningBaseline();
@@ -264,11 +291,11 @@ export async function runAgentLoop(
           // Omitted when unknown, so the control plane keeps treating every
           // installed package as possibly intended rather than none of them.
           ...(manuallyInstalledPackages ? { manuallyInstalledPackages } : {}),
-          ...(Object.keys(packageVersions).length > 0
-            ? { declaredPackageVersions: packageVersions }
+          ...(Object.keys(allPackageVersions).length > 0
+            ? { declaredPackageVersions: allPackageVersions }
             : {}),
-          ...(Object.keys(repoVersions).length > 0
-            ? { availablePackageVersions: repoVersions }
+          ...(Object.keys(allRepoVersions).length > 0
+            ? { availablePackageVersions: allRepoVersions }
             : {}),
           openPorts,
           configState: { runningAccessMethods },
