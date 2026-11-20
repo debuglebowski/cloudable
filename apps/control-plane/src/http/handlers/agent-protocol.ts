@@ -14,6 +14,7 @@ import {
   collectPendingActions,
   expireStaleActions,
 } from "../../domain/machine/package-actions";
+import { nixpkgsCommitFor, readNixSnapshot } from "../../domain/organisation/nix-snapshot";
 import {
   recordReportedScanner,
   recordVulnerabilityScan,
@@ -239,6 +240,9 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
         );
 
         const settings = yield* pollSettingsFor(db, identity.orgId).pipe(Effect.orDie);
+        const nixSnapshot = collected.some((row) => row.packageName.startsWith("nix:"))
+          ? yield* readNixSnapshot(db, identity.orgId)
+          : null;
 
         return HttpServerResponse.unsafeJson(
           {
@@ -246,12 +250,16 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
             ...(agentRelease ? { agentRelease } : {}),
             packages: desired.allowedPackages,
             settings,
-            pendingActions: collected.map((row) => ({
-              id: row.id,
-              op: row.op,
-              packageName: row.packageName,
-              versionPin: row.versionPin,
-            })),
+            pendingActions: collected.map((row) => {
+              const nixpkgsCommit = nixpkgsCommitFor(row.packageName, row.versionPin, nixSnapshot);
+              return {
+                id: row.id,
+                op: row.op,
+                packageName: row.packageName,
+                versionPin: row.versionPin,
+                ...(nixpkgsCommit ? { nixpkgsCommit } : {}),
+              };
+            }),
           },
           { status: 200, headers: { etag } },
         );

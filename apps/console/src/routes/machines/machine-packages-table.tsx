@@ -1,3 +1,4 @@
+import { isInstallablePackageName } from "@cloudable/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Box,
@@ -742,8 +743,10 @@ function RowMenu({
   const isEnsured = row.setting === "ensure_installed" || row.setting === "ensure_latest";
   const known = row.installed !== "unknown";
 
-  // Installing and uninstalling: never on a package the image shipped with.
-  const canAct = canRequestActions && !row.isBaseline && known;
+  // Installing and uninstalling: never on a package the image shipped with,
+  // and only for a kind Cloudable installs through: apt, npm, pipx, cargo or nix, never home:.
+  const canAct =
+    canRequestActions && !row.isBaseline && known && isInstallablePackageName(row.packageName);
   // An ensured package that is missing is installed by Cloudable anyway; only offer a
   // manual try when its last automatic one failed and the next is hours away.
   const showInstall =

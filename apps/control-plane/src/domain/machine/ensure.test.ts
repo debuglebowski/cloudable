@@ -128,7 +128,7 @@ describe("decideEnsureActions", () => {
         manifest: [
           entry({ packageName: "excluded-one", excluded: true }),
           entry({ packageName: "orphan", partOf: "missing-parent" }),
-          entry({ packageName: "npm:@openai/codex" }),
+          entry({ packageName: "home:chromium" }),
           entry({ packageName: "curl" }),
           entry({ packageName: "jq" }),
         ],

@@ -12,7 +12,7 @@
 // most once per approval: right here when no sign-off is needed, or from the
 // approvals handler when the last approver says yes.
 // ---------------------------------------------------------------------------
-import { isValidPackageName } from "@cloudable/contracts";
+import { isInstallablePackageName, isValidDeclaredPackageName } from "@cloudable/contracts";
 import { Effect, Schema } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
@@ -111,7 +111,10 @@ export const requestPackageAction = (input: {
 > =>
   Effect.gen(function* () {
     const requestId = ulid();
-    if (!isValidPackageName(input.packageName)) {
+    if (
+      !isValidDeclaredPackageName(input.packageName) ||
+      !isInstallablePackageName(input.packageName)
+    ) {
       return yield* Effect.fail(
         rejected(
           "invalid_package_name",

@@ -24,6 +24,8 @@ export interface OrgWire {
   eventRetentionDays: number;
   /** Hours before a failed Ensure install is tried again. Absent from an older control plane. */
   ensureRetryHours?: number;
+  /** The nixpkgs commit `nix:` packages install from. Absent from an older control plane. */
+  nixSnapshot?: string | null;
   retentionLocation: "customer" | "cloudable_sweden_central";
 }
 

@@ -125,7 +125,11 @@ export class PackageEnsureSettingError extends Schema.TaggedError<PackageEnsureS
       problems: Schema.Array(
         Schema.Struct({
           packageName: Schema.String,
-          reason: Schema.Literal("not_installable", "ensure_latest_with_pin"),
+          reason: Schema.Literal(
+            "not_installable",
+            "ensure_latest_with_pin",
+            "invalid_version_pin",
+          ),
           message: Schema.String,
         }),
       ),
@@ -136,7 +140,7 @@ export class PackageEnsureSettingError extends Schema.TaggedError<PackageEnsureS
 export const ensureSettingError = (
   problems: ReadonlyArray<{
     packageName: string;
-    reason: "not_installable" | "ensure_latest_with_pin";
+    reason: "not_installable" | "ensure_latest_with_pin" | "invalid_version_pin";
     message: string;
   }>,
 ): PackageEnsureSettingError =>

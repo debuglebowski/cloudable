@@ -4,6 +4,7 @@ import { requireAdminUser } from "../../domain/authz";
 import { requestOrgManifestEdit } from "../../domain/machine/package-ensure";
 import { requestApprovalSettingsChange } from "../../domain/organisation/approval-settings-change";
 import { ENSURE_RETRY_HOURS_INVALID_REASON } from "../../domain/organisation/ensure-retry";
+import { NIX_SNAPSHOT_INVALID_REASON } from "../../domain/organisation/nix-snapshot";
 import { type OrgPackagesError, listOrgPackages } from "../../domain/organisation/packages";
 import {
   OrgSettingsError,
@@ -28,6 +29,7 @@ const VALIDATION_REASONS = new Set([
   "retention_days_must_be_a_positive_integer",
   EVENTS_RETENTION_INVALID_REASON,
   ENSURE_RETRY_HOURS_INVALID_REASON,
+  NIX_SNAPSHOT_INVALID_REASON,
 ]);
 
 const rethrowInfraAsDefect = (e: OrgSettingsError) =>
@@ -75,6 +77,7 @@ export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handl
           retentionDefaultDays: payload.retentionDefaultDays,
           eventRetentionDays: payload.eventRetentionDays,
           ensureRetryHours: payload.ensureRetryHours,
+          nixSnapshot: payload.nixSnapshot,
           retentionLocation: payload.retentionLocation,
           // The authenticated caller, never a name they chose for themselves. This is the
           // actor on a permanent `organisation.updated` event.

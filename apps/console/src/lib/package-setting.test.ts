@@ -9,11 +9,14 @@ describe("settingUnavailableReason", () => {
     ).toBeNull();
   });
 
-  test("ensure settings are apt only", () => {
-    for (const name of ["npm:playwright", "pipx:ruff", "cargo:just", "home:tool"]) {
+  test("ensure settings need a manager Cloudable installs through: never home", () => {
+    expect(
+      settingUnavailableReason("ensure_installed", { packageName: "home:tool", versionPin: null }),
+    ).not.toBeNull();
+    for (const name of ["npm:playwright", "pipx:ruff", "cargo:just", "nix:jq"]) {
       expect(
         settingUnavailableReason("ensure_installed", { packageName: name, versionPin: null }),
-      ).not.toBeNull();
+      ).toBeNull();
     }
     expect(
       settingUnavailableReason("ensure_installed", { packageName: "ripgrep", versionPin: "14" }),

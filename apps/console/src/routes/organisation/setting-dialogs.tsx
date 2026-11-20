@@ -287,6 +287,57 @@ export function EnsureRetryHoursDialog({
   );
 }
 
+export interface NixSnapshotDialogProps {
+  open: boolean;
+  currentSnapshot: string | null;
+  onOpenChange: (open: boolean) => void;
+  onSave: (snapshot: string | null) => void | Promise<void>;
+}
+
+const NIXPKGS_COMMIT = /^[0-9a-f]{40}$/;
+
+/**
+ * The nixpkgs commit every machine's `nix:` packages install from. Moving it
+ * forward is how Nix packages get newer versions. Empty clears it, which stops
+ * new Nix installs until one is set again.
+ */
+export function NixSnapshotDialog({
+  open,
+  currentSnapshot,
+  onOpenChange,
+  onSave,
+}: NixSnapshotDialogProps) {
+  const inputId = useId();
+
+  return (
+    <ValueEditDialog<string>
+      open={open}
+      currentValue={currentSnapshot ?? ""}
+      title="Nix snapshot"
+      description="The nixpkgs commit Nix packages install from. Every machine gets the versions in this commit. Move it forward to update them."
+      onOpenChange={onOpenChange}
+      onSave={(value) => onSave(value.trim() === "" ? null : value.trim())}
+      isValid={(value) => value.trim() === "" || NIXPKGS_COMMIT.test(value.trim())}
+    >
+      {(value, setValue) => (
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={inputId}>nixpkgs commit</Label>
+          <Input
+            id={inputId}
+            className="font-mono"
+            placeholder="40-character commit"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            A full commit from github.com/NixOS/nixpkgs. Leave empty to stop new Nix installs.
+          </p>
+        </div>
+      )}
+    </ValueEditDialog>
+  );
+}
+
 const RETENTION_LOCATIONS: RetentionLocation[] = ["customer", "cloudable_sweden_central"];
 
 export interface RetentionLocationDialogProps {

@@ -50,6 +50,8 @@ const PendingPackageAction = Schema.Struct({
   op: Schema.Literal("install", "uninstall"),
   packageName: Schema.String,
   versionPin: Schema.NullOr(Schema.String),
+  // For a `nix:` package: the nixpkgs commit to install from.
+  nixpkgsCommit: Schema.optional(Schema.String),
 });
 
 /** 200 body for `GET /poll` — a 304 (unchanged) has no body. See `docs/agents.md`. */

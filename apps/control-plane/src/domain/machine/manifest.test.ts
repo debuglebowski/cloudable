@@ -353,11 +353,11 @@ describe("findEnsureSettingProblems", () => {
   test("refuses a package Cloudable cannot install, and Ensure latest version with a pin", () => {
     expect(
       findEnsureSettingProblems([
-        { packageName: "npm:@openai/codex", setting: "ensure_installed", versionPin: null },
+        { packageName: "home:chromium", setting: "ensure_installed", versionPin: null },
         { packageName: "nodejs", setting: "ensure_latest", versionPin: "20" },
       ]).map((problem) => [problem.packageName, problem.reason]),
     ).toEqual([
-      ["npm:@openai/codex", "not_installable"],
+      ["home:chromium", "not_installable"],
       ["nodejs", "ensure_latest_with_pin"],
     ]);
   });

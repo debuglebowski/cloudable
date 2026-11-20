@@ -48,6 +48,8 @@ export interface OrgSettings {
   retentionLocation: RetentionLocation;
   /** Hours before an Ensure install that failed is tried again. Whole hours, 1 to 720. */
   ensureRetryHours: number;
+  /** The nixpkgs commit `nix:` packages install from. Null until an admin sets one. */
+  nixSnapshot: string | null;
 }
 
 export const ENSURE_RETRY_HOURS_MIN = 1;

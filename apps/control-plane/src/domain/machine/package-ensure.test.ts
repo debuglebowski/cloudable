@@ -206,7 +206,7 @@ describe("ensure settings", () => {
       requestOrgManifestEdit({
         orgId: org.id,
         personId: requester,
-        upserts: [{ packageName: "npm:@openai/codex", setting: "ensure_installed" }],
+        upserts: [{ packageName: "home:chromium", setting: "ensure_installed" }],
       }),
     );
     expect(notInstallable._tag).toBe("PackageEnsureSettingError");

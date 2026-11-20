@@ -49,6 +49,8 @@ const OrgSettingsResource = Schema.Struct({
   retentionDefaultDays: Schema.Number,
   eventRetentionDays: Schema.Number,
   ensureRetryHours: Schema.Number,
+  // The nixpkgs commit `nix:` packages install from. Null until an admin sets one.
+  nixSnapshot: Schema.NullOr(Schema.String),
   retentionLocation: RetentionLocation,
 });
 
@@ -67,6 +69,8 @@ const UpdateOrgSettingsPayload = Schema.Struct({
   eventRetentionDays: Schema.optional(Schema.Number),
   // Hours before a failed Ensure install is tried again, 1 to 720.
   ensureRetryHours: Schema.optional(Schema.Number),
+  // A full 40-character nixpkgs commit, or null to clear it.
+  nixSnapshot: Schema.optional(Schema.NullOr(Schema.String)),
   retentionLocation: Schema.optional(RetentionLocation),
 });
 
@@ -76,7 +80,7 @@ const UpdateOrgSettingsPayload = Schema.Struct({
 // An apt name, or `<manager>:<name>`. See `PACKAGE_MANAGERS` in the contracts package.
 const DeclaredPackageName = Schema.String.pipe(
   Schema.filter(isValidDeclaredPackageName, {
-    message: () => "not a valid package name: use an apt name or <npm|pipx|cargo|home>:<name>",
+    message: () => "not a valid package name: use an apt name or <npm|pipx|cargo|nix|home>:<name>",
   }),
 );
 

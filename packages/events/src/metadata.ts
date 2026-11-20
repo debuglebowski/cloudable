@@ -19,7 +19,7 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   "org.setting_changed": {
     tier: 1,
     description:
-      "An org- or machine-level default setting was changed. An org package edit (key `package:<name>`) includes the package's `setting`. The Ensure retry wait is key `packages.ensureRetryHours`.",
+      "An org- or machine-level default setting was changed. An org package edit (key `package:<name>`) includes the package's `setting`. The Ensure retry wait is key `packages.ensureRetryHours`. The nixpkgs commit `nix:` packages install from is key `packages.nix.snapshot`.",
   },
   "org.integration_connected": {
     tier: 1,

@@ -29,6 +29,12 @@ import {
   effectiveEnsureRetryHours,
   isValidEnsureRetryHours,
 } from "./ensure-retry";
+import {
+  NIX_SNAPSHOT_INVALID_REASON,
+  NIX_SNAPSHOT_KEY,
+  effectiveNixSnapshot,
+  isValidNixSnapshot,
+} from "./nix-snapshot";
 
 /**
  * Aggregate read/write for the Organisation page (approval mode per action type,
@@ -94,6 +100,8 @@ export interface OrgSettingsView {
   retentionLocation: RetentionLocation;
   /** Hours before an *Ensure* install that failed is tried again. */
   ensureRetryHours: number;
+  /** The nixpkgs commit `nix:` packages install from. Null until an admin sets one. */
+  nixSnapshot: string | null;
 }
 
 const dbTry = <A>(thunk: () => Promise<A>, reason: string): Effect.Effect<A, OrgSettingsError> =>
@@ -184,6 +192,10 @@ export const getOrgSettings = (
       yield* readOrgScopedSetting<number>(orgId, ENSURE_RETRY_HOURS_KEY),
     );
 
+    const nixSnapshot = effectiveNixSnapshot(
+      yield* readOrgScopedSetting<unknown>(orgId, NIX_SNAPSHOT_KEY),
+    );
+
     return {
       id: org.id,
       name: org.name,
@@ -197,6 +209,7 @@ export const getOrgSettings = (
       eventRetentionDays,
       retentionLocation,
       ensureRetryHours,
+      nixSnapshot,
     };
   });
 
@@ -209,6 +222,8 @@ export interface UpdateOrgSettingsInput {
   eventRetentionDays?: number | undefined;
   retentionLocation?: RetentionLocation | undefined;
   ensureRetryHours?: number | undefined;
+  /** A nixpkgs commit, or null to clear it. */
+  nixSnapshot?: string | null | undefined;
   actor: SettingChangeActor;
 }
 
@@ -303,6 +318,9 @@ export const updateOrgSettings = (
         new OrgSettingsError({ reason: ENSURE_RETRY_HOURS_INVALID_REASON }),
       );
     }
+    if (input.nixSnapshot !== undefined && !isValidNixSnapshot(input.nixSnapshot)) {
+      return yield* Effect.fail(new OrgSettingsError({ reason: NIX_SNAPSHOT_INVALID_REASON }));
+    }
 
     if (trimmedName !== undefined) {
       yield* dbTry(
@@ -369,6 +387,16 @@ export const updateOrgSettings = (
         input.orgId,
         ENSURE_RETRY_HOURS_KEY,
         input.ensureRetryHours,
+        input.actor,
+        correlationId,
+      );
+    }
+
+    if (input.nixSnapshot !== undefined) {
+      yield* writeOrgSetting(
+        input.orgId,
+        NIX_SNAPSHOT_KEY,
+        input.nixSnapshot,
         input.actor,
         correlationId,
       );

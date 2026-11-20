@@ -1,4 +1,4 @@
-import { isValidPackageName } from "@cloudable/contracts";
+import { isInstallablePackageName, isValidDeclaredPackageName } from "@cloudable/contracts";
 import type {
   PackageActionOp,
   PackageActionTrigger,
@@ -37,6 +37,52 @@ export class PackageActionError extends Data.TaggedError("PackageActionError")<{
  * do without a person asking.
  */
 export const ACTION_EXPIRY_MS = 5 * 60 * 1000;
+
+/**
+ * The same, per manager. npm and pipx download and unpack; cargo compiles from
+ * source; Nix may download a large closure. Each is a little longer than the
+ * agent's own `timeout` for that manager (`INSTALL_TIMEOUT_SECONDS` in
+ * `apps/agent/src/user-package-actions.ts`), so the agent always gets to say
+ * what happened before the control plane gives up.
+ */
+const EXPIRY_MS_BY_MANAGER: Record<string, number> = {
+  npm: 15 * 60 * 1000,
+  pipx: 15 * 60 * 1000,
+  cargo: 35 * 60 * 1000,
+  nix: 35 * 60 * 1000,
+};
+
+export const actionExpiryMs = (packageName: string): number =>
+  EXPIRY_MS_BY_MANAGER[packageName.slice(0, Math.max(0, packageName.indexOf(":")))] ??
+  ACTION_EXPIRY_MS;
+
+/**
+ * When each running action should be given up on. The agent runs one poll's
+ * actions one after another, so an action handed out together with a cargo
+ * build waits for it. Each action's deadline is therefore its batch's start
+ * plus the expiry of everything up to and including it in the order they were
+ * requested, not just its own expiry: otherwise an apt install queued behind a
+ * twenty-minute compile would expire before it ever ran.
+ */
+export function expiredActionIds(rows: ReadonlyArray<ActionRow>, now: Date): string[] {
+  const batches = new Map<number, ActionRow[]>();
+  for (const row of rows) {
+    if (row.status !== "running" || !row.startedAt) continue;
+    const key = row.startedAt.getTime();
+    batches.set(key, [...(batches.get(key) ?? []), row]);
+  }
+  const expired: string[] = [];
+  for (const [start, batch] of batches) {
+    let deadline = start;
+    for (const row of [...batch].sort(
+      (a, b) => a.requestedAt.getTime() - b.requestedAt.getTime(),
+    )) {
+      deadline += actionExpiryMs(row.packageName);
+      if (now.getTime() > deadline) expired.push(row.id);
+    }
+  }
+  return expired;
+}
 
 export type ActionRow = typeof machinePackageActions.$inferSelect;
 
@@ -83,7 +129,10 @@ export const enqueuePackageAction = (
   },
 ): Effect.Effect<ActionRow, PackageActionError> =>
   Effect.gen(function* () {
-    if (!isValidPackageName(input.packageName)) {
+    if (
+      !isValidDeclaredPackageName(input.packageName) ||
+      !isInstallablePackageName(input.packageName)
+    ) {
       return yield* Effect.fail(
         new PackageActionError({
           reason: "invalid_package_name",
@@ -266,18 +315,45 @@ export const expireStaleActions = (
   now: Date,
 ): Effect.Effect<ActionRow[], PackageActionError> =>
   Effect.tryPromise({
-    try: () =>
-      db
-        .update(machinePackageActions)
-        .set({ status: "expired", finishedAt: now })
+    try: async () => {
+      // Nothing can be due before the shortest expiry has passed, so most reports stop here.
+      const running = await db
+        .select()
+        .from(machinePackageActions)
         .where(
           and(
             eq(machinePackageActions.machineId, machineId),
             eq(machinePackageActions.status, "running"),
             lt(machinePackageActions.startedAt, new Date(now.getTime() - ACTION_EXPIRY_MS)),
           ),
+        );
+      if (running.length === 0) return [];
+      // Every running action of the batches in play, not only the old ones, so the
+      // order inside each batch is complete.
+      const starts = [...new Set(running.map((row) => row.startedAt?.getTime() ?? 0))];
+      const batchRows = await db
+        .select()
+        .from(machinePackageActions)
+        .where(
+          and(
+            eq(machinePackageActions.machineId, machineId),
+            eq(machinePackageActions.status, "running"),
+            inArray(
+              machinePackageActions.startedAt,
+              starts.map((start) => new Date(start)),
+            ),
+          ),
+        );
+      const ids = expiredActionIds(batchRows, now);
+      if (ids.length === 0) return [];
+      return db
+        .update(machinePackageActions)
+        .set({ status: "expired", finishedAt: now })
+        .where(
+          and(eq(machinePackageActions.status, "running"), inArray(machinePackageActions.id, ids)),
         )
-        .returning(),
+        .returning();
+    },
     catch: (cause) =>
       new PackageActionError({ reason: "write_failed", message: "expiring actions", cause }),
   });

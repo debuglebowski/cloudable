@@ -29,7 +29,7 @@ export function settingUnavailableReason(
   entry: { packageName: string; versionPin: string | null },
 ): string | null {
   if (setting === "allowed") return null;
-  if (!isInstallablePackageName(entry.packageName)) return "apt packages only for now";
+  if (!isInstallablePackageName(entry.packageName)) return "Cloudable cannot install this kind";
   if (setting === "ensure_latest" && entry.versionPin) return "not with a version pin";
   return null;
 }

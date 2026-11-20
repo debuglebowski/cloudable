@@ -15,6 +15,7 @@ import {
   snapshotInspectEnabledOf,
   webTerminalEnabledOf,
 } from "../machine/settings";
+import { NIX_SNAPSHOT_KEY, isValidNixSnapshot } from "../organisation/nix-snapshot";
 import { type AdminRoleRequiredError, requireAdmin } from "../people/authorization";
 import {
   EVENTS_RETENTION_DAYS_KEY,
@@ -125,6 +126,32 @@ export const applySettingChange = (
           new InvalidSettingValueError({
             key: input.key,
             message: `event retention must be a whole number of days, at least ${MIN_EVENTS_RETENTION_DAYS}`,
+          }),
+        );
+      }
+    }
+
+    // The nixpkgs snapshot decides which versions every machine's `nix:` packages install at,
+    // so it is the org's, set by an admin, and always a full commit. Checked here so every write
+    // path agrees, the same as the vulnerability scan keys below.
+    if (input.key === NIX_SNAPSHOT_KEY) {
+      if (input.actorType === "person") {
+        yield* requireAdmin(
+          input.actorId,
+          input.orgId,
+          "Only an admin can change the Nix snapshot.",
+        );
+      }
+      if (input.scopeType !== "org") {
+        return yield* Effect.fail(
+          new InvalidScopeError({ message: "the Nix snapshot can only be set for the org" }),
+        );
+      }
+      if (!isValidNixSnapshot(input.value)) {
+        return yield* Effect.fail(
+          new InvalidSettingValueError({
+            key: input.key,
+            message: "the Nix snapshot must be a full 40-character nixpkgs commit, or null",
           }),
         );
       }
@@ -365,8 +392,9 @@ export const applySettingChange = (
     // value did not change: re-saving the same schedule should not make the fleet re-download
     // its settings. Runs after the event is durably published, so the change is on record
     // whatever happens here.
+    // The Nix snapshot reaches agents the same way (`settings.nix`).
     if (
-      isVulnerabilityScanSettingKey(input.key) &&
+      (isVulnerabilityScanSettingKey(input.key) || input.key === NIX_SNAPSHOT_KEY) &&
       JSON.stringify(previous) !== JSON.stringify(input.value)
     ) {
       yield* Effect.tryPromise({

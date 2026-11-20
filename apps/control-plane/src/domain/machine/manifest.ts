@@ -1,4 +1,9 @@
-import { type PackageSetting, isInstallablePackageName } from "@cloudable/contracts";
+import {
+  type PackageSetting,
+  isInstallablePackageName,
+  isValidVersionPin,
+  parseDeclaredPackageName,
+} from "@cloudable/contracts";
 import { type SettingRow, resolveSetting } from "@cloudable/schema";
 
 /** See `docs/inheritance.md` for the full write-up of this chain. */
@@ -179,14 +184,17 @@ export const packageNameFromSettingKey = (key: string): string | null =>
  */
 export interface EnsureSettingProblem {
   packageName: string;
-  reason: "not_installable" | "ensure_latest_with_pin";
+  reason: "not_installable" | "ensure_latest_with_pin" | "invalid_version_pin";
   message: string;
 }
 
 /**
  * The ensure rules that do not depend on anything but the entry itself:
  * Cloudable can only ensure what it can install, and "latest" and a version
- * pin contradict each other.
+ * pin contradict each other. Also, for every setting, a pin on an npm, pipx,
+ * cargo or nix package must be a version that manager understands
+ * (`isValidVersionPin`): it becomes that manager's argument on the machine. apt
+ * pins are left as they were, free text apt itself judges.
  */
 export function findEnsureSettingProblems(
   entries: ReadonlyArray<{
@@ -197,6 +205,24 @@ export function findEnsureSettingProblems(
 ): EnsureSettingProblem[] {
   const problems: EnsureSettingProblem[] = [];
   for (const entry of entries) {
+    const manager = parseDeclaredPackageName(entry.packageName)?.manager;
+    if (
+      entry.versionPin !== null &&
+      manager !== undefined &&
+      manager !== "apt" &&
+      manager !== "home" &&
+      !isValidVersionPin(entry.packageName, entry.versionPin)
+    ) {
+      problems.push({
+        packageName: entry.packageName,
+        reason: "invalid_version_pin",
+        message:
+          manager === "nix"
+            ? `"${entry.versionPin}" is not a nixpkgs commit. A nix: pin is a full 40-character commit.`
+            : `"${entry.versionPin}" is not a version ${manager} understands.`,
+      });
+      continue;
+    }
     if (entry.setting === "allowed") continue;
     if (!isInstallablePackageName(entry.packageName)) {
       problems.push({

@@ -92,6 +92,7 @@ function printOrg(org: OrgWire): void {
       "ensure retry wait",
       org.ensureRetryHours === undefined ? "-" : `${org.ensureRetryHours} hours`,
     ],
+    ["nix snapshot", org.nixSnapshot ?? "-"],
   ]);
   console.log("\napproval modes:");
   printTable(
@@ -127,7 +128,7 @@ function approvalModes(values: ReadonlyArray<string>): Record<string, string> {
 
 export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    `org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--event-retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--ensure-retry-hours <n>] [--approval-mode <action>=<mode> --reason <text>] ${VULNERABILITY_SCAN_USAGE}`,
+    `org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--event-retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--ensure-retry-hours <n>] [--nix-snapshot <commit>|none] [--approval-mode <action>=<mode> --reason <text>] ${VULNERABILITY_SCAN_USAGE}`,
   );
   const args = parseArgs(
     argv,
@@ -139,6 +140,7 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
         "event-retention-days",
         "retention-location",
         "ensure-retry-hours",
+        "nix-snapshot",
         "reason",
         ...VULNERABILITY_SCAN_VALUE_FLAGS,
       ],
@@ -167,6 +169,11 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
     // The control plane enforces 1 to 720 and says so; this only rejects what is
     // not a whole number at all.
     payload.ensureRetryHours = positiveInt(args.flags["ensure-retry-hours"], "ensure-retry-hours");
+  }
+  if (args.flags["nix-snapshot"]) {
+    // "none" clears it. The control plane checks it is a full nixpkgs commit and says so.
+    const snapshot = args.flags["nix-snapshot"].trim();
+    payload.nixSnapshot = snapshot === "none" ? null : snapshot;
   }
   if (args.flags["retention-location"]) {
     payload.retentionLocation = oneOf(

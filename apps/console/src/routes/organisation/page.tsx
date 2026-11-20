@@ -27,6 +27,7 @@ import {
   EnsureRetryHoursDialog,
   EventRetentionDialog,
   LoggingTierDialog,
+  NixSnapshotDialog,
   RetentionDaysDialog,
   RetentionLocationDialog,
 } from "./setting-dialogs";
@@ -60,6 +61,7 @@ export function OrganisationPage() {
   const [editingEventRetention, setEditingEventRetention] = useState(false);
   const [editingRetentionLocation, setEditingRetentionLocation] = useState(false);
   const [editingEnsureRetry, setEditingEnsureRetry] = useState(false);
+  const [editingNixSnapshot, setEditingNixSnapshot] = useState(false);
   const [editingControlId, setEditingControlId] = useState<string | null>(null);
 
   if (isLoading || !settings) {
@@ -229,6 +231,22 @@ export function OrganisationPage() {
               />
             </CardContent>
           </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Nix</CardTitle>
+              <CardDescription>
+                Which versions Nix packages install at, on every machine.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col">
+              <SettingRow
+                label="nixpkgs snapshot"
+                value={settings.nixSnapshot ? settings.nixSnapshot.slice(0, 12) : "not set"}
+                source="org"
+                onOverride={() => setEditingNixSnapshot(true)}
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="vulnerabilities" className="mt-6">
@@ -315,6 +333,14 @@ export function OrganisationPage() {
         onOpenChange={setEditingRetentionLocation}
         onSave={async (location) => {
           await update.mutateAsync({ retentionLocation: location });
+        }}
+      />
+      <NixSnapshotDialog
+        open={editingNixSnapshot}
+        currentSnapshot={settings.nixSnapshot}
+        onOpenChange={setEditingNixSnapshot}
+        onSave={async (snapshot) => {
+          await update.mutateAsync({ nixSnapshot: snapshot });
         }}
       />
       <EnsureRetryHoursDialog

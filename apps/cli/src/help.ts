@@ -462,6 +462,11 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
               "Hours before a failed Ensure install is tried again (1 to 720, default 24)",
           },
           {
+            flag: "--nix-snapshot <commit>|none",
+            description:
+              "The nixpkgs commit nix: packages install from (full 40-character commit). none clears it",
+          },
+          {
             flag: "--approval-mode <action>=<mode>",
             description:
               "none|single|dual per action (repeatable). Asks for the change; an approver signs off",

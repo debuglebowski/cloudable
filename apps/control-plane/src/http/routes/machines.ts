@@ -172,7 +172,7 @@ const machineIdPathSchema = Schema.Struct({ id: Schema.UUID });
 // See `PACKAGE_MANAGERS` in the contracts package.
 const declaredPackageNameSchema = Schema.String.pipe(
   Schema.filter(isValidDeclaredPackageName, {
-    message: () => "not a valid package name: use an apt name or <npm|pipx|cargo|home>:<name>",
+    message: () => "not a valid package name: use an apt name or <npm|pipx|cargo|nix|home>:<name>",
   }),
 );
 
