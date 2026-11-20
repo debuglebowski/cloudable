@@ -185,7 +185,8 @@ export function PackageEntryDialog({
             {!isEdit ? (
               <>
                 Not from apt? Prefix it: <code>npm:</code>, <code>pipx:</code>, <code>cargo:</code>{" "}
-                for global tools, <code>home:</code> for software in the home folder.
+                for global tools, <code>nix:</code> for a nixpkgs package (its pin is a nixpkgs
+                commit), <code>home:</code> for software in the home folder.
               </>
             ) : mode.inherited ? (
               "This package comes from the org. Saving gives this machine its own entry, which it uses instead. Reset to the org's entry any time from the row's menu."
