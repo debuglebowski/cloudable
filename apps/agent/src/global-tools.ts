@@ -37,8 +37,14 @@ export const NIX_FEATURES = ["--extra-experimental-features", "nix-command flake
  * so a package name cannot become shell syntax even if every validation above this
  * one were gone. Exit 127 means the first word is not installed for that user;
  * 124 is `timeout` giving up.
+ *
+ * It starts in the user's home, never in the agent's own working folder. npm, pipx and
+ * cargo all read settings from the folder they run in (`.npmrc`, `.cargo/config.toml`),
+ * and `npm config set` writes to the nearest project's `.npmrc` (seen in testing: it
+ * tried to write the agent's checkout). The home is where these tools' settings belong.
  */
-const RUN_AS_USER_SCRIPT = 'command -v "$1" >/dev/null 2>&1 || exit 127; exec "$@"';
+const RUN_AS_USER_SCRIPT =
+  'cd "$HOME" 2>/dev/null || cd /; command -v "$1" >/dev/null 2>&1 || exit 127; exec "$@"';
 
 export function runAsUser(
   runner: CommandRunner,
@@ -200,12 +206,12 @@ interface ListCommand {
 
 const LIST_COMMANDS: readonly ListCommand[] = [
   { manager: "npm", argv: ["npm", "ls", "-g", "--depth=0", "--json"], parse: parseNpmGlobal },
-  // Ubuntu's npm puts globals in /usr. Cloudable moves the user's prefix to ~/.local
+  // Ubuntu's npm puts globals in /usr/local. Cloudable moves the user's prefix to ~/.local
   // before its first npm install (`user-package-actions.ts`), so read /usr as well:
   // a tool someone installed there with sudo is still installed software.
   {
     manager: "npm",
-    argv: ["npm", "ls", "-g", "--prefix", "/usr", "--depth=0", "--json"],
+    argv: ["npm", "ls", "-g", "--prefix", "/usr/local", "--depth=0", "--json"],
     parse: parseNpmGlobal,
   },
   { manager: "pipx", argv: ["pipx", "list", "--json"], parse: parsePipxList },

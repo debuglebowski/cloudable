@@ -56,7 +56,11 @@ describe("npm", () => {
       return ok();
     });
     const result = await applyPackageAction(action(), runner, options);
-    expect(runner.commands).toContainEqual(["sh", "-c", 'npm config set prefix "$HOME/.local"']);
+    expect(runner.commands).toContainEqual([
+      "sh",
+      "-c",
+      'npm config set --location=user prefix "$HOME/.local"',
+    ]);
     expect(result.detail).toContain("moved from /usr to ~/.local");
   });
 

@@ -64,8 +64,15 @@ export interface UserActionContext {
 
 const MAX_DETAIL_LENGTH = 400;
 
+/**
+ * What an interactive bash with no terminal prints before anything else. It is noise from
+ * `runAsUser`'s shell, not the manager's answer, so it never reaches an action's message.
+ */
+const BASH_NO_TTY_NOISE =
+  /^bash: (cannot set terminal process group|no job control in this shell).*$/gm;
+
 export const tail = (text: string): string => {
-  const trimmed = text.trim();
+  const trimmed = text.replace(BASH_NO_TTY_NOISE, "").trim();
   return trimmed.length <= MAX_DETAIL_LENGTH
     ? trimmed
     : `...${trimmed.slice(trimmed.length - MAX_DETAIL_LENGTH)}`;
@@ -112,7 +119,7 @@ async function nixProfile(runner: CommandRunner, user: string) {
 }
 
 /**
- * Ubuntu's npm installs global packages into `/usr`, which the machine user
+ * Ubuntu's npm installs global packages into `/usr/local`, which the machine user
  * cannot write. Running npm as root instead would run every package's install
  * scripts as root. So before the first install, if the user's global folder is
  * not writable, point it at `~/.local` in the user's own `~/.npmrc`. Ubuntu's
@@ -131,7 +138,7 @@ async function ensureWritableNpmPrefix(
   // A constant script: `$HOME` is the only thing expanded, and it is the user's own.
   const set = await runAsUser(
     runner,
-    ["sh", "-c", 'npm config set prefix "$HOME/.local"'],
+    ["sh", "-c", 'npm config set --location=user prefix "$HOME/.local"'],
     30,
     user,
   );

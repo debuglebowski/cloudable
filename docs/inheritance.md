@@ -321,12 +321,16 @@ scripts never run as root.
 - **The manager must already be there.** Cloudable never installs one on its own. A person asks
   for `npm`, `pipx`, `cargo` or `nix-setup-systemd` through apt first. Without it the install
   fails with "npm is not installed for user cloudable".
-- **npm.** Ubuntu's npm installs global tools into `/usr`, which the user cannot write. Before
+- **npm.** Ubuntu's npm installs global tools into `/usr/local`, which the user cannot write. Before
   the first Cloudable npm install, if the user's global folder is not writable, the agent points
   it at `~/.local` in the user's `~/.npmrc` and says so in the action result. The inventory reads
-  both `~/.local` and `/usr`, so a tool installed with sudo earlier still counts.
+  both `~/.local` and `/usr/local`, so a tool installed with sudo earlier still counts. Every
+  npm, pipx and cargo command runs in the user's home, so a project's `.npmrc` or
+  `.cargo/config.toml` never decides where a tool goes.
 - **cargo.** Compiles from source, so its actions may run for up to 35 minutes before they
-  expire. When the vulnerability scan has put cargo-auditable on the machine, installs go through
+  expire. Ubuntu 24.04's cargo is Rust 1.75, and many current crates need a newer one: the
+  install then fails with cargo's own "requires rustc 1.88 or newer". Pin an older version of the
+  crate, or have the person use rustup. When the vulnerability scan has put cargo-auditable on the machine, installs go through
   it so the result can be scanned.
 - **Nix** needs Ubuntu 24.04 (Nix 2.18). Ubuntu 22.04's Nix 2.6 is refused. Installing the apt
   package `nix-setup-systemd` also adds the machine user to `nix-users`, which the Nix daemon

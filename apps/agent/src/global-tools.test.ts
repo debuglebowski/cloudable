@@ -155,7 +155,7 @@ describe("runAsUser", () => {
       "--",
       "bash",
       "-lic",
-      'command -v "$1" >/dev/null 2>&1 || exit 127; exec "$@"',
+      'cd "$HOME" 2>/dev/null || cd /; command -v "$1" >/dev/null 2>&1 || exit 127; exec "$@"',
       "bash",
       "npm",
       "install",
