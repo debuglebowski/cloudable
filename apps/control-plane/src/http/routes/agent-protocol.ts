@@ -2,6 +2,8 @@ import {
   HARDENING_BASELINE_PATTERN,
   MAX_REPORTED_FINDINGS,
   SCAN_FAILURE_REASONS,
+  SCAN_SCOPES,
+  VULNERABILITY_ECOSYSTEMS,
 } from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
@@ -91,7 +93,7 @@ const PackageActionResult = Schema.Struct({
  */
 const VulnerabilityFinding = Schema.Struct({
   vulnerabilityId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
-  ecosystem: Schema.Literal("os"),
+  ecosystem: Schema.Literal(...VULNERABILITY_ECOSYSTEMS),
   packageName: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
   installedVersion: Schema.String.pipe(Schema.maxLength(256)),
   fixedVersion: Schema.NullOr(Schema.String.pipe(Schema.maxLength(256))),
@@ -103,7 +105,7 @@ const VulnerabilityScanReport = Schema.Struct({
   scanId: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,64}$/)),
   scanner: Schema.Literal("trivy"),
   scannerVersion: Schema.NullOr(Schema.String.pipe(Schema.maxLength(64))),
-  scope: Schema.Literal("os"),
+  scope: Schema.Literal(...SCAN_SCOPES),
   startedAt: Schema.String,
   finishedAt: Schema.String,
   outcome: Schema.Literal("completed", "failed"),

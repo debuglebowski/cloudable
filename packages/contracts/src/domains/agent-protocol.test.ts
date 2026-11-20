@@ -13,7 +13,15 @@ describe("nix package names", () => {
   });
 
   test("anything that could be more than an attribute", () => {
-    for (const name of ["nix:", "nix:.x", "nix:a..b", "nix:a#b", "nix:a b", "nix:1abc", "nix:a/b"]) {
+    for (const name of [
+      "nix:",
+      "nix:.x",
+      "nix:a..b",
+      "nix:a#b",
+      "nix:a b",
+      "nix:1abc",
+      "nix:a/b",
+    ]) {
       expect(isValidDeclaredPackageName(name)).toBe(false);
     }
   });

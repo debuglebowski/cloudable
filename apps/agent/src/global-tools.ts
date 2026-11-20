@@ -123,10 +123,14 @@ export interface NixProfileElement extends UserPackage {
  */
 export function versionFromStorePath(storePath: string): string | undefined {
   const base = storePath.slice(storePath.lastIndexOf("/") + 1);
-  const name = base.slice(base.indexOf("-") + 1);
+  // A non-default output carries its name at the end (`curl-8.23.0-bin`), which is not
+  // part of the version.
+  const name = base.slice(base.indexOf("-") + 1).replace(NIX_OUTPUT_SUFFIX, "");
   const match = /-(\d.*)$/.exec(name);
   return match?.[1];
 }
+
+const NIX_OUTPUT_SUFFIX = /-(bin|out|dev|lib|man|doc|info|devdoc|debug|static)$/;
 
 /** `legacyPackages.x86_64-linux.python3Packages.black` -> `python3Packages.black`. */
 function attrFromPath(attrPath: string): string | undefined {

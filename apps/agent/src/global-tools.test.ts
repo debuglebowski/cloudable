@@ -75,6 +75,10 @@ describe("Nix profile", () => {
     expect(
       versionFromStorePath("/nix/store/0123456789abcdfghijklmnpqrsvwxyz-hello"),
     ).toBeUndefined();
+    // A non-default output's name is not part of the version (seen on Nix 2.35 for curl).
+    expect(
+      versionFromStorePath("/nix/store/rjafg106f6sngkysyri204fsh4zvjjzk-curl-8.23.0-bin"),
+    ).toBe("8.23.0");
   });
 
   test("Nix 2.18 (version 2): an array, removed by index", () => {

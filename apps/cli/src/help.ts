@@ -490,6 +490,11 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
             description: "Days a fixable High may stay open before the check fails (default 30)",
           },
           {
+            flag: "--scan-scope os|os_and_tools",
+            description:
+              "What a scan looks at: OS packages, or those and npm, pipx, cargo and Nix tools",
+          },
+          {
             flag: "--vuln-db-repository <registry/path>|none",
             description:
               "Your own mirror of the vulnerability database, or none for the public ones",
