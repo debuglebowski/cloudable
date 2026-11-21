@@ -40,6 +40,12 @@ export interface PackagesViewInput {
   manuallyInstalledPackages?: ReadonlyArray<string> | null | undefined;
   /** Outstanding actions by package name. */
   pendingActions?: ReadonlyMap<string, PendingPackageActionView> | undefined;
+  /** What the repository offers, as the agent last reported. */
+  availablePackageVersions?: Readonly<Record<string, string>> | undefined;
+  /** The last ensure install that failed or expired, by package, and when it is tried again. */
+  ensureFailures?:
+    | ReadonlyMap<string, { failedAt: string; reason: string; nextAttemptAt: string }>
+    | undefined;
 }
 
 /**
@@ -98,6 +104,8 @@ export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[]
       installedVersion !== entry.versionPin;
 
     const pendingAction = pendingActions.get(packageName);
+    const availableVersion = input.availablePackageVersions?.[packageName];
+    const ensureFailure = input.ensureFailures?.get(packageName);
 
     rows.push({
       packageName,
@@ -116,6 +124,12 @@ export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[]
         isAptName(packageName) &&
         !manualSet.has(packageName),
       ...(pendingAction ? { pendingAction } : {}),
+      ...(entry && entry.setting !== "allowed" ? { setting: entry.setting } : {}),
+      ...(availableVersion !== undefined ? { availableVersion } : {}),
+      // Only while the entry is still ensured: an old failure means nothing once it is not.
+      ...(ensureFailure && entry && entry.setting !== "allowed" && !pendingAction
+        ? { ensureFailure }
+        : {}),
     });
   }
 
@@ -127,6 +141,7 @@ export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[]
 /** Lower sorts first. */
 function rank(row: MachinePackageRow): number {
   if (row.pendingAction) return 0;
+  if (row.ensureFailure) return 1;
   if (row.permission === "disallowed" && row.installed === "installed") return 1;
   if (row.versionMismatch) return 2;
   if (row.permission === null && !row.isBaseline && !row.installedAsDependency) return 3;

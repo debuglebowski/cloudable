@@ -1,11 +1,15 @@
 import { useId, useState } from "react";
+import { toast } from "sonner";
 
 import {
   type OrgPackageEntry,
+  type UpdateOrgPackagesResult,
   useAddOrgPackage,
   useOrgPackages,
   useRemoveOrgPackage,
+  useSetOrgPackageSetting,
 } from "@/api/organisation";
+import { PackageSettingSelect } from "@/components/package-setting-select";
 import { PageLoader } from "@/components/page-loader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +17,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  PACKAGE_SETTING_LABELS,
+  type PackageSetting,
+  describeSettingChange,
+  settingUnavailableReason,
+} from "@/lib/package-setting";
 
 /**
  * Org-level package manifest defaults (see docs/inheritance.md's
@@ -24,6 +34,17 @@ import { Label } from "@/components/ui/label";
  * `PATCH /api/v1/organisation/packages` / `.../machines/:id/packages`, never
  * a silent no-op at reconcile).
  */
+/** Tells the person what a setting change did: applied, or waiting for an approver. */
+function toastSettingChange(
+  packageName: string,
+  setting: PackageSetting,
+  result: UpdateOrgPackagesResult,
+) {
+  const outcome = describeSettingChange(packageName, setting, result.ensureApprovals);
+  const show = outcome.kind === "success" ? toast.success : toast.error;
+  show(outcome.title, outcome.description ? { description: outcome.description } : undefined);
+}
+
 export function OrgPackageManifestCard() {
   const packagesQuery = useOrgPackages();
 
@@ -33,7 +54,9 @@ export function OrgPackageManifestCard() {
         <CardTitle>Package manifest defaults</CardTitle>
         <CardDescription>
           The org-wide default manifest. Any machine without its own entry (or override) for a
-          package resolves to what's declared here — lowest level wins.
+          package resolves to what's declared here — lowest level wins. Ensure installed makes
+          Cloudable install a package on every machine that is missing it. Ensure latest version
+          also updates it. Both need an approval first.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -63,6 +86,8 @@ function PackageRow({ entry }: { entry: OrgPackageEntry }) {
   // each row tracks its own pending state independently — removing two rows
   // in quick succession must not clear the first row's "Removing…" state.
   const removePackage = useRemoveOrgPackage();
+  const setSetting = useSetOrgPackageSetting();
+  const setting = entry.setting ?? "allowed";
 
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border py-2.5 last:border-b-0">
@@ -77,14 +102,29 @@ function PackageRow({ entry }: { entry: OrgPackageEntry }) {
           <span className="text-xs text-muted-foreground">· {entry.description}</span>
         )}
       </div>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => removePackage.mutate(entry.packageName)}
-        disabled={removePackage.isPending}
-      >
-        {removePackage.isPending ? "Removing…" : "Remove"}
-      </Button>
+      <div className="flex shrink-0 items-center gap-2">
+        <PackageSettingSelect
+          value={setting}
+          onChange={(next) => {
+            if (next === setting) return;
+            setSetting.mutate(
+              { packageName: entry.packageName, setting: next },
+              { onSuccess: (result) => toastSettingChange(entry.packageName, next, result) },
+            );
+          }}
+          packageName={entry.packageName}
+          versionPin={entry.versionPin}
+          disabled={setSetting.isPending}
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => removePackage.mutate(entry.packageName)}
+          disabled={removePackage.isPending}
+        >
+          {removePackage.isPending ? "Removing…" : "Remove"}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -96,34 +136,48 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
   const pinnedId = useId();
   const partOfId = useId();
   const descriptionId = useId();
+  const settingId = useId();
 
   const [packageName, setPackageName] = useState("");
   const [versionPin, setVersionPin] = useState("");
   const [pinned, setPinned] = useState(false);
   const [partOf, setPartOf] = useState("");
   const [description, setDescription] = useState("");
+  const [setting, setSetting] = useState<PackageSetting>("allowed");
 
   const trimmedName = packageName.trim();
+  const trimmedVersion = versionPin.trim() === "" ? null : versionPin.trim();
   const isDuplicate = existing.some((entry) => entry.packageName === trimmedName);
-  const canAdd = trimmedName !== "" && !isDuplicate && !addPackage.isPending;
+  // The setting picked first can stop fitting once a name or pin is typed after it.
+  const settingProblem = settingUnavailableReason(setting, {
+    packageName: trimmedName,
+    versionPin: trimmedVersion,
+  });
+  const canAdd =
+    trimmedName !== "" && !isDuplicate && settingProblem === null && !addPackage.isPending;
 
   function submit() {
     if (!canAdd) return;
+    const added = { name: trimmedName, setting };
     addPackage.mutate(
       {
         packageName: trimmedName,
-        versionPin: versionPin.trim() === "" ? null : versionPin.trim(),
+        versionPin: trimmedVersion,
         pinned,
         ...(partOf.trim() === "" ? {} : { partOf: partOf.trim() }),
         ...(description.trim() === "" ? {} : { description: description.trim() }),
+        setting,
       },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
           setPackageName("");
           setVersionPin("");
           setPinned(false);
           setPartOf("");
           setDescription("");
+          setSetting("allowed");
+          // An ensure setting waits for an approval, and the package is not added until then.
+          if (added.setting !== "allowed") toastSettingChange(added.name, added.setting, result);
         },
       },
     );
@@ -194,6 +248,19 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
             className="w-64"
           />
         </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={settingId} className="text-xs text-muted-foreground">
+            Setting
+          </label>
+          <PackageSettingSelect
+            id={settingId}
+            value={setting}
+            onChange={setSetting}
+            packageName={trimmedName}
+            versionPin={trimmedVersion}
+            className="h-10"
+          />
+        </div>
         <div className="flex items-center gap-1.5 pb-1.5">
           <Checkbox
             id={pinnedId}
@@ -211,6 +278,11 @@ function AddPackageForm({ existing }: { existing: OrgPackageEntry[] }) {
       {isDuplicate && (
         <p className="text-xs text-destructive">
           "{trimmedName}" is already declared at the org level — remove it first to replace it.
+        </p>
+      )}
+      {settingProblem && trimmedName !== "" && (
+        <p className="text-xs text-destructive">
+          {PACKAGE_SETTING_LABELS[setting]} is not possible here: {settingProblem}.
         </p>
       )}
     </div>

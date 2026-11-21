@@ -2,7 +2,11 @@ import type { AgentRelease, PendingPackageAction } from "@cloudable/contracts";
 import type { PackageActionResult } from "@cloudable/contracts";
 import { listRunningAccessMethods } from "./access-methods";
 import { AgentUpdater, UPDATE_EXIT } from "./agent-update";
-import { applyPackageActions, declaredPackageVersions } from "./apply-packages";
+import {
+  applyPackageActions,
+  availablePackageVersions,
+  declaredPackageVersions,
+} from "./apply-packages";
 import { AttestationRejectedError, attest, clearCachedSession } from "./attestation";
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
@@ -230,6 +234,7 @@ export async function runAgentLoop(
           openPorts,
           runningAccessMethods,
           packageVersions,
+          repoVersions,
         ] = await Promise.all([
           listInstalledPackages(),
           listGlobalToolsCached(),
@@ -239,6 +244,9 @@ export async function runAgentLoop(
           // Only the allowed set — versions exist to check pins, and only
           // declared entries carry pins.
           declaredPackageVersions(allowedPackages),
+          // What the repository offers for the same set, so the control plane can
+          // update an *Ensure latest version* package. Read from existing lists.
+          availablePackageVersions(allowedPackages),
         ]);
         // One inventory: apt names bare, other managers' global tools as `<manager>:<name>`.
         const installedPackages = [...aptPackages, ...globalTools];
@@ -258,6 +266,9 @@ export async function runAgentLoop(
           ...(manuallyInstalledPackages ? { manuallyInstalledPackages } : {}),
           ...(Object.keys(packageVersions).length > 0
             ? { declaredPackageVersions: packageVersions }
+            : {}),
+          ...(Object.keys(repoVersions).length > 0
+            ? { availablePackageVersions: repoVersions }
             : {}),
           openPorts,
           configState: { runningAccessMethods },

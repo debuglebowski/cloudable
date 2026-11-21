@@ -23,6 +23,7 @@ export type ApprovalActionType =
   | "admin_access"
   | "offboarding"
   | "package_install"
+  | "package_ensure"
   | "approval_settings_change";
 
 /** What exactly was asked for, for the action types whose target alone does not say it. */
@@ -71,6 +72,7 @@ export const ACTION_TYPE_LABELS: Record<ApprovalActionType, string> = {
   admin_access: "Admin access",
   offboarding: "Offboarding",
   package_install: "Package install",
+  package_ensure: "Package ensure setting",
   approval_settings_change: "Approval settings change",
 };
 
@@ -87,6 +89,15 @@ export function describePayload(actionType: ApprovalActionType, payload: unknown
     const p = payload as { packageName: string; op: string; versionPin: string | null };
     const verb = p.op === "uninstall" ? "Remove" : "Install";
     return `${verb} ${p.packageName}${p.versionPin ? ` (version ${p.versionPin})` : ""}`;
+  }
+  if (actionType === "package_ensure" && "edit" in payload) {
+    const p = payload as {
+      scope: "org" | "machine";
+      edit: { packageName: string; setting?: string };
+    };
+    const setting =
+      p.edit.setting === "ensure_latest" ? "Ensure latest version" : "Ensure installed";
+    return `Set ${p.edit.packageName} to ${setting}${p.scope === "org" ? " for every machine" : ""}`;
   }
   if (actionType === "approval_settings_change" && "approvalModes" in payload) {
     const modes = (payload as { approvalModes: Record<string, ApprovalMode | undefined> })

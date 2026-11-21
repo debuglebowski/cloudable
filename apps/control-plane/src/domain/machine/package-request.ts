@@ -85,6 +85,7 @@ export const queuePackageAction = (input: {
           packageName: action.packageName,
           op: action.op,
           versionPin: action.versionPin,
+          trigger: "person",
         }),
       ])
       .pipe(Effect.orDie);
@@ -138,6 +139,16 @@ export const requestPackageAction = (input: {
         rejected(
           "baseline_package",
           `"${input.packageName}" came with this machine's image and cannot be installed or removed from here.`,
+          requestId,
+        ),
+      );
+    }
+
+    if (input.op === "uninstall" && row?.setting !== undefined && row.setting !== "allowed") {
+      return yield* Effect.fail(
+        rejected(
+          "ensured_package",
+          `"${input.packageName}" is set to Ensure, so Cloudable would install it again. Set it to Allowed first.`,
           requestId,
         ),
       );

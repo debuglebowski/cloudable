@@ -147,6 +147,10 @@ const ReportPayload = Schema.Struct({
   declaredPackageVersions: Schema.optional(
     Schema.Record({ key: Schema.String, value: Schema.String }),
   ),
+  // What the repository offers for the same set; drives *Ensure latest version*.
+  availablePackageVersions: Schema.optional(
+    Schema.Record({ key: Schema.String, value: Schema.String }),
+  ),
   openPorts: Schema.Array(Schema.Number),
   configState: ConfigState,
   // The machine's own measurement of its filesystems. Absent means the agent could

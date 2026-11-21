@@ -9,7 +9,9 @@
 import type {
   MachineDetail,
   MachineSummary,
+  PackageEnsureApprovalView,
   PackageManifestEdit,
+  PackageSetting,
   ResolvedPackageManifestEntry,
   UpdateMachinePackagesResponse,
 } from "@cloudable/contracts";
@@ -89,24 +91,66 @@ export async function runMachinesListCommand(argv: ReadonlyArray<string>): Promi
 // get
 // ---------------------------------------------------------------------------
 
+/** The labels people see for a package's setting, here and in the console. */
+export const SETTING_LABELS: Record<PackageSetting, string> = {
+  allowed: "Allowed",
+  ensure_installed: "Ensure installed",
+  ensure_latest: "Ensure latest version",
+};
+
+/** Absent reads as `allowed`, as it does on the wire. */
+export const settingLabel = (setting: PackageSetting | undefined): string =>
+  SETTING_LABELS[setting ?? "allowed"];
+
+function printManifestTable(manifest: ReadonlyArray<ResolvedPackageManifestEntry>): void {
+  printTable(
+    ["package", "version", "pinned", "excluded", "setting", "part of", "from", "description"],
+    manifest.map((entry) => [
+      entry.packageName,
+      dash(entry.versionPin),
+      entry.pinned ? "yes" : "no",
+      entry.excluded ? "yes" : "no",
+      settingLabel(entry.setting),
+      dash(entry.partOf ?? null),
+      entry.source,
+      dash(entry.description ?? null),
+    ]),
+  );
+}
+
 function printManifest(manifest: ReadonlyArray<ResolvedPackageManifestEntry>): void {
   if (manifest.length === 0) {
     console.log("\nNo declared packages.");
     return;
   }
   console.log("\npackages:");
-  printTable(
-    ["package", "version", "pinned", "excluded", "part of", "from", "description"],
-    manifest.map((entry) => [
-      entry.packageName,
-      dash(entry.versionPin),
-      entry.pinned ? "yes" : "no",
-      entry.excluded ? "yes" : "no",
-      dash(entry.partOf ?? null),
-      entry.source,
-      dash(entry.description ?? null),
-    ]),
-  );
+  printManifestTable(manifest);
+}
+
+/**
+ * One line per edit that set an Ensure setting. Each waits for its approval,
+ * unless the org's `package_ensure` mode is `none` and it already applied.
+ */
+export function describeEnsureApprovals(
+  approvals: ReadonlyArray<PackageEnsureApprovalView>,
+  upserts: ReadonlyArray<PackageManifestEdit>,
+): string[] {
+  return approvals.map((approval) => {
+    switch (approval.status) {
+      case "pending":
+        return `${approval.packageName}: waiting for approval ${approval.approvalId}`;
+      case "approved": {
+        const edit = upserts.find((u) => u.packageName === approval.packageName && u.setting);
+        return edit
+          ? `${approval.packageName}: set to ${settingLabel(edit.setting)}`
+          : `${approval.packageName}: setting changed`;
+      }
+      case "rejected":
+        return `${approval.packageName}: not changed, approval ${approval.approvalId} was rejected`;
+      case "expired":
+        return `${approval.packageName}: not changed, approval ${approval.approvalId} expired`;
+    }
+  });
 }
 
 export async function runMachinesGetCommand(argv: ReadonlyArray<string>): Promise<void> {
@@ -304,11 +348,27 @@ export function parsePackageArg(value: string, pinned: boolean): PackageManifest
  * beats the org. `--include` undoes an exclusion without touching the pin or
  * version the row already carries.
  *
+ * `--ensure <pkg>` sets a package to Ensure installed, `--ensure-latest <pkg>`
+ * to Ensure latest version, and `--allow <pkg>` back to Allowed. Like
+ * `--exclude`, they send only the setting, so the pin and the rest keep their
+ * value. Moving to an Ensure setting waits for a `package_ensure` approval.
+ *
  * `--part-of <parent>` makes every `--add`/`--pin` in the same command a part
  * of that declared parent: allowed only while the parent is. `--standalone
  * <pkg>` clears a package's parent. `--description <text>` records why every
  * `--add`/`--pin` in the command is allowed.
  */
+/** The repeatable flags both `machines packages set` and `org packages set` take. */
+export const PACKAGE_EDIT_FLAGS = [
+  "add",
+  "pin",
+  "remove",
+  "standalone",
+  "ensure",
+  "ensure-latest",
+  "allow",
+] as const;
+
 export function packageEdits(args: Args): {
   upserts: PackageManifestEdit[];
   removals: string[];
@@ -326,6 +386,18 @@ export function packageEdits(args: Args): {
     ...(args.all.exclude ?? []).map((packageName) => ({ packageName, excluded: true })),
     ...(args.all.include ?? []).map((packageName) => ({ packageName, excluded: false })),
     ...(args.all.standalone ?? []).map((packageName) => ({ packageName, partOf: null })),
+    ...(args.all.ensure ?? []).map((packageName) => ({
+      packageName,
+      setting: "ensure_installed" as const,
+    })),
+    ...(args.all["ensure-latest"] ?? []).map((packageName) => ({
+      packageName,
+      setting: "ensure_latest" as const,
+    })),
+    ...(args.all.allow ?? []).map((packageName) => ({
+      packageName,
+      setting: "allowed" as const,
+    })),
   ];
   return { upserts, removals: [...(args.all.remove ?? [])] };
 }
@@ -344,29 +416,18 @@ export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>
     printEmpty("declared packages");
     return;
   }
-  printTable(
-    ["package", "version", "pinned", "excluded", "part of", "from", "description"],
-    machine.manifest.map((entry) => [
-      entry.packageName,
-      dash(entry.versionPin),
-      entry.pinned ? "yes" : "no",
-      entry.excluded ? "yes" : "no",
-      dash(entry.partOf ?? null),
-      entry.source,
-      dash(entry.description ?? null),
-    ]),
-  );
+  printManifestTable(machine.manifest);
 }
 
 export async function runMachinesPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--exclude <pkg>] [--include <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>.",
+    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--exclude <pkg>] [--include <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>] [--ensure <pkg>] [--ensure-latest <pkg>] [--allow <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>. Only apt packages can be ensured.",
   );
   const args = parseArgs(
     argv,
     readSpec({
       values: ["part-of", "description"],
-      repeatable: ["add", "pin", "remove", "exclude", "include", "standalone"],
+      repeatable: [...PACKAGE_EDIT_FLAGS, "exclude", "include"],
     }),
   );
   const id = await machineId(required(args, 0, "a machine", usage));
@@ -386,10 +447,13 @@ export async function runMachinesPackagesSetCommand(argv: ReadonlyArray<string>)
     printJson(result);
     return;
   }
-  // Deliberately does not tell you to run `machines reconcile`: reconcile only
-  // ever removes undeclared software, it never installs, and nothing reads the
-  // `desiredStateVersion` that a reconcile trigger bumps. Saying otherwise
-  // promised an apply step that does not exist.
+  // Deliberately does not tell you to run `machines reconcile`: there is no
+  // apply step. An Allowed package installs only when a person asks for it.
+  // An Ensure package is queued by the control plane on the machine's next
+  // report, once its setting is approved. Nothing reads the
+  // `desiredStateVersion` that a reconcile trigger bumps.
   console.log("Desired state updated.");
+  for (const line of describeEnsureApprovals(result.ensureApprovals ?? [], upserts))
+    console.log(line);
   printManifest(result.manifest);
 }

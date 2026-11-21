@@ -1,3 +1,4 @@
+import { type PackageSetting, isInstallablePackageName } from "@cloudable/contracts";
 import { type SettingRow, resolveSetting } from "@cloudable/schema";
 
 /** See `docs/inheritance.md` for the full write-up of this chain. */
@@ -22,6 +23,8 @@ export interface MachinePackageRow {
   partOf?: string | null;
   /** Free text: why it is allowed. Absent reads as null. */
   description?: string | null;
+  /** See the column comment in `machine-package.ts`. Absent reads as `allowed`. */
+  setting?: PackageSetting;
   source: ManifestScope;
 }
 
@@ -31,6 +34,7 @@ export interface PackageManifestValue {
   excluded: boolean;
   partOf: string | null;
   description: string | null;
+  setting: PackageSetting;
 }
 
 export interface ResolvedManifestEntry {
@@ -48,6 +52,8 @@ export interface ResolvedManifestEntry {
   partOf: string | null;
   /** Why it is allowed, in a person's words; null when not given. */
   description: string | null;
+  /** What Cloudable does about it: only allow it, or ensure it. */
+  setting: PackageSetting;
   /** Which scope level's row won resolution — feeds `LineageGutter`/`SettingRow` (docs/frontend.md). */
   source: ManifestScope;
   resolvedFromScopeId: string;
@@ -78,6 +84,7 @@ export function resolveManifest(
       excluded: row.excluded,
       partOf: row.partOf ?? null,
       description: row.description ?? null,
+      setting: row.setting ?? "allowed",
     },
     source: row.source,
   }));
@@ -93,6 +100,7 @@ export function resolveManifest(
       excluded: winner.value.excluded,
       partOf: winner.value.partOf,
       description: winner.value.description,
+      setting: winner.value.setting,
       source: winner.source,
       resolvedFromScopeId: winner.resolvedFromScopeId,
     });
@@ -163,6 +171,49 @@ export const packageSettingKey = (packageName: string): string =>
 /** Inverse of `packageSettingKey` — `null` when the key is not a package key. */
 export const packageNameFromSettingKey = (key: string): string | null =>
   key.startsWith(PACKAGE_SETTING_KEY_PREFIX) ? key.slice(PACKAGE_SETTING_KEY_PREFIX.length) : null;
+
+/**
+ * Why an edit's setting cannot be written as asked. Checked at edit time,
+ * before any approval is asked for, so an approver is never asked about
+ * something that could not be carried out.
+ */
+export interface EnsureSettingProblem {
+  packageName: string;
+  reason: "not_installable" | "ensure_latest_with_pin";
+  message: string;
+}
+
+/**
+ * The ensure rules that do not depend on anything but the entry itself:
+ * Cloudable can only ensure what it can install, and "latest" and a version
+ * pin contradict each other.
+ */
+export function findEnsureSettingProblems(
+  entries: ReadonlyArray<{
+    packageName: string;
+    setting: PackageSetting;
+    versionPin: string | null;
+  }>,
+): EnsureSettingProblem[] {
+  const problems: EnsureSettingProblem[] = [];
+  for (const entry of entries) {
+    if (entry.setting === "allowed") continue;
+    if (!isInstallablePackageName(entry.packageName)) {
+      problems.push({
+        packageName: entry.packageName,
+        reason: "not_installable",
+        message: `Cloudable cannot install "${entry.packageName}", so it cannot ensure it.`,
+      });
+    } else if (entry.setting === "ensure_latest" && entry.versionPin !== null) {
+      problems.push({
+        packageName: entry.packageName,
+        reason: "ensure_latest_with_pin",
+        message: `"${entry.packageName}" has a version pin, so it cannot be set to Ensure latest version.`,
+      });
+    }
+  }
+  return problems;
+}
 
 export interface PinConflict {
   packageName: string;

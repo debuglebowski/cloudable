@@ -1,12 +1,10 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
 import { requireAdminUser } from "../../domain/authz";
+import { requestOrgManifestEdit } from "../../domain/machine/package-ensure";
 import { requestApprovalSettingsChange } from "../../domain/organisation/approval-settings-change";
-import {
-  type OrgPackagesError,
-  listOrgPackages,
-  updateOrgPackages,
-} from "../../domain/organisation/packages";
+import { ENSURE_RETRY_HOURS_INVALID_REASON } from "../../domain/organisation/ensure-retry";
+import { type OrgPackagesError, listOrgPackages } from "../../domain/organisation/packages";
 import {
   OrgSettingsError,
   getOrgSettings,
@@ -29,6 +27,7 @@ const VALIDATION_REASONS = new Set([
   "org_name_required",
   "retention_days_must_be_a_positive_integer",
   EVENTS_RETENTION_INVALID_REASON,
+  ENSURE_RETRY_HOURS_INVALID_REASON,
 ]);
 
 const rethrowInfraAsDefect = (e: OrgSettingsError) =>
@@ -75,6 +74,7 @@ export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handl
           loggingTier: payload.loggingTier,
           retentionDefaultDays: payload.retentionDefaultDays,
           eventRetentionDays: payload.eventRetentionDays,
+          ensureRetryHours: payload.ensureRetryHours,
           retentionLocation: payload.retentionLocation,
           // The authenticated caller, never a name they chose for themselves. This is the
           // actor on a permanent `organisation.updated` event.
@@ -106,15 +106,13 @@ export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handl
         const currentUser = yield* CurrentUserTag;
         // The org manifest says which packages any machine may have: configuration, so admin.
         yield* requireAdminUser(currentUser, "Only an admin can change the org's packages.");
-        return yield* updateOrgPackages({
+        // An edit that sets a package to Ensure waits for its approval; everything else applies now.
+        return yield* requestOrgManifestEdit({
           orgId: currentUser.orgId,
+          personId: currentUser.personId,
           upserts: payload.upserts,
           removals: payload.removals,
-          actor: { actorType: "person", actorId: currentUser.personId },
         });
-      }).pipe(
-        Effect.map((items) => ({ items })),
-        Effect.catchTag("OrgPackagesError", rethrowPackagesInfraAsDefect),
-      ),
+      }).pipe(Effect.catchTag("OrgPackagesError", rethrowPackagesInfraAsDefect)),
     ),
 );

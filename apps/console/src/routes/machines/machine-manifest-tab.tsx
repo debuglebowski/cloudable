@@ -7,6 +7,7 @@ import {
   type ManifestHistoryEntry,
   type ManifestHistoryState,
   ManifestOverrideError,
+  type PackageSetting,
   getMachineManifest,
   getMachineManifestHistory,
   machinesKeys,
@@ -15,11 +16,17 @@ import {
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ActorCell } from "@/components/actor-cell";
 import { Freshness } from "@/components/freshness";
+import { PackageSettingSelect } from "@/components/package-setting-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  PACKAGE_SETTING_LABELS,
+  describeSettingChange,
+  settingUnavailableReason,
+} from "@/lib/package-setting";
 import { MachinePackagesTable } from "@/routes/machines/machine-packages-table";
 
 /**
@@ -125,10 +132,12 @@ function AddPackageForm({
   const versionId = useId();
   const partOfId = useId();
   const descriptionId = useId();
+  const settingId = useId();
   const [packageName, setPackageName] = useState("");
   const [versionPin, setVersionPin] = useState("");
   const [partOf, setPartOf] = useState("");
   const [description, setDescription] = useState("");
+  const [setting, setSetting] = useState<PackageSetting>("allowed");
   const [error, setError] = useState<string | null>(null);
 
   const addMutation = useMutation({
@@ -137,15 +146,28 @@ function AddPackageForm({
       versionPin: string | null;
       partOf?: string;
       description?: string;
+      setting: PackageSetting;
     }) => updateMachinePackages(machineId, { upserts: [entry] }),
-    onSuccess: (_manifest, entry) => {
+    onSuccess: (result, entry) => {
       setPackageName("");
       setVersionPin("");
       setPartOf("");
       setDescription("");
+      setSetting("allowed");
       setError(null);
       onDone();
-      toast.success(`"${entry.packageName}" declared on this machine`);
+      if (entry.setting === "allowed") {
+        toast.success(`"${entry.packageName}" declared on this machine`);
+        return;
+      }
+      // An ensure setting waits for an approval, and the package is not declared until then.
+      const outcome = describeSettingChange(
+        entry.packageName,
+        entry.setting,
+        result.ensureApprovals,
+      );
+      const show = outcome.kind === "success" ? toast.success : toast.error;
+      show(outcome.title, outcome.description ? { description: outcome.description } : undefined);
     },
     onError: (err) => {
       setError(
@@ -162,17 +184,24 @@ function AddPackageForm({
   const isDuplicate = existing.some(
     (entry) => entry.package === trimmedName && entry.source === "machine",
   );
-  const canAdd = trimmedName !== "" && !isDuplicate && !addMutation.isPending;
+  const trimmedVersion = versionPin.trim();
+  // The setting picked first can stop fitting once a name or pin is typed after it.
+  const settingProblem = settingUnavailableReason(setting, {
+    packageName: trimmedName,
+    versionPin: trimmedVersion === "" ? null : trimmedVersion,
+  });
+  const canAdd =
+    trimmedName !== "" && !isDuplicate && settingProblem === null && !addMutation.isPending;
 
   function submit() {
     if (!canAdd) return;
-    const trimmedVersion = versionPin.trim();
     const trimmedParent = partOf.trim();
     addMutation.mutate({
       packageName: trimmedName,
       versionPin: trimmedVersion === "" ? null : trimmedVersion,
       ...(trimmedParent === "" ? {} : { partOf: trimmedParent }),
       ...(description.trim() === "" ? {} : { description: description.trim() }),
+      setting,
     });
   }
 
@@ -249,6 +278,19 @@ function AddPackageForm({
             className="w-64"
           />
         </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={settingId} className="text-xs text-muted-foreground">
+            Setting
+          </label>
+          <PackageSettingSelect
+            id={settingId}
+            value={setting}
+            onChange={setSetting}
+            packageName={trimmedName}
+            versionPin={trimmedVersion === "" ? null : trimmedVersion}
+            className="h-10"
+          />
+        </div>
         <Button size="sm" onClick={submit} disabled={!canAdd}>
           {addMutation.isPending ? "Adding…" : "Add package"}
         </Button>
@@ -258,10 +300,19 @@ function AddPackageForm({
           "{trimmedName}" is already set on this machine — edit the row above instead.
         </p>
       )}
+      {settingProblem && trimmedName !== "" && (
+        <p className="text-xs text-destructive">
+          {PACKAGE_SETTING_LABELS[setting]} is not possible here: {settingProblem}.
+        </p>
+      )}
       <p className="text-xs text-muted-foreground">
         Not from apt? Prefix it: <code>npm:</code>, <code>pipx:</code>, <code>cargo:</code> for
         global tools, <code>home:</code> for software in the home folder. A part is allowed only
         while what it is part of is.
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Ensure installed makes Cloudable install it when it is missing. Ensure latest version also
+        updates it. Both need an approval first.
       </p>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
@@ -269,12 +320,16 @@ function AddPackageForm({
 }
 
 /** Renders one side of a change the way the audit summary does. */
-function describeState(state: ManifestHistoryState | null): string {
+export function describeState(state: ManifestHistoryState | null): string {
   if (state === null) return "not declared";
   if (state.excluded) return "excluded";
   const version = state.versionPin ?? "any version";
-  const described = state.pinned ? `${version}, pinned` : version;
-  return state.partOf ? `${described}, part of ${state.partOf}` : described;
+  const parts = [state.pinned ? `${version}, pinned` : version];
+  if (state.partOf) parts.push(`part of ${state.partOf}`);
+  if (state.setting && state.setting !== "allowed") {
+    parts.push(PACKAGE_SETTING_LABELS[state.setting]);
+  }
+  return parts.join(", ");
 }
 
 function ManifestHistoryCard({

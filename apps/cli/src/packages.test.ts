@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { parseArgs } from "./args";
-import { packageEdits, parsePackageArg } from "./machines";
+import { describeEnsureApprovals, packageEdits, parsePackageArg } from "./machines";
 
 test("a package argument carries its pin with it", () => {
   expect(parsePackageArg("curl", false)).toEqual({
@@ -48,6 +48,38 @@ test("--exclude and --include are upserts, not removals", () => {
     { packageName: "nodejs", excluded: false },
   ]);
   expect(removals).toEqual([]);
+});
+
+test("--ensure, --ensure-latest and --allow send only the setting", () => {
+  const args = parseArgs(["--ensure", "ripgrep", "--ensure-latest", "git", "--allow", "jq"], {
+    repeatable: ["add", "pin", "remove", "ensure", "ensure-latest", "allow"],
+  });
+  const { upserts, removals } = packageEdits(args);
+  // No version or pin: an omitted field keeps whatever the row already had, so
+  // ensuring a pinned package keeps its pin.
+  expect(upserts).toEqual([
+    { packageName: "ripgrep", setting: "ensure_installed" },
+    { packageName: "git", setting: "ensure_latest" },
+    { packageName: "jq", setting: "allowed" },
+  ]);
+  expect(removals).toEqual([]);
+});
+
+test("each ensure approval is one plain line", () => {
+  const upserts = [
+    { packageName: "ripgrep", setting: "ensure_installed" as const },
+    { packageName: "git", setting: "ensure_latest" as const },
+  ];
+  expect(
+    describeEnsureApprovals(
+      [
+        { packageName: "ripgrep", approvalId: "ap-1", status: "pending" },
+        { packageName: "git", approvalId: "ap-2", status: "approved" },
+      ],
+      upserts,
+    ),
+  ).toEqual(["ripgrep: waiting for approval ap-1", "git: set to Ensure latest version"]);
+  expect(describeEnsureApprovals([], upserts)).toEqual([]);
 });
 
 test("a prefixed npm name keeps its scope; a pin after it still splits", () => {

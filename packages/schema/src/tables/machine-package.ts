@@ -53,6 +53,16 @@ export const machinePackages = pgTable(
     // work"). Free text for the reader of the manifest and the audit trail;
     // nothing acts on it.
     description: text("description"),
+    // What Cloudable does about this package. `allowed`: a machine may have it,
+    // and a person installs it. `ensure_installed`: Cloudable installs it when
+    // it is missing. `ensure_latest`: Cloudable also updates it when the
+    // package repository has a newer version. Setting a package to either
+    // ensure value needs an approval (`package_ensure`); the installs it then
+    // causes do not. See `domain/machine/ensure.ts` and CLAUDE.md invariants
+    // 4, 5 and 10.
+    setting: text("setting", { enum: ["allowed", "ensure_installed", "ensure_latest"] })
+      .notNull()
+      .default("allowed"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

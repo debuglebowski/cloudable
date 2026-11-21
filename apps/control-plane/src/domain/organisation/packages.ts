@@ -1,3 +1,4 @@
+import type { PackageSetting } from "@cloudable/contracts";
 import type { OrgEvent } from "@cloudable/events";
 import { machinePackages, orgs } from "@cloudable/schema";
 import { and, eq } from "drizzle-orm";
@@ -5,8 +6,17 @@ import { type Context, Effect, Schema } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
-import { PackagePinConflictError } from "../machine/errors";
-import { type MachinePackageRow, findPinConflicts, packageSettingKey } from "../machine/manifest";
+import {
+  type PackageEnsureSettingError,
+  PackagePinConflictError,
+  ensureSettingError,
+} from "../machine/errors";
+import {
+  type MachinePackageRow,
+  findEnsureSettingProblems,
+  findPinConflicts,
+  packageSettingKey,
+} from "../machine/manifest";
 
 /**
  * Org-scope write path for the package manifest. `domain/machine/MachineService
@@ -37,6 +47,8 @@ export interface OrgPackageEntry {
   partOf: string | null;
   /** Why it is allowed, or null. */
   description: string | null;
+  /** What Cloudable does about it. */
+  setting: PackageSetting;
 }
 
 export interface OrgPackageEdit {
@@ -47,6 +59,11 @@ export interface OrgPackageEdit {
   partOf?: string | null | undefined;
   /** Null clears it; omitted keeps the current value. */
   description?: string | null | undefined;
+  /**
+   * Omitted keeps it. Written as given: the approval for an ensure setting is
+   * asked for by `domain/machine/package-ensure.ts` before this runs.
+   */
+  setting?: PackageSetting | undefined;
 }
 
 export interface OrgPackagesActor {
@@ -76,13 +93,17 @@ export interface UpdateOrgPackagesInput {
 export const orgPackageSettingKey = packageSettingKey;
 
 const toEntry = (
-  row: Pick<MachinePackageRow, "packageName" | "versionPin" | "pinned" | "partOf" | "description">,
+  row: Pick<
+    MachinePackageRow,
+    "packageName" | "versionPin" | "pinned" | "partOf" | "description" | "setting"
+  >,
 ): OrgPackageEntry => ({
   packageName: row.packageName,
   versionPin: row.versionPin,
   pinned: row.pinned,
   partOf: row.partOf ?? null,
   description: row.description ?? null,
+  setting: row.setting ?? "allowed",
 });
 
 const byPackageName = (a: OrgPackageEntry, b: OrgPackageEntry) =>
@@ -176,7 +197,11 @@ function orgPackageSettingChangedEvent(input: {
  */
 export const updateOrgPackages = (
   input: UpdateOrgPackagesInput,
-): Effect.Effect<OrgPackageEntry[], OrgPackagesError | PackagePinConflictError, Db | EventBus> =>
+): Effect.Effect<
+  OrgPackageEntry[],
+  OrgPackagesError | PackagePinConflictError | PackageEnsureSettingError,
+  Db | EventBus
+> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const eventBus = yield* EventBus;
@@ -218,8 +243,14 @@ export const updateOrgPackages = (
         partOf: upsert.partOf !== undefined ? upsert.partOf : (previous?.partOf ?? null),
         description:
           upsert.description !== undefined ? upsert.description : (previous?.description ?? null),
+        setting: upsert.setting !== undefined ? upsert.setting : (previous?.setting ?? "allowed"),
       };
     });
+
+    const ensureProblems = findEnsureSettingProblems(resolvedUpserts);
+    if (ensureProblems.length > 0) {
+      return yield* Effect.fail(ensureSettingError(ensureProblems));
+    }
 
     yield* Effect.tryPromise({
       try: () =>
@@ -235,6 +266,7 @@ export const updateOrgPackages = (
                 pinned: upsert.pinned,
                 partOf: upsert.partOf,
                 description: upsert.description,
+                setting: upsert.setting,
                 source: "org",
               })
               .onConflictDoUpdate({
@@ -248,6 +280,7 @@ export const updateOrgPackages = (
                   pinned: upsert.pinned,
                   partOf: upsert.partOf,
                   description: upsert.description,
+                  setting: upsert.setting,
                   source: "org",
                   updatedAt: new Date(),
                 },
@@ -276,6 +309,7 @@ export const updateOrgPackages = (
         pinned: upsert.pinned,
         partOf: upsert.partOf,
         description: upsert.description,
+        setting: upsert.setting,
       });
     }
     for (const packageName of removals) {

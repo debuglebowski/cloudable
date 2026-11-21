@@ -7,7 +7,7 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | Type | Tier | Description |
 | :--- | :--- | :--- |
 | `org.created` | 1 | A new org was created. |
-| `org.setting_changed` | 1 | An org- or machine-level default setting was changed. |
+| `org.setting_changed` | 1 | An org- or machine-level default setting was changed. An org package edit (key `package:<name>`) includes the package's `setting`. The Ensure retry wait is key `packages.ensureRetryHours`. |
 | `org.integration_connected` | 1 | An IdP, cloud, or secret store integration was connected to the org. |
 | `org.integration_removed` | 1 | An IdP, cloud, or secret store integration was removed from the org. |
 | `org.events_expired` | 1 | The retention sweep deleted events older than the org's retention window. Carries the cutoff and a count, nothing else. |
@@ -49,7 +49,7 @@ role contract's, the same in Kahuna and SlayZone: `service`, `actor`, `subject`,
 | `machine.started` | 1 | A machine was started. |
 | `machine.stopped` | 1 | A machine was stopped by a user, policy, or offboarding. |
 | `machine.reimaged` | 1 | A machine's image was replaced with a different image. |
-| `machine.setting_changed` | 2 | A machine-level setting was changed, overriding a template or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did. |
+| `machine.setting_changed` | 2 | A machine-level setting was changed, overriding a template or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did. A package edit's `previous` and `current` include its `setting` (`allowed`, `ensure_installed` or `ensure_latest`). |
 | `machine.offboarded` | 1 | A machine was offboarded from its previous owner under approval. |
 | `machine.archived` | 1 | A machine was archived with a final snapshot and retention window. |
 | `machine.state_reported` | 2 | The agent reported observed machine state that changed since the last report. |
@@ -57,7 +57,7 @@ role contract's, the same in Kahuna and SlayZone: `service`, `actor`, `subject`,
 | `machine.drift_resolved` | 1 | Detected drift was removed from a machine under approval. |
 | `machine.reconciled` | 2 | Reconciliation removed undeclared software or settings to close a gap with desired state. |
 | `machine.first_seen` | 1 | The control agent contacted the control plane for the first time on a machine. |
-| `machine.package_action_requested` | 1 | A person asked for a package to be installed or removed on a machine. |
+| `machine.package_action_requested` | 1 | A package install or removal was queued for a machine. Either a person asked for it (actor `person`), or a package set to Ensure installed or Ensure latest version required it (actor `system`). An Ensure install carries `trigger` (the setting), `ensureReason` (`missing` or `outdated`), `fromVersion` and `toVersion`. |
 | `machine.package_action_completed` | 1 | A package install or removal completed on a machine. |
 | `machine.package_action_failed` | 1 | A package install or removal failed on a machine, or was collected by the agent and never reported back. |
 | `machine.vulnerability_scan_completed` | 1 | A vulnerability scan of a machine finished. Carries counts and the new Critical and High CVE ids; the findings themselves are current state, not events. |

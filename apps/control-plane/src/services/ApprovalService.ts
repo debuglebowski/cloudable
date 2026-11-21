@@ -20,6 +20,7 @@ export type ApprovalActionType =
   | "admin_access"
   | "offboarding"
   | "package_install"
+  | "package_ensure"
   | "approval_settings_change";
 export type ApprovalMode = "none" | "single" | "dual";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";

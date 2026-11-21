@@ -24,6 +24,7 @@ import { OrgPackageManifestCard } from "./org-package-manifest-card";
 import {
   ApprovalModeDialog,
   ControlOverrideDialog,
+  EnsureRetryHoursDialog,
   EventRetentionDialog,
   LoggingTierDialog,
   RetentionDaysDialog,
@@ -58,6 +59,7 @@ export function OrganisationPage() {
   const [editingRetentionDays, setEditingRetentionDays] = useState(false);
   const [editingEventRetention, setEditingEventRetention] = useState(false);
   const [editingRetentionLocation, setEditingRetentionLocation] = useState(false);
+  const [editingEnsureRetry, setEditingEnsureRetry] = useState(false);
   const [editingControlId, setEditingControlId] = useState<string | null>(null);
 
   if (isLoading || !settings) {
@@ -209,8 +211,24 @@ export function OrganisationPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="packages" className="mt-6">
+        <TabsContent value="packages" className="mt-6 flex flex-col gap-4">
           <OrgPackageManifestCard />
+          <Card>
+            <CardHeader>
+              <CardTitle>Ensure installs</CardTitle>
+              <CardDescription>
+                What Cloudable does when it fails to install a package set to Ensure.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col">
+              <SettingRow
+                label="Retry a failed Ensure install after"
+                value={`${settings.ensureRetryHours} ${settings.ensureRetryHours === 1 ? "hour" : "hours"}`}
+                source="org"
+                onOverride={() => setEditingEnsureRetry(true)}
+              />
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="vulnerabilities" className="mt-6">
@@ -297,6 +315,14 @@ export function OrganisationPage() {
         onOpenChange={setEditingRetentionLocation}
         onSave={async (location) => {
           await update.mutateAsync({ retentionLocation: location });
+        }}
+      />
+      <EnsureRetryHoursDialog
+        open={editingEnsureRetry}
+        currentHours={settings.ensureRetryHours}
+        onOpenChange={setEditingEnsureRetry}
+        onSave={async (hours) => {
+          await update.mutateAsync({ ensureRetryHours: hours });
         }}
       />
       <ControlOverrideDialog

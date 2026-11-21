@@ -105,6 +105,7 @@ describe("manifest history", () => {
       excluded: true,
       partOf: null,
       description: null,
+      setting: "allowed",
     });
     expect(page.items[1]?.previous).toEqual({
       versionPin: null,
@@ -112,6 +113,7 @@ describe("manifest history", () => {
       excluded: false,
       partOf: null,
       description: null,
+      setting: "allowed",
     });
     expect(page.items[1]?.current).toEqual({
       versionPin: "14",
@@ -119,6 +121,7 @@ describe("manifest history", () => {
       excluded: false,
       partOf: null,
       description: null,
+      setting: "allowed",
     });
     // An add reads as "had nothing before".
     expect(page.items[2]?.previous).toBeNull();

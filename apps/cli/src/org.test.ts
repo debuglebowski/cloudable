@@ -24,6 +24,7 @@ const org = {
   loggingTierOverrideCount: 0,
   retentionDefaultDays: 30,
   eventRetentionDays: 365,
+  ensureRetryHours: 24,
   retentionLocation: "customer",
 };
 
@@ -98,6 +99,21 @@ test("--event-retention-days is sent as eventRetentionDays, apart from the snaps
 test("the two retention flags are separate settings and can be given together", async () => {
   await runOrgUpdateCommand(["--retention-days", "45", "--event-retention-days", "500"]);
   expect(sent).toEqual([{ retentionDefaultDays: 45, eventRetentionDays: 500 }]);
+});
+
+test("--ensure-retry-hours is sent as ensureRetryHours", async () => {
+  await runOrgUpdateCommand(["--ensure-retry-hours", "48"]);
+  expect(paths).toEqual(["/api/v1/organisation"]);
+  expect(sent).toEqual([{ ensureRetryHours: 48 }]);
+  const out = log.mock.calls.map((call: unknown[]) => call.join(" ")).join("\n");
+  expect(out).toContain("ensure retry wait");
+});
+
+test("an ensure retry wait that is not a whole number is refused before anything is sent", async () => {
+  await expect(runOrgUpdateCommand(["--ensure-retry-hours", "1.5"])).rejects.toBeInstanceOf(
+    UsageError,
+  );
+  expect(sent).toEqual([]);
 });
 
 test("any two changes at once are accepted (exactly two used to be refused as 'nothing to change')", async () => {

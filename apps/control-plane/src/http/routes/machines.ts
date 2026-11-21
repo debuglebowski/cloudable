@@ -6,6 +6,7 @@ import {
   InvalidMachineRequestError,
   MachineNotFoundError,
   PackageActionRejected,
+  PackageEnsureSettingError,
   PackagePinConflictError,
 } from "../../domain/machine/errors";
 import { CurrentUserAuthentication } from "../middleware/auth";
@@ -24,6 +25,15 @@ const machineStateSchema = Schema.Literal(
 
 const manifestScopeSchema = Schema.Literal("org", "template", "machine");
 
+// What Cloudable does about a declared package. See `PackageSetting` in the contracts package.
+export const packageSettingSchema = Schema.Literal("allowed", "ensure_installed", "ensure_latest");
+
+export const ensureApprovalSchema = Schema.Struct({
+  packageName: Schema.String,
+  approvalId: Schema.String,
+  status: Schema.Literal("pending", "approved", "rejected", "expired"),
+});
+
 const resolvedManifestEntrySchema = Schema.Struct({
   packageName: Schema.String,
   versionPin: Schema.NullOr(Schema.String),
@@ -31,6 +41,7 @@ const resolvedManifestEntrySchema = Schema.Struct({
   excluded: Schema.Boolean,
   partOf: Schema.NullOr(Schema.String),
   description: Schema.NullOr(Schema.String),
+  setting: packageSettingSchema,
   source: manifestScopeSchema,
   resolvedFromScopeId: Schema.String,
 });
@@ -177,6 +188,8 @@ const packageManifestEntrySchema = Schema.Struct({
   partOf: Schema.optional(Schema.NullOr(declaredPackageNameSchema)),
   // Why it is allowed. Free text for people; nothing acts on it.
   description: Schema.optional(Schema.NullOr(Schema.String.pipe(Schema.maxLength(500)))),
+  // Moving to an ensure setting waits for a `package_ensure` approval.
+  setting: Schema.optional(packageSettingSchema),
 }).pipe(
   Schema.filter((entry) => entry.partOf !== entry.packageName, {
     message: () => "a package cannot be part of itself",
@@ -190,6 +203,8 @@ const updateMachinePackagesPayloadSchema = Schema.Struct({
 
 const updateMachinePackagesResponseSchema = Schema.Struct({
   manifest: Schema.Array(resolvedManifestEntrySchema),
+  // One per edit that set an ensure setting; those wait for their approval.
+  ensureApprovals: Schema.optional(Schema.Array(ensureApprovalSchema)),
 });
 
 const manifestHistoryStateSchema = Schema.Struct({
@@ -198,6 +213,8 @@ const manifestHistoryStateSchema = Schema.Struct({
   excluded: Schema.Boolean,
   partOf: Schema.NullOr(Schema.String),
   description: Schema.NullOr(Schema.String),
+  // Absent on changes recorded before settings existed: those were all `allowed`.
+  setting: Schema.optional(packageSettingSchema),
 });
 
 /**
@@ -238,9 +255,19 @@ const packageRowSchema = Schema.Struct({
     Schema.Struct({
       id: Schema.String,
       op: Schema.Literal("install", "uninstall"),
+      trigger: Schema.optional(Schema.Literal("person", "ensure_installed", "ensure_latest")),
       status: Schema.Literal("pending", "running", "succeeded", "failed", "expired"),
       requestedAt: Schema.String,
       failureReason: Schema.optional(Schema.String),
+    }),
+  ),
+  setting: Schema.optional(packageSettingSchema),
+  availableVersion: Schema.optional(Schema.String),
+  ensureFailure: Schema.optional(
+    Schema.Struct({
+      failedAt: Schema.String,
+      reason: Schema.String,
+      nextAttemptAt: Schema.String,
     }),
   ),
 });
@@ -317,7 +344,8 @@ export const MachinesGroup = HttpApiGroup.make("machines")
       .setPayload(updateMachinePackagesPayloadSchema)
       .addSuccess(updateMachinePackagesResponseSchema)
       .addError(MachineNotFoundError, { status: 404 })
-      .addError(PackagePinConflictError, { status: 422 }),
+      .addError(PackagePinConflictError, { status: 422 })
+      .addError(PackageEnsureSettingError, { status: 422 }),
   )
   .add(
     // The packages table: what the manifest allows, joined with what the agent

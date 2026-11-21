@@ -119,3 +119,15 @@ test("the scanning commands are in the registry and say what they do", () => {
   expect(renderCommandHelp(resolve(["machines", "vulnerabilities"]).chain)).toContain("--all");
   expect(renderCommandHelp(resolve(["export", "vulnerabilities"]).chain)).toContain("--output");
 });
+
+test("both package set commands take the ensure flags, and org update takes the retry wait", () => {
+  for (const path of [
+    ["machines", "packages", "set"],
+    ["org", "packages", "set"],
+  ]) {
+    const help = renderCommandHelp(resolve(path).chain);
+    for (const flag of ["--ensure", "--ensure-latest", "--allow"]) expect(help).toContain(flag);
+    expect(help).toContain("Setting Ensure needs an approval");
+  }
+  expect(renderCommandHelp(resolve(["org", "update"]).chain)).toContain("--ensure-retry-hours");
+});

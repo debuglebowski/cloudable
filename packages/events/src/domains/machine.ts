@@ -102,12 +102,14 @@ export type MachineEvent =
     })
   | (EventEnvelope & {
       /**
-       * A person asked for a package to be installed or removed on a machine.
+       * A package install or removal was queued for a machine. A person asked
+       * for it, or a package's *Ensure* setting required it.
        *
        * The first family of events in this catalogue that records the control
-       * plane asking a machine to change itself. `actorType` is always
-       * "person": nothing enqueues one of these on its own, which is what
-       * keeps "nothing installs or removes software unasked" true.
+       * plane asking a machine to change itself. `actorType` is "person" when a
+       * person asked. It is "system" when an *Ensure* setting caused it, and
+       * `trigger` then names the setting. Nothing else enqueues one of these,
+       * which is what keeps invariant 4 true.
        */
       type: "machine.package_action_requested";
       payload: {
@@ -115,6 +117,17 @@ export type MachineEvent =
         packageName: string;
         op: "install" | "uninstall";
         versionPin: string | null;
+        /**
+         * Why the action exists. Absent on events recorded before ensure settings
+         * existed, which were all asked for by a person. For `ensure_installed` /
+         * `ensure_latest` the actor is `system`, and the setting's own approval
+         * and `setting_changed` event name the people behind it.
+         */
+        trigger?: "person" | "ensure_installed" | "ensure_latest";
+        /** For an ensure action: `missing`, or `outdated` with the versions it moves between. */
+        ensureReason?: "missing" | "outdated";
+        fromVersion?: string | null;
+        toVersion?: string | null;
       };
     })
   | (EventEnvelope & {

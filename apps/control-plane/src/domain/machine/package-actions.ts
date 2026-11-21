@@ -1,8 +1,12 @@
 import { isValidPackageName } from "@cloudable/contracts";
-import type { PackageActionOp, PendingPackageActionView } from "@cloudable/contracts";
+import type {
+  PackageActionOp,
+  PackageActionTrigger,
+  PendingPackageActionView,
+} from "@cloudable/contracts";
 import { machinePackageActions } from "@cloudable/schema";
 import type * as schema from "@cloudable/schema";
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Data, Effect } from "effect";
 
@@ -45,6 +49,7 @@ export const toActionView = (row: ActionRow): PendingPackageActionView => ({
   op: row.op,
   status: row.status,
   requestedAt: row.requestedAt.toISOString(),
+  ...(row.trigger !== "person" ? { trigger: row.trigger } : {}),
   ...(row.failureReason ? { failureReason: row.failureReason } : {}),
 });
 
@@ -70,7 +75,9 @@ export const enqueuePackageAction = (
     packageName: string;
     op: PackageActionOp;
     versionPin: string | null;
-    requestedByPersonId: string;
+    /** Null when an ensure setting caused this, not a person; `trigger` says which. */
+    requestedByPersonId: string | null;
+    trigger?: PackageActionTrigger | undefined;
     correlationId: string;
     isBaselinePackage: boolean;
   },
@@ -135,6 +142,7 @@ export const enqueuePackageAction = (
               op: input.op,
               versionPin: input.versionPin,
               requestedByPersonId: input.requestedByPersonId,
+              trigger: input.trigger ?? "person",
               correlationId: input.correlationId,
             })
             .returning();
@@ -295,4 +303,69 @@ export const outstandingActionsByPackage = (
         new PackageActionError({ reason: "write_failed", message: "reading actions", cause }),
     });
     return new Map(rows.map((row) => [row.packageName, toActionView(row)]));
+  });
+
+/**
+ * The latest finished action Cloudable queued for an ensure setting, per
+ * package. Drives the retry wait (`domain/machine/ensure.ts`) and the
+ * "failed, next try at" line in the packages table.
+ */
+export const lastEnsureActionsByPackage = (
+  db: DbHandle,
+  machineId: string,
+): Effect.Effect<
+  Map<
+    string,
+    {
+      status: "succeeded" | "failed" | "expired";
+      trigger: "ensure_installed" | "ensure_latest";
+      finishedAt: Date;
+      failureReason: string | null;
+    }
+  >,
+  PackageActionError
+> =>
+  Effect.tryPromise({
+    try: async () => {
+      const rows = await db
+        .select({
+          packageName: machinePackageActions.packageName,
+          status: machinePackageActions.status,
+          trigger: machinePackageActions.trigger,
+          finishedAt: machinePackageActions.finishedAt,
+          failureReason: machinePackageActions.failureReason,
+        })
+        .from(machinePackageActions)
+        .where(
+          and(
+            eq(machinePackageActions.machineId, machineId),
+            inArray(machinePackageActions.trigger, ["ensure_installed", "ensure_latest"]),
+            inArray(machinePackageActions.status, ["succeeded", "failed", "expired"]),
+          ),
+        )
+        .orderBy(desc(machinePackageActions.finishedAt));
+      const latest = new Map<
+        string,
+        {
+          status: "succeeded" | "failed" | "expired";
+          trigger: "ensure_installed" | "ensure_latest";
+          finishedAt: Date;
+          failureReason: string | null;
+        }
+      >();
+      for (const row of rows) {
+        if (latest.has(row.packageName) || row.finishedAt === null) continue;
+        if (row.trigger === "person") continue;
+        if (row.status === "pending" || row.status === "running") continue;
+        latest.set(row.packageName, {
+          status: row.status,
+          trigger: row.trigger,
+          finishedAt: row.finishedAt,
+          failureReason: row.failureReason,
+        });
+      }
+      return latest;
+    },
+    catch: (cause) =>
+      new PackageActionError({ reason: "write_failed", message: "reading ensure actions", cause }),
   });

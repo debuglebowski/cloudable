@@ -12,12 +12,14 @@ import type { Db } from "../../db/layer";
 import type { ApprovalResult } from "../../services/ApprovalService";
 import type { EventBus } from "../../services/EventBus";
 import type { TunnelServer } from "../../tunnel/server";
+import type { MachineService } from "../machine/MachineService";
+import { applyApprovedEnsureEdit } from "../machine/package-ensure";
 import { decodePackageInstallPayload, queuePackageAction } from "../machine/package-request";
 import { applyApprovalSettingsChange } from "../organisation/approval-settings-change";
 
 export const carryOutApproved = (
   approval: ApprovalResult,
-): Effect.Effect<void, never, Db | EventBus | TunnelServer> => {
+): Effect.Effect<void, never, Db | EventBus | TunnelServer | MachineService> => {
   if (approval.status !== "approved") return Effect.void;
   switch (approval.actionType) {
     case "package_install": {
@@ -42,6 +44,8 @@ export const carryOutApproved = (
         ),
       );
     }
+    case "package_ensure":
+      return applyApprovedEnsureEdit(approval);
     case "approval_settings_change":
       return applyApprovalSettingsChange(approval).pipe(
         Effect.catchAll((error) =>

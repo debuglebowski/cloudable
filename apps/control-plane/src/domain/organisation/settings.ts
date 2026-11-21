@@ -23,6 +23,12 @@ import {
   effectiveEventsRetentionDays,
   isValidEventsRetentionDays,
 } from "../retention/policy";
+import {
+  ENSURE_RETRY_HOURS_INVALID_REASON,
+  ENSURE_RETRY_HOURS_KEY,
+  effectiveEnsureRetryHours,
+  isValidEnsureRetryHours,
+} from "./ensure-retry";
 
 /**
  * Aggregate read/write for the Organisation page (approval mode per action type,
@@ -61,7 +67,8 @@ export type ApprovalActionType =
   | "break_glass"
   | "admin_access"
   | "offboarding"
-  | "package_install";
+  | "package_install"
+  | "package_ensure";
 export type ApprovalMode = "none" | "single" | "dual";
 
 export const APPROVAL_ACTION_TYPES: readonly ApprovalActionType[] = [
@@ -70,6 +77,7 @@ export const APPROVAL_ACTION_TYPES: readonly ApprovalActionType[] = [
   "admin_access",
   "offboarding",
   "package_install",
+  "package_ensure",
 ];
 
 export interface OrgSettingsView {
@@ -84,6 +92,8 @@ export interface OrgSettingsView {
   /** How long the org's events live before the retention sweep deletes them. */
   eventRetentionDays: number;
   retentionLocation: RetentionLocation;
+  /** Hours before an *Ensure* install that failed is tried again. */
+  ensureRetryHours: number;
 }
 
 const dbTry = <A>(thunk: () => Promise<A>, reason: string): Effect.Effect<A, OrgSettingsError> =>
@@ -170,6 +180,10 @@ export const getOrgSettings = (
       (yield* readOrgScopedSetting<RetentionLocation>(orgId, RETENTION_LOCATION_KEY)) ??
       DEFAULT_RETENTION_LOCATION;
 
+    const ensureRetryHours = effectiveEnsureRetryHours(
+      yield* readOrgScopedSetting<number>(orgId, ENSURE_RETRY_HOURS_KEY),
+    );
+
     return {
       id: org.id,
       name: org.name,
@@ -182,6 +196,7 @@ export const getOrgSettings = (
       retentionDefaultDays,
       eventRetentionDays,
       retentionLocation,
+      ensureRetryHours,
     };
   });
 
@@ -193,6 +208,7 @@ export interface UpdateOrgSettingsInput {
   retentionDefaultDays?: number | undefined;
   eventRetentionDays?: number | undefined;
   retentionLocation?: RetentionLocation | undefined;
+  ensureRetryHours?: number | undefined;
   actor: SettingChangeActor;
 }
 
@@ -282,6 +298,11 @@ export const updateOrgSettings = (
     ) {
       return yield* Effect.fail(new OrgSettingsError({ reason: EVENTS_RETENTION_INVALID_REASON }));
     }
+    if (input.ensureRetryHours !== undefined && !isValidEnsureRetryHours(input.ensureRetryHours)) {
+      return yield* Effect.fail(
+        new OrgSettingsError({ reason: ENSURE_RETRY_HOURS_INVALID_REASON }),
+      );
+    }
 
     if (trimmedName !== undefined) {
       yield* dbTry(
@@ -338,6 +359,16 @@ export const updateOrgSettings = (
         input.orgId,
         RETENTION_LOCATION_KEY,
         input.retentionLocation,
+        input.actor,
+        correlationId,
+      );
+    }
+
+    if (input.ensureRetryHours !== undefined) {
+      yield* writeOrgSetting(
+        input.orgId,
+        ENSURE_RETRY_HOURS_KEY,
+        input.ensureRetryHours,
         input.actor,
         correlationId,
       );

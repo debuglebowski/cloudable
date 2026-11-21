@@ -39,9 +39,9 @@ export interface AttestResponse {
  * A package operation the control plane is asking this machine to perform.
  *
  * Handed out by the poll, performed by the agent, and reported back on the
- * next report. Every one of these was requested by a person — nothing in the
- * control plane enqueues work on its own, which is what keeps invariants 4
- * and 5 true now that the agent can change a machine.
+ * next report. Each one was asked for by a person, or required by a package's
+ * approved *Ensure* setting (invariant 4). The agent does not know or care
+ * which: it performs what it is handed.
  *
  * `packageName` is validated against `PACKAGE_NAME_PATTERN` before it is
  * written, again before it is handed out here, and once more by the agent
@@ -83,6 +83,14 @@ export const isValidPackageName = (value: string): boolean =>
 export const PACKAGE_MANAGERS = ["apt", "npm", "pipx", "cargo", "home"] as const;
 export type PackageManagerName = (typeof PACKAGE_MANAGERS)[number];
 
+/**
+ * The managers Cloudable can install through, and so the only ones a package
+ * can be set to *Ensure* for. One list on purpose: adding a manager here (and
+ * teaching `apps/agent/src/apply-packages.ts` its commands) is all the ensure
+ * feature needs to cover it.
+ */
+export const INSTALLABLE_PACKAGE_MANAGERS: readonly PackageManagerName[] = ["apt"];
+
 const PREFIXED_NAME_PATTERNS: Record<Exclude<PackageManagerName, "apt">, RegExp> = {
   // npm allows a scope and lowercase names; uppercase is tolerated for old packages.
   npm: /^(@[a-zA-Z0-9][a-zA-Z0-9._~-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._~-]*$/,
@@ -100,6 +108,12 @@ export const parseDeclaredPackageName = (
   const manager = value.slice(0, colon);
   if (!(PACKAGE_MANAGERS as readonly string[]).includes(manager) || manager === "apt") return null;
   return { manager: manager as PackageManagerName, name: value.slice(colon + 1) };
+};
+
+/** Whether Cloudable can install this declared name (see `INSTALLABLE_PACKAGE_MANAGERS`). */
+export const isInstallablePackageName = (value: string): boolean => {
+  const parsed = parseDeclaredPackageName(value);
+  return parsed !== null && INSTALLABLE_PACKAGE_MANAGERS.includes(parsed.manager);
 };
 
 /** The grammar a manifest entry's name must follow: an apt name, or `<manager>:<name>`. */
@@ -123,10 +137,11 @@ export interface DesiredStateResponse {
   readonly agentRelease?: AgentRelease;
   readonly version: string;
   /**
-   * Package names this machine is ALLOWED to have — a permission list, not an
-   * install list. The agent does not install these; it installs what
-   * `pendingActions` asks for. Sent so the agent can tell an allowed package
-   * from an undeclared one locally.
+   * Package names this machine is ALLOWED to have. The agent does not install
+   * these; it installs what `pendingActions` asks for, which for an *Ensure*
+   * package the control plane queues on its own. Sent so the agent can tell an
+   * allowed package from an undeclared one locally, and so it knows which
+   * versions to report.
    */
   readonly packages: readonly string[];
   /**
@@ -202,6 +217,15 @@ export interface AgentReportRequest {
    * be tens of KB every 30 seconds to answer a question about a handful.
    */
   readonly declaredPackageVersions?: Readonly<Record<string, string>>;
+  /**
+   * For the same allowed set: the newest version the machine's package
+   * repository offers (apt's "Candidate"), read from the lists the OS already
+   * keeps. The agent never refreshes those lists for this. The control plane
+   * compares it with the installed version to decide whether an *Ensure latest
+   * version* package needs updating. Optional: an older agent omits it, and
+   * its machine simply gets no updates.
+   */
+  readonly availablePackageVersions?: Readonly<Record<string, string>>;
   readonly openPorts: readonly number[];
   readonly configState: ConfigState;
   /**

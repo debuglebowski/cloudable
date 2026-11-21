@@ -11,10 +11,12 @@ import { type CommandRunner, bunCommandRunner } from "./installed-packages";
  * being precise about the boundaries:
  *
  * - It never decides anything. It performs actions the control plane handed it,
- *   each of which a person asked for. There is no local reconciliation, no
- *   "install everything in the manifest", no cleanup of undeclared packages.
- *   That restraint is what keeps "nothing installs or removes software unasked"
- *   true (invariants 4 and 5).
+ *   each asked for by a person or required by a package's approved *Ensure*
+ *   setting, which the control plane decides. There is no local
+ *   reconciliation, no "install everything in the manifest", no cleanup of
+ *   undeclared packages. Keeping every decision in the control plane is what
+ *   keeps each change recorded with the person or setting behind it
+ *   (invariants 4, 5 and 10).
  * - It never reports events, only outcomes. What those outcomes mean is the
  *   control plane's to decide and record (invariant 12).
  * - It runs as root, because the systemd unit has no `User=`. So nothing here
@@ -217,6 +219,52 @@ export async function declaredPackageVersions(
     if (!isValidPackageName(name)) continue;
     const version = await installedVersionOf(runner, pm, name);
     if (version !== undefined) versions[name] = version;
+  }
+  return versions;
+}
+
+/**
+ * The newest version the package repository offers for each allowed apt
+ * package (apt's "Candidate"), so the control plane can tell whether an
+ * *Ensure latest version* package is behind.
+ *
+ * Reads the package lists the OS already keeps (Ubuntu refreshes them daily).
+ * It never runs `apt-get update` itself: this runs every poll, and fetching
+ * the lists that often would be a load on the mirrors for nothing. One
+ * `apt-cache policy` call covers every name. A candidate equal to the
+ * installed version means up to date; apt never offers a downgrade as the
+ * candidate.
+ */
+export async function availablePackageVersions(
+  allowedPackages: readonly string[],
+  runner: CommandRunner = bunCommandRunner,
+): Promise<Record<string, string>> {
+  // Bare names only: a colon means another manager, which apt knows nothing about.
+  const names = allowedPackages.filter((name) => isValidPackageName(name));
+  if (names.length === 0) return {};
+  const pm = await detectManager(runner);
+  if (pm !== APT) return {};
+  const result = await runner.run("apt-cache", ["policy", ...names]);
+  if (result === null || result.exitCode !== 0) return {};
+  return parseAptCachePolicy(result.stdout);
+}
+
+/** Exported for the test. `(none)` means the repository has no version of it at all. */
+export function parseAptCachePolicy(output: string): Record<string, string> {
+  const versions: Record<string, string> = {};
+  let current: string | null = null;
+  for (const line of output.split("\n")) {
+    const header = /^(\S+):$/.exec(line);
+    if (header?.[1]) {
+      // apt-cache prints `name:arch` for a foreign-architecture package; the
+      // manifest knows the bare name.
+      current = header[1].split(":")[0] ?? null;
+      continue;
+    }
+    const candidate = /^\s+Candidate:\s+(\S+)/.exec(line);
+    if (current && candidate?.[1] && candidate[1] !== "(none)") {
+      versions[current] = candidate[1];
+    }
   }
   return versions;
 }

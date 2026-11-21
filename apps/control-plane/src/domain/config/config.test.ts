@@ -866,6 +866,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
           excluded: false,
           partOf: null,
           description: null,
+          setting: "allowed",
         },
         overridesLevel: "none",
       });

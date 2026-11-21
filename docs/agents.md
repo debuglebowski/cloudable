@@ -16,9 +16,11 @@ actions it was handed, report observed state, sleep, repeat.
 
 The agent observes, with three exceptions. Its supervisor updates the control-agent
 binary to the release bundled by the deployed control plane (see below). `apply-packages.ts` installs and removes
-packages. It never decides to — it performs actions the control plane handed it,
-each requested by a person. There is no local convergence towards the manifest,
-and the allowed list it receives is a permission, not an instruction. And
+packages. It never decides to. It performs actions the control plane handed it.
+A person asked for each one, or a package's approved Ensure setting required it.
+The control plane makes that decision, never the agent (see "Ensure settings" in
+`docs/inheritance.md`). There is no local convergence towards the manifest, and
+the allowed list it receives is not an install list. And
 `vulnerability-scan/` downloads and runs the vulnerability scanner, but only while
 an admin has scanning switched on for the org (see "Components Cloudable installs
 itself" below and `docs/vulnerability-scanning.md`).
@@ -150,6 +152,12 @@ intentionally simple:
   `npm:<name>`, `pipx:<name>`, `cargo:<name>`. The agent asks those managers as the machine's own
   user (`runuser`, through that user's shell setup, bounded by `timeout`), at most every five
   minutes. `manuallyInstalledPackages` is `apt-mark showmanual`. See `docs/inheritance.md`.
+- `availablePackageVersions` is the version the package repository offers for each allowed apt
+  package, from one `apt-cache policy` call. The agent never runs `apt-get update` for it. It
+  reads the package lists the machine already has. After storing the report, the control plane
+  queues any install an Ensure setting needs (`MachineService.ensurePackages`). An older agent
+  does not send this field. Its machine gets missing Ensure packages installed, but no Ensure
+  latest version updates.
 - Otherwise, an **in-memory**, per-process diff of `installedPackages` /
   `openPorts` / `configState.runningAccessMethods` against the previous
   report → `machine.state_reported` if anything changed, nothing if it
@@ -222,10 +230,11 @@ something shared across replicas (e.g. Postgres `LISTEN`/`NOTIFY`).
 
 ### Components Cloudable installs itself
 
-Invariant 4 says nothing installs or removes software unasked. This is the closed list of
-exceptions: Cloudable's own components, which a governed machine needs in order to be governed.
-Anything not in this table is covered by the invariant as written: a person asks, per package,
-and it is recorded.
+Invariant 4 says software changes only through a recorded decision. A person asks for a package,
+or an admin sets it to Ensure installed or Ensure latest version and an approver approves that.
+This is the closed list of exceptions: Cloudable's own components, which a governed machine needs
+in order to be governed. They install without either decision. Anything not in this table is
+covered by the invariant as written.
 
 | Component | Put on the machine by | Asked for by | Recorded as |
 | :--- | :--- | :--- | :--- |
@@ -319,9 +328,11 @@ report (observed state + action outcomes), sleep ~30s, repeat.
 
 Actions run one at a time: two `apt-get` processes on one machine collide on the
 dpkg lock. An action the agent collects and never reports on is expired by the
-control plane after five minutes — visibly, never retried, because the package
-may be half-installed and running the package manager again over an unknown
-state is not something to do unasked.
+control plane after five minutes, visibly. The package may be half-installed,
+and running the package manager again over an unknown state is not something to
+do unasked. So an expired action a person asked for is never retried. An expired
+Ensure install is tried again only after the org's retry wait
+(`packages.ensureRetryHours`, default 24 hours), the same as a failed one.
 
 On any failure it backs off instead of retrying immediately or on a fixed
 schedule:

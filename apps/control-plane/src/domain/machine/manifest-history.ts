@@ -1,3 +1,4 @@
+import type { PackageSetting } from "@cloudable/contracts";
 import type * as schema from "@cloudable/schema";
 import { events, machines } from "@cloudable/schema";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
@@ -21,6 +22,8 @@ export interface ManifestHistoryState {
   partOf: string | null;
   /** Why it was allowed, null when not given. */
   description: string | null;
+  /** What Cloudable does about it. Rows written before settings existed read as `allowed`. */
+  setting: PackageSetting;
 }
 
 export interface ManifestHistoryEntry {
@@ -66,6 +69,7 @@ function toState(raw: unknown): ManifestHistoryState | null {
     excluded?: unknown;
     partOf?: unknown;
     description?: unknown;
+    setting?: unknown;
   };
   return {
     versionPin: typeof value.versionPin === "string" ? value.versionPin : null,
@@ -73,6 +77,10 @@ function toState(raw: unknown): ManifestHistoryState | null {
     excluded: value.excluded === true,
     partOf: typeof value.partOf === "string" ? value.partOf : null,
     description: typeof value.description === "string" ? value.description : null,
+    setting:
+      value.setting === "ensure_installed" || value.setting === "ensure_latest"
+        ? value.setting
+        : "allowed",
   };
 }
 
