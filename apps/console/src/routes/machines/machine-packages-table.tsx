@@ -67,12 +67,15 @@ export function MachinePackagesTable({
   machineId,
   canEditPermission,
   canRequestActions,
+  actions,
 }: {
   machineId: string;
   /** Which packages a machine may have is configuration: admin only. */
   canEditPermission: boolean;
   /** Installing and removing: the owner or an admin. */
   canRequestActions: boolean;
+  /** Buttons for the bar above the table, left side (the image-packages toggle sits right). */
+  actions?: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const [showBaseline, setShowBaseline] = useState(false);
@@ -168,6 +171,24 @@ export function MachinePackagesTable({
         </p>
       )}
 
+      {(actions || baselineCount > 0) && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>{actions}</div>
+          {baselineCount > 0 && (
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id={`show-baseline-${machineId}`}
+                checked={showBaseline}
+                onCheckedChange={(checked) => setShowBaseline(checked === true)}
+              />
+              <Label htmlFor={`show-baseline-${machineId}`} className="text-sm font-normal">
+                Show image packages and dependencies ({baselineCount})
+              </Label>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* min-h-0 and no flex-1: shrinks when content overflows, collapses to
           content otherwise. Same wrapper the Access page's tables use. */}
       <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
@@ -220,19 +241,6 @@ export function MachinePackagesTable({
           </TableBody>
         </Table>
       </div>
-
-      {baselineCount > 0 && (
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id={`show-baseline-${machineId}`}
-            checked={showBaseline}
-            onCheckedChange={(checked) => setShowBaseline(checked === true)}
-          />
-          <Label htmlFor={`show-baseline-${machineId}`} className="text-sm font-normal">
-            Show image packages and dependencies ({baselineCount})
-          </Label>
-        </div>
-      )}
     </div>
   );
 }

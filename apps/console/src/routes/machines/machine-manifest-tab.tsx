@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { Plus } from "lucide-react";
+import { type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -20,6 +21,15 @@ import { PackageSettingSelect } from "@/components/package-setting-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -93,20 +103,26 @@ export function MachineManifestTab({
             machineId={machineId}
             canEditPermission={canEditManifest}
             canRequestActions={canRequestActions}
+            actions={
+              canEditManifest && (
+                <AddPackageDialog
+                  machineId={machineId}
+                  existing={manifest}
+                  onDone={() => {
+                    void queryClient.invalidateQueries({
+                      queryKey: machinesKeys.manifest(machineId),
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: machinesKeys.packages(machineId),
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: machinesKeys.manifestHistory(machineId),
+                    });
+                  }}
+                />
+              )
+            }
           />
-
-          {canEditManifest && (
-            <AddPackageForm
-              machineId={machineId}
-              existing={manifest}
-              onDone={() => {
-                void queryClient.invalidateQueries({ queryKey: machinesKeys.manifest(machineId) });
-                void queryClient.invalidateQueries({
-                  queryKey: machinesKeys.manifestHistory(machineId),
-                });
-              }}
-            />
-          )}
         </CardContent>
       </Card>
 
@@ -119,7 +135,8 @@ export function MachineManifestTab({
   );
 }
 
-function AddPackageForm({
+/** The "Add package" button and the dialog it opens. */
+function AddPackageDialog({
   machineId,
   existing,
   onDone,
@@ -139,6 +156,16 @@ function AddPackageForm({
   const [description, setDescription] = useState("");
   const [setting, setSetting] = useState<PackageSetting>("allowed");
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  function reset() {
+    setPackageName("");
+    setVersionPin("");
+    setPartOf("");
+    setDescription("");
+    setSetting("allowed");
+    setError(null);
+  }
 
   const addMutation = useMutation({
     mutationFn: (entry: {
@@ -149,12 +176,8 @@ function AddPackageForm({
       setting: PackageSetting;
     }) => updateMachinePackages(machineId, { upserts: [entry] }),
     onSuccess: (result, entry) => {
-      setPackageName("");
-      setVersionPin("");
-      setPartOf("");
-      setDescription("");
-      setSetting("allowed");
-      setError(null);
+      reset();
+      setOpen(false);
       onDone();
       if (entry.setting === "allowed") {
         toast.success(`"${entry.packageName}" declared on this machine`);
@@ -205,117 +228,140 @@ function AddPackageForm({
     });
   }
 
-  return (
-    <div className="flex flex-col gap-2 border-t border-border pt-3">
-      <p className="text-xs font-medium text-muted-foreground">Declare a package on this machine</p>
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="flex flex-col gap-1">
-          <label htmlFor={nameId} className="text-xs text-muted-foreground">
-            Package
-          </label>
-          <Input
-            id={nameId}
-            value={packageName}
-            onChange={(event) => setPackageName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
-            placeholder="ripgrep or npm:playwright"
-            className="w-52"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={versionId} className="text-xs text-muted-foreground">
-            Version pin
-          </label>
-          <Input
-            id={versionId}
-            value={versionPin}
-            onChange={(event) => setVersionPin(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
-            placeholder="any"
-            className="w-32"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={partOfId} className="text-xs text-muted-foreground">
-            Part of
-          </label>
-          <Input
-            id={partOfId}
-            value={partOf}
-            onChange={(event) => setPartOf(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
-            placeholder="none"
-            list={`${partOfId}-options`}
-            className="w-44"
-          />
-          <datalist id={`${partOfId}-options`}>
-            {existing
-              .filter((entry) => !entry.excluded)
-              .map((entry) => (
-                <option key={entry.package} value={entry.package} />
-              ))}
-          </datalist>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={descriptionId} className="text-xs text-muted-foreground">
-            Why
-          </label>
-          <Input
-            id={descriptionId}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
-            placeholder="GitHub CLI for PR work"
-            maxLength={500}
-            className="w-64"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={settingId} className="text-xs text-muted-foreground">
-            Setting
-          </label>
-          <PackageSettingSelect
-            id={settingId}
-            value={setting}
-            onChange={setSetting}
-            packageName={trimmedName}
-            versionPin={trimmedVersion === "" ? null : trimmedVersion}
-            className="h-10"
-          />
-        </div>
-        <Button size="sm" onClick={submit} disabled={!canAdd}>
-          {addMutation.isPending ? "Adding…" : "Add package"}
-        </Button>
-      </div>
-      {isDuplicate && (
-        <p className="text-xs text-destructive">
-          "{trimmedName}" is already set on this machine — edit the row above instead.
-        </p>
-      )}
-      {settingProblem && trimmedName !== "" && (
-        <p className="text-xs text-destructive">
-          {PACKAGE_SETTING_LABELS[setting]} is not possible here: {settingProblem}.
-        </p>
-      )}
-      <p className="text-xs text-muted-foreground">
-        Not from apt? Prefix it: <code>npm:</code>, <code>pipx:</code>, <code>cargo:</code> for
-        global tools, <code>home:</code> for software in the home folder. A part is allowed only
-        while what it is part of is.
-      </p>
-      <p className="text-xs text-muted-foreground">
-        Ensure installed makes Cloudable install it when it is missing. Ensure latest version also
-        updates it. Both need an approval first.
-      </p>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+  const field = (id: string, label: string, control: ReactNode) => (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-xs text-muted-foreground">
+        {label}
+      </label>
+      {control}
     </div>
+  );
+  const onEnter = (event: KeyboardEvent) => {
+    if (event.key === "Enter") submit();
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) reset();
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus />
+          Add package
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add a package to this machine</DialogTitle>
+          <DialogDescription>
+            Not from apt? Prefix it: <code>npm:</code>, <code>pipx:</code>, <code>cargo:</code> for
+            global tools, <code>home:</code> for software in the home folder.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          {field(
+            nameId,
+            "Package",
+            <Input
+              id={nameId}
+              value={packageName}
+              onChange={(event) => setPackageName(event.target.value)}
+              onKeyDown={onEnter}
+              placeholder="ripgrep or npm:playwright"
+              autoFocus
+            />,
+          )}
+          {field(
+            versionId,
+            "Version pin",
+            <Input
+              id={versionId}
+              value={versionPin}
+              onChange={(event) => setVersionPin(event.target.value)}
+              onKeyDown={onEnter}
+              placeholder="any"
+            />,
+          )}
+          {field(
+            partOfId,
+            "Part of",
+            <>
+              <Input
+                id={partOfId}
+                value={partOf}
+                onChange={(event) => setPartOf(event.target.value)}
+                onKeyDown={onEnter}
+                placeholder="none"
+                list={`${partOfId}-options`}
+              />
+              <datalist id={`${partOfId}-options`}>
+                {existing
+                  .filter((entry) => !entry.excluded)
+                  .map((entry) => (
+                    <option key={entry.package} value={entry.package} />
+                  ))}
+              </datalist>
+              <span className="text-xs text-muted-foreground">
+                A part is allowed only while what it is part of is.
+              </span>
+            </>,
+          )}
+          {field(
+            descriptionId,
+            "Why",
+            <Input
+              id={descriptionId}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              onKeyDown={onEnter}
+              placeholder="GitHub CLI for PR work"
+              maxLength={500}
+            />,
+          )}
+          {field(
+            settingId,
+            "Setting",
+            <>
+              <PackageSettingSelect
+                id={settingId}
+                value={setting}
+                onChange={setSetting}
+                packageName={trimmedName}
+                versionPin={trimmedVersion === "" ? null : trimmedVersion}
+                className="h-10 w-full"
+              />
+              <span className="text-xs text-muted-foreground">
+                Ensure installed makes Cloudable install it when it is missing. Ensure latest
+                version also updates it. Both need an approval first.
+              </span>
+            </>,
+          )}
+          {isDuplicate && (
+            <p className="text-xs text-destructive">
+              "{trimmedName}" is already set on this machine. Change its row in the table instead.
+            </p>
+          )}
+          {settingProblem && trimmedName !== "" && (
+            <p className="text-xs text-destructive">
+              {PACKAGE_SETTING_LABELS[setting]} is not possible here: {settingProblem}.
+            </p>
+          )}
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={!canAdd}>
+            {addMutation.isPending ? "Adding…" : "Add package"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
