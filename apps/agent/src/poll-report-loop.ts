@@ -231,6 +231,12 @@ export async function runAgentLoop(
         // operation. Otherwise the startup watchdog could interrupt dpkg mid-install.
         if (pendingActions.length > 0 && updater?.read()?.phase !== "starting") {
           console.log(`poll: applying ${pendingActions.length} package action(s)`);
+          // cargo-auditable before a cargo build, so the tool it installs can be scanned.
+          if (
+            pendingActions.some((a) => a.op === "install" && a.packageName.startsWith("cargo:"))
+          ) {
+            await scanManager.prepareCargoInstall();
+          }
           actionResults = await applyPackageActions(pendingActions);
           pendingActions = [];
           // The inventory below should show what the actions just did, not a cached

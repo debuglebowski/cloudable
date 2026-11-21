@@ -246,7 +246,7 @@ covered by the invariant as written.
 | Control agent | cloud-init at provisioning, downloaded from `/_internal/binaries/` | Creating the machine | The machine's creation events; `machine.first_seen` carries the agent version |
 | Tunnel daemon | cloud-init at provisioning, same route | Creating the machine | The machine's creation events |
 | Vulnerability scanner (Trivy) | The agent, after a poll says scanning is on | An admin turning vulnerability scanning on for the org | `org.setting_changed` for `security.vulnerabilityScan.enabled`, with who and when; `machine.scanner_installed` for each machine, on install and on every update |
-| cargo-auditable | The agent, at a scan, when the machine user has cargo | An admin setting the scan scope to `os_and_tools` | `org.setting_changed` for `security.vulnerabilityScan.scope`; `machine.scanner_installed` (scanner `cargo-auditable`) on install and every update |
+| cargo-auditable | The agent, right before a cargo install, and at a scan when the machine user has cargo | An admin setting the scan scope to `os_and_tools` | `org.setting_changed` for `security.vulnerabilityScan.scope`; `machine.scanner_installed` (scanner `cargo-auditable`) on install and every update |
 | vulnix | Nix, asked by the agent at a scan, when the machine user has Nix packages | An admin setting the scan scope to `os_and_tools` | `org.setting_changed` for `security.vulnerabilityScan.scope`; `machine.scanner_installed` (scanner `vulnix`) on install and every update |
 
 Rules for the scanner row, which exist so this does not become a back door:

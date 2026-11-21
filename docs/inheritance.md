@@ -330,8 +330,9 @@ scripts never run as root.
 - **cargo.** Compiles from source, so its actions may run for up to 35 minutes before they
   expire. Ubuntu 24.04's cargo is Rust 1.75, and many current crates need a newer one: the
   install then fails with cargo's own "requires rustc 1.88 or newer". Pin an older version of the
-  crate, or have the person use rustup. When the vulnerability scan has put cargo-auditable on the machine, installs go through
-  it so the result can be scanned.
+  crate, or have the person use rustup. While the org scans tools (scope `os_and_tools`), the
+  agent puts cargo-auditable on the machine right before the install, and the install goes
+  through it so the result can be scanned.
 - **Nix** needs Ubuntu 24.04 (Nix 2.18). Ubuntu 22.04's Nix 2.6 is refused. Installing the apt
   package `nix-setup-systemd` also adds the machine user to `nix-users`, which the Nix daemon
   requires, and writes `/etc/profile.d/cloudable-nix.sh` to put `~/.nix-profile/bin` on PATH.

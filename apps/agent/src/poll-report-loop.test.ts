@@ -221,7 +221,12 @@ function fakeScanManager(init: {
   pending?: import("@cloudable/contracts").VulnerabilityScanReport;
 }) {
   let pending = init.pending;
-  const calls = { setSettings: [] as unknown[], ticks: 0, acknowledged: [] as string[] };
+  const calls = {
+    setSettings: [] as unknown[],
+    ticks: 0,
+    acknowledged: [] as string[],
+    cargoPrepared: 0,
+  };
   const manager: import("./vulnerability-scan/scan-manager").ScanManager = {
     setSettings: (settings) => {
       calls.setSettings.push(settings);
@@ -231,6 +236,9 @@ function fakeScanManager(init: {
     },
     installedScanner: () => init.scanner,
     installedScanTools: () => [],
+    prepareCargoInstall: async () => {
+      calls.cargoPrepared += 1;
+    },
     pendingReport: () => pending,
     acknowledge: (scanId) => {
       calls.acknowledged.push(scanId);
@@ -395,6 +403,36 @@ describe("runAgentLoop: vulnerability scanning", () => {
     expect(mock.reports[1]?.vulnerabilityScan).toEqual(FINISHED_SCAN);
     expect(calls.acknowledged).toEqual(["scan-1"]);
   }, 15_000);
+
+  for (const [label, packageName, expected] of [
+    ["prepares cargo-auditable before a cargo install", "cargo:ripgrep", 1],
+    ["leaves cargo-auditable alone for any other install", "npm:prettier", 0],
+  ] as const) {
+    test(label, async () => {
+      const { manager, calls } = fakeScanManager({});
+      mock = startScanMock({
+        poll: (call) =>
+          Response.json(
+            {
+              version: "v1",
+              packages: [],
+              settings: {},
+              pendingActions:
+                call === 1 ? [{ id: "a1", op: "install", packageName, versionPin: null }] : [],
+            },
+            { headers: { etag: `"${call}"` } },
+          ),
+        report: () => Response.json({ acknowledged: true }),
+      });
+
+      await run(manager, () => (mock?.reports.length ?? 0) > 0);
+
+      expect(calls.cargoPrepared).toBe(expected);
+      // The action ran and was reported either way. Here it fails: no runuser on this machine.
+      const results = mock.reports[0]?.actionResults as Array<{ id: string }> | undefined;
+      expect(results?.[0]?.id).toBe("a1");
+    }, 15_000);
+  }
 
   test("leaves both fields out when there is no scanner and no result", async () => {
     const { manager, calls } = fakeScanManager({});
