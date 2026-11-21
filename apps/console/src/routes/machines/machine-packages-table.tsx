@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, CircleSlash, type LucideIcon, Package, RefreshCw, ShieldCheck } from "lucide-react";
+import { Box, CircleSlash, type LucideIcon, Package, ShieldCheck } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 
@@ -14,12 +14,18 @@ import {
   machinesKeys,
   updateMachinePackages,
 } from "@/api/machines";
-import { PackageSettingSelect } from "@/components/package-setting-select";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -31,9 +37,11 @@ import {
 } from "@/components/ui/table";
 import { refusalReason } from "@/lib/api-client";
 import {
+  PACKAGE_SETTINGS,
   PACKAGE_SETTING_LABELS,
   describeSettingChange,
   formatNextTry,
+  settingUnavailableReason,
 } from "@/lib/package-setting";
 
 /**
@@ -46,9 +54,10 @@ import {
  * is exactly the case the compliance check exists to catch. Collapsing them
  * into one "status" would hide the interesting half.
  *
- * The Setting column says what Cloudable does about an allowed package: only
- * allow it, or install it when missing (Ensure installed), or also update it
- * (Ensure latest version). Moving to an ensure setting waits for an approval.
+ * One Permission column says both whether a package may be here and what
+ * Cloudable does about it: Excluded, Allowed, Ensure installed (installed when
+ * missing) or Ensure latest version (also kept updated). A dash means nobody
+ * declared it. Moving to an ensure value waits for an approval.
  *
  * Base image packages are hidden behind the toggle. A real Ubuntu server image
  * is several hundred packages, and listing them by default buries the handful
@@ -115,28 +124,17 @@ export function MachinePackagesTable({
     },
   });
 
-  const settingMutation = useMutation({
-    mutationFn: (vars: { row: MachinePackageRow; setting: PackageSetting }) =>
-      updateMachinePackages(machineId, {
-        upserts: [
-          {
-            packageName: vars.row.packageName,
-            setting: vars.setting,
-            // A first machine row for an inherited entry would otherwise
-            // declare "any version" and quietly drop the org's version.
-            ...(vars.row.source !== "machine" && vars.row.versionPin
-              ? { versionPin: vars.row.versionPin }
-              : {}),
-          },
-        ],
-      }),
+  const permissionMutation = useMutation({
+    mutationFn: (vars: { row: MachinePackageRow; target: PermissionValue }) =>
+      updateMachinePackages(machineId, { upserts: [permissionEdit(vars.row, vars.target)] }),
     onSuccess: (result, vars) => {
       invalidate();
-      const outcome = describeSettingChange(
-        vars.row.packageName,
-        vars.setting,
-        result.ensureApprovals,
-      );
+      const name = vars.row.packageName;
+      if (vars.target === "excluded") {
+        toast.success(`"${name}" is no longer allowed on this machine`);
+        return;
+      }
+      const outcome = describeSettingChange(name, vars.target, result.ensureApprovals);
       if (result.ensureApprovals.some((approval) => approval.status === "pending")) {
         void queryClient.invalidateQueries({ queryKey: ["approvals"] });
       }
@@ -144,30 +142,12 @@ export function MachinePackagesTable({
       show(outcome.title, outcome.description ? { description: outcome.description } : undefined);
     },
     onError: (err) => {
-      toast.error("Couldn't change the setting", {
+      toast.error("Couldn't change that", {
         description:
           err instanceof ManifestOverrideError
             ? err.body.error.message
             : (refusalReason(err) ?? err.message),
       });
-    },
-  });
-
-  const permissionMutation = useMutation({
-    mutationFn: (vars: { packageName: string; allowed: boolean }) =>
-      updateMachinePackages(machineId, {
-        upserts: [{ packageName: vars.packageName, excluded: !vars.allowed }],
-      }),
-    onSuccess: (_rows, vars) => {
-      invalidate();
-      toast.success(
-        vars.allowed
-          ? `"${vars.packageName}" is allowed on this machine`
-          : `"${vars.packageName}" is no longer allowed on this machine`,
-      );
-    },
-    onError: (err) => {
-      toast.error("Couldn't change that", { description: refusalReason(err) ?? err.message });
     },
   });
 
@@ -196,7 +176,6 @@ export function MachinePackagesTable({
             <TableRow>
               <Th icon={Package}>Package</Th>
               <Th icon={ShieldCheck}>Permission</Th>
-              <Th icon={RefreshCw}>Setting</Th>
               <Th icon={Box}>Status</Th>
               <Th icon={CircleSlash}>From</Th>
               <TableHead className="text-right">Action</TableHead>
@@ -208,14 +187,14 @@ export function MachinePackagesTable({
             )}
             {packagesQuery.isError && (
               <TableRow>
-                <TableCell colSpan={6} className="text-sm text-destructive">
+                <TableCell colSpan={5} className="text-sm text-destructive">
                   Failed to load packages.
                 </TableCell>
               </TableRow>
             )}
             {!packagesQuery.isPending && rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="text-sm text-muted-foreground">
+                <TableCell colSpan={5} className="text-sm text-muted-foreground">
                   {baselineCount > 0
                     ? "Nothing declared or added beyond the image this machine was built from."
                     : "No packages."}
@@ -230,17 +209,12 @@ export function MachinePackagesTable({
                   (actionMutation.isPending &&
                     actionMutation.variables?.packageName === row.packageName) ||
                   (permissionMutation.isPending &&
-                    permissionMutation.variables?.packageName === row.packageName) ||
-                  (settingMutation.isPending &&
-                    settingMutation.variables?.row.packageName === row.packageName)
+                    permissionMutation.variables?.row.packageName === row.packageName)
                 }
                 canEditPermission={canEditPermission}
                 canRequestActions={canRequestActions}
                 onAction={(op) => actionMutation.mutate({ packageName: row.packageName, op })}
-                onPermission={(allowed) =>
-                  permissionMutation.mutate({ packageName: row.packageName, allowed })
-                }
-                onSetting={(setting) => settingMutation.mutate({ row, setting })}
+                onPermission={(target) => permissionMutation.mutate({ row, target })}
               />
             ))}
           </TableBody>
@@ -291,6 +265,43 @@ function SkeletonRows({ rows = 3, widths }: { rows?: number; widths: string[] })
   );
 }
 
+/** One column for both facts: not declared (null), excluded, or allowed with its setting. */
+type PermissionValue = "excluded" | PackageSetting;
+
+const PERMISSION_LABELS: Record<PermissionValue, string> = {
+  excluded: "Excluded",
+  ...PACKAGE_SETTING_LABELS,
+};
+
+const permissionOf = (row: MachinePackageRow): PermissionValue | null =>
+  row.permission === "disallowed"
+    ? "excluded"
+    : row.permission === "allowed"
+      ? (row.setting ?? "allowed")
+      : null;
+
+/**
+ * The one manifest edit a Permission change makes. Excluding also resets the
+ * setting, so lifting the exclusion later can never bring back an Ensure
+ * setting without a fresh approval.
+ */
+function permissionEdit(row: MachinePackageRow, target: PermissionValue) {
+  if (target === "excluded") {
+    return { packageName: row.packageName, excluded: true, setting: "allowed" as const };
+  }
+  return {
+    packageName: row.packageName,
+    // Lifting an exclusion, or declaring an undeclared package, is part of the same edit.
+    ...(row.permission !== "allowed" ? { excluded: false } : {}),
+    // A first machine row for an inherited entry would otherwise declare
+    // "any version" and quietly drop the org's version.
+    ...(target !== "allowed" || row.permission === "allowed" ? { setting: target } : {}),
+    ...(row.source !== null && row.source !== "machine" && row.versionPin
+      ? { versionPin: row.versionPin }
+      : {}),
+  };
+}
+
 function PermissionCell({
   row,
   busy,
@@ -300,7 +311,7 @@ function PermissionCell({
   row: MachinePackageRow;
   busy: boolean;
   canEdit: boolean;
-  onPermission: (allowed: boolean) => void;
+  onPermission: (target: PermissionValue) => void;
 }) {
   if (row.isBaseline && row.permission === null) {
     return <span className="text-sm text-muted-foreground">from the image</span>;
@@ -308,90 +319,46 @@ function PermissionCell({
   if (row.installedAsDependency && row.permission === null) {
     return <span className="text-sm text-muted-foreground">dependency</span>;
   }
+  const value = permissionOf(row);
   if (!canEdit) {
-    return row.permission === "disallowed" ? (
-      <Badge variant="outline">disallowed</Badge>
-    ) : (
-      <span className="text-sm text-muted-foreground">
-        {row.permission === "allowed" ? "allowed" : "—"}
-      </span>
-    );
-  }
-  if (row.permission === "allowed") {
+    if (value === "excluded") return <Badge variant="outline">Excluded</Badge>;
+    // A dash for undeclared: nobody has said anything at all, which is not the same as excluded.
     return (
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onPermission(false)}
-        className="text-sm underline-offset-4 hover:underline disabled:opacity-50"
-        title="Stop allowing this package on this machine"
+      <span
+        className={
+          value === null || value === "allowed" ? "text-sm text-muted-foreground" : "text-sm"
+        }
       >
-        allowed
-      </button>
-    );
-  }
-  if (row.permission === "disallowed") {
-    return (
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onPermission(true)}
-        className="text-sm underline-offset-4 hover:underline disabled:opacity-50"
-        title="Allow this package on this machine"
-      >
-        <Badge variant="outline">disallowed</Badge>
-      </button>
-    );
-  }
-  // Installed and nobody said it could be. The dash is the honest rendering —
-  // it is not disallowed, nobody has said anything at all.
-  return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={() => onPermission(true)}
-      className="text-sm text-muted-foreground underline-offset-4 hover:underline disabled:opacity-50"
-      title="Allow this package on this machine"
-    >
-      —
-    </button>
-  );
-}
-
-function SettingCell({
-  row,
-  busy,
-  canEdit,
-  onSetting,
-}: {
-  row: MachinePackageRow;
-  busy: boolean;
-  canEdit: boolean;
-  onSetting: (setting: PackageSetting) => void;
-}) {
-  // Only a package the manifest allows has a setting. Anything else is not
-  // something Cloudable could ensure.
-  if (row.permission !== "allowed") {
-    return <span className="text-sm text-muted-foreground">—</span>;
-  }
-  const setting = row.setting ?? "allowed";
-  if (!canEdit) {
-    return (
-      <span className={setting === "allowed" ? "text-sm text-muted-foreground" : "text-sm"}>
-        {PACKAGE_SETTING_LABELS[setting]}
+        {value === null ? "—" : PERMISSION_LABELS[value]}
       </span>
     );
   }
   return (
-    <PackageSettingSelect
-      value={setting}
-      onChange={(next) => {
-        if (next !== setting) onSetting(next);
+    <Select
+      {...(value !== null ? { value } : {})}
+      onValueChange={(next) => {
+        if (next !== value) onPermission(next as PermissionValue);
       }}
-      packageName={row.packageName}
-      versionPin={row.versionPin}
       disabled={busy}
-    />
+    >
+      <SelectTrigger className="h-8 w-48 text-xs" aria-label="Permission">
+        <SelectValue placeholder="Not declared" />
+      </SelectTrigger>
+      <SelectContent>
+        {(["excluded", ...PACKAGE_SETTINGS] as const).map((option) => {
+          const reason =
+            option === value || option === "excluded"
+              ? null
+              : settingUnavailableReason(option, row);
+          return (
+            <SelectItem key={option} value={option} disabled={reason !== null}>
+              {PERMISSION_LABELS[option]}
+              {reason && <span className="ml-1.5 text-xs text-muted-foreground">({reason})</span>}
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -486,15 +453,13 @@ function PackageRow({
   canRequestActions,
   onAction,
   onPermission,
-  onSetting,
 }: {
   row: MachinePackageRow;
   busy: boolean;
   canEditPermission: boolean;
   canRequestActions: boolean;
   onAction: (op: PackageActionOp) => void;
-  onPermission: (allowed: boolean) => void;
-  onSetting: (setting: PackageSetting) => void;
+  onPermission: (target: PermissionValue) => void;
 }) {
   const outstanding =
     row.pendingAction?.status === "pending" || row.pendingAction?.status === "running";
@@ -526,9 +491,6 @@ function PackageRow({
           canEdit={canEditPermission}
           onPermission={onPermission}
         />
-      </TableCell>
-      <TableCell>
-        <SettingCell row={row} busy={busy} canEdit={canEditPermission} onSetting={onSetting} />
       </TableCell>
       <TableCell>
         <StatusCell row={row} />
