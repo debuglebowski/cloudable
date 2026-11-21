@@ -74,7 +74,7 @@ export function MachinePackagesTable({
   canEditPermission: boolean;
   /** Installing and removing: the owner or an admin. */
   canRequestActions: boolean;
-  /** Buttons for the bar above the table, left side (the image-packages toggle sits right). */
+  /** Buttons for the bar above the table, right side (the image-packages toggle sits left). */
   actions?: ReactNode;
 }) {
   const queryClient = useQueryClient();
@@ -173,8 +173,7 @@ export function MachinePackagesTable({
 
       {(actions || baselineCount > 0) && (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>{actions}</div>
-          {baselineCount > 0 && (
+          {baselineCount > 0 ? (
             <div className="flex items-center gap-2">
               <Checkbox
                 id={`show-baseline-${machineId}`}
@@ -185,7 +184,10 @@ export function MachinePackagesTable({
                 Show image packages and dependencies ({baselineCount})
               </Label>
             </div>
+          ) : (
+            <div />
           )}
+          <div>{actions}</div>
         </div>
       )}
 
