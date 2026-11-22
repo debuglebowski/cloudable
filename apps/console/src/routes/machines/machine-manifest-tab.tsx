@@ -1,42 +1,18 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useId, useState } from "react";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 
 import {
-  type ManifestEntry,
   type ManifestHistoryEntry,
   type ManifestHistoryState,
-  ManifestOverrideError,
-  type PackageSetting,
-  getMachineManifest,
   getMachineManifestHistory,
   machinesKeys,
-  updateMachinePackages,
 } from "@/api/machines";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ActorCell } from "@/components/actor-cell";
 import { Freshness } from "@/components/freshness";
-import { PackageSettingSelect } from "@/components/package-setting-select";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  PACKAGE_SETTING_LABELS,
-  describeSettingChange,
-  settingUnavailableReason,
-} from "@/lib/package-setting";
+import { PACKAGE_SETTING_LABELS } from "@/lib/package-setting";
 import { MachinePackagesTable } from "@/routes/machines/machine-packages-table";
 
 /**
@@ -61,7 +37,7 @@ import { MachinePackagesTable } from "@/routes/machines/machine-packages-table";
  * rejects a machine edit that collides with an org pin.
  *
  * The table itself lives in `machine-packages-table.tsx`; this tab is the
- * table, the form for declaring something new, and the change history.
+ * table and the change history.
  */
 export function MachineManifestTab({
   machineId,
@@ -74,18 +50,10 @@ export function MachineManifestTab({
   /** Asking for an install or a removal: the owner or an admin. Installs wait for an approver. */
   canRequestActions: boolean;
 }) {
-  const queryClient = useQueryClient();
-
-  const manifestQuery = useQuery({
-    queryKey: machinesKeys.manifest(machineId),
-    queryFn: () => getMachineManifest(machineId),
-  });
   const historyQuery = useQuery({
     queryKey: machinesKeys.manifestHistory(machineId),
     queryFn: () => getMachineManifestHistory(machineId),
   });
-
-  const manifest = manifestQuery.data ?? [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -93,9 +61,9 @@ export function MachineManifestTab({
         <CardHeader>
           <CardTitle>Packages</CardTitle>
           <CardDescription>
-            What this machine is allowed to have, and what it actually has. Permission is inherited
-            from the org unless this machine overrides it; installing and removing are separate
-            actions the machine carries out on its next check-in.
+            What this machine is allowed to have, and what it actually has. Each package comes from
+            the org or is set on this machine. Installing and removing happen on the machine's next
+            check-in.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -103,25 +71,6 @@ export function MachineManifestTab({
             machineId={machineId}
             canEditPermission={canEditManifest}
             canRequestActions={canRequestActions}
-            actions={
-              canEditManifest && (
-                <AddPackageDialog
-                  machineId={machineId}
-                  existing={manifest}
-                  onDone={() => {
-                    void queryClient.invalidateQueries({
-                      queryKey: machinesKeys.manifest(machineId),
-                    });
-                    void queryClient.invalidateQueries({
-                      queryKey: machinesKeys.packages(machineId),
-                    });
-                    void queryClient.invalidateQueries({
-                      queryKey: machinesKeys.manifestHistory(machineId),
-                    });
-                  }}
-                />
-              )
-            }
           />
         </CardContent>
       </Card>
@@ -132,236 +81,6 @@ export function MachineManifestTab({
         entries={historyQuery.data ?? []}
       />
     </div>
-  );
-}
-
-/** The "Add package" button and the dialog it opens. */
-function AddPackageDialog({
-  machineId,
-  existing,
-  onDone,
-}: {
-  machineId: string;
-  existing: ManifestEntry[];
-  onDone: () => void;
-}) {
-  const nameId = useId();
-  const versionId = useId();
-  const partOfId = useId();
-  const descriptionId = useId();
-  const settingId = useId();
-  const [packageName, setPackageName] = useState("");
-  const [versionPin, setVersionPin] = useState("");
-  const [partOf, setPartOf] = useState("");
-  const [description, setDescription] = useState("");
-  const [setting, setSetting] = useState<PackageSetting>("allowed");
-  const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
-
-  function reset() {
-    setPackageName("");
-    setVersionPin("");
-    setPartOf("");
-    setDescription("");
-    setSetting("allowed");
-    setError(null);
-  }
-
-  const addMutation = useMutation({
-    mutationFn: (entry: {
-      packageName: string;
-      versionPin: string | null;
-      partOf?: string;
-      description?: string;
-      setting: PackageSetting;
-    }) => updateMachinePackages(machineId, { upserts: [entry] }),
-    onSuccess: (result, entry) => {
-      reset();
-      setOpen(false);
-      onDone();
-      if (entry.setting === "allowed") {
-        toast.success(`"${entry.packageName}" declared on this machine`);
-        return;
-      }
-      // An ensure setting waits for an approval, and the package is not declared until then.
-      const outcome = describeSettingChange(
-        entry.packageName,
-        entry.setting,
-        result.ensureApprovals,
-      );
-      const show = outcome.kind === "success" ? toast.success : toast.error;
-      show(outcome.title, outcome.description ? { description: outcome.description } : undefined);
-    },
-    onError: (err) => {
-      setError(
-        err instanceof ManifestOverrideError
-          ? err.body.error.message
-          : "Couldn't add that package.",
-      );
-    },
-  });
-
-  const trimmedName = packageName.trim();
-  // A name already on the machine's own row is a duplicate; one inherited from
-  // the org is not — declaring it here is how you override it.
-  const isDuplicate = existing.some(
-    (entry) => entry.package === trimmedName && entry.source === "machine",
-  );
-  const trimmedVersion = versionPin.trim();
-  // The setting picked first can stop fitting once a name or pin is typed after it.
-  const settingProblem = settingUnavailableReason(setting, {
-    packageName: trimmedName,
-    versionPin: trimmedVersion === "" ? null : trimmedVersion,
-  });
-  const canAdd =
-    trimmedName !== "" && !isDuplicate && settingProblem === null && !addMutation.isPending;
-
-  function submit() {
-    if (!canAdd) return;
-    const trimmedParent = partOf.trim();
-    addMutation.mutate({
-      packageName: trimmedName,
-      versionPin: trimmedVersion === "" ? null : trimmedVersion,
-      ...(trimmedParent === "" ? {} : { partOf: trimmedParent }),
-      ...(description.trim() === "" ? {} : { description: description.trim() }),
-      setting,
-    });
-  }
-
-  const field = (id: string, label: string, control: ReactNode) => (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-xs text-muted-foreground">
-        {label}
-      </label>
-      {control}
-    </div>
-  );
-  const onEnter = (event: KeyboardEvent) => {
-    if (event.key === "Enter") submit();
-  };
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) reset();
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus />
-          Add package
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add a package to this machine</DialogTitle>
-          <DialogDescription>
-            Not from apt? Prefix it: <code>npm:</code>, <code>pipx:</code>, <code>cargo:</code> for
-            global tools, <code>home:</code> for software in the home folder.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
-          {field(
-            nameId,
-            "Package",
-            <Input
-              id={nameId}
-              value={packageName}
-              onChange={(event) => setPackageName(event.target.value)}
-              onKeyDown={onEnter}
-              placeholder="ripgrep or npm:playwright"
-              autoFocus
-            />,
-          )}
-          {field(
-            versionId,
-            "Version pin",
-            <Input
-              id={versionId}
-              value={versionPin}
-              onChange={(event) => setVersionPin(event.target.value)}
-              onKeyDown={onEnter}
-              placeholder="any"
-            />,
-          )}
-          {field(
-            partOfId,
-            "Part of",
-            <>
-              <Input
-                id={partOfId}
-                value={partOf}
-                onChange={(event) => setPartOf(event.target.value)}
-                onKeyDown={onEnter}
-                placeholder="none"
-                list={`${partOfId}-options`}
-              />
-              <datalist id={`${partOfId}-options`}>
-                {existing
-                  .filter((entry) => !entry.excluded)
-                  .map((entry) => (
-                    <option key={entry.package} value={entry.package} />
-                  ))}
-              </datalist>
-              <span className="text-xs text-muted-foreground">
-                A part is allowed only while what it is part of is.
-              </span>
-            </>,
-          )}
-          {field(
-            descriptionId,
-            "Why",
-            <Input
-              id={descriptionId}
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              onKeyDown={onEnter}
-              placeholder="GitHub CLI for PR work"
-              maxLength={500}
-            />,
-          )}
-          {field(
-            settingId,
-            "Setting",
-            <>
-              <PackageSettingSelect
-                id={settingId}
-                value={setting}
-                onChange={setSetting}
-                packageName={trimmedName}
-                versionPin={trimmedVersion === "" ? null : trimmedVersion}
-                className="h-10 w-full"
-              />
-              <span className="text-xs text-muted-foreground">
-                Ensure installed makes Cloudable install it when it is missing. Ensure latest
-                version also updates it. Both need an approval first.
-              </span>
-            </>,
-          )}
-          {isDuplicate && (
-            <p className="text-xs text-destructive">
-              "{trimmedName}" is already set on this machine. Change its row in the table instead.
-            </p>
-          )}
-          {settingProblem && trimmedName !== "" && (
-            <p className="text-xs text-destructive">
-              {PACKAGE_SETTING_LABELS[setting]} is not possible here: {settingProblem}.
-            </p>
-          )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={!canAdd}>
-            {addMutation.isPending ? "Adding…" : "Add package"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 

@@ -198,8 +198,9 @@ export function useRequestApprovalModesChange() {
  * removes an org-scoped entry, rather than only overriding an
  * already-resolved one (see `domain/organisation/packages.ts`).
  */
-export function useOrgPackages() {
+export function useOrgPackages(options: { enabled?: boolean } = {}) {
   return useQuery({
+    enabled: options.enabled ?? true,
     queryKey: organisationKeys.packages(),
     queryFn: () =>
       apiGet<OrgPackagesResponse>("/api/v1/organisation/packages").then((res) => res.items),
