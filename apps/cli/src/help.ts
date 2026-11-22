@@ -31,6 +31,22 @@ export interface CommandSpec {
 
 export const TAGLINE = "cloudable — governed cloud Linux machines, one per person";
 
+/** The package setting flags, shared by `machines packages set` and `org packages set`. */
+const ENSURE_OPTIONS: ReadonlyArray<OptionSpec> = [
+  { flag: "--ensure <pkg>", description: "Set it to Ensure installed (repeatable)" },
+  {
+    flag: "--ensure-latest <pkg>",
+    description: "Set it to Ensure latest version (repeatable)",
+  },
+  { flag: "--allow <pkg>", description: "Set it back to Allowed (repeatable)" },
+];
+
+const ENSURE_NOTES: ReadonlyArray<string> = [
+  "Allowed: a machine may have it, and a person installs it. Ensure installed: Cloudable installs it when it is missing. Ensure latest version: Cloudable also updates it when the repository has a newer version.",
+  "Setting Ensure needs an approval. The installs it then causes do not. Back to Allowed applies at once.",
+  "Only apt packages can be ensured. Ensure latest version cannot have a version pin.",
+];
+
 export const COMMANDS: ReadonlyArray<CommandSpec> = [
   {
     name: "login",
@@ -160,10 +176,12 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
               { flag: "--remove <pkg>", description: "Drop this machine's entry (repeatable)" },
               { flag: "--exclude <pkg>", description: "Keep an org package off this machine" },
               { flag: "--include <pkg>", description: "Undo an exclusion (repeatable)" },
+              ...ENSURE_OPTIONS,
             ],
             notes: [
               "Edits desired state only.",
               '--remove falls back to the org entry; --exclude overrides it with "not here".',
+              ...ENSURE_NOTES,
               "Every edit is recorded. See it under the machine's manifest history.",
             ],
           },
@@ -439,6 +457,11 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
             description: "Where snapshots live",
           },
           {
+            flag: "--ensure-retry-hours <n>",
+            description:
+              "Hours before a failed Ensure install is tried again (1 to 720, default 24)",
+          },
+          {
             flag: "--approval-mode <action>=<mode>",
             description:
               "none|single|dual per action (repeatable). Asks for the change; an approver signs off",
@@ -481,12 +504,14 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
           { name: "list", summary: "Show the org manifest" },
           {
             name: "set",
-            summary: "Declare, pin or drop packages for the whole org",
+            summary: "Declare, pin, ensure or drop packages for the whole org",
             options: [
               { flag: "--add <pkg>[@<ver>]", description: "Declare a package (repeatable)" },
               { flag: "--pin <pkg>[@<ver>]", description: "Declare it pinned (repeatable)" },
               { flag: "--remove <pkg>", description: "Drop the org entry (repeatable)" },
+              ...ENSURE_OPTIONS,
             ],
+            notes: [...ENSURE_NOTES, "Every edit is recorded."],
           },
         ],
       },

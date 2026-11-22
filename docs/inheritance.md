@@ -94,23 +94,32 @@ addable/removable named entries (not one keyed value), so it gets a table shaped
 concept — while still sharing the exact same resolution algorithm, not a parallel one that could
 drift from it.
 
-## The package manifest is permission, not desired state
+## What a package manifest entry says
 
 A manifest entry says a machine **may** have a package, and optionally pins the version it may have
-(`docker`, `nodejs 20`). It does not say the package will be installed, and nothing converges a
-machine towards it. Installing and removing are explicit per-package actions a person takes
-(`domain/machine/package-actions.ts`), each one recorded as a request, an outcome, and a failure if
-there was one.
+(`docker`, `nodejs 20`). Each entry also has a setting. The setting says what Cloudable does about
+the package:
+
+- **Allowed** (`allowed`, the default). A machine may have it. Nothing installs it until a person
+  asks.
+- **Ensure installed** (`ensure_installed`). Cloudable installs it when it is missing. It never
+  updates it.
+- **Ensure latest version** (`ensure_latest`). Cloudable installs it when it is missing. It also
+  updates it when the package repository has a newer version.
+
+Nothing else moves a machine towards its manifest. An Allowed package is installed or removed only
+when a person asks, per package (`domain/machine/package-actions.ts`). Each action is recorded as a
+request, an outcome, and a failure if there was one.
 
 Who may ask: the machine's owner, or an admin. An install also needs an approval
 (`package_install`, one approver by default, set on the Organisation page) and is queued only
 once it is approved (`domain/machine/package-request.ts`). A removal is queued at once. Which
-packages a machine *may* have is configuration, so only an admin edits a manifest, at either
-scope.
+packages a machine *may* have, and their settings, are configuration. So only an admin edits a
+manifest, at either scope.
 
 That split is why a machine's packages table has two independent columns. A package can be allowed
-and absent because nobody has installed it yet, or present and disallowed because somebody
-installed it anyway — and the second is exactly what the compliance check is looking for.
+and absent because nobody has installed it yet. It can be present and disallowed because somebody
+installed it anyway. The second is exactly what the compliance check is looking for.
 There is no dependency resolution here; that is the machine's own package manager's job. Rows
 live in `machinePackages`, one per `(scopeType, scopeId, packageName)` (enforced by a unique index,
 `machine_packages_scope_package_idx`), which is also the upsert key `MachineService.updatePackages`
@@ -121,6 +130,85 @@ The HTTP-editable surface for this unit is `PATCH /api/v1/machines/:id/packages`
 The org's own defaults are edited through `PATCH /api/v1/organisation/packages`
 (`domain/organisation/packages.ts`); the schema, `resolveManifest()`, and the pin check below are
 scope-generic and shared by both.
+
+## Ensure settings
+
+The two Ensure settings are the only way Cloudable installs a declared package without a person
+asking for it at that moment. The rules are in `domain/machine/package-ensure.ts` and
+`domain/machine/ensure.ts`.
+
+### Setting one
+
+- An edit sends `setting` on an upsert, at org or machine scope. An omitted `setting` keeps the
+  current value.
+- Moving a package to an Ensure setting needs a `package_ensure` approval. So does moving between
+  the two. The mode is set on the Organisation page. The default is `single`.
+- That edit is not written until the approval is granted. The response lists it under
+  `ensureApprovals`, with the approval id and its status. Other edits in the same request apply at
+  once.
+- When the org's mode is `none`, the approval is granted at once and the edit is written.
+- Moving back to Allowed applies at once. It cannot make Cloudable install anything.
+- The installs an Ensure setting causes need no approval of their own. The setting's approval
+  covers them.
+- Only apt packages can be ensured. The one list is `INSTALLABLE_PACKAGE_MANAGERS` in
+  `packages/contracts`. Ensuring any other name is refused with a 422 `invalid_ensure_setting`.
+- Ensure latest version with a version pin is refused the same way. The two contradict each other.
+- Ensure installed with a version pin installs the pinned version.
+- Both checks run before any approval is asked for. An approver is never asked about an edit that
+  would then be refused.
+
+### What gets queued, and when
+
+Each time the agent reports, the control plane looks at every Ensure package on that machine
+(`MachineService.ensurePackages`). It queues an install in two cases:
+
+- The package is missing. This applies to both Ensure settings.
+- The setting is Ensure latest version, and the version the repository offers differs from the
+  installed one.
+
+The agent reports what the repository offers (`availablePackageVersions`). It reads it with
+`apt-cache policy`. It never runs `apt-get update` itself. So "newer" means newer in the package
+lists the machine already has. Ubuntu refreshes those daily.
+
+Ensure installed never updates a package. It does not change an installed version that differs
+from its pin either.
+
+Each queued install is recorded as `machine.package_action_requested`. Its actor is `system`. Its
+payload says which setting caused it (`trigger`), whether the package was missing or outdated
+(`ensureReason`), and the versions it moves between (`fromVersion`, `toVersion`). The people
+behind it are on the setting's approval and its `setting_changed` event.
+
+Nothing is queued for:
+
+- an excluded entry, or a part whose parent is not allowed
+- a package the machine's image shipped with
+- a package that already has an action waiting or running
+- a package whose last Ensure action finished less than five minutes ago. A report already on its
+  way can still describe the machine from before the action.
+- an archived machine
+
+### When an install fails
+
+After an Ensure install fails or expires, Cloudable waits before it tries again. The wait is the
+org setting `packages.ensureRetryHours`. It is 1 to 720 hours. The default is 24. An admin changes
+it with `PATCH /api/v1/organisation` (`ensureRetryHours`). The change is recorded as
+`org.setting_changed`.
+
+An update can succeed and still leave the package behind, for example when apt holds it. Cloudable
+then waits the same time before it tries that update again.
+
+The machine's packages view shows the wait. A row has `ensureFailure` with `failedAt`, `reason` and
+`nextAttemptAt`. It also has `setting` and `availableVersion`.
+
+### Removing an ensured package
+
+A request to uninstall a package set to Ensure is refused with `ensured_package`. Cloudable would
+install it straight back. Set it to Allowed first.
+
+### Older agents
+
+An agent from before this feature does not report what the repository offers. Its machine still
+gets missing Ensure packages installed. It does not get Ensure latest version updates.
 
 ## Removing, and excluding
 
@@ -182,8 +270,7 @@ No row is written and no event is emitted when this happens — the edit fails a
 `machine_packages` write. This is deliberately **edit-time-only**: pinning does not retroactively
 change what `resolveManifest()` returns for a machine-level row that was written *before* the pin
 was set (a machine can still be resolving its own pre-existing override). Reconcile never silently
-drops such a row either — nothing converges a machine towards its manifest at all; the pin only
-ever blocks a *new* write attempt.
+drops such a row either. The pin only ever blocks a *new* write attempt.
 
 ## Allowlist detection
 
@@ -232,19 +319,29 @@ entry, as above. `allowedPackageNames` in `domain/machine/manifest.ts` is the on
 check, the packages table and the allowed list the agent polls.
 
 One definition, two consumers, deliberately: the table a person looks at and the finding an auditor
-reads are computed by the same function, so they cannot disagree. Neither has any license to act —
-removing a package is always an explicit per-package action someone asked for.
+reads are computed by the same function, so they cannot disagree. Neither has any license to act.
+Removing a package is always an explicit per-package action someone asked for. Ensure settings only
+ever install. They never remove undeclared software.
 
 ## Events
 
 `MachineService` emits `machine.created` on creation and one `machine.setting_changed` event per
 edited package name on a successful `updatePackages` call (all sharing one `correlationId` per
 request) — see `apps/control-plane/src/domain/machine/events.ts`. Each `machine.setting_changed`
-payload's `previous`/`current` are the resolved value (`{ versionPin, pinned, excluded, partOf }` or `null`
-if the package isn't in the manifest on that side) computed via `resolveManifest()` *before* and
+payload's `previous`/`current` are the resolved value
+(`{ versionPin, pinned, excluded, partOf, description, setting }` or `null` if the package isn't in
+the manifest on that side) computed via `resolveManifest()` *before* and
 *after* the write, and `overridesLevel` is the `source` of the *previous* resolved value (or
 `"none"` if the package had no prior resolved value at all) — i.e. which level's effective value
-this edit just superseded.
+this edit just superseded. `org.setting_changed` for an org package carries the org entry: `packageName`, `versionPin`,
+`pinned`, `partOf`, `description` and `setting`. Events
+recorded before settings existed have no `setting`. Those packages were all Allowed.
+
+An Ensure setting that waited for approval is written, and its event recorded, when the approval is
+granted. The event is attributed to the person who asked, not the approver.
+
+An install that an Ensure setting causes is recorded as `machine.package_action_requested` with
+actor `system`. See "Ensure settings" above for its payload.
 
 Both write paths namespace the event's `key` as `package:<name>` (`packageSettingKey()`), the org
 path via `orgPackageSettingKey`, which now re-exports it. The prefix is load-bearing in two places:

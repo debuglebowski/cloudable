@@ -18,7 +18,8 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   "org.created": { tier: 1, description: "A new org was created." },
   "org.setting_changed": {
     tier: 1,
-    description: "An org- or machine-level default setting was changed.",
+    description:
+      "An org- or machine-level default setting was changed. An org package edit (key `package:<name>`) includes the package's `setting`. The Ensure retry wait is key `packages.ensureRetryHours`.",
   },
   "org.integration_connected": {
     tier: 1,
@@ -122,7 +123,7 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   "machine.setting_changed": {
     tier: 2,
     description:
-      "A machine-level setting was changed, overriding a template or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did.",
+      "A machine-level setting was changed, overriding a template or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did. A package edit's `previous` and `current` include its `setting` (`allowed`, `ensure_installed` or `ensure_latest`).",
   },
   "machine.offboarded": {
     tier: 1,
@@ -158,7 +159,8 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   // logging-tier setting away from never being written at all.
   "machine.package_action_requested": {
     tier: 1,
-    description: "A person asked for a package to be installed or removed on a machine.",
+    description:
+      "A package install or removal was queued for a machine. Either a person asked for it (actor `person`), or a package set to Ensure installed or Ensure latest version required it (actor `system`). An Ensure install carries `trigger` (the setting), `ensureReason` (`missing` or `outdated`), `fromVersion` and `toVersion`.",
   },
   "machine.package_action_completed": {
     tier: 1,

@@ -4,6 +4,7 @@ import { getAgentRelease } from "../../domain/agent-update/release";
 import { authorizeMachine, ownOnlyFilter, requireAdminUser } from "../../domain/authz";
 import { MachineService } from "../../domain/machine/MachineService";
 import { toActionView } from "../../domain/machine/package-actions";
+import { requestMachineManifestEdit } from "../../domain/machine/package-ensure";
 import { requestPackageAction } from "../../domain/machine/package-request";
 import { Api } from "../api";
 import { CurrentUserTag } from "../middleware/auth";
@@ -73,16 +74,14 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
         yield* authorizeMachine(currentUser, path.id, "editManifest");
-        const machineService = yield* MachineService;
-        return yield* machineService
-          .updatePackages({
-            machineId: path.id,
-            orgId: currentUser.orgId,
-            upserts: payload.upserts,
-            removals: payload.removals,
-            actorPersonId: currentUser.personId,
-          })
-          .pipe(Effect.catchTag("MachineServiceError", Effect.die));
+        // An edit that sets a package to Ensure waits for its approval; everything else applies now.
+        return yield* requestMachineManifestEdit({
+          machineId: path.id,
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+          upserts: payload.upserts,
+          removals: payload.removals,
+        }).pipe(Effect.catchTag("MachineServiceError", Effect.die));
       }),
     )
     .handle("packages", ({ path }) =>

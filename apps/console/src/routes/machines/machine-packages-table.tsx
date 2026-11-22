@@ -1,22 +1,62 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Box, CircleSlash, type LucideIcon, Package, ShieldCheck } from "lucide-react";
+import {
+  Box,
+  Download,
+  type LucideIcon,
+  MoreHorizontal,
+  Package,
+  Pencil,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  Undo2,
+  X,
+} from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 
 import {
   type MachinePackageRow,
+  ManifestOverrideError,
   PackageActionError,
   type PackageActionOp,
+  type PackageSetting,
   createPackageAction,
   getMachinePackages,
   machinesKeys,
   updateMachinePackages,
 } from "@/api/machines";
+import { useOrgPackages } from "@/api/organisation";
+import { PackageEntryDialog, type PackageEntryDialogMode } from "@/components/package-entry-dialog";
 import { TableHeaderIcon } from "@/components/table-header-icon";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -27,6 +67,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { refusalReason } from "@/lib/api-client";
+import {
+  PACKAGE_SETTINGS,
+  PACKAGE_SETTING_LABELS,
+  describeSettingChange,
+  formatNextTry,
+  settingUnavailableReason,
+} from "@/lib/package-setting";
 
 /**
  * A machine's packages: what it is allowed to have, what it actually has, and
@@ -37,6 +84,16 @@ import { refusalReason } from "@/lib/api-client";
  * yet, or present and disallowed because somebody installed it anyway — which
  * is exactly the case the compliance check exists to catch. Collapsing them
  * into one "status" would hide the interesting half.
+ *
+ * One Permission column says both whether a package may be here and what
+ * Cloudable does about it: Excluded, Allowed, Ensure installed (installed when
+ * missing) or Ensure latest version (also kept updated). A dash means nobody
+ * declared it, and a line under it says where the entry comes from. Moving to an
+ * ensure value waits for an approval.
+ *
+ * Everything else a person can do to a row is in its menu: install, uninstall,
+ * edit (or override, for an org entry), and remove this machine's own entry,
+ * which for an override means going back to the org's entry.
  *
  * Base image packages are hidden behind the toggle. A real Ubuntu server image
  * is several hundred packages, and listing them by default buries the handful
@@ -55,6 +112,13 @@ export function MachinePackagesTable({
 }) {
   const queryClient = useQueryClient();
   const [showBaseline, setShowBaseline] = useState(false);
+  const [entryDialog, setEntryDialog] = useState<PackageEntryDialogMode | null>(null);
+  const [removing, setRemoving] = useState<MachinePackageRow | null>(null);
+
+  // Which packages the org declares, so a machine entry can say whether it overrides one,
+  // and so its menu offers "reset to org" rather than "remove". Admin only, like editing.
+  const orgPackagesQuery = useOrgPackages({ enabled: canEditPermission });
+  const orgNames = new Set((orgPackagesQuery.data ?? []).map((entry) => entry.packageName));
 
   const packagesQuery = useQuery({
     queryKey: machinesKeys.packages(machineId),
@@ -95,27 +159,62 @@ export function MachinePackagesTable({
       toast.error("Couldn't request that", {
         description:
           err instanceof PackageActionError
-            ? err.body.error.message
+            ? err.body.error.code === "ensured_package"
+              ? "This package is set to Ensure, so Cloudable would put it back. Set it to Allowed first."
+              : err.body.error.message
             : (refusalReason(err) ?? err.message),
       });
     },
   });
 
   const permissionMutation = useMutation({
-    mutationFn: (vars: { packageName: string; allowed: boolean }) =>
-      updateMachinePackages(machineId, {
-        upserts: [{ packageName: vars.packageName, excluded: !vars.allowed }],
-      }),
-    onSuccess: (_rows, vars) => {
+    mutationFn: (vars: { row: MachinePackageRow; target: PermissionValue }) =>
+      updateMachinePackages(machineId, { upserts: [permissionEdit(vars.row, vars.target)] }),
+    onSuccess: (result, vars) => {
       invalidate();
+      const name = vars.row.packageName;
+      if (vars.target === "excluded") {
+        toast.success(`"${name}" is no longer allowed on this machine`);
+        return;
+      }
+      const outcome = describeSettingChange(name, vars.target, result.ensureApprovals);
+      if (result.ensureApprovals.some((approval) => approval.status === "pending")) {
+        void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      }
+      const show = outcome.kind === "success" ? toast.success : toast.error;
+      show(outcome.title, outcome.description ? { description: outcome.description } : undefined);
+    },
+    onError: (err) => {
+      toast.error("Couldn't change that", {
+        description:
+          err instanceof ManifestOverrideError
+            ? err.body.error.message
+            : (refusalReason(err) ?? err.message),
+      });
+    },
+  });
+
+  // Deletes this machine's own entry. Where the org declares the package, the machine goes
+  // back to the org's entry; otherwise the package is no longer declared here at all.
+  const removeMutation = useMutation({
+    mutationFn: (row: MachinePackageRow) =>
+      updateMachinePackages(machineId, { removals: [row.packageName] }),
+    onSuccess: (_result, row) => {
+      invalidate();
+      setRemoving(null);
       toast.success(
-        vars.allowed
-          ? `"${vars.packageName}" is allowed on this machine`
-          : `"${vars.packageName}" is no longer allowed on this machine`,
+        orgNames.has(row.packageName)
+          ? `"${row.packageName}" uses the org's entry again`
+          : `"${row.packageName}" removed from this machine's manifest`,
       );
     },
     onError: (err) => {
-      toast.error("Couldn't change that", { description: refusalReason(err) ?? err.message });
+      toast.error("Couldn't remove that", {
+        description:
+          err instanceof ManifestOverrideError
+            ? err.body.error.message
+            : (refusalReason(err) ?? err.message),
+      });
     },
   });
 
@@ -136,6 +235,31 @@ export function MachinePackagesTable({
         </p>
       )}
 
+      {(canEditPermission || baselineCount > 0) && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {baselineCount > 0 ? (
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id={`show-baseline-${machineId}`}
+                checked={showBaseline}
+                onCheckedChange={(checked) => setShowBaseline(checked === true)}
+              />
+              <Label htmlFor={`show-baseline-${machineId}`} className="text-sm font-normal">
+                Show image packages and dependencies ({baselineCount})
+              </Label>
+            </div>
+          ) : (
+            <div />
+          )}
+          {canEditPermission && (
+            <Button size="sm" onClick={() => setEntryDialog({ kind: "add" })}>
+              <Plus />
+              Add package
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* min-h-0 and no flex-1: shrinks when content overflows, collapses to
           content otherwise. Same wrapper the Access page's tables use. */}
       <div className="min-h-0 overflow-hidden rounded-2xl border border-muted-foreground/20 bg-card shadow-[0_4px_12px_0_rgba(0,0,0,0.08)]">
@@ -145,24 +269,23 @@ export function MachinePackagesTable({
               <Th icon={Package}>Package</Th>
               <Th icon={ShieldCheck}>Permission</Th>
               <Th icon={Box}>Status</Th>
-              <Th icon={CircleSlash}>From</Th>
-              <TableHead className="text-right">Action</TableHead>
+              <TableHead className="w-12">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {packagesQuery.isPending && (
-              <SkeletonRows widths={["w-32", "w-20", "w-24", "w-16", "w-20"]} />
-            )}
+            {packagesQuery.isPending && <SkeletonRows widths={["w-32", "w-40", "w-28", "w-6"]} />}
             {packagesQuery.isError && (
               <TableRow>
-                <TableCell colSpan={5} className="text-sm text-destructive">
+                <TableCell colSpan={4} className="text-sm text-destructive">
                   Failed to load packages.
                 </TableCell>
               </TableRow>
             )}
             {!packagesQuery.isPending && rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-sm text-muted-foreground">
+                <TableCell colSpan={4} className="text-sm text-muted-foreground">
                   {baselineCount > 0
                     ? "Nothing declared or added beyond the image this machine was built from."
                     : "No packages."}
@@ -177,13 +300,31 @@ export function MachinePackagesTable({
                   (actionMutation.isPending &&
                     actionMutation.variables?.packageName === row.packageName) ||
                   (permissionMutation.isPending &&
-                    permissionMutation.variables?.packageName === row.packageName)
+                    permissionMutation.variables?.row.packageName === row.packageName) ||
+                  (removeMutation.isPending &&
+                    removeMutation.variables?.packageName === row.packageName)
                 }
+                lineage={lineageOf(row, orgNames)}
                 canEditPermission={canEditPermission}
                 canRequestActions={canRequestActions}
                 onAction={(op) => actionMutation.mutate({ packageName: row.packageName, op })}
-                onPermission={(allowed) =>
-                  permissionMutation.mutate({ packageName: row.packageName, allowed })
+                onPermission={(target) => permissionMutation.mutate({ row, target })}
+                onEdit={() =>
+                  setEntryDialog({
+                    kind: "edit",
+                    inherited: row.source !== "machine",
+                    values: {
+                      packageName: row.packageName,
+                      versionPin: row.versionPin,
+                      partOf: row.partOf ?? null,
+                      description: row.description ?? null,
+                      setting: row.setting ?? "allowed",
+                    },
+                  })
+                }
+                onRemove={() =>
+                  // Going back to the org's entry loses nothing, so it needs no confirmation.
+                  orgNames.has(row.packageName) ? removeMutation.mutate(row) : setRemoving(row)
                 }
               />
             ))}
@@ -191,18 +332,60 @@ export function MachinePackagesTable({
         </Table>
       </div>
 
-      {baselineCount > 0 && (
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id={`show-baseline-${machineId}`}
-            checked={showBaseline}
-            onCheckedChange={(checked) => setShowBaseline(checked === true)}
-          />
-          <Label htmlFor={`show-baseline-${machineId}`} className="text-sm font-normal">
-            Show image packages and dependencies ({baselineCount})
-          </Label>
-        </div>
-      )}
+      <PackageEntryDialog
+        scope="machine"
+        save={(entry) =>
+          updateMachinePackages(machineId, {
+            // Saving an entry means it is allowed here. Excluding is the Permission select's job.
+            upserts: [{ ...entry, excluded: false }],
+          })
+        }
+        mode={entryDialog}
+        onOpenChange={(open) => {
+          if (!open) setEntryDialog(null);
+        }}
+        takenNames={
+          new Set(allRows.filter((row) => row.source === "machine").map((row) => row.packageName))
+        }
+        partOfOptions={allRows
+          .filter((row) => row.permission === "allowed")
+          .map((row) => row.packageName)}
+        onSaved={invalidate}
+      />
+
+      <AlertDialog
+        open={removing !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoving(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove "{removing?.packageName}" from this machine?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removing?.installed === "installed"
+                ? "It is no longer allowed here. It stays installed, and counts as undeclared software until someone uninstalls it."
+                : "It is no longer allowed here."}
+              {removing?.setting && removing.setting !== "allowed"
+                ? " Cloudable stops ensuring it."
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={removeMutation.isPending}
+              onClick={(event) => {
+                // Stay open until the request settles; success closes it.
+                event.preventDefault();
+                if (removing) removeMutation.mutate(removing);
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -235,7 +418,83 @@ function SkeletonRows({ rows = 3, widths }: { rows?: number; widths: string[] })
   );
 }
 
+/** One column for both facts: not declared (null), excluded, or allowed with its setting. */
+type PermissionValue = "excluded" | PackageSetting;
+
+const PERMISSION_LABELS: Record<PermissionValue, string> = {
+  excluded: "Excluded",
+  ...PACKAGE_SETTING_LABELS,
+};
+
+const permissionOf = (row: MachinePackageRow): PermissionValue | null =>
+  row.permission === "disallowed"
+    ? "excluded"
+    : row.permission === "allowed"
+      ? (row.setting ?? "allowed")
+      : null;
+
+/**
+ * The one manifest edit a Permission change makes. Excluding also resets the
+ * setting, so lifting the exclusion later can never bring back an Ensure
+ * setting without a fresh approval.
+ */
+function permissionEdit(row: MachinePackageRow, target: PermissionValue) {
+  if (target === "excluded") {
+    return { packageName: row.packageName, excluded: true, setting: "allowed" as const };
+  }
+  return {
+    packageName: row.packageName,
+    // Lifting an exclusion, or declaring an undeclared package, is part of the same edit.
+    ...(row.permission !== "allowed" ? { excluded: false } : {}),
+    // A first machine row for an inherited entry would otherwise declare
+    // "any version" and quietly drop the org's version.
+    ...(target !== "allowed" || row.permission === "allowed" ? { setting: target } : {}),
+    ...(row.source !== null && row.source !== "machine" && row.versionPin
+      ? { versionPin: row.versionPin }
+      : {}),
+  };
+}
+
+/** Where a row's permission comes from, said in words under the select. */
+type Lineage = "org" | "override" | "machine" | null;
+
+const lineageOf = (row: MachinePackageRow, orgNames: ReadonlySet<string>): Lineage =>
+  row.source === null
+    ? null
+    : row.source !== "machine"
+      ? "org"
+      : orgNames.has(row.packageName)
+        ? "override"
+        : "machine";
+
+const LINEAGE_LABELS: Record<Exclude<Lineage, null>, string> = {
+  org: "From the org",
+  override: "Overrides the org",
+  machine: "This machine only",
+};
+
 function PermissionCell({
+  row,
+  busy,
+  canEdit,
+  lineage,
+  onPermission,
+}: {
+  row: MachinePackageRow;
+  busy: boolean;
+  canEdit: boolean;
+  lineage: Lineage;
+  onPermission: (target: PermissionValue) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <PermissionControl row={row} busy={busy} canEdit={canEdit} onPermission={onPermission} />
+      {lineage && <span className="text-xs text-muted-foreground">{LINEAGE_LABELS[lineage]}</span>}
+    </div>
+  );
+}
+
+function PermissionControl({
   row,
   busy,
   canEdit,
@@ -244,7 +503,7 @@ function PermissionCell({
   row: MachinePackageRow;
   busy: boolean;
   canEdit: boolean;
-  onPermission: (allowed: boolean) => void;
+  onPermission: (target: PermissionValue) => void;
 }) {
   if (row.isBaseline && row.permission === null) {
     return <span className="text-sm text-muted-foreground">from the image</span>;
@@ -252,63 +511,89 @@ function PermissionCell({
   if (row.installedAsDependency && row.permission === null) {
     return <span className="text-sm text-muted-foreground">dependency</span>;
   }
+  const value = permissionOf(row);
   if (!canEdit) {
-    return row.permission === "disallowed" ? (
-      <Badge variant="outline">disallowed</Badge>
-    ) : (
-      <span className="text-sm text-muted-foreground">
-        {row.permission === "allowed" ? "allowed" : "—"}
+    if (value === "excluded") return <Badge variant="outline">Excluded</Badge>;
+    // A dash for undeclared: nobody has said anything at all, which is not the same as excluded.
+    return (
+      <span
+        className={
+          value === null || value === "allowed" ? "text-sm text-muted-foreground" : "text-sm"
+        }
+      >
+        {value === null ? "—" : PERMISSION_LABELS[value]}
       </span>
     );
   }
-  if (row.permission === "allowed") {
-    return (
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onPermission(false)}
-        className="text-sm underline-offset-4 hover:underline disabled:opacity-50"
-        title="Stop allowing this package on this machine"
-      >
-        allowed
-      </button>
-    );
-  }
-  if (row.permission === "disallowed") {
-    return (
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onPermission(true)}
-        className="text-sm underline-offset-4 hover:underline disabled:opacity-50"
-        title="Allow this package on this machine"
-      >
-        <Badge variant="outline">disallowed</Badge>
-      </button>
-    );
-  }
-  // Installed and nobody said it could be. The dash is the honest rendering —
-  // it is not disallowed, nobody has said anything at all.
   return (
-    <button
-      type="button"
+    <Select
+      {...(value !== null ? { value } : {})}
+      onValueChange={(next) => {
+        if (next !== value) onPermission(next as PermissionValue);
+      }}
       disabled={busy}
-      onClick={() => onPermission(true)}
-      className="text-sm text-muted-foreground underline-offset-4 hover:underline disabled:opacity-50"
-      title="Allow this package on this machine"
     >
-      —
-    </button>
+      <SelectTrigger className="h-8 w-48 text-xs" aria-label="Permission">
+        <SelectValue placeholder="Not declared" />
+      </SelectTrigger>
+      <SelectContent>
+        {(["excluded", ...PACKAGE_SETTINGS] as const).map((option) => {
+          const reason =
+            option === value || option === "excluded"
+              ? null
+              : settingUnavailableReason(option, row);
+          return (
+            <SelectItem key={option} value={option} disabled={reason !== null}>
+              {PERMISSION_LABELS[option]}
+              {reason && <span className="ml-1.5 text-xs text-muted-foreground">({reason})</span>}
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
   );
 }
+
+/** Whether Cloudable queued this action for an ensure setting, rather than a person asking. */
+const isEnsureTriggered = (row: MachinePackageRow): boolean =>
+  row.pendingAction?.trigger === "ensure_installed" ||
+  row.pendingAction?.trigger === "ensure_latest";
 
 function StatusCell({ row }: { row: MachinePackageRow }) {
   const pending = row.pendingAction;
   if (pending && (pending.status === "pending" || pending.status === "running")) {
+    if (isEnsureTriggered(row)) {
+      // An install on a package that is already there is an update to a newer version.
+      return (
+        <span className="text-sm text-muted-foreground">
+          {row.installed === "installed"
+            ? `updating${row.availableVersion ? ` to ${row.availableVersion}` : ""} (Ensure)…`
+            : "installing (Ensure)…"}
+        </span>
+      );
+    }
     return (
       <span className="text-sm text-muted-foreground">
         {pending.op === "install" ? "installing…" : "removing…"}
       </span>
+    );
+  }
+  if (row.ensureFailure) {
+    return (
+      <div className="flex flex-col gap-0.5 text-sm">
+        <span className="flex items-center gap-1.5">
+          <Badge variant="destructive">install failed</Badge>
+          <span className="text-muted-foreground">
+            next try {formatNextTry(row.ensureFailure.nextAttemptAt)}
+          </span>
+        </span>
+        <span
+          className="max-w-md truncate font-mono text-xs text-muted-foreground"
+          title={row.ensureFailure.reason}
+        >
+          {row.ensureFailure.reason}
+        </span>
+      </div>
     );
   }
   if (pending?.status === "expired") {
@@ -348,6 +633,14 @@ function StatusCell({ row }: { row: MachinePackageRow }) {
           not the pinned version
         </Badge>
       )}
+      {row.setting === "ensure_latest" &&
+        row.availableVersion &&
+        row.availableVersion !== row.installedVersion && (
+          // Cloudable queues the update on the machine's next check-in.
+          <span className="text-xs text-muted-foreground">
+            update to <span className="font-mono">{row.availableVersion}</span> available
+          </span>
+        )}
     </span>
   );
 }
@@ -355,37 +648,41 @@ function StatusCell({ row }: { row: MachinePackageRow }) {
 function PackageRow({
   row,
   busy,
+  lineage,
   canEditPermission,
   canRequestActions,
   onAction,
   onPermission,
+  onEdit,
+  onRemove,
 }: {
   row: MachinePackageRow;
   busy: boolean;
+  lineage: Lineage;
   canEditPermission: boolean;
   canRequestActions: boolean;
   onAction: (op: PackageActionOp) => void;
-  onPermission: (allowed: boolean) => void;
+  onPermission: (target: PermissionValue) => void;
+  onEdit: () => void;
+  onRemove: () => void;
 }) {
-  const outstanding =
-    row.pendingAction?.status === "pending" || row.pendingAction?.status === "running";
-  const isInstalled = row.installed === "installed";
-
   return (
     <TableRow className={row.isBaseline ? "opacity-70" : undefined}>
       <TableCell className={row.partOf ? "pl-8 font-medium" : "font-medium"}>
         {row.partOf && <span className="mr-1 text-muted-foreground">↳</span>}
         {row.packageName}
-        {row.partOf && (
-          <span className="ml-2 text-xs text-muted-foreground">part of {row.partOf}</span>
-        )}
-        {row.description && (
-          <span className="block text-xs font-normal text-muted-foreground">{row.description}</span>
-        )}
         {row.versionPin && (
           <span className="ml-2 font-mono text-xs text-muted-foreground">
             pinned {row.versionPin}
           </span>
+        )}
+        {row.partOf && (
+          <span className="block text-xs font-normal text-muted-foreground">
+            part of {row.partOf}
+          </span>
+        )}
+        {row.description && (
+          <span className="block text-xs font-normal text-muted-foreground">{row.description}</span>
         )}
       </TableCell>
       <TableCell>
@@ -393,33 +690,122 @@ function PackageRow({
           row={row}
           busy={busy}
           canEdit={canEditPermission}
+          lineage={lineage}
           onPermission={onPermission}
         />
       </TableCell>
       <TableCell>
         <StatusCell row={row} />
       </TableCell>
-      <TableCell className="text-sm text-muted-foreground">{row.source ?? "—"}</TableCell>
       <TableCell className="text-right">
-        {/* No button at all on a base image package, rather than a disabled one
-            with a tooltip: uninstalling systemd is not an option we want to
-            render as merely unavailable right now. */}
-        {row.isBaseline || !canRequestActions ? (
-          <span className="text-xs text-muted-foreground">—</span>
-        ) : row.installed === "unknown" ? (
-          <span className="text-xs text-muted-foreground">waiting for the agent</span>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || outstanding}
-            onClick={() => onAction(isInstalled ? "uninstall" : "install")}
-          >
-            {outstanding ? "Working…" : isInstalled ? "Uninstall" : "Install"}
-          </Button>
-        )}
+        <RowMenu
+          row={row}
+          busy={busy}
+          lineage={lineage}
+          canEditPermission={canEditPermission}
+          canRequestActions={canRequestActions}
+          onAction={onAction}
+          onEdit={onEdit}
+          onRemove={onRemove}
+        />
       </TableCell>
     </TableRow>
+  );
+}
+
+/**
+ * Everything a person can do to one row, in one place. Items that do not apply
+ * are left out; an item that applies but is blocked right now is shown disabled
+ * with the reason, so nobody has to guess why it is missing.
+ */
+function RowMenu({
+  row,
+  busy,
+  lineage,
+  canEditPermission,
+  canRequestActions,
+  onAction,
+  onEdit,
+  onRemove,
+}: {
+  row: MachinePackageRow;
+  busy: boolean;
+  lineage: Lineage;
+  canEditPermission: boolean;
+  canRequestActions: boolean;
+  onAction: (op: PackageActionOp) => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const outstanding =
+    row.pendingAction?.status === "pending" || row.pendingAction?.status === "running";
+  const isEnsured = row.setting === "ensure_installed" || row.setting === "ensure_latest";
+  const known = row.installed !== "unknown";
+
+  // Installing and uninstalling: never on a package the image shipped with.
+  const canAct = canRequestActions && !row.isBaseline && known;
+  // An ensured package that is missing is installed by Cloudable anyway; only offer a
+  // manual try when its last automatic one failed and the next is hours away.
+  const showInstall =
+    canAct && row.installed === "not_installed" && (!isEnsured || row.ensureFailure !== undefined);
+  const showUninstall = canAct && row.installed === "installed";
+
+  const showEdit = canEditPermission && row.permission === "allowed";
+  // Only this machine's own entry can be removed. An entry from the org is excluded instead.
+  const showRemove = canEditPermission && row.source === "machine";
+
+  if (!showInstall && !showUninstall && !showEdit && !showRemove) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          disabled={busy}
+          aria-label={`Actions for ${row.packageName}`}
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        {showInstall && (
+          <DropdownMenuItem disabled={outstanding} onSelect={() => onAction("install")}>
+            <Download />
+            {row.ensureFailure ? "Try installing now" : "Install"}
+          </DropdownMenuItem>
+        )}
+        {showUninstall && (
+          <DropdownMenuItem
+            disabled={outstanding || isEnsured}
+            onSelect={() => onAction("uninstall")}
+          >
+            <Trash2 />
+            {isEnsured ? "Uninstall (set to Allowed first)" : "Uninstall"}
+          </DropdownMenuItem>
+        )}
+        {(showInstall || showUninstall) && (showEdit || showRemove) && <DropdownMenuSeparator />}
+        {showEdit && (
+          <DropdownMenuItem onSelect={onEdit}>
+            <Pencil />
+            {lineage === "org" ? "Override on this machine…" : "Edit…"}
+          </DropdownMenuItem>
+        )}
+        {showRemove &&
+          (lineage === "override" ? (
+            <DropdownMenuItem onSelect={onRemove}>
+              <Undo2 />
+              Reset to the org's entry
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem destructive onSelect={onRemove}>
+              <X />
+              Remove from this machine…
+            </DropdownMenuItem>
+          ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

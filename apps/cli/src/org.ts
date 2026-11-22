@@ -1,4 +1,6 @@
 import type {
+  PackageEnsureApprovalView,
+  PackageSetting,
   UpdateVulnerabilityScanRequest,
   VulnerabilityScanOrgView,
 } from "@cloudable/contracts";
@@ -8,14 +10,20 @@ import type {
 //
 // These are the defaults every machine inherits (docs/inheritance.md): change
 // one here and it resolves down to every machine that has no override of its
-// own. Nothing here touches a live machine; the agent picks changes up on its
-// next reconcile.
+// own. Nothing here touches a live machine. A package set to Ensure is
+// installed by the control plane on each machine's next report, once the
+// setting is approved.
 // ---------------------------------------------------------------------------
 import { oneOf, parseArgs, positiveInt, readSpec } from "./args";
 import { UsageError } from "./errors";
 import { authenticatedApiRequest, patchJson, postJson } from "./http-client";
 import { type OrgWire, fetchOrg } from "./identity";
-import { packageEdits } from "./machines";
+import {
+  PACKAGE_EDIT_FLAGS,
+  describeEnsureApprovals,
+  packageEdits,
+  settingLabel,
+} from "./machines";
 import { dash, printEmpty, printFields, printJson, printTable } from "./output";
 import { usageFor } from "./program";
 import {
@@ -33,6 +41,7 @@ const APPROVAL_ACTIONS = [
   "admin_access",
   "offboarding",
   "package_install",
+  "package_ensure",
 ] as const;
 const APPROVAL_MODES = ["none", "single", "dual"] as const;
 const RETENTION_LOCATIONS = ["customer", "cloudable_sweden_central"] as const;
@@ -43,6 +52,26 @@ interface OrgPackageEntry {
   pinned: boolean;
   partOf?: string | null;
   description?: string | null;
+  setting?: PackageSetting;
+}
+
+interface OrgPackagesResponse {
+  items: OrgPackageEntry[];
+  ensureApprovals?: PackageEnsureApprovalView[];
+}
+
+function printOrgPackages(items: ReadonlyArray<OrgPackageEntry>): void {
+  printTable(
+    ["package", "version", "pinned", "setting", "part of", "description"],
+    items.map((entry) => [
+      entry.packageName,
+      dash(entry.versionPin),
+      entry.pinned ? "yes" : "no",
+      settingLabel(entry.setting),
+      dash(entry.partOf ?? null),
+      dash(entry.description ?? null),
+    ]),
+  );
 }
 
 /** "1 machine overrides it", not "1 machines override it". */
@@ -59,6 +88,10 @@ function printOrg(org: OrgWire): void {
     ["snapshot retention", `${org.retentionDefaultDays} days`],
     ["event retention", `${org.eventRetentionDays} days`],
     ["retention location", org.retentionLocation],
+    [
+      "ensure retry wait",
+      org.ensureRetryHours === undefined ? "-" : `${org.ensureRetryHours} hours`,
+    ],
   ]);
   console.log("\napproval modes:");
   printTable(
@@ -94,7 +127,7 @@ function approvalModes(values: ReadonlyArray<string>): Record<string, string> {
 
 export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    `org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--event-retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--approval-mode <action>=<mode> --reason <text>] ${VULNERABILITY_SCAN_USAGE}`,
+    `org update [--name <name>] [--logging-tier 1|2] [--retention-days <n>] [--event-retention-days <n>] [--retention-location customer|cloudable_sweden_central] [--ensure-retry-hours <n>] [--approval-mode <action>=<mode> --reason <text>] ${VULNERABILITY_SCAN_USAGE}`,
   );
   const args = parseArgs(
     argv,
@@ -105,6 +138,7 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
         "retention-days",
         "event-retention-days",
         "retention-location",
+        "ensure-retry-hours",
         "reason",
         ...VULNERABILITY_SCAN_VALUE_FLAGS,
       ],
@@ -128,6 +162,11 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
       args.flags["event-retention-days"],
       "event-retention-days",
     );
+  }
+  if (args.flags["ensure-retry-hours"]) {
+    // The control plane enforces 1 to 720 and says so; this only rejects what is
+    // not a whole number at all.
+    payload.ensureRetryHours = positiveInt(args.flags["ensure-retry-hours"], "ensure-retry-hours");
   }
   if (args.flags["retention-location"]) {
     payload.retentionLocation = oneOf(
@@ -201,9 +240,7 @@ export async function runOrgUpdateCommand(argv: ReadonlyArray<string>): Promise<
 
 export async function runOrgPackagesListCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const res = await authenticatedApiRequest<{ items: OrgPackageEntry[] }>(
-    "/api/v1/organisation/packages",
-  );
+  const res = await authenticatedApiRequest<OrgPackagesResponse>("/api/v1/organisation/packages");
   if (args.booleans.has("json")) {
     printJson(res);
     return;
@@ -212,27 +249,18 @@ export async function runOrgPackagesListCommand(argv: ReadonlyArray<string>): Pr
     printEmpty("org packages");
     return;
   }
-  printTable(
-    ["package", "version", "pinned", "part of", "description"],
-    res.items.map((entry) => [
-      entry.packageName,
-      dash(entry.versionPin),
-      entry.pinned ? "yes" : "no",
-      dash(entry.partOf ?? null),
-      dash(entry.description ?? null),
-    ]),
-  );
+  printOrgPackages(res.items);
 }
 
 export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "org packages set [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>.",
+    "org packages set [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>] [--ensure <pkg>] [--ensure-latest <pkg>] [--allow <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>. Only apt packages can be ensured.",
   );
   const args = parseArgs(
     argv,
     readSpec({
       values: ["part-of", "description"],
-      repeatable: ["add", "pin", "remove", "standalone"],
+      repeatable: [...PACKAGE_EDIT_FLAGS],
     }),
   );
   const { upserts, removals } = packageEdits(args);
@@ -240,7 +268,7 @@ export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Pro
     throw new UsageError(`nothing to change\n\n${usage}`);
   }
 
-  const res = await authenticatedApiRequest<{ items: OrgPackageEntry[] }>(
+  const res = await authenticatedApiRequest<OrgPackagesResponse>(
     "/api/v1/organisation/packages",
     patchJson({
       ...(upserts.length > 0 ? { upserts } : {}),
@@ -251,15 +279,7 @@ export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Pro
     printJson(res);
     return;
   }
-  console.log("Org manifest updated. Every machine inherits it on its next reconcile.");
-  printTable(
-    ["package", "version", "pinned", "part of", "description"],
-    res.items.map((entry) => [
-      entry.packageName,
-      dash(entry.versionPin),
-      entry.pinned ? "yes" : "no",
-      dash(entry.partOf ?? null),
-      dash(entry.description ?? null),
-    ]),
-  );
+  console.log("Org manifest updated. Every machine without its own entry inherits it.");
+  for (const line of describeEnsureApprovals(res.ensureApprovals ?? [], upserts)) console.log(line);
+  printOrgPackages(res.items);
 }

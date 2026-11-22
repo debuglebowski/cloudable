@@ -359,6 +359,7 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
             installedPackages: payload.installedPackages,
             manuallyInstalledPackages: payload.manuallyInstalledPackages,
             declaredPackageVersions: payload.declaredPackageVersions,
+            availablePackageVersions: payload.availablePackageVersions,
             observedAt: now,
           })
           .pipe(
@@ -424,6 +425,22 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
         if (actionEvents.length > 0) {
           yield* eventBus.publish(actionEvents).pipe(Effect.orDie);
         }
+
+        // Queue the installs this machine's Ensure packages need, now that its inventory and
+        // its finished actions are stored. The agent reports state; deciding what that state
+        // calls for is the control plane's (invariant 12). Logged, not fatal: the next report
+        // decides again.
+        yield* machineService
+          .ensurePackages({ machineId: machine.id, orgId: identity.orgId, now })
+          .pipe(
+            Effect.catchAll((error) =>
+              Effect.logWarning(
+                `report: ensure packages failed for ${machine.id}: ${String(
+                  "cause" in error ? (error.cause ?? error) : error,
+                )}`,
+              ),
+            ),
+          );
 
         if (wasFirstSeen) {
           yield* eventBus

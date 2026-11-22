@@ -1,7 +1,8 @@
+import type { ApiErrorBody, PackageEnsureApprovalView, PackageSetting } from "@cloudable/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { apiGet, apiPatch, apiPost, refusalReason } from "@/lib/api-client";
+import { ApiError, apiGet, apiPatch, apiPost, refusalReason } from "@/lib/api-client";
 
 /**
  * Organisation settings — wired to the real `apps/control-plane/src/http/
@@ -20,7 +21,8 @@ export type ApprovalActionType =
   | "break_glass"
   | "admin_access"
   | "offboarding"
-  | "package_install";
+  | "package_install"
+  | "package_ensure";
 
 /** Matches `approvals.mode`. */
 export type ApprovalMode = "none" | "single" | "dual";
@@ -44,7 +46,13 @@ export interface OrgSettings {
   /** How long events are kept before the retention sweep deletes them. */
   eventRetentionDays: number;
   retentionLocation: RetentionLocation;
+  /** Hours before an Ensure install that failed is tried again. Whole hours, 1 to 720. */
+  ensureRetryHours: number;
 }
+
+export const ENSURE_RETRY_HOURS_MIN = 1;
+export const ENSURE_RETRY_HOURS_MAX = 720;
+export const ENSURE_RETRY_HOURS_DEFAULT = 24;
 
 export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
   "snapshot_restore",
@@ -52,6 +60,7 @@ export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
   "admin_access",
   "offboarding",
   "package_install",
+  "package_ensure",
 ];
 
 export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
@@ -60,6 +69,7 @@ export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
   admin_access: "Admin access to an unowned machine",
   offboarding: "Offboarding",
   package_install: "Package install",
+  package_ensure: "Setting a package to Ensure",
 };
 
 export const LOGGING_TIER_LABELS: Record<LoggingTier, string> = {
@@ -87,6 +97,8 @@ export interface OrgPackageEntry {
   partOf?: string | null;
   /** Why it is allowed, or null. */
   description?: string | null;
+  /** What Cloudable does about it on every machine it reaches. */
+  setting: PackageSetting;
 }
 
 export interface OrgPackageEdit {
@@ -95,10 +107,26 @@ export interface OrgPackageEdit {
   pinned?: boolean;
   partOf?: string | null;
   description?: string | null;
+  /** Omitted keeps it. Moving to an ensure setting waits for an approval. */
+  setting?: PackageSetting;
 }
 
 interface OrgPackagesResponse {
   items: OrgPackageEntry[];
+}
+
+export interface UpdateOrgPackagesResult extends OrgPackagesResponse {
+  /** One per edit that set an ensure setting. `approved` means it was applied already. */
+  ensureApprovals?: PackageEnsureApprovalView[];
+}
+
+/** The control plane's own message for a refused edit (a pin conflict, an ensure setting it cannot take). */
+function editErrorMessage(error: Error): string {
+  if (error instanceof ApiError && error.body && typeof error.body === "object") {
+    const message = (error.body as Partial<ApiErrorBody>).error?.message;
+    if (typeof message === "string") return message;
+  }
+  return refusalReason(error) ?? error.message;
 }
 
 export function useOrgSettings() {
@@ -170,34 +198,58 @@ export function useRequestApprovalModesChange() {
  * removes an org-scoped entry, rather than only overriding an
  * already-resolved one (see `domain/organisation/packages.ts`).
  */
-export function useOrgPackages() {
+export function useOrgPackages(options: { enabled?: boolean } = {}) {
   return useQuery({
+    enabled: options.enabled ?? true,
     queryKey: organisationKeys.packages(),
     queryFn: () =>
       apiGet<OrgPackagesResponse>("/api/v1/organisation/packages").then((res) => res.items),
   });
 }
 
+/**
+ * Writes org package edits directly, for callers that show their own errors (the
+ * add/edit dialog). A refusal comes back as an Error carrying the server's own message.
+ */
+export async function updateOrgPackages(input: {
+  upserts?: OrgPackageEdit[];
+  removals?: string[];
+}): Promise<UpdateOrgPackagesResult> {
+  try {
+    return await apiPatch<UpdateOrgPackagesResult>("/api/v1/organisation/packages", input);
+  } catch (error) {
+    throw error instanceof Error ? new Error(editErrorMessage(error)) : error;
+  }
+}
+
 function useUpdateOrgPackages() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { upserts?: OrgPackageEdit[]; removals?: string[] }) =>
-      apiPatch<OrgPackagesResponse>("/api/v1/organisation/packages", input),
-    onSuccess: () => {
+      apiPatch<UpdateOrgPackagesResult>("/api/v1/organisation/packages", input),
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: organisationKeys.packages() });
+      if (result.ensureApprovals?.some((approval) => approval.status === "pending")) {
+        queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      }
     },
     onError: (error) => {
-      toast.error("Couldn't update the org package manifest", { description: error.message });
+      toast.error("Couldn't update the org package manifest", {
+        description: editErrorMessage(error),
+      });
     },
   });
 }
 
-export function useAddOrgPackage() {
+/** Changes one org entry's setting, keeping everything else about it. */
+export function useSetOrgPackageSetting() {
   const update = useUpdateOrgPackages();
   return {
     ...update,
-    mutate: (entry: OrgPackageEdit, options?: Parameters<typeof update.mutate>[1]) =>
-      update.mutate({ upserts: [entry] }, options),
+    mutate: (
+      input: { packageName: string; setting: PackageSetting },
+      options?: Parameters<typeof update.mutate>[1],
+    ) => update.mutate({ upserts: [input] }, options),
   };
 }
 

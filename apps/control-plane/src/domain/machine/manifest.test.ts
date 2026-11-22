@@ -3,6 +3,7 @@ import {
   type MachinePackageRow,
   computeUndeclaredPackages,
   declaredPackages,
+  findEnsureSettingProblems,
   findPinConflicts,
   packageNameFromSettingKey,
   packageSettingKey,
@@ -46,6 +47,7 @@ describe("resolveManifest", () => {
         resolvedFromScopeId: "machine-1",
         partOf: null,
         description: null,
+        setting: "allowed",
       },
     ]);
   });
@@ -94,6 +96,7 @@ describe("resolveManifest", () => {
         resolvedFromScopeId: "org-1",
         partOf: null,
         description: null,
+        setting: "allowed",
       },
       {
         packageName: "nodejs",
@@ -104,6 +107,7 @@ describe("resolveManifest", () => {
         resolvedFromScopeId: "machine-1",
         partOf: null,
         description: null,
+        setting: "allowed",
       },
     ]);
   });
@@ -332,5 +336,29 @@ describe("package setting keys", () => {
 
   test("keeps a scoped name intact, colons and all", () => {
     expect(packageNameFromSettingKey(packageSettingKey("@scope/pkg"))).toBe("@scope/pkg");
+  });
+});
+
+describe("findEnsureSettingProblems", () => {
+  test("Allowed is always fine, and an apt package can be ensured with or without a pin", () => {
+    expect(
+      findEnsureSettingProblems([
+        { packageName: "npm:@openai/codex", setting: "allowed", versionPin: null },
+        { packageName: "ripgrep", setting: "ensure_installed", versionPin: "14.1.0" },
+        { packageName: "jq", setting: "ensure_latest", versionPin: null },
+      ]),
+    ).toEqual([]);
+  });
+
+  test("refuses a package Cloudable cannot install, and Ensure latest version with a pin", () => {
+    expect(
+      findEnsureSettingProblems([
+        { packageName: "npm:@openai/codex", setting: "ensure_installed", versionPin: null },
+        { packageName: "nodejs", setting: "ensure_latest", versionPin: "20" },
+      ]).map((problem) => [problem.packageName, problem.reason]),
+    ).toEqual([
+      ["npm:@openai/codex", "not_installable"],
+      ["nodejs", "ensure_latest_with_pin"],
+    ]);
   });
 });

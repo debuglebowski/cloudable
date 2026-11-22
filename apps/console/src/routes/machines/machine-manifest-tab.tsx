@@ -1,25 +1,18 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState } from "react";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 
 import {
-  type ManifestEntry,
   type ManifestHistoryEntry,
   type ManifestHistoryState,
-  ManifestOverrideError,
-  getMachineManifest,
   getMachineManifestHistory,
   machinesKeys,
-  updateMachinePackages,
 } from "@/api/machines";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { ActorCell } from "@/components/actor-cell";
 import { Freshness } from "@/components/freshness";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PACKAGE_SETTING_LABELS } from "@/lib/package-setting";
 import { MachinePackagesTable } from "@/routes/machines/machine-packages-table";
 
 /**
@@ -44,7 +37,7 @@ import { MachinePackagesTable } from "@/routes/machines/machine-packages-table";
  * rejects a machine edit that collides with an org pin.
  *
  * The table itself lives in `machine-packages-table.tsx`; this tab is the
- * table, the form for declaring something new, and the change history.
+ * table and the change history.
  */
 export function MachineManifestTab({
   machineId,
@@ -57,18 +50,10 @@ export function MachineManifestTab({
   /** Asking for an install or a removal: the owner or an admin. Installs wait for an approver. */
   canRequestActions: boolean;
 }) {
-  const queryClient = useQueryClient();
-
-  const manifestQuery = useQuery({
-    queryKey: machinesKeys.manifest(machineId),
-    queryFn: () => getMachineManifest(machineId),
-  });
   const historyQuery = useQuery({
     queryKey: machinesKeys.manifestHistory(machineId),
     queryFn: () => getMachineManifestHistory(machineId),
   });
-
-  const manifest = manifestQuery.data ?? [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -76,9 +61,9 @@ export function MachineManifestTab({
         <CardHeader>
           <CardTitle>Packages</CardTitle>
           <CardDescription>
-            What this machine is allowed to have, and what it actually has. Permission is inherited
-            from the org unless this machine overrides it; installing and removing are separate
-            actions the machine carries out on its next check-in.
+            What this machine is allowed to have, and what it actually has. Each package comes from
+            the org or is set on this machine. Installing and removing happen on the machine's next
+            check-in.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -87,19 +72,6 @@ export function MachineManifestTab({
             canEditPermission={canEditManifest}
             canRequestActions={canRequestActions}
           />
-
-          {canEditManifest && (
-            <AddPackageForm
-              machineId={machineId}
-              existing={manifest}
-              onDone={() => {
-                void queryClient.invalidateQueries({ queryKey: machinesKeys.manifest(machineId) });
-                void queryClient.invalidateQueries({
-                  queryKey: machinesKeys.manifestHistory(machineId),
-                });
-              }}
-            />
-          )}
         </CardContent>
       </Card>
 
@@ -112,169 +84,17 @@ export function MachineManifestTab({
   );
 }
 
-function AddPackageForm({
-  machineId,
-  existing,
-  onDone,
-}: {
-  machineId: string;
-  existing: ManifestEntry[];
-  onDone: () => void;
-}) {
-  const nameId = useId();
-  const versionId = useId();
-  const partOfId = useId();
-  const descriptionId = useId();
-  const [packageName, setPackageName] = useState("");
-  const [versionPin, setVersionPin] = useState("");
-  const [partOf, setPartOf] = useState("");
-  const [description, setDescription] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const addMutation = useMutation({
-    mutationFn: (entry: {
-      packageName: string;
-      versionPin: string | null;
-      partOf?: string;
-      description?: string;
-    }) => updateMachinePackages(machineId, { upserts: [entry] }),
-    onSuccess: (_manifest, entry) => {
-      setPackageName("");
-      setVersionPin("");
-      setPartOf("");
-      setDescription("");
-      setError(null);
-      onDone();
-      toast.success(`"${entry.packageName}" declared on this machine`);
-    },
-    onError: (err) => {
-      setError(
-        err instanceof ManifestOverrideError
-          ? err.body.error.message
-          : "Couldn't add that package.",
-      );
-    },
-  });
-
-  const trimmedName = packageName.trim();
-  // A name already on the machine's own row is a duplicate; one inherited from
-  // the org is not — declaring it here is how you override it.
-  const isDuplicate = existing.some(
-    (entry) => entry.package === trimmedName && entry.source === "machine",
-  );
-  const canAdd = trimmedName !== "" && !isDuplicate && !addMutation.isPending;
-
-  function submit() {
-    if (!canAdd) return;
-    const trimmedVersion = versionPin.trim();
-    const trimmedParent = partOf.trim();
-    addMutation.mutate({
-      packageName: trimmedName,
-      versionPin: trimmedVersion === "" ? null : trimmedVersion,
-      ...(trimmedParent === "" ? {} : { partOf: trimmedParent }),
-      ...(description.trim() === "" ? {} : { description: description.trim() }),
-    });
-  }
-
-  return (
-    <div className="flex flex-col gap-2 border-t border-border pt-3">
-      <p className="text-xs font-medium text-muted-foreground">Declare a package on this machine</p>
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="flex flex-col gap-1">
-          <label htmlFor={nameId} className="text-xs text-muted-foreground">
-            Package
-          </label>
-          <Input
-            id={nameId}
-            value={packageName}
-            onChange={(event) => setPackageName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
-            placeholder="ripgrep or npm:playwright"
-            className="w-52"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={versionId} className="text-xs text-muted-foreground">
-            Version pin
-          </label>
-          <Input
-            id={versionId}
-            value={versionPin}
-            onChange={(event) => setVersionPin(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
-            placeholder="any"
-            className="w-32"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={partOfId} className="text-xs text-muted-foreground">
-            Part of
-          </label>
-          <Input
-            id={partOfId}
-            value={partOf}
-            onChange={(event) => setPartOf(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
-            placeholder="none"
-            list={`${partOfId}-options`}
-            className="w-44"
-          />
-          <datalist id={`${partOfId}-options`}>
-            {existing
-              .filter((entry) => !entry.excluded)
-              .map((entry) => (
-                <option key={entry.package} value={entry.package} />
-              ))}
-          </datalist>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={descriptionId} className="text-xs text-muted-foreground">
-            Why
-          </label>
-          <Input
-            id={descriptionId}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
-            placeholder="GitHub CLI for PR work"
-            maxLength={500}
-            className="w-64"
-          />
-        </div>
-        <Button size="sm" onClick={submit} disabled={!canAdd}>
-          {addMutation.isPending ? "Adding…" : "Add package"}
-        </Button>
-      </div>
-      {isDuplicate && (
-        <p className="text-xs text-destructive">
-          "{trimmedName}" is already set on this machine — edit the row above instead.
-        </p>
-      )}
-      <p className="text-xs text-muted-foreground">
-        Not from apt? Prefix it: <code>npm:</code>, <code>pipx:</code>, <code>cargo:</code> for
-        global tools, <code>home:</code> for software in the home folder. A part is allowed only
-        while what it is part of is.
-      </p>
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
-  );
-}
-
 /** Renders one side of a change the way the audit summary does. */
-function describeState(state: ManifestHistoryState | null): string {
+export function describeState(state: ManifestHistoryState | null): string {
   if (state === null) return "not declared";
   if (state.excluded) return "excluded";
   const version = state.versionPin ?? "any version";
-  const described = state.pinned ? `${version}, pinned` : version;
-  return state.partOf ? `${described}, part of ${state.partOf}` : described;
+  const parts = [state.pinned ? `${version}, pinned` : version];
+  if (state.partOf) parts.push(`part of ${state.partOf}`);
+  if (state.setting && state.setting !== "allowed") {
+    parts.push(PACKAGE_SETTING_LABELS[state.setting]);
+  }
+  return parts.join(", ");
 }
 
 function ManifestHistoryCard({

@@ -1,7 +1,8 @@
 # Machine lifecycle
 
-How machine lifecycle is implemented. Machines are archived, never deleted, and drift is
-flagged, never auto-corrected — nothing in this lifecycle silently "fixes" anything either.
+How machine lifecycle is implemented. Machines are archived, never deleted. Drift is flagged.
+Cloudable fixes only what a package's Ensure setting covers, and that is not part of this
+lifecycle (see `docs/inheritance.md`). Nothing in this lifecycle silently "fixes" anything.
 
 Domain code: `apps/control-plane/src/domain/archive/*`. HTTP surface:
 `apps/control-plane/src/http/routes/archive.ts` (+ handlers in `http/handlers/archive.ts`),

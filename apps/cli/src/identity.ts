@@ -22,6 +22,8 @@ export interface OrgWire {
   loggingTierOverrideCount: number;
   retentionDefaultDays: number;
   eventRetentionDays: number;
+  /** Hours before a failed Ensure install is tried again. Absent from an older control plane. */
+  ensureRetryHours?: number;
   retentionLocation: "customer" | "cloudable_sweden_central";
 }
 

@@ -1,3 +1,4 @@
+import type { PackageSetting } from "@cloudable/contracts";
 import { machinePackages, machines, people } from "@cloudable/schema";
 import { and, asc, eq, gt, inArray, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
@@ -10,17 +11,22 @@ import { EventBus } from "../../services/EventBus";
 import { type ProvisioningError, ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { UBUNTU_IMAGES } from "../../services/ProvisioningService.azure";
 import { isProviderEnabled } from "../integrations/integrations";
+import { readEnsureRetryHours } from "../organisation/ensure-retry";
 import { readMalwareProtectionWith } from "../organisation/malware-protection";
 import { generateDefaultMachineName } from "./default-name";
+import { decideEnsureActions, nextEnsureAttemptAt } from "./ensure";
 import {
   InvalidCursorError,
   InvalidMachineRequestError,
   MachineNotFoundError,
+  type PackageEnsureSettingError,
   PackagePinConflictError,
+  ensureSettingError,
 } from "./errors";
 import {
   machineCreatedEvent,
   machineOwnerAssignedEvent,
+  machinePackageActionRequestedEvent,
   machineProvisioningFailedEvent,
   machineSettingChangedEvent,
 } from "./events";
@@ -28,12 +34,17 @@ import {
   type MachinePackageRow,
   type ResolvedManifestEntry,
   declaredPackages,
+  findEnsureSettingProblems,
   findPinConflicts,
   packageSettingKey,
   resolveManifest,
 } from "./manifest";
 import { queryManifestHistory } from "./manifest-history";
-import { outstandingActionsByPackage } from "./package-actions";
+import {
+  enqueuePackageAction,
+  lastEnsureActionsByPackage,
+  outstandingActionsByPackage,
+} from "./package-actions";
 import { buildPackagesView } from "./packages-view";
 import {
   type AccessMethodsEnabled,
@@ -120,6 +131,12 @@ export interface PackageManifestEdit {
   partOf?: string | null | undefined;
   /** Why it is allowed; null clears it, omitted keeps it. */
   description?: string | null | undefined;
+  /**
+   * Omitted keeps it. This writer does not ask for approval: callers that take
+   * edits from a person go through `domain/machine/package-ensure.ts`, which
+   * holds an ensure edit back until its `package_ensure` approval is granted.
+   */
+  setting?: PackageSetting | undefined;
 }
 
 export interface UpdateMachinePackagesInput {
@@ -165,6 +182,7 @@ const toManifestRow = (row: MachinePackageTableRow): MachinePackageRow => ({
   excluded: row.excluded,
   partOf: row.partOf,
   description: row.description,
+  setting: row.setting,
   source: row.source,
 });
 
@@ -675,7 +693,10 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       input: UpdateMachinePackagesInput,
     ): Effect.Effect<
       UpdateMachinePackagesResult,
-      MachineServiceError | MachineNotFoundError | PackagePinConflictError
+      | MachineServiceError
+      | MachineNotFoundError
+      | PackagePinConflictError
+      | PackageEnsureSettingError
     > =>
       Effect.gen(function* () {
         const machine = yield* fetchMachine(input.machineId, input.orgId);
@@ -745,6 +766,8 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             upsert.pinned === undefined &&
             upsert.partOf === undefined &&
             upsert.description === undefined &&
+            upsert.setting === undefined &&
+            (previous.setting ?? "allowed") === "allowed" &&
             previous.versionPin === null &&
             previous.pinned === false &&
             (previous.partOf ?? null) === null &&
@@ -773,8 +796,15 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                 upsert.description !== undefined
                   ? upsert.description
                   : (previous?.description ?? null),
+              setting:
+                upsert.setting !== undefined ? upsert.setting : (previous?.setting ?? "allowed"),
             };
           });
+
+        const ensureProblems = findEnsureSettingProblems(resolvedUpserts);
+        if (ensureProblems.length > 0) {
+          return yield* Effect.fail(ensureSettingError(ensureProblems));
+        }
 
         yield* Effect.tryPromise({
           try: async () => {
@@ -790,6 +820,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   excluded: upsert.excluded,
                   partOf: upsert.partOf,
                   description: upsert.description,
+                  setting: upsert.setting,
                   source: "machine",
                 })
                 .onConflictDoUpdate({
@@ -804,6 +835,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                     excluded: upsert.excluded,
                     partOf: upsert.partOf,
                     description: upsert.description,
+                    setting: upsert.setting,
                     source: "machine",
                     updatedAt: new Date(),
                   },
@@ -852,6 +884,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   excluded: previous.excluded,
                   partOf: previous.partOf,
                   description: previous.description,
+                  setting: previous.setting,
                 }
               : null,
             current: current
@@ -861,6 +894,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   excluded: current.excluded,
                   partOf: current.partOf,
                   description: current.description,
+                  setting: current.setting,
                 }
               : null,
             overridesLevel: previous?.source ?? "none",
@@ -896,10 +930,10 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
      * What the agent's poll serves: the version it compares against, and the
      * packages this machine is allowed to have.
      *
-     * The allowed list is a permission list, not an install list. The agent
-     * does not act on it — it acts on `pendingActions` — and it is sent so the
-     * agent can tell an allowed package from an undeclared one without a round
-     * trip.
+     * The agent does not install from the allowed list — it acts on
+     * `pendingActions`, which for *Ensure* packages `ensurePackages` queues —
+     * and it is sent so the agent can tell an allowed package from an
+     * undeclared one without a round trip, and knows which versions to report.
      */
     const desiredStateFor = (machineId: string, orgId: string) =>
       Effect.gen(function* () {
@@ -934,6 +968,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       installedPackages: ReadonlyArray<string>;
       manuallyInstalledPackages?: ReadonlyArray<string> | undefined;
       declaredPackageVersions?: Readonly<Record<string, string>> | undefined;
+      availablePackageVersions?: Readonly<Record<string, string>> | undefined;
       observedAt: Date;
     }) =>
       Effect.tryPromise({
@@ -948,6 +983,9 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                 ? [...input.manuallyInstalledPackages]
                 : null,
               declaredPackageVersions: input.declaredPackageVersions ?? {},
+              // Null, not {}, when the agent did not say: an older agent knows nothing about
+              // the repository, which is different from the repository offering nothing.
+              availablePackageVersions: input.availablePackageVersions ?? null,
               baselinePackages: sql`coalesce(${machines.baselinePackages}, ${JSON.stringify([...input.installedPackages])}::jsonb)`,
               // ISO string with an explicit cast, not the Date itself: a JS Date
               // bound inside a `sql` template never reaches the driver's
@@ -971,6 +1009,27 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         const pendingActions = yield* outstandingActionsByPackage(db, machine.id).pipe(
           Effect.catchAll(() => Effect.succeed(new Map())),
         );
+        const retryWaitMs = (yield* readEnsureRetryHours(db, machine.orgId)) * 60 * 60 * 1000;
+        const lastEnsure = yield* lastEnsureActionsByPackage(db, machine.id).pipe(
+          Effect.catchAll(() => Effect.succeed(new Map())),
+        );
+        const ensureFailures = new Map<
+          string,
+          { failedAt: string; reason: string; nextAttemptAt: string }
+        >();
+        for (const [packageName, last] of lastEnsure) {
+          const nextAttemptAt = nextEnsureAttemptAt(last, retryWaitMs);
+          if (!nextAttemptAt) continue;
+          ensureFailures.set(packageName, {
+            failedAt: last.finishedAt.toISOString(),
+            reason:
+              last.failureReason ??
+              (last.status === "expired"
+                ? "the agent took the install and never reported back"
+                : "the package manager reported a failure"),
+            nextAttemptAt: nextAttemptAt.toISOString(),
+          });
+        }
 
         return {
           items: buildPackagesView({
@@ -982,9 +1041,96 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             baselinePackages: stringArray(machine.baselinePackages),
             manuallyInstalledPackages: stringArray(machine.manuallyInstalledPackages),
             pendingActions,
+            availablePackageVersions: (machine.availablePackageVersions ?? undefined) as
+              | Record<string, string>
+              | undefined,
+            ensureFailures,
           }),
           lastReportedAt: machine.lastVerifiedAt?.toISOString() ?? null,
         };
+      });
+
+    /**
+     * Queues the installs this machine's *Ensure* packages need, judged on what
+     * its agent last reported. Called from the report handler, after the
+     * inventory is stored. Each queued install is recorded as
+     * `machine.package_action_requested` with a `system` actor and the setting
+     * that caused it. See `domain/machine/ensure.ts` for what is decided and why.
+     */
+    const ensurePackages = (input: { machineId: string; orgId: string; now: Date }) =>
+      Effect.gen(function* () {
+        const machine = yield* fetchMachine(input.machineId, input.orgId);
+        // An archived machine is governed by nothing; it gets nothing installed either.
+        if (machine.archivedAt !== null) return [];
+        const rows = (yield* fetchManifestRows(machine)).map(toManifestRow);
+        const manifest = resolveManifest(rows, {
+          orgId: machine.orgId,
+          templateId: machine.templateId,
+          machineId: machine.id,
+        });
+        if (!manifest.some((entry) => entry.setting !== "allowed")) return [];
+
+        const outstanding = yield* outstandingActionsByPackage(db, machine.id);
+        const lastEnsureActions = yield* lastEnsureActionsByPackage(db, machine.id);
+        const retryWaitMs = (yield* readEnsureRetryHours(db, machine.orgId)) * 60 * 60 * 1000;
+        const decisions = decideEnsureActions({
+          manifest,
+          installedPackages: stringArray(machine.installedPackages),
+          installedVersions: (machine.declaredPackageVersions ?? {}) as Record<string, string>,
+          availableVersions: (machine.availablePackageVersions ?? {}) as Record<string, string>,
+          baselinePackages: new Set(stringArray(machine.baselinePackages) ?? []),
+          outstanding: new Set(outstanding.keys()),
+          lastEnsureActions,
+          retryWaitMs,
+          now: input.now,
+        });
+
+        const queued: string[] = [];
+        for (const decision of decisions) {
+          const correlationId = ulid();
+          const action = yield* enqueuePackageAction(db, {
+            machineId: machine.id,
+            orgId: machine.orgId,
+            packageName: decision.packageName,
+            op: "install",
+            versionPin: decision.versionPin,
+            requestedByPersonId: null,
+            trigger: decision.trigger,
+            correlationId,
+            isBaselinePackage: false,
+          }).pipe(
+            // `already_pending` is a race with a person's request, and fine: one install is
+            // on its way either way. Anything else is logged and tried on the next report.
+            Effect.catchAll((error) =>
+              (error.reason === "already_pending"
+                ? Effect.void
+                : Effect.logWarning(
+                    `ensure: could not queue ${decision.packageName} on ${machine.id}: ${error.message}`,
+                  )
+              ).pipe(Effect.as(null)),
+            ),
+          );
+          if (!action) continue;
+          yield* publishOrFail([
+            machinePackageActionRequestedEvent({
+              machineId: machine.id,
+              orgId: machine.orgId,
+              correlationId,
+              actorType: "system",
+              actorId: "system",
+              actionId: action.id,
+              packageName: action.packageName,
+              op: action.op,
+              versionPin: action.versionPin,
+              trigger: decision.trigger,
+              ensureReason: decision.reason,
+              fromVersion: decision.installedVersion,
+              toVersion: decision.availableVersion,
+            }),
+          ]);
+          queued.push(decision.packageName);
+        }
+        return queued;
       });
 
     return {
@@ -996,6 +1142,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       desiredStateFor,
       recordReportedPackages,
       packagesView,
+      ensurePackages,
     } as const;
   }),
   dependencies: [EventBus.Default],

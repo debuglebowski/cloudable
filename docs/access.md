@@ -31,6 +31,7 @@ approval settings needs an approver specifically, not just any admin.
 | Restart, upgrade, take a snapshot | yes | yes | no |
 | Ask for a package install or removal | yes | yes | no |
 | Change which packages it may have | no | yes | no |
+| Set a package to Ensure installed or Ensure latest version | no | yes, once a `package_ensure` approval is granted | no |
 | Restore a snapshot | yes, to the same owner | yes, to the same owner | no |
 
 Every one of these is recorded with the person who did it.
@@ -273,7 +274,12 @@ A person with no Cloudable app role is then refused at sign-in.
 
 - **Package installs** need an approval, by default from one person (`package_install` on the
   Organisation page). The owner asks on their own machine, an admin on any. The install is queued
-  only once it is approved. A removal is queued at once.
+  only once it is approved. A removal is queued at once. A removal of a package set to Ensure is
+  refused, because Cloudable would install it again.
+- **Setting a package to Ensure** needs an approval, by default from one person (`package_ensure`
+  on the Organisation page). Only an admin can ask, as for any manifest edit. Moving between the
+  two Ensure settings needs one too. The setting is written only once it is approved. The installs
+  and updates it then causes need no approval of their own. Moving back to Allowed applies at once.
 - **Approval settings** change only with an approver's sign-off. An admin asks
   (`POST /api/v1/organisation/approval-modes`), an approver decides, then the new modes apply.
   This request can never be set to need no one.

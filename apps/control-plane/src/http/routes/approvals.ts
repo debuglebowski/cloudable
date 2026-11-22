@@ -16,6 +16,7 @@ const ActionType = Schema.Literal(
   "admin_access",
   "offboarding",
   "package_install",
+  "package_ensure",
   "approval_settings_change",
 );
 /** What `POST /api/v1/approvals` accepts. Package installs and approval-settings changes are

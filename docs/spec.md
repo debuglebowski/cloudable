@@ -14,24 +14,29 @@ Violating any of these breaks a stated customer promise. They are not preference
 1. **No cloud credential is ever stored.** Federation only. Client secrets are never acceptable.
 2. **Events are append-only.** No updates. The only delete is the retention sweep, which removes events older than the org's retention window (default 365 days, never below 90). Retention is expiry, not mutation.
 3. **A machine has exactly one owner, and the owner is a person.** No shared, team-owned or unowned machines.
-4. **Nothing installs or removes software unasked.** A person asks, per package, and the request,
-   its outcome and its failures are all recorded. The package manifest is a *permission* list —
-   declaring a package says a machine may have it, never that something will go and install it.
-   Nothing adopts software it found running into the manifest either. The one exception is
-   Cloudable's own components: the agent, the tunnel daemon, and monitoring tools such as the
-   vulnerability scanner. Monitoring tools install only after an admin turns them on for the org,
-   and every install and update is recorded. The list is closed and lives in `docs/agents.md`.
-   Why: compliance needs the same monitoring on every machine, and asking per machine would leave
-   gaps in the evidence.
-5. **Drift is never auto-corrected.** Detected, surfaced, aged — never silently removed.
+4. **Software changes only through a recorded decision.** A person asks for a package, or an
+   admin sets it to *Ensure installed* or *Ensure latest version*. Either way the request, its
+   outcome and its failures are all recorded. Every other package in the manifest is *Allowed*.
+   Declaring an Allowed package says a machine may have it, never that something will go and
+   install it. Setting a package to Ensure needs an approval. Nothing adopts software it found
+   running into the manifest either. Cloudable's own components install without either decision.
+   These are the agent, the tunnel daemon, and monitoring tools such as the vulnerability scanner.
+   Monitoring tools install only after an admin turns them on for the org, and every install and
+   update is recorded. The list is closed and lives in `docs/agents.md`. Why: compliance needs the
+   same monitoring on every machine, and asking per machine would leave gaps in the evidence.
+5. **Drift is flagged. Cloudable fixes only what a package's setting covers.** *Ensure installed*
+   fixes a missing package. *Ensure latest version* also fixes an outdated one. Undeclared software
+   is detected, surfaced and aged. It is never silently removed.
 6. **Machines are never deleted.** Only archived. Snapshot data expires; the record is permanent.
 7. **No inbound network access to any machine, ever.** Agents are pull-only; tunnels are outbound.
 8. **Cloudable never stores customer secrets.** It injects at runtime from the customer's own store.
 9. **The CA private key never enters the control plane.** Sign operations only.
 10. **A machine changes only through an explicit, audited action.** Create, archive, restart,
-    reimage, and per-package install/remove — each one requested by a person and recorded. No
-    background loop mutates a machine. The status-refresh pass only *observes*, and writes nothing
-    but the state it read back.
+    reimage, and per-package install/remove. Each one is asked for by a person, or required by an
+    admin's approved *Ensure* setting, and each is recorded. No background loop mutates a machine.
+    An Ensure install is decided when the agent reports, and is queued as a recorded action like
+    any other. The status-refresh pass only *observes*, and writes nothing but the state it read
+    back.
 11. **Event type names are a public interface.** Additive changes only. No renaming.
 12. **The agent never submits audit events.** It reports observed state; the control plane diffs and emits. A user with root could otherwise write their own audit history.
 
@@ -101,6 +106,8 @@ An entry names a package and **optionally** pins a version. `docker` and `nodejs
 
 **Resolution: lowest level wins.** Machine beats template beats organisation.
 
+**Setting:** each entry is *Allowed* (the default), *Ensure installed* or *Ensure latest version*. Allowed means a machine may have it and a person installs it. Ensure installed means Cloudable installs it when it is missing. Ensure latest version also updates it when the package repository has a newer version. Setting Ensure needs an approval. Only apt packages can be ensured. See `docs/inheritance.md`.
+
 **Pinning:** the organisation can mark an entry pinned. A pinned entry cannot be overridden below. Attempting to override one is a **validation error at edit time**, not a silent no-op at reconcile.
 
 **Scope 2:** per-machine policy disabling local installation entirely.
@@ -113,7 +120,7 @@ An entry names a package and **optionally** pins a version. `docker` and `nodejs
 
 Per machine: package manifest, persistent paths, access methods enabled, logging tier, region, one owner.
 
-**Allowlist:** anything installed outside the manifest is detected on reconcile and surfaced.
+**Allowlist:** anything installed outside the manifest is detected on reconcile and surfaced. It is never removed for you.
 
 No Ansible — push models break against ephemeral or sleeping machines. Packer baking is optional and compatible.
 
@@ -125,7 +132,7 @@ Two separate daemons. Different trust levels, different failure domains.
 
 ### 8.1 Control agent (systemd)
 - On boot: attest identity, report installed packages and config state
-- Pull desired state, reconcile, enforce allowlist, emit events
+- Pull desired state and perform the package actions it was handed. It never decides an install itself, and it reports state rather than events (invariant 12)
 - **Pull-only. No inbound access ever.**
 - Poll ~30s with ETag / version check
 - **Backoff: exponential with full jitter, ~10 min cap.** Jitter is the part that matters — the failure mode is a synchronised fleet-wide poll after a control plane outage
@@ -239,7 +246,7 @@ See `docs/access.md` for implementation detail.
 
 **Approval mode is policy**, inherited through the chain, per action type: **none / single / dual**.
 
-Consumers: snapshot restore, break-glass, admin access to an unowned machine, offboarding, package installs, and changes to approval settings.
+Consumers: snapshot restore, break-glass, admin access to an unowned machine, offboarding, package installs, setting a package to Ensure, and changes to approval settings.
 
 **Who decides.** An approver or an admin. Never the person who asked, the person the request is about, or the owner of the machine it is about. A change to approval settings needs an approver specifically, and can never resolve to "none": otherwise an admin could set a mode to "none" and then act alone.
 
@@ -445,8 +452,8 @@ See `docs/frontend.md` for implementation detail (tokens, routing/nav convention
 | Per-machine connection passwords | A long-lived shared secret resident on the machine |
 | SSH public key upload | Certificates replace it entirely |
 | Shared, team-owned or unowned machines | Breaks offboarding, ownership checks and break-glass notification |
-| Auto-correcting drift | A tool that deletes an engineer's packages gets routed around |
-| A loop that converges a machine to its manifest | Same reason. The manifest is permission; installing is a person's decision, one package at a time |
+| Auto-correcting drift beyond what an Ensure setting covers | A tool that deletes an engineer's packages gets routed around. Ensure only installs a missing package or updates an outdated one. It never removes anything |
+| A loop that converges a machine to its whole manifest | Same reason. An Allowed package is installed only when a person asks. Only packages an admin set to Ensure, with an approval, are installed without one |
 | code-server or any full IDE | Owning an IDE's update cadence and vulnerability surface |
 | Idle suspend / cost optimisation | Lowers a bill, does not unlock a customer |
 | General application hosting | Competing with Kubernetes and Vercel |
