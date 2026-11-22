@@ -27,6 +27,7 @@ import {
   updateMachinePackages,
 } from "@/api/machines";
 import { useOrgPackages } from "@/api/organisation";
+import { PackageEntryDialog, type PackageEntryDialogMode } from "@/components/package-entry-dialog";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import {
   AlertDialog,
@@ -73,10 +74,6 @@ import {
   formatNextTry,
   settingUnavailableReason,
 } from "@/lib/package-setting";
-import {
-  PackageEntryDialog,
-  type PackageEntryDialogMode,
-} from "@/routes/machines/package-entry-dialog";
 
 /**
  * A machine's packages: what it is allowed to have, what it actually has, and
@@ -336,7 +333,13 @@ export function MachinePackagesTable({
       </div>
 
       <PackageEntryDialog
-        machineId={machineId}
+        scope="machine"
+        save={(entry) =>
+          updateMachinePackages(machineId, {
+            // Saving an entry means it is allowed here. Excluding is the Permission select's job.
+            upserts: [{ ...entry, excluded: false }],
+          })
+        }
         mode={entryDialog}
         onOpenChange={(open) => {
           if (!open) setEntryDialog(null);

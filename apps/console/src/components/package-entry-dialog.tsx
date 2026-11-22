@@ -3,13 +3,13 @@ import { type KeyboardEvent, type ReactNode, useEffect, useId, useState } from "
 import { toast } from "sonner";
 
 import {
-  type MachinePackageEdit,
   ManifestOverrideError,
+  type PackageEnsureApprovalView,
   type PackageSetting,
-  updateMachinePackages,
 } from "@/api/machines";
 import { PackageSettingSelect } from "@/components/package-setting-select";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { refusalReason } from "@/lib/api-client";
 import {
   PACKAGE_SETTING_LABELS,
@@ -33,6 +34,18 @@ export interface PackageEntryValues {
   partOf: string | null;
   description: string | null;
   setting: PackageSetting;
+  /** Org entries only: machines cannot override a pinned entry. */
+  pinned?: boolean;
+}
+
+/** One saved entry, as both write paths take it. */
+export interface PackageEntrySave {
+  packageName: string;
+  versionPin: string | null;
+  partOf: string | null;
+  description: string | null;
+  setting: PackageSetting;
+  pinned?: boolean;
 }
 
 export type PackageEntryDialogMode =
@@ -41,19 +54,24 @@ export type PackageEntryDialogMode =
   | { kind: "edit"; values: PackageEntryValues; inherited: boolean };
 
 /**
- * Adds a package to one machine's manifest, or changes an entry already there.
- * Every field is sent on save, so what the dialog shows is exactly what is
- * written. Moving to an Ensure setting waits for an approval, like everywhere else.
+ * Adds a package to a manifest, or changes an entry already there, for one
+ * machine or for the whole org. Every field is sent on save, so what the
+ * dialog shows is exactly what is written. Moving to an Ensure setting waits
+ * for an approval, like everywhere else.
  */
 export function PackageEntryDialog({
-  machineId,
+  scope,
+  save,
   mode,
   onOpenChange,
   takenNames,
   partOfOptions,
   onSaved,
 }: {
-  machineId: string;
+  /** The org's entries can be pinned and apply to every machine; a machine's apply to it alone. */
+  scope: "machine" | "org";
+  /** Writes the entry. Returns the approvals any Ensure setting asked for. */
+  save: (entry: PackageEntrySave) => Promise<{ ensureApprovals?: PackageEnsureApprovalView[] }>;
   /** Null closes the dialog. */
   mode: PackageEntryDialogMode | null;
   onOpenChange: (open: boolean) => void;
@@ -68,11 +86,13 @@ export function PackageEntryDialog({
   const partOfId = useId();
   const descriptionId = useId();
   const settingId = useId();
+  const pinnedId = useId();
   const [packageName, setPackageName] = useState("");
   const [versionPin, setVersionPin] = useState("");
   const [partOf, setPartOf] = useState("");
   const [description, setDescription] = useState("");
   const [setting, setSetting] = useState<PackageSetting>("allowed");
+  const [pinned, setPinned] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Start from the entry being edited each time the dialog opens.
@@ -84,38 +104,36 @@ export function PackageEntryDialog({
     setPartOf(values?.partOf ?? "");
     setDescription(values?.description ?? "");
     setSetting(values?.setting ?? "allowed");
+    setPinned(values?.pinned ?? false);
     setError(null);
   }, [mode]);
 
   const saveMutation = useMutation({
-    mutationFn: (entry: MachinePackageEdit & { setting: PackageSetting }) =>
-      updateMachinePackages(machineId, { upserts: [entry] }),
+    mutationFn: save,
     onSuccess: (result, entry) => {
       onOpenChange(false);
       onSaved();
-      const approval = result.ensureApprovals.find((a) => a.packageName === entry.packageName);
+      const ensureApprovals = result.ensureApprovals ?? [];
+      const approval = ensureApprovals.find((a) => a.packageName === entry.packageName);
       if (approval && approval.status !== "approved") {
         // An Ensure setting waits for its approval, and so does the rest of this edit.
-        const outcome = describeSettingChange(
-          entry.packageName,
-          entry.setting,
-          result.ensureApprovals,
-        );
+        const outcome = describeSettingChange(entry.packageName, entry.setting, ensureApprovals);
         const show = outcome.kind === "success" ? toast.success : toast.error;
         show(outcome.title, outcome.description ? { description: outcome.description } : undefined);
         return;
       }
+      const where = scope === "org" ? "for every machine" : "on this machine";
       toast.success(
         mode?.kind === "edit"
-          ? `"${entry.packageName}" updated on this machine`
-          : `"${entry.packageName}" added to this machine`,
+          ? `"${entry.packageName}" updated ${where}`
+          : `"${entry.packageName}" added ${where}`,
       );
     },
     onError: (err) => {
       setError(
         err instanceof ManifestOverrideError
           ? err.body.error.message
-          : (refusalReason(err) ?? "Couldn't save that package."),
+          : (refusalReason(err) ?? err.message ?? "Couldn't save that package."),
       );
     },
   });
@@ -142,9 +160,7 @@ export function PackageEntryDialog({
       partOf: trimmedParent === "" ? null : trimmedParent,
       description: trimmedDescription === "" ? null : trimmedDescription,
       setting,
-      // Saving an entry means it is allowed here. An excluded entry is changed with the
-      // Permission select, never from this dialog.
-      excluded: false,
+      ...(scope === "org" ? { pinned } : {}),
     });
   }
 
@@ -153,7 +169,9 @@ export function PackageEntryDialog({
   };
 
   const title = !isEdit
-    ? "Add a package to this machine"
+    ? scope === "org"
+      ? "Add a package for every machine"
+      : "Add a package to this machine"
     : mode.inherited
       ? `Override "${trimmedName}" on this machine`
       : `Edit "${trimmedName}"`;
@@ -171,6 +189,8 @@ export function PackageEntryDialog({
               </>
             ) : mode.inherited ? (
               "This package comes from the org. Saving gives this machine its own entry, which it uses instead. Reset to the org's entry any time from the row's menu."
+            ) : scope === "org" ? (
+              "Every machine without its own entry for this package uses this one."
             ) : (
               "This entry belongs to this machine."
             )}
@@ -244,9 +264,27 @@ export function PackageEntryDialog({
               className="h-10 w-full"
             />
           </Field>
+          {scope === "org" && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id={pinnedId}
+                  checked={pinned}
+                  onCheckedChange={(checked) => setPinned(checked === true)}
+                />
+                <Label htmlFor={pinnedId} className="text-sm font-normal">
+                  Pinned
+                </Label>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                A machine cannot override or exclude a pinned package.
+              </span>
+            </div>
+          )}
           {isDuplicate && (
             <p className="text-xs text-destructive">
-              "{trimmedName}" is already on this machine. Use Edit in its row instead.
+              "{trimmedName}" is already {scope === "org" ? "on the org list" : "on this machine"}.
+              Use Edit in its row instead.
             </p>
           )}
           {settingProblem && trimmedName !== "" && (

@@ -207,6 +207,21 @@ export function useOrgPackages(options: { enabled?: boolean } = {}) {
   });
 }
 
+/**
+ * Writes org package edits directly, for callers that show their own errors (the
+ * add/edit dialog). A refusal comes back as an Error carrying the server's own message.
+ */
+export async function updateOrgPackages(input: {
+  upserts?: OrgPackageEdit[];
+  removals?: string[];
+}): Promise<UpdateOrgPackagesResult> {
+  try {
+    return await apiPatch<UpdateOrgPackagesResult>("/api/v1/organisation/packages", input);
+  } catch (error) {
+    throw error instanceof Error ? new Error(editErrorMessage(error)) : error;
+  }
+}
+
 function useUpdateOrgPackages() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -235,15 +250,6 @@ export function useSetOrgPackageSetting() {
       input: { packageName: string; setting: PackageSetting },
       options?: Parameters<typeof update.mutate>[1],
     ) => update.mutate({ upserts: [input] }, options),
-  };
-}
-
-export function useAddOrgPackage() {
-  const update = useUpdateOrgPackages();
-  return {
-    ...update,
-    mutate: (entry: OrgPackageEdit, options?: Parameters<typeof update.mutate>[1]) =>
-      update.mutate({ upserts: [entry] }, options),
   };
 }
 
