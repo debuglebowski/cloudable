@@ -25,6 +25,8 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=/etc/cloudable/agent.env
 ExecStart=/opt/cloudable/agent
+OOMScoreAdjust=-750
+OOMPolicy=continue
 Restart=always
 RestartSec=5
 

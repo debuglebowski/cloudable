@@ -435,6 +435,8 @@ StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/opt/cloudable/agent
+OOMScoreAdjust=-750
+OOMPolicy=continue
 Restart=always
 RestartSec=5
 Environment=CONTROL_PLANE_URL=${config.controlPlaneBaseUrl}
@@ -465,6 +467,8 @@ RequiresMountsFor=/home
 
 [Service]
 ExecStart=/opt/cloudable/tunnel-daemon
+OOMScoreAdjust=-750
+OOMPolicy=continue
 Restart=always
 RestartSec=5
 Environment=CONTROL_PLANE_URL=${config.controlPlaneBaseUrl}

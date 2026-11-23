@@ -207,6 +207,15 @@ describe("cloudInitFor", () => {
     expect(script).toContain("systemctl enable --now cloudable-tunnel-daemon");
   });
 
+  test("protects the control and tunnel daemons during low-memory recovery", () => {
+    const script = decode();
+    for (const binary of ["agent", "tunnel-daemon"]) {
+      expect(script).toContain(
+        `ExecStart=/opt/cloudable/${binary}\nOOMScoreAdjust=-750\nOOMPolicy=continue`,
+      );
+    }
+  });
+
   // Regression: both units were `Restart=always` with no override, so
   // systemd's default burst limit (5 crashes in 10s) permanently stopped
   // them after any sustained boot-time failure (e.g. the attestation bug
