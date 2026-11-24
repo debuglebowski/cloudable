@@ -75,9 +75,9 @@ export interface MachineDescriptor {
   /**
    * The declared package manifest to provision the machine with, as plain
    * entry strings (e.g. "docker", "nodejs 20").
-   * Resolved from the org → template → machine manifest chain at creation
+   * Resolved from the org → profile → machine manifest chain at creation
    * time (see `MachineService.create`) — a brand-new machine has no
-   * machine-level overrides yet, so this is the org (+ template) manifest.
+   * machine-level overrides yet, so this is the org (+ profile) manifest.
    */
   packages?: ReadonlyArray<string>;
   /** See `MalwareProtection`. Absent means `none`. */

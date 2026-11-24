@@ -141,7 +141,7 @@ const authorizeInspection = (input: {
     const db = yield* Db;
     const accessMethods = yield* resolveAccessMethodsEnabled(db, {
       orgId: machine.orgId,
-      templateId: machine.templateId,
+      profileId: machine.profileId,
       machineId: machine.id,
     }).pipe(
       Effect.mapError((cause) => new ArchiveDbError({ reason: `settings: ${cause.reason}` })),

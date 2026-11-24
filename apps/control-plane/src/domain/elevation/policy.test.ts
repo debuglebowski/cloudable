@@ -15,7 +15,7 @@ import {
   resolveElevationTtlMinutes,
 } from "./policy";
 
-const chain = { orgId: "org-1", templateId: null, machineId: "machine-1" };
+const chain = { orgId: "org-1", profileId: null, machineId: "machine-1" };
 
 describe("requiredApprovalModeFloor", () => {
   test("file_recovery floors at single", () => {

@@ -22,7 +22,7 @@ export type MachineProvider = "azure" | "docker" | "fake";
 export interface Machine {
   id: string;
   orgId: string;
-  templateId: string | null;
+  profileId: string | null;
   ownerPersonId: string | null;
   name: string;
   provider: MachineProvider;
@@ -53,15 +53,15 @@ export function isMachineStale(lastVerifiedAt: string | null): boolean {
   );
 }
 
-export type SettingLevel = "org" | "template" | "machine";
+export type SettingLevel = "org" | "profile" | "machine";
 
 export interface ManifestEntry {
   package: string;
   /** `null` means "any" version — no pin. */
   version: string | null;
   source: SettingLevel;
-  /** Org-level pin: cannot be overridden below. */
-  pinned: boolean;
+  /** Lock: cannot be overridden below. */
+  locked: boolean;
   /**
    * This machine declares the package must not be here, overriding the org.
    * Different from the package simply not being listed, which means "inherit".
@@ -157,7 +157,7 @@ export const machinesKeys = {
 interface MachineSummaryWire {
   id: string;
   orgId: string;
-  templateId: string | null;
+  profileId: string | null;
   ownerPersonId: string | null;
   name: string;
   provider: MachineProvider;
@@ -174,7 +174,7 @@ function toMachine(wire: MachineSummaryWire): Machine {
   return {
     id: wire.id,
     orgId: wire.orgId,
-    templateId: wire.templateId,
+    profileId: wire.profileId,
     ownerPersonId: wire.ownerPersonId,
     name: wire.name,
     provider: wire.provider,
@@ -194,7 +194,7 @@ function toMachine(wire: MachineSummaryWire): Machine {
 interface ResolvedManifestEntryWire {
   packageName: string;
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   excluded: boolean;
   partOf?: string | null;
   description?: string | null;
@@ -212,7 +212,7 @@ function toManifestEntry(wire: ResolvedManifestEntryWire): ManifestEntry {
     package: wire.packageName,
     version: wire.versionPin,
     source: wire.source,
-    pinned: wire.pinned,
+    locked: wire.locked,
     excluded: wire.excluded,
     partOf: wire.partOf ?? null,
     description: wire.description ?? null,
@@ -283,10 +283,10 @@ export interface UpdateMachinePackagesResult {
  * version of one inherited from the org, excluding an org package, and
  * dropping a machine row so the org's entry applies again.
  *
- * `pinned` is deliberately never sent. A pin means "cannot be overridden
+ * `locked` is deliberately never sent. A lock means "cannot be overridden
  * below", and nothing sits below a machine, so it is an org control; the
- * server still rejects a machine edit that collides with an org pin (422,
- * `pinned_entry_conflict`), which is what `ManifestOverrideError` carries.
+ * server still rejects a machine edit that collides with an org lock (422,
+ * `locked_entry_conflict`), which is what `ManifestOverrideError` carries.
  * It also carries the 422 for an ensure setting the entry cannot take
  * (`invalid_ensure_setting`): a non-apt name, or Ensure latest version with
  * a version pin.
@@ -318,7 +318,7 @@ export async function updateMachinePackages(
  */
 export interface ManifestHistoryState {
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   excluded: boolean;
   partOf?: string | null;
   description?: string | null;

@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { describeState } from "./machine-manifest-tab";
 
 describe("describeState", () => {
-  const base = { versionPin: null, pinned: false, excluded: false };
+  const base = { versionPin: null, locked: false, excluded: false };
 
   test("Allowed, or no setting recorded, adds nothing", () => {
     expect(describeState(base)).toBe("any version");

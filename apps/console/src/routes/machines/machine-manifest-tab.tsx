@@ -89,7 +89,7 @@ export function describeState(state: ManifestHistoryState | null): string {
   if (state === null) return "not declared";
   if (state.excluded) return "excluded";
   const version = state.versionPin ?? "any version";
-  const parts = [state.pinned ? `${version}, pinned` : version];
+  const parts = [state.locked ? `${version}, locked` : version];
   if (state.partOf) parts.push(`part of ${state.partOf}`);
   if (state.setting && state.setting !== "allowed") {
     parts.push(PACKAGE_SETTING_LABELS[state.setting]);

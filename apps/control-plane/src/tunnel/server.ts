@@ -116,7 +116,7 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
         if (!denialReason && machine) {
           const accessMethods = yield* resolveAccessMethodsEnabled(db, {
             orgId: machine.orgId,
-            templateId: machine.templateId,
+            profileId: machine.profileId,
             machineId: machine.id,
           }).pipe(Effect.mapError((cause) => new TunnelError({ reason: "lookup_failed", cause })));
           const methodEnabled =

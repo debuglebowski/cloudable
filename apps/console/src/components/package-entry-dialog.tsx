@@ -34,8 +34,8 @@ export interface PackageEntryValues {
   partOf: string | null;
   description: string | null;
   setting: PackageSetting;
-  /** Org entries only: machines cannot override a pinned entry. */
-  pinned?: boolean;
+  /** Org entries only: machines cannot override a locked entry. */
+  locked?: boolean;
 }
 
 /** One saved entry, as both write paths take it. */
@@ -45,7 +45,7 @@ export interface PackageEntrySave {
   partOf: string | null;
   description: string | null;
   setting: PackageSetting;
-  pinned?: boolean;
+  locked?: boolean;
 }
 
 export type PackageEntryDialogMode =
@@ -68,7 +68,7 @@ export function PackageEntryDialog({
   partOfOptions,
   onSaved,
 }: {
-  /** The org's entries can be pinned and apply to every machine; a machine's apply to it alone. */
+  /** The org's entries can be locked and apply to every machine; a machine's apply to it alone. */
   scope: "machine" | "org";
   /** Writes the entry. Returns the approvals any Ensure setting asked for. */
   save: (entry: PackageEntrySave) => Promise<{ ensureApprovals?: PackageEnsureApprovalView[] }>;
@@ -86,13 +86,13 @@ export function PackageEntryDialog({
   const partOfId = useId();
   const descriptionId = useId();
   const settingId = useId();
-  const pinnedId = useId();
+  const lockedId = useId();
   const [packageName, setPackageName] = useState("");
   const [versionPin, setVersionPin] = useState("");
   const [partOf, setPartOf] = useState("");
   const [description, setDescription] = useState("");
   const [setting, setSetting] = useState<PackageSetting>("allowed");
-  const [pinned, setPinned] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Start from the entry being edited each time the dialog opens.
@@ -104,7 +104,7 @@ export function PackageEntryDialog({
     setPartOf(values?.partOf ?? "");
     setDescription(values?.description ?? "");
     setSetting(values?.setting ?? "allowed");
-    setPinned(values?.pinned ?? false);
+    setLocked(values?.locked ?? false);
     setError(null);
   }, [mode]);
 
@@ -160,7 +160,7 @@ export function PackageEntryDialog({
       partOf: trimmedParent === "" ? null : trimmedParent,
       description: trimmedDescription === "" ? null : trimmedDescription,
       setting,
-      ...(scope === "org" ? { pinned } : {}),
+      ...(scope === "org" ? { locked } : {}),
     });
   }
 
@@ -269,16 +269,16 @@ export function PackageEntryDialog({
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <Checkbox
-                  id={pinnedId}
-                  checked={pinned}
-                  onCheckedChange={(checked) => setPinned(checked === true)}
+                  id={lockedId}
+                  checked={locked}
+                  onCheckedChange={(checked) => setLocked(checked === true)}
                 />
-                <Label htmlFor={pinnedId} className="text-sm font-normal">
-                  Pinned
+                <Label htmlFor={lockedId} className="text-sm font-normal">
+                  Locked
                 </Label>
               </div>
               <span className="text-xs text-muted-foreground">
-                A machine cannot override or exclude a pinned package.
+                A machine cannot override or exclude a locked package.
               </span>
             </div>
           )}

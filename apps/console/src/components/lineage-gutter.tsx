@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 
-export type Level = "org" | "template" | "machine";
+export type Level = "org" | "profile" | "machine";
 
 export interface LineageGutterProps {
   /** where the effective value was set */

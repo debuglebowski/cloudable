@@ -13,7 +13,7 @@ type DbHandle = PostgresJsDatabase<typeof schema>;
  * Logging tier and retention location.
  *
  * Both are stored as ordinary rows in the existing `settingValues` table
- * (org → template → machine chain, `resolveSetting`'s pattern — see
+ * (org → profile → machine chain, `resolveSetting`'s pattern — see
  * `@cloudable/schema`) rather than a dedicated table: the resolution
  * mechanism these two settings need already exists and is the single
  * source of truth for every other setting in the product, so a parallel
@@ -123,7 +123,7 @@ export interface EffectiveLoggingTier {
  * `resolveSetting()`'s chain walk, the same algorithm every other
  * chain-resolved setting uses (see docs/inheritance.md).
  *
- * `templateId` is accepted for forward compatibility with the template
+ * `profileId` is accepted for forward compatibility with the template
  * layer (inert in v1 — see the file header) — `resolveSetting()` already
  * checks it when present, so nothing here needs to change when a caller
  * starts passing a real one.
@@ -145,14 +145,14 @@ export const isLoggingTier = (value: unknown): value is LoggingTier => value ===
 
 export const getEffectiveLoggingTier = (
   db: DbHandle,
-  chain: { orgId: string; machineId: string; templateId?: string | null },
+  chain: { orgId: string; machineId: string; profileId?: string | null },
 ): Effect.Effect<EffectiveLoggingTier, LoggingSettingsError> =>
   Effect.tryPromise({
     try: async () => {
       const scopeIds = [
         chain.orgId,
         chain.machineId,
-        ...(chain.templateId ? [chain.templateId] : []),
+        ...(chain.profileId ? [chain.profileId] : []),
       ];
       const rows = await db
         .select({

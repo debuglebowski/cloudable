@@ -6,7 +6,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Data, Effect } from "effect";
 
 /**
- * Two more org → template → machine resolved settings from the
+ * Two more org → profile → machine resolved settings from the
  * machine model's setting list (package manifest, persistent paths, access methods
  * enabled, logging tier, region, one owner) — alongside the package
  * manifest (`manifest.ts`). Both follow the exact `resolveSetting()`
@@ -56,13 +56,13 @@ export const DEFAULT_ACCESS_METHODS_ENABLED: AccessMethodsEnabled = {
 
 export interface ResolvedMachineSetting<T> {
   value: T;
-  source: "org" | "template" | "machine";
+  source: "org" | "profile" | "machine";
   resolvedFromScopeId: string;
 }
 
 export interface MachineSettingChain {
   orgId: string;
-  templateId?: string | null;
+  profileId?: string | null;
   machineId: string;
 }
 
@@ -80,7 +80,7 @@ const loadChainRows = <T>(
     const scopeIds = [
       chain.orgId,
       chain.machineId,
-      ...(chain.templateId ? [chain.templateId] : []),
+      ...(chain.profileId ? [chain.profileId] : []),
     ];
     const rows = yield* Effect.tryPromise({
       try: () =>

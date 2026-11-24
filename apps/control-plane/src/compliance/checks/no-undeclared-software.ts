@@ -116,7 +116,7 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
 
         const manifest = resolveManifest(manifestRows as MachinePackageRow[], {
           orgId: machine.orgId,
-          templateId: machine.templateId,
+          profileId: machine.profileId,
           machineId: machine.id,
         });
 

@@ -101,7 +101,7 @@ describe("manifest history", () => {
     // Newest first, so the exclusion leads.
     expect(page.items[0]?.current).toEqual({
       versionPin: "14",
-      pinned: false,
+      locked: false,
       excluded: true,
       partOf: null,
       description: null,
@@ -109,7 +109,7 @@ describe("manifest history", () => {
     });
     expect(page.items[1]?.previous).toEqual({
       versionPin: null,
-      pinned: false,
+      locked: false,
       excluded: false,
       partOf: null,
       description: null,
@@ -117,7 +117,7 @@ describe("manifest history", () => {
     });
     expect(page.items[1]?.current).toEqual({
       versionPin: "14",
-      pinned: false,
+      locked: false,
       excluded: false,
       partOf: null,
       description: null,
@@ -134,7 +134,7 @@ describe("manifest history", () => {
     await run(
       updateOrgPackages({
         orgId: org.id,
-        upserts: [{ packageName: "docker", versionPin: "24", pinned: false }],
+        upserts: [{ packageName: "docker", versionPin: "24", locked: false }],
         actor: { actorType: "system", actorId: "test" },
       }),
     );

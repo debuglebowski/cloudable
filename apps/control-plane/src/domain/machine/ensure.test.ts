@@ -8,7 +8,7 @@ const HOUR = 60 * 60 * 1000;
 const entry = (overrides: Partial<ResolvedManifestEntry> = {}): ResolvedManifestEntry => ({
   packageName: "ripgrep",
   versionPin: null,
-  pinned: false,
+  locked: false,
   excluded: false,
   partOf: null,
   description: null,

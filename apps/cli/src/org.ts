@@ -49,7 +49,7 @@ const RETENTION_LOCATIONS = ["customer", "cloudable_sweden_central"] as const;
 interface OrgPackageEntry {
   packageName: string;
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   partOf?: string | null;
   description?: string | null;
   setting?: PackageSetting;
@@ -62,11 +62,11 @@ interface OrgPackagesResponse {
 
 function printOrgPackages(items: ReadonlyArray<OrgPackageEntry>): void {
   printTable(
-    ["package", "version", "pinned", "setting", "part of", "description"],
+    ["package", "version", "locked", "setting", "part of", "description"],
     items.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
-      entry.pinned ? "yes" : "no",
+      entry.locked ? "yes" : "no",
       settingLabel(entry.setting),
       dash(entry.partOf ?? null),
       dash(entry.description ?? null),
@@ -261,7 +261,7 @@ export async function runOrgPackagesListCommand(argv: ReadonlyArray<string>): Pr
 
 export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "org packages set [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>] [--ensure <pkg>] [--ensure-latest <pkg>] [--allow <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>. Only apt packages can be ensured.",
+    "org packages set [--add <pkg>[@<version>]] [--lock <pkg>[@<version>]] [--remove <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>] [--ensure <pkg>] [--ensure-latest <pkg>] [--allow <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>. Only apt packages can be ensured.",
   );
   const args = parseArgs(
     argv,

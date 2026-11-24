@@ -5,6 +5,7 @@
 export * from "./tables/org";
 export * from "./tables/person";
 export * from "./tables/idp-role-mode";
+export * from "./tables/profile";
 export * from "./tables/machine";
 export * from "./tables/setting";
 export * from "./tables/machine-package";

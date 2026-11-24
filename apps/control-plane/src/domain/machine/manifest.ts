@@ -7,11 +7,11 @@ import {
 import { type SettingRow, resolveSetting } from "@cloudable/schema";
 
 /** See `docs/inheritance.md` for the full write-up of this chain. */
-export type ManifestScope = "org" | "template" | "machine";
+export type ManifestScope = "org" | "profile" | "machine";
 
 export interface ManifestScopeChain {
   orgId: string;
-  templateId?: string | null;
+  profileId?: string | null;
   machineId: string;
 }
 
@@ -21,7 +21,7 @@ export interface MachinePackageRow {
   scopeId: string;
   packageName: string;
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   /** Machine scope only — see the column comment in `machine-package.ts`. */
   excluded: boolean;
   /** See the column comment in `machine-package.ts`. Absent reads as null. */
@@ -35,7 +35,7 @@ export interface MachinePackageRow {
 
 export interface PackageManifestValue {
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   excluded: boolean;
   partOf: string | null;
   description: string | null;
@@ -45,7 +45,7 @@ export interface PackageManifestValue {
 export interface ResolvedManifestEntry {
   packageName: string;
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   /**
    * The winning row says this package must not be on the machine. Resolved
    * entries keep it (rather than being dropped here) so the console can
@@ -66,7 +66,7 @@ export interface ResolvedManifestEntry {
 
 /**
  * Resolve the effective package manifest for a machine across the
- * org → template → machine chain (lowest level wins).
+ * org → profile → machine chain (lowest level wins).
  *
  * Deliberately does not reimplement the chain walk: each distinct
  * `packageName` across `rows` is resolved individually via
@@ -85,7 +85,7 @@ export function resolveManifest(
     key: row.packageName,
     value: {
       versionPin: row.versionPin,
-      pinned: row.pinned,
+      locked: row.locked,
       excluded: row.excluded,
       partOf: row.partOf ?? null,
       description: row.description ?? null,
@@ -101,7 +101,7 @@ export function resolveManifest(
     resolved.push({
       packageName,
       versionPin: winner.value.versionPin,
-      pinned: winner.value.pinned,
+      locked: winner.value.locked,
       excluded: winner.value.excluded,
       partOf: winner.value.partOf,
       description: winner.value.description,
@@ -241,48 +241,48 @@ export function findEnsureSettingProblems(
   return problems;
 }
 
-export interface PinConflict {
+export interface LockConflict {
   packageName: string;
-  pinnedAtScope: ManifestScope;
-  pinnedAtScopeId: string;
-  pinnedVersionPin: string | null;
+  lockedAtScope: ManifestScope;
+  lockedAtScopeId: string;
+  lockedVersionPin: string | null;
 }
 
-const SCOPE_RANK: Record<ManifestScope, number> = { org: 0, template: 1, machine: 2 };
+const SCOPE_RANK: Record<ManifestScope, number> = { org: 0, profile: 1, machine: 2 };
 
 /**
- * The organisation can mark an entry pinned. A pinned entry
+ * The organisation can mark an entry locked. A locked entry
  * cannot be overridden below. Attempting to override one is a validation
  * error at edit time, not a silent no-op at reconcile.
  *
- * Returns one conflict per edited package name that has a pinned row at a
- * *higher* scope than `targetScope` (org/template pin blocking a machine
- * edit, org pin blocking a template edit). An edit at the same scope that
- * owns the pin, or at a higher scope than any existing pin, is not an
+ * Returns one conflict per edited package name that has a locked row at a
+ * *higher* scope than `targetScope` (org/profile lock blocking a machine
+ * edit, org lock blocking a profile edit). An edit at the same scope that
+ * owns the lock, or at a higher scope than any existing lock, is not an
  * override-below and is never reported.
  */
-export function findPinConflicts(
+export function findLockConflicts(
   existingRows: ReadonlyArray<MachinePackageRow>,
   targetScope: ManifestScope,
   editedPackageNames: ReadonlyArray<string>,
-): PinConflict[] {
-  const conflicts: PinConflict[] = [];
+): LockConflict[] {
+  const conflicts: LockConflict[] = [];
   for (const packageName of editedPackageNames) {
-    const pinnedAbove = existingRows
+    const lockedAbove = existingRows
       .filter(
         (row) =>
           row.packageName === packageName &&
-          row.pinned &&
+          row.locked &&
           SCOPE_RANK[row.scopeType] < SCOPE_RANK[targetScope],
       )
-      // Closest pinning scope above the target is the one the edit actually collides with.
+      // Closest locking scope above the target is the one the edit actually collides with.
       .sort((a, b) => SCOPE_RANK[b.scopeType] - SCOPE_RANK[a.scopeType])[0];
-    if (pinnedAbove) {
+    if (lockedAbove) {
       conflicts.push({
         packageName,
-        pinnedAtScope: pinnedAbove.scopeType,
-        pinnedAtScopeId: pinnedAbove.scopeId,
-        pinnedVersionPin: pinnedAbove.versionPin,
+        lockedAtScope: lockedAbove.scopeType,
+        lockedAtScopeId: lockedAbove.scopeId,
+        lockedVersionPin: lockedAbove.versionPin,
       });
     }
   }

@@ -58,26 +58,26 @@ export class MachineNotRunningError extends Schema.TaggedError<MachineNotRunning
   }),
 }) {}
 
-const PinConflictSchema = Schema.Struct({
+const LockConflictSchema = Schema.Struct({
   packageName: Schema.String,
-  pinnedAtScope: Schema.Literal("org", "template", "machine"),
-  pinnedAtScopeId: Schema.String,
-  pinnedVersionPin: Schema.NullOr(Schema.String),
+  lockedAtScope: Schema.Literal("org", "profile", "machine"),
+  lockedAtScopeId: Schema.String,
+  lockedVersionPin: Schema.NullOr(Schema.String),
 });
 
 /**
- * Overriding a pinned manifest entry below its scope is a
+ * Overriding a locked manifest entry below its scope is a
  * validation error at edit time (HTTP 422), never a silent no-op.
  */
-export class PackagePinConflictError extends Schema.TaggedError<PackagePinConflictError>(
-  "PackagePinConflictError",
-)("PackagePinConflictError", {
+export class PackageLockConflictError extends Schema.TaggedError<PackageLockConflictError>(
+  "PackageLockConflictError",
+)("PackageLockConflictError", {
   error: Schema.Struct({
-    code: Schema.Literal("pinned_entry_conflict"),
+    code: Schema.Literal("locked_entry_conflict"),
     message: Schema.String,
     requestId: Schema.String,
     details: Schema.Struct({
-      conflicts: Schema.Array(PinConflictSchema),
+      conflicts: Schema.Array(LockConflictSchema),
     }),
   }),
 }) {}

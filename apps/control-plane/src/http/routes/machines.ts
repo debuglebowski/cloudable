@@ -7,7 +7,7 @@ import {
   MachineNotFoundError,
   PackageActionRejected,
   PackageEnsureSettingError,
-  PackagePinConflictError,
+  PackageLockConflictError,
 } from "../../domain/machine/errors";
 import { CurrentUserAuthentication } from "../middleware/auth";
 import { ApprovalResource } from "./approvals";
@@ -23,7 +23,7 @@ const machineStateSchema = Schema.Literal(
   "error",
 );
 
-const manifestScopeSchema = Schema.Literal("org", "template", "machine");
+const manifestScopeSchema = Schema.Literal("org", "profile", "machine");
 
 // What Cloudable does about a declared package. See `PackageSetting` in the contracts package.
 export const packageSettingSchema = Schema.Literal("allowed", "ensure_installed", "ensure_latest");
@@ -37,7 +37,7 @@ export const ensureApprovalSchema = Schema.Struct({
 const resolvedManifestEntrySchema = Schema.Struct({
   packageName: Schema.String,
   versionPin: Schema.NullOr(Schema.String),
-  pinned: Schema.Boolean,
+  locked: Schema.Boolean,
   excluded: Schema.Boolean,
   partOf: Schema.NullOr(Schema.String),
   description: Schema.NullOr(Schema.String),
@@ -84,7 +84,7 @@ const resolvedAccessMethodsEnabledSchema = Schema.Struct({
 const machineSummaryFields = {
   id: Schema.UUID,
   orgId: Schema.UUID,
-  templateId: Schema.NullOr(Schema.UUID),
+  profileId: Schema.NullOr(Schema.UUID),
   ownerPersonId: Schema.NullOr(Schema.UUID),
   name: Schema.String,
   provider: machineProviderSchema,
@@ -101,7 +101,7 @@ const machineSummarySchema = Schema.Struct(machineSummaryFields);
 
 // Logging tier resolves org → machine, same chain as everything
 // else — `source` is "org" when the machine has no override of its own,
-// "machine" when it does (never "template" in v1 — the layer is inert).
+// "machine" when it does (never "profile" in v1 — the layer is inert).
 const effectiveLoggingTierSchema = Schema.Struct({
   tier: Schema.Literal(1, 2),
   source: manifestScopeSchema,
@@ -153,7 +153,7 @@ const createMachinePayloadSchema = Schema.Struct({
   // Required, never omitted — a machine always has exactly one owner,
   // always a person.
   ownerPersonId: Schema.UUID,
-  templateId: Schema.optional(Schema.NullOr(Schema.UUID)),
+  profileId: Schema.optional(Schema.NullOr(Schema.UUID)),
 });
 
 const listMachinesUrlParamsSchema = Schema.Struct({
@@ -179,7 +179,7 @@ const declaredPackageNameSchema = Schema.String.pipe(
 const packageManifestEntrySchema = Schema.Struct({
   packageName: declaredPackageNameSchema,
   versionPin: Schema.optional(Schema.NullOr(Schema.String)),
-  pinned: Schema.optional(Schema.Boolean),
+  locked: Schema.optional(Schema.Boolean),
   // `true` writes "not on this machine", overriding the org's entry. An
   // omitted field keeps the machine row's current value, so this never
   // silently resets a pin (see `MachineService.updatePackages`).
@@ -209,7 +209,7 @@ const updateMachinePackagesResponseSchema = Schema.Struct({
 
 const manifestHistoryStateSchema = Schema.Struct({
   versionPin: Schema.NullOr(Schema.String),
-  pinned: Schema.Boolean,
+  locked: Schema.Boolean,
   excluded: Schema.Boolean,
   partOf: Schema.NullOr(Schema.String),
   description: Schema.NullOr(Schema.String),
@@ -344,7 +344,7 @@ export const MachinesGroup = HttpApiGroup.make("machines")
       .setPayload(updateMachinePackagesPayloadSchema)
       .addSuccess(updateMachinePackagesResponseSchema)
       .addError(MachineNotFoundError, { status: 404 })
-      .addError(PackagePinConflictError, { status: 422 })
+      .addError(PackageLockConflictError, { status: 422 })
       .addError(PackageEnsureSettingError, { status: 422 }),
   )
   .add(

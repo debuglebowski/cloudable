@@ -51,8 +51,8 @@ function printChanges(changes: ReadonlyArray<SettingChange>): void {
 }
 
 export async function runConfigSetCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = usageFor("config set <key> <value> [--machine <machine>] [--pinned]");
-  const args = parseArgs(argv, readSpec({ values: ["machine"], booleans: ["pinned"] }));
+  const usage = usageFor("config set <key> <value> [--machine <machine>] [--locked]");
+  const args = parseArgs(argv, readSpec({ values: ["machine"], booleans: ["locked"] }));
   const key = required(args, 0, "a key", usage);
   const rawValue = args.positionals[1];
   if (rawValue === undefined) throw new UsageError(`a value is required\n\n${usage}`);
@@ -69,7 +69,7 @@ export async function runConfigSetCommand(argv: ReadonlyArray<string>): Promise<
       scopeId,
       key,
       value: parseValue(rawValue),
-      ...(args.booleans.has("pinned") ? { pinned: true } : {}),
+      ...(args.booleans.has("locked") ? { locked: true } : {}),
     }),
   );
   if (args.booleans.has("json")) {

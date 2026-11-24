@@ -56,7 +56,7 @@ import { describeSettingChange } from "@/lib/package-setting";
 /**
  * The org's package list: what every machine may have, and what Cloudable
  * does about it. A machine without its own entry for a package uses the org's
- * (docs/inheritance.md). A pinned entry cannot be overridden or excluded on a
+ * (docs/inheritance.md). A locked entry cannot be overridden or excluded on a
  * machine. This is the only place org entries are added, changed or removed;
  * it mirrors the machine packages table (`routes/machines/machine-packages-table.tsx`)
  * and shares its add/edit dialog.
@@ -140,7 +140,7 @@ export function OrgPackageManifestCard() {
                         partOf: entry.partOf ?? null,
                         description: entry.description ?? null,
                         setting: entry.setting ?? "allowed",
-                        pinned: entry.pinned,
+                        locked: entry.locked,
                       },
                     })
                   }
@@ -272,7 +272,7 @@ function OrgPackageRow({
           <span className="font-mono text-xs text-muted-foreground">
             {entry.versionPin ?? "any"}
           </span>
-          {entry.pinned && <Badge variant="outline">pinned</Badge>}
+          {entry.locked && <Badge variant="outline">locked</Badge>}
         </span>
       </TableCell>
       <TableCell className="text-right">

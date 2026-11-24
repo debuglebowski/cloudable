@@ -168,11 +168,11 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
           },
           {
             name: "set",
-            summary: "Declare, pin, exclude or drop packages for one machine",
+            summary: "Declare, lock, exclude or drop packages for one machine",
             args: "<machine>",
             options: [
               { flag: "--add <pkg>[@<ver>]", description: "Declare a package (repeatable)" },
-              { flag: "--pin <pkg>[@<ver>]", description: "Declare it pinned (repeatable)" },
+              { flag: "--lock <pkg>[@<ver>]", description: "Declare it locked (repeatable)" },
               { flag: "--remove <pkg>", description: "Drop this machine's entry (repeatable)" },
               { flag: "--exclude <pkg>", description: "Keep an org package off this machine" },
               { flag: "--include <pkg>", description: "Undo an exclusion (repeatable)" },
@@ -514,10 +514,10 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
           { name: "list", summary: "Show the org manifest" },
           {
             name: "set",
-            summary: "Declare, pin, ensure or drop packages for the whole org",
+            summary: "Declare, lock, ensure or drop packages for the whole org",
             options: [
               { flag: "--add <pkg>[@<ver>]", description: "Declare a package (repeatable)" },
-              { flag: "--pin <pkg>[@<ver>]", description: "Declare it pinned (repeatable)" },
+              { flag: "--lock <pkg>[@<ver>]", description: "Declare it locked (repeatable)" },
               { flag: "--remove <pkg>", description: "Drop the org entry (repeatable)" },
               ...ENSURE_OPTIONS,
             ],
@@ -537,7 +537,7 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         args: "<key> <value>",
         options: [
           { flag: "--machine <machine>", description: "Set it on one machine instead of the org" },
-          { flag: "--pinned", description: "Stop lower scopes overriding it" },
+          { flag: "--locked", description: "Stop lower scopes overriding it" },
         ],
         notes: ["Values are read as JSON when they look like it, otherwise as text."],
       },

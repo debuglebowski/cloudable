@@ -54,8 +54,8 @@ export type MachineState =
   | "archived_expired"
   | "error";
 
-/** Where a resolved manifest entry's value came from — org → template → machine, lowest wins. */
-export type ManifestScope = "org" | "template" | "machine";
+/** Where a resolved manifest entry's value came from — org → profile → machine, lowest wins. */
+export type ManifestScope = "org" | "profile" | "machine";
 
 /** Which `ProvisioningService` backend a machine runs on — a per-machine,
  * org-enabled choice (see `docs/frontend.md`'s Integrations page). Not every
@@ -66,7 +66,7 @@ export type MachineProvider = "azure" | "docker" | "fake";
 export interface MachineSummary {
   id: string;
   orgId: string;
-  templateId: string | null;
+  profileId: string | null;
   ownerPersonId: string | null;
   name: string;
   provider: MachineProvider;
@@ -90,7 +90,7 @@ export interface CreateMachineRequest {
   image: string;
   /** A machine always has exactly one owner, always a person. */
   ownerPersonId: string;
-  templateId?: string | null;
+  profileId?: string | null;
 }
 
 // `orgId`/`actorPersonId` are gone from every request below: the server
@@ -128,7 +128,7 @@ export const isEnsureSetting = (setting: PackageSetting): boolean => setting !==
 export interface PackageManifestEntry {
   packageName: string;
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   /**
    * Machine scope only: this package must not be on this machine, overriding
    * the org. Different from having no entry, which means "inherit". An
@@ -156,7 +156,7 @@ export interface ResolvedPackageManifestEntry extends PackageManifestEntry {
 }
 
 /**
- * A resolved org → template → machine setting, lowest level wins.
+ * A resolved org → profile → machine setting, lowest level wins.
  * Shared wire shape for every single-value machine setting that
  * isn't a manifest entry — currently `persistentPaths` and
  * `accessMethodsEnabled` below. Written via the generic
@@ -175,7 +175,7 @@ export type PersistentPaths = string[];
 
 /**
  * Which access methods are turned on for a machine. Admin-disablable at any level in the
- * org -> template -> machine chain, and disabling one terminates its live sessions
+ * org -> profile -> machine chain, and disabling one terminates its live sessions
  * (`domain/config/apply-setting-change.ts`) rather than merely refusing new ones.
  *
  * `files` is a separate flag from `webTerminal` on purpose. It is the lower of the two
@@ -225,7 +225,7 @@ export interface MachineDetail extends MachineSummary {
 export interface PackageManifestEdit {
   packageName: string;
   versionPin?: string | null;
-  pinned?: boolean;
+  locked?: boolean;
   excluded?: boolean;
   /** Parent declaration; null clears it. Omitted keeps the current value. */
   partOf?: string | null;
@@ -243,7 +243,7 @@ export interface PackageManifestEdit {
  * Edits are always applied at the `machine` scope (this endpoint edits one
  * machine's manifest). `upserts` add or replace a machine-level entry by
  * `packageName`; `removals` drop a machine-level override, falling back to
- * whatever the org/template chain resolves to. See `docs/inheritance.md`.
+ * whatever the org/profile chain resolves to. See `docs/inheritance.md`.
  *
  * Removal and exclusion are different things: removing drops this machine's
  * own row so the org's entry applies again, while excluding writes a row that
@@ -270,12 +270,12 @@ export interface PackageEnsureApprovalView {
   status: "pending" | "approved" | "rejected" | "expired";
 }
 
-/** 422 body detail when an edit would override a pinned entry below its scope. */
-export interface PackagePinConflict {
+/** 422 body detail when an edit would override a locked entry below its scope. */
+export interface PackageLockConflict {
   packageName: string;
-  pinnedAtScope: ManifestScope;
-  pinnedAtScopeId: string;
-  pinnedVersionPin: string | null;
+  lockedAtScope: ManifestScope;
+  lockedAtScopeId: string;
+  lockedVersionPin: string | null;
 }
 
 /**

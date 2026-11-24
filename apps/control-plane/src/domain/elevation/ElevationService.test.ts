@@ -77,7 +77,7 @@ function makeFakeRepo(s: Seed) {
       {
         id: s.machineId,
         orgId: s.orgId,
-        templateId: null,
+        profileId: null,
         ownerPersonId: s.ownerPersonId,
         name: "owned-machine",
       },
@@ -107,7 +107,7 @@ function makeFakeRepo(s: Seed) {
     findElevation: (elevationId) => Effect.succeed(elevationsById.get(elevationId) ?? null),
     // The fake ignores `scopeIds` (the narrowing `ElevationRepoLive` does for
     // real) since this in-memory dataset is already scoped to one org by
-    // construction; `resolveSetting`'s own org/template/machine precedence
+    // construction; `resolveSetting`'s own org/profile/machine precedence
     // is covered separately by `policy.test.ts`.
     findSettingRows: () => Effect.succeed(settingRows),
     insertElevation: (values: InsertElevationValues) => {

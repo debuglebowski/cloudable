@@ -234,7 +234,7 @@ export interface UpdateOrgSettingsInput {
  * unchanged. In practice only `SettingWriteError` (a DB/event-publish
  * failure) can occur here: `scopeType` is always `"org"` with `scopeId`
  * fixed to `orgId`, so `applySettingChange`'s `InvalidScopeError` and its
- * machine-only `MachineNotFoundError`/`PinnedSettingError` paths never
+ * machine-only `MachineNotFoundError`/`LockedSettingError` paths never
  * trigger.
  */
 const writeOrgSetting = (

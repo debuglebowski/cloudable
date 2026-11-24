@@ -143,7 +143,7 @@ const resolveApprovalMode = (
 
     // Template layer doesn't exist in v1 — chain is org -> machine only.
     const settingRows: SettingRow<ApprovalMode>[] = rows
-      .filter((row) => row.scopeType !== "template")
+      .filter((row) => row.scopeType !== "profile")
       .map((row) => ({
         scopeType: row.scopeType,
         scopeId: row.scopeId,
@@ -154,7 +154,7 @@ const resolveApprovalMode = (
 
     const resolved = resolveSetting(key, settingRows, {
       orgId,
-      templateId: null,
+      profileId: null,
       machineId: targetMachineId ?? NIL_MACHINE_ID,
     });
 

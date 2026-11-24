@@ -27,10 +27,10 @@ import {
   InvalidScopeError,
   InvalidSettingValueError,
   MachineNotFoundError,
-  PinnedSettingError,
+  LockedSettingError,
   SettingWriteError,
 } from "./errors";
-import { isPackageManifestKey } from "./validate-pinning";
+import { isPackageManifestKey } from "./validate-locking";
 
 export interface ApplySettingChangeInput {
   orgId: string;
@@ -39,7 +39,7 @@ export interface ApplySettingChangeInput {
   key: string;
   value: unknown;
   /** Org-scope only. Ignored (existing flag preserved) on a machine-scope write. */
-  pinned?: boolean | undefined;
+  locked?: boolean | undefined;
   actorType: "person" | "system";
   actorId: string;
   correlationId: string;
@@ -58,7 +58,7 @@ export type ApplySettingChangeError =
   | InvalidScopeError
   | InvalidSettingValueError
   | MachineNotFoundError
-  | PinnedSettingError
+  | LockedSettingError
   | SettingWriteError;
 
 /**
@@ -186,10 +186,10 @@ export const applySettingChange = (
     }
 
     // Machine-scope: resolve the machine, verify tenancy, and (for the
-    // package manifest key only — see validate-pinning.ts) check pinning
+    // package manifest key only — see validate-locking.ts) check locking
     // and compute which level this write overrides.
     let machine: typeof machines.$inferSelect | undefined;
-    let overridesLevel: "org" | "template" | "machine" = "org";
+    let overridesLevel: "org" | "profile" | "machine" = "org";
 
     if (input.scopeType === "machine") {
       const machineRows = yield* Effect.tryPromise({
@@ -202,7 +202,7 @@ export const applySettingChange = (
         return yield* Effect.fail(new MachineNotFoundError({ machineId: input.scopeId }));
       }
 
-      // Scoped to exactly the org/template/machine ids in this machine's own
+      // Scoped to exactly the org/profile/machine ids in this machine's own
       // chain — not every row for this key across every org. `scopeId` is a
       // globally-unique uuid so the unscoped query was correct, but it would
       // pull every tenant's rows for a common key (e.g. "packages") into
@@ -210,7 +210,7 @@ export const applySettingChange = (
       const chainScopeIds = [
         input.orgId,
         input.scopeId,
-        ...(machine.templateId ? [machine.templateId] : []),
+        ...(machine.profileId ? [machine.profileId] : []),
       ];
       const keyRows = yield* Effect.tryPromise({
         try: () =>
@@ -225,23 +225,23 @@ export const applySettingChange = (
       });
 
       if (isPackageManifestKey(input.key)) {
-        const parentScopes: ReadonlyArray<{ scopeType: "org" | "template"; scopeId: string }> = [
+        const parentScopes: ReadonlyArray<{ scopeType: "org" | "profile"; scopeId: string }> = [
           { scopeType: "org", scopeId: input.orgId },
-          ...(machine.templateId
-            ? [{ scopeType: "template" as const, scopeId: machine.templateId }]
+          ...(machine.profileId
+            ? [{ scopeType: "profile" as const, scopeId: machine.profileId }]
             : []),
         ];
-        const pinnedParent = keyRows.find(
+        const lockedParent = keyRows.find(
           (row) =>
-            row.pinned &&
+            row.locked &&
             parentScopes.some((p) => p.scopeType === row.scopeType && p.scopeId === row.scopeId),
         );
-        if (pinnedParent) {
+        if (lockedParent) {
           return yield* Effect.fail(
-            new PinnedSettingError({
+            new LockedSettingError({
               key: input.key,
-              pinnedAtScopeType: pinnedParent.scopeType,
-              pinnedAtScopeId: pinnedParent.scopeId,
+              lockedAtScopeType: lockedParent.scopeType,
+              lockedAtScopeId: lockedParent.scopeId,
             }),
           );
         }
@@ -254,7 +254,7 @@ export const applySettingChange = (
       ) as ReadonlyArray<SettingRow>;
       const resolved = resolveSetting(input.key, rowsExcludingThisMachine, {
         orgId: input.orgId,
-        templateId: machine.templateId,
+        profileId: machine.profileId,
         machineId: input.scopeId,
       });
       overridesLevel = resolved?.source ?? "org";
@@ -285,14 +285,14 @@ export const applySettingChange = (
     // the event row. `null` round-trips explicitly.
     const previous: unknown = existing ? existing.value : null;
 
-    // `pinned` is an org-scope-only concept: the
-    // organisation marks an entry pinned so nothing below it can override.
+    // `locked` is an org-scope-only concept: the
+    // organisation marks an entry locked so nothing below it can override.
     // A machine-scope write must never be able to set or clear it — that
     // would let the very override this flag exists to block also toggle it.
-    const nextPinned =
+    const nextLocked =
       input.scopeType === "org"
-        ? (input.pinned ?? existing?.pinned ?? false)
-        : (existing?.pinned ?? false);
+        ? (input.locked ?? existing?.locked ?? false)
+        : (existing?.locked ?? false);
 
     yield* Effect.tryPromise({
       try: async () => {
@@ -301,7 +301,7 @@ export const applySettingChange = (
             .update(settingValues)
             .set({
               value: input.value,
-              pinned: nextPinned,
+              locked: nextLocked,
               updatedAt: new Date(),
             })
             .where(eq(settingValues.id, existing.id));
@@ -312,7 +312,7 @@ export const applySettingChange = (
             key: input.key,
             value: input.value,
             source: input.scopeType,
-            pinned: nextPinned,
+            locked: nextLocked,
           });
         }
       },

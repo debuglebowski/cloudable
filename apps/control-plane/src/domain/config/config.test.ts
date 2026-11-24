@@ -20,7 +20,7 @@ import { getOrgSettings, updateOrgSettings } from "../organisation/settings";
 import { AdminRoleRequiredError } from "../people/authorization";
 import { EVENTS_RETENTION_DAYS_KEY, EVENTS_RETENTION_INVALID_REASON } from "../retention/policy";
 import { applySettingChange } from "./apply-setting-change";
-import { InvalidScopeError, InvalidSettingValueError, PinnedSettingError } from "./errors";
+import { InvalidScopeError, InvalidSettingValueError, LockedSettingError } from "./errors";
 
 // This suite runs against a real Postgres — the behaviour under test is the
 // interaction between `settingValues`, `machines.desiredStateVersion`, and
@@ -358,7 +358,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       });
     });
 
-    test("overriding a pinned org-level package manifest entry is rejected", async () => {
+    test("overriding a locked org-level package manifest entry is rejected", async () => {
       const org = await seedOrg();
       const machine = await seedMachine(org.id);
 
@@ -369,7 +369,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
           scopeId: org.id,
           key: "packages",
           value: [{ package: "docker" }],
-          pinned: true,
+          locked: true,
           actorType: "person",
           actorId: "person-1",
           correlationId: crypto.randomUUID(),
@@ -389,11 +389,11 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         }).pipe(Effect.flip),
       );
 
-      expect(error).toBeInstanceOf(PinnedSettingError);
+      expect(error).toBeInstanceOf(LockedSettingError);
       expect(error).toMatchObject({
         key: "packages",
-        pinnedAtScopeType: "org",
-        pinnedAtScopeId: org.id,
+        lockedAtScopeType: "org",
+        lockedAtScopeId: org.id,
       });
 
       // No machine-scope row was written.
@@ -404,7 +404,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       expect(machineRows.find((r) => r.key === "packages")).toBeUndefined();
     });
 
-    test("the pinned flag is a machine-scope no-op — it's an org-scope-only concept", async () => {
+    test("the locked flag is a machine-scope no-op — it's an org-scope-only concept", async () => {
       const org = await seedOrg();
       const machine = await seedMachine(org.id);
 
@@ -415,7 +415,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
           scopeId: machine.id,
           key: "log_tier",
           value: 1,
-          pinned: true,
+          locked: true,
           actorType: "person",
           actorId: "person-1",
           correlationId: crypto.randomUUID(),
@@ -426,7 +426,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         .select()
         .from(settingValues)
         .where(and(eq(settingValues.scopeType, "machine"), eq(settingValues.scopeId, machine.id)));
-      expect(row?.pinned).toBe(false);
+      expect(row?.locked).toBe(false);
     });
 
     // Disabling terminates live sessions — not merely refuses
@@ -821,7 +821,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
           yield* machineService.updatePackages({
             machineId: machineA.id,
             orgId: org.id,
-            upserts: [{ packageName: "docker", versionPin: "24", pinned: false }],
+            upserts: [{ packageName: "docker", versionPin: "24", locked: false }],
             actorPersonId: null,
           });
         }),
@@ -833,7 +833,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
           scopeType: "machine",
           scopeId: machineB.id,
           key: "docker",
-          value: { versionPin: "24", pinned: false },
+          value: { versionPin: "24", locked: false },
           actorType: "system",
           actorId: "system",
           correlationId: crypto.randomUUID(),
@@ -862,6 +862,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
         previous: null,
         current: {
           versionPin: "24",
+          // The event stores the lock flag under its first name.
           pinned: false,
           excluded: false,
           partOf: null,
@@ -873,7 +874,7 @@ describe.skipIf(!postgresReachable)("config (requires Postgres at DATABASE_URL)"
       expect(eventB?.payload).toEqual({
         key: "docker",
         previous: null,
-        current: { versionPin: "24", pinned: false },
+        current: { versionPin: "24", locked: false },
         overridesLevel: "org",
       });
     });

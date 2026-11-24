@@ -4,7 +4,7 @@ import { orgs } from "./org";
 
 /**
  * Records WHICH secret ref (a pointer into the customer's own Azure Key
- * Vault or 1Password store) is bound to which scope — org, template,
+ * Vault or 1Password store) is bound to which scope — org, profile,
  * machine, or a specific person. Metadata only: the pointer/reference is
  * stored here, NEVER the secret value itself — Cloudable injects secrets,
  * never stores them. Fetching happens at runtime via
@@ -14,7 +14,7 @@ import { orgs } from "./org";
  *
  * Scope precedence/resolution mirrors `setting_values`
  * (`resolve-setting.ts`), extended with a `person` scope for secrets bound
- * to an individual user rather than an org/template/machine — per template
+ * to an individual user rather than an org/profile/machine — per profile
  * or per user.
  */
 export const secretBindings = pgTable(
@@ -24,7 +24,7 @@ export const secretBindings = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => orgs.id),
-    scopeType: text("scope_type", { enum: ["org", "template", "machine", "person"] }).notNull(),
+    scopeType: text("scope_type", { enum: ["org", "profile", "machine", "person"] }).notNull(),
     scopeId: uuid("scope_id").notNull(),
     // Target name the fetched value should be injected as (e.g. an env var
     // name) — interpretation is entirely up to the caller injecting it into

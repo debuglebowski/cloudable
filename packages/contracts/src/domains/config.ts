@@ -43,7 +43,7 @@ export interface PatchSettingRequest {
   key: string;
   value: unknown;
   /** Org-scope only: marks the entry un-overridable below. */
-  pinned?: boolean;
+  locked?: boolean;
 }
 
 export interface SettingChangeResult {
@@ -73,7 +73,7 @@ export interface ImportConfigEntry {
   scopeId: string;
   key: string;
   value: unknown;
-  pinned?: boolean;
+  locked?: boolean;
 }
 
 /** Bulk desired-state document — the GitOps path. Applied entry-by-entry through the exact same code path as `PatchSettingRequest` — same path whether the change came from the UI or a Git commit. */

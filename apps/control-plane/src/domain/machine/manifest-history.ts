@@ -16,7 +16,7 @@ export class ManifestHistoryError extends Data.TaggedError("ManifestHistoryError
 /** One side of a change. `null` means the package had no entry at that point. */
 export interface ManifestHistoryState {
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   excluded: boolean;
   /** The parent declaration, null when none (and for rows written before parts existed). */
   partOf: string | null;
@@ -55,7 +55,7 @@ const HISTORY_EVENT_TYPES = ["machine.setting_changed", "org.setting_changed"] a
 /**
  * Normalises both write paths' payloads onto one shape.
  *
- * The org path stores an `OrgPackageEntry` (`{ packageName, versionPin, pinned }`)
+ * The org path stores an `OrgPackageEntry` (`{ packageName, versionPin, pinned }`; `pinned` is the lock flag's stored name)
  * and the machine path stores `{ versionPin, pinned, excluded }`, so neither
  * side can be trusted to carry every field. Reading defensively here is also
  * what lets old rows — written before `excluded` existed — render as the
@@ -73,7 +73,7 @@ function toState(raw: unknown): ManifestHistoryState | null {
   };
   return {
     versionPin: typeof value.versionPin === "string" ? value.versionPin : null,
-    pinned: value.pinned === true,
+    locked: value.pinned === true,
     excluded: value.excluded === true,
     partOf: typeof value.partOf === "string" ? value.partOf : null,
     description: typeof value.description === "string" ? value.description : null,

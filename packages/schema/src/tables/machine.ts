@@ -1,6 +1,7 @@
 import { boolean, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { orgs } from "./org";
 import { people } from "./person";
+import { profiles } from "./profile";
 
 /** A persistent, governed cloud machine. Exactly one owner, always a person, or none during offboarding. */
 export const machines = pgTable("machines", {
@@ -8,10 +9,10 @@ export const machines = pgTable("machines", {
   orgId: uuid("org_id")
     .notNull()
     .references(() => orgs.id),
-  // No `templates` table exists yet (v1 has no templates — see CLAUDE.md "Not in v1").
-  // Kept as a bare nullable uuid, deliberately without a foreign key, so it can be
-  // wired up to a future `templates` table without a data migration.
-  templateId: uuid("template_id"),
+  // The profile this machine links to, if any (org → profile → machine). An admin
+  // sets it at creation and can move the machine later; each move is recorded as
+  // `machine.profile_assigned`. See `docs/inheritance.md`.
+  profileId: uuid("profile_id").references(() => profiles.id),
   // Nullable because the owner is cleared (not the row deleted) during offboarding —
   // a machine's history must survive its owner leaving.
   ownerPersonId: uuid("owner_person_id").references(() => people.id),

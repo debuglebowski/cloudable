@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 export interface SettingRowProps {
   label: string;
   value: unknown;
-  source: "org" | "template" | "machine";
+  source: "org" | "profile" | "machine";
   onOverride?: (next: unknown) => void;
   /**
    * The value this setting would resolve to without the override currently in effect —

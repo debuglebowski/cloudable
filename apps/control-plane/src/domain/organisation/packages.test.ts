@@ -10,7 +10,7 @@ import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
 import { MachineService } from "../machine/MachineService";
-import { PackagePinConflictError } from "../machine/errors";
+import { PackageLockConflictError } from "../machine/errors";
 import { type OrgPackagesError, listOrgPackages, updateOrgPackages } from "./packages";
 
 // Runs against the docker-compose Postgres (already migrated — see
@@ -86,7 +86,7 @@ describe("org-scope package manifest write path", () => {
           {
             packageName: "docker",
             versionPin: "24",
-            pinned: false,
+            locked: false,
             partOf: null,
             description: null,
             setting: "allowed",
@@ -107,7 +107,7 @@ describe("org-scope package manifest write path", () => {
       {
         packageName: "docker",
         versionPin: "24",
-        pinned: false,
+        locked: false,
         excluded: false,
         partOf: null,
         description: null,
@@ -118,7 +118,7 @@ describe("org-scope package manifest write path", () => {
     ]);
   });
 
-  test("a pinned org-scope entry rejects a conflicting machine-level override with PackagePinConflictError (422), not a silent no-op", async () => {
+  test("a locked org-scope entry rejects a conflicting machine-level override with PackageLockConflictError (422), not a silent no-op", async () => {
     const org = await seedOrg();
     const machine = await seedMachine(org.id);
 
@@ -129,7 +129,7 @@ describe("org-scope package manifest write path", () => {
           {
             packageName: "docker",
             versionPin: "24",
-            pinned: true,
+            locked: true,
             partOf: null,
             description: null,
             setting: "allowed",
@@ -150,14 +150,14 @@ describe("org-scope package manifest write path", () => {
       }),
     );
 
-    expect(error).toBeInstanceOf(PackagePinConflictError);
-    expect((error as PackagePinConflictError).error.code).toBe("pinned_entry_conflict");
-    expect((error as PackagePinConflictError).error.details.conflicts).toEqual([
+    expect(error).toBeInstanceOf(PackageLockConflictError);
+    expect((error as PackageLockConflictError).error.code).toBe("locked_entry_conflict");
+    expect((error as PackageLockConflictError).error.details.conflicts).toEqual([
       {
         packageName: "docker",
-        pinnedAtScope: "org",
-        pinnedAtScopeId: org.id,
-        pinnedVersionPin: "24",
+        lockedAtScope: "org",
+        lockedAtScopeId: org.id,
+        lockedVersionPin: "24",
       },
     ]);
 
@@ -171,7 +171,7 @@ describe("org-scope package manifest write path", () => {
     expect(machineRows).toEqual([]);
   });
 
-  test("a pinned org-scope entry also rejects a machine trying to exclude it", async () => {
+  test("a locked org-scope entry also rejects a machine trying to exclude it", async () => {
     const org = await seedOrg();
     const machine = await seedMachine(org.id);
 
@@ -182,7 +182,7 @@ describe("org-scope package manifest write path", () => {
           {
             packageName: "docker",
             versionPin: "24",
-            pinned: true,
+            locked: true,
             partOf: null,
             description: null,
             setting: "allowed",
@@ -192,9 +192,9 @@ describe("org-scope package manifest write path", () => {
       }),
     );
 
-    // Excluding is an override like changing a version is, so the pin has to
-    // stop it too. A machine that could opt out of a pinned package would make
-    // the pin decorative.
+    // Excluding is an override like changing a version is, so the lock has to
+    // stop it too. A machine that could opt out of a locked package would make
+    // the lock decorative.
     const error = await runFail(
       Effect.gen(function* () {
         const service = yield* MachineService;
@@ -206,7 +206,7 @@ describe("org-scope package manifest write path", () => {
       }),
     );
 
-    expect(error).toBeInstanceOf(PackagePinConflictError);
+    expect(error).toBeInstanceOf(PackageLockConflictError);
 
     const machineRows = await db
       .select()
@@ -217,7 +217,7 @@ describe("org-scope package manifest write path", () => {
     expect(machineRows).toEqual([]);
   });
 
-  test("an unpinned org package can be excluded on one machine without touching the org's own entry", async () => {
+  test("an unlocked org package can be excluded on one machine without touching the org's own entry", async () => {
     const org = await seedOrg();
     const machine = await seedMachine(org.id);
     const other = await seedMachine(org.id);
@@ -229,7 +229,7 @@ describe("org-scope package manifest write path", () => {
           {
             packageName: "docker",
             versionPin: "24",
-            pinned: false,
+            locked: false,
             partOf: null,
             description: null,
             setting: "allowed",
@@ -257,7 +257,7 @@ describe("org-scope package manifest write path", () => {
         // say "not here". Lifting the exclusion deletes the row rather than
         // leaving this null behind to shadow the org's "24" (asserted below).
         versionPin: null,
-        pinned: false,
+        locked: false,
         excluded: true,
         partOf: null,
         description: null,
@@ -284,7 +284,7 @@ describe("org-scope package manifest write path", () => {
       {
         packageName: "docker",
         versionPin: "24",
-        pinned: false,
+        locked: false,
         excluded: false,
         partOf: null,
         description: null,
@@ -319,7 +319,7 @@ describe("org-scope package manifest write path", () => {
       {
         packageName: "nodejs",
         versionPin: "20",
-        pinned: false,
+        locked: false,
         partOf: null,
         description: null,
         setting: "allowed",
@@ -355,12 +355,13 @@ describe("org-scope package manifest write path", () => {
     expect(event?.payload).toMatchObject({
       key: "package:curl",
       previous: null,
+      // The event stores the lock flag under its first name.
       current: { packageName: "curl", versionPin: null, pinned: false },
       level: "org",
     });
   });
 
-  test("an upsert that omits `pinned` preserves an existing entry's pin instead of silently stripping it", async () => {
+  test("an upsert that omits `locked` preserves an existing entry's lock instead of silently stripping it", async () => {
     const org = await seedOrg();
 
     await run(
@@ -370,7 +371,7 @@ describe("org-scope package manifest write path", () => {
           {
             packageName: "docker",
             versionPin: "24",
-            pinned: true,
+            locked: true,
             partOf: null,
             description: null,
             setting: "allowed",
@@ -380,7 +381,7 @@ describe("org-scope package manifest write path", () => {
       }),
     );
 
-    // Only `versionPin` is sent this time — `pinned` is omitted entirely.
+    // Only `versionPin` is sent this time — `locked` is omitted entirely.
     const result = await run(
       updateOrgPackages({
         orgId: org.id,
@@ -393,7 +394,7 @@ describe("org-scope package manifest write path", () => {
       {
         packageName: "docker",
         versionPin: "26",
-        pinned: true,
+        locked: true,
         partOf: null,
         description: null,
         setting: "allowed",
@@ -403,7 +404,7 @@ describe("org-scope package manifest write path", () => {
       {
         packageName: "docker",
         versionPin: "26",
-        pinned: true,
+        locked: true,
         partOf: null,
         description: null,
         setting: "allowed",

@@ -60,7 +60,7 @@ export function requiredApprovalModeFloor(level: ElevationLevel): ApprovalMode {
 
 export interface SettingsChain {
   orgId: string;
-  templateId?: string | null;
+  profileId?: string | null;
   machineId: string;
 }
 

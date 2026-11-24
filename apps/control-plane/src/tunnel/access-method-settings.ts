@@ -31,7 +31,7 @@ type DbHandle = PostgresJsDatabase<typeof schema>;
  * `domain/machine/settings.ts`'s `ACCESS_METHODS_ENABLED_KEY` /
  * `resolveAccessMethodsEnabled` is the live path — that is what `mintSession` and
  * `MachineService` actually call, and it resolves an `AccessMethodsEnabled` OBJECT through
- * the org -> template -> machine chain rather than a flat list under a different key.
+ * the org -> profile -> machine chain rather than a flat list under a different key.
  *
  * Kept rather than deleted because nothing here is wrong on its own terms, but do not wire
  * it up: two resolvers for "which access methods are on" that read different keys is how a

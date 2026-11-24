@@ -20,7 +20,7 @@ import {
   InvalidMachineRequestError,
   MachineNotFoundError,
   type PackageEnsureSettingError,
-  PackagePinConflictError,
+  PackageLockConflictError,
   ensureSettingError,
 } from "./errors";
 import {
@@ -35,7 +35,7 @@ import {
   type ResolvedManifestEntry,
   declaredPackages,
   findEnsureSettingProblems,
-  findPinConflicts,
+  findLockConflicts,
   packageSettingKey,
   resolveManifest,
 } from "./manifest";
@@ -85,7 +85,7 @@ export interface CreateMachineInput {
   // exactly one owner, always a person. An owner is cleared only later, by
   // offboarding an existing machine, never omitted at creation.
   ownerPersonId: string;
-  templateId?: string | null;
+  profileId?: string | null;
   actorPersonId?: string | null;
   /**
    * Build this machine's data disk from a snapshot's captured DATA disk
@@ -124,7 +124,7 @@ export interface MachineDetail extends MachineRow {
 export interface PackageManifestEdit {
   packageName: string;
   versionPin?: string | null | undefined;
-  pinned?: boolean | undefined;
+  locked?: boolean | undefined;
   /** `true` declares "this package must not be on this machine", overriding the org. */
   excluded?: boolean | undefined;
   /** The declared parent this package is part of; null clears it, omitted keeps it. */
@@ -178,7 +178,7 @@ const toManifestRow = (row: MachinePackageTableRow): MachinePackageRow => ({
   scopeId: row.scopeId,
   packageName: row.packageName,
   versionPin: row.versionPin,
-  pinned: row.pinned,
+  locked: row.locked,
   excluded: row.excluded,
   partOf: row.partOf,
   description: row.description,
@@ -222,21 +222,21 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
     const eventBus = yield* EventBus;
     const provisioning = yield* ProvisioningServiceTag;
 
-    const manifestScopeFilter = (machine: Pick<MachineRow, "id" | "orgId" | "templateId">) => {
+    const manifestScopeFilter = (machine: Pick<MachineRow, "id" | "orgId" | "profileId">) => {
       const conditions = [
         and(eq(machinePackages.scopeType, "org"), eq(machinePackages.scopeId, machine.orgId)),
         and(eq(machinePackages.scopeType, "machine"), eq(machinePackages.scopeId, machine.id)),
       ];
-      if (machine.templateId) {
-        const templateId = machine.templateId;
+      if (machine.profileId) {
+        const profileId = machine.profileId;
         conditions.push(
-          and(eq(machinePackages.scopeType, "template"), eq(machinePackages.scopeId, templateId)),
+          and(eq(machinePackages.scopeType, "profile"), eq(machinePackages.scopeId, profileId)),
         );
       }
       return or(...conditions);
     };
 
-    const fetchManifestRows = (machine: Pick<MachineRow, "id" | "orgId" | "templateId">) =>
+    const fetchManifestRows = (machine: Pick<MachineRow, "id" | "orgId" | "profileId">) =>
       Effect.tryPromise({
         try: () => db.select().from(machinePackages).where(manifestScopeFilter(machine)),
         catch: (cause) => new MachineServiceError({ reason: "manifest_read_failed", cause }),
@@ -437,7 +437,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
               .insert(machines)
               .values({
                 orgId: input.orgId,
-                templateId: input.templateId ?? null,
+                profileId: input.profileId ?? null,
                 ownerPersonId: input.ownerPersonId,
                 name,
                 provider: input.provider,
@@ -492,7 +492,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         // reconcile/upgrade would report.
         //
         // Packages are resolved the same way `getById` resolves a machine's
-        // effective manifest — org (+ template) rows only, since a
+        // effective manifest — org (+ profile) rows only, since a
         // brand-new machine has no machine-level override yet. This is
         // what a provisioning backend (e.g. the local Docker adapter)
         // actually installs.
@@ -500,7 +500,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         const packages = declaredPackages(
           resolveManifest(manifestRows.map(toManifestRow), {
             orgId: machine.orgId,
-            templateId: machine.templateId,
+            profileId: machine.profileId,
             machineId: machine.id,
           }),
         ).map((entry) => entry.packageName);
@@ -669,7 +669,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         const rows = yield* fetchManifestRows(machine);
         const chain = {
           orgId: machine.orgId,
-          templateId: machine.templateId,
+          profileId: machine.profileId,
           machineId: machine.id,
         };
         const manifest = resolveManifest(rows.map(toManifestRow), chain);
@@ -695,7 +695,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       UpdateMachinePackagesResult,
       | MachineServiceError
       | MachineNotFoundError
-      | PackagePinConflictError
+      | PackageLockConflictError
       | PackageEnsureSettingError
     > =>
       Effect.gen(function* () {
@@ -708,13 +708,13 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
 
         const existingRows = (yield* fetchManifestRows(machine)).map(toManifestRow);
 
-        const conflicts = findPinConflicts(existingRows, "machine", editedPackageNames);
+        const conflicts = findLockConflicts(existingRows, "machine", editedPackageNames);
         if (conflicts.length > 0) {
           return yield* Effect.fail(
-            new PackagePinConflictError({
+            new PackageLockConflictError({
               error: {
-                code: "pinned_entry_conflict",
-                message: `${conflicts.length} package(s) are pinned above the machine scope and cannot be overridden below.`,
+                code: "locked_entry_conflict",
+                message: `${conflicts.length} package(s) are locked above the machine scope and cannot be overridden below.`,
                 requestId: ulid(),
                 details: { conflicts },
               },
@@ -724,7 +724,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
 
         const chain = {
           orgId: machine.orgId,
-          templateId: machine.templateId,
+          profileId: machine.profileId,
           machineId: machine.id,
         };
         const previousByName = new Map(
@@ -732,9 +732,9 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         );
         // Falls back to this machine's own existing row (never the resolved
         // chain value — a first machine-level override must not inherit,
-        // say, the org's `pinned` flag just because it happened to resolve
-        // that way) so an upsert that omits `versionPin`/`pinned` preserves
-        // that field instead of silently resetting it to "any"/unpinned.
+        // say, the org's `locked` flag just because it happened to resolve
+        // that way) so an upsert that omits `versionPin`/`locked` preserves
+        // that field instead of silently resetting it to "any"/unlocked.
         const existingMachineRowByName = new Map(
           existingRows
             .filter((row) => row.scopeType === "machine" && row.scopeId === machine.id)
@@ -763,13 +763,13 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             previous?.excluded === true &&
             upsert.excluded === false &&
             upsert.versionPin === undefined &&
-            upsert.pinned === undefined &&
+            upsert.locked === undefined &&
             upsert.partOf === undefined &&
             upsert.description === undefined &&
             upsert.setting === undefined &&
             (previous.setting ?? "allowed") === "allowed" &&
             previous.versionPin === null &&
-            previous.pinned === false &&
+            previous.locked === false &&
             (previous.partOf ?? null) === null &&
             (previous.description ?? null) === null
           );
@@ -788,7 +788,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                 upsert.versionPin !== undefined
                   ? upsert.versionPin
                   : (previous?.versionPin ?? null),
-              pinned: upsert.pinned !== undefined ? upsert.pinned : (previous?.pinned ?? false),
+              locked: upsert.locked !== undefined ? upsert.locked : (previous?.locked ?? false),
               excluded:
                 upsert.excluded !== undefined ? upsert.excluded : (previous?.excluded ?? false),
               partOf: upsert.partOf !== undefined ? upsert.partOf : (previous?.partOf ?? null),
@@ -816,7 +816,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   scopeId: machine.id,
                   packageName: upsert.packageName,
                   versionPin: upsert.versionPin,
-                  pinned: upsert.pinned,
+                  locked: upsert.locked,
                   excluded: upsert.excluded,
                   partOf: upsert.partOf,
                   description: upsert.description,
@@ -831,7 +831,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
                   ],
                   set: {
                     versionPin: upsert.versionPin,
-                    pinned: upsert.pinned,
+                    locked: upsert.locked,
                     excluded: upsert.excluded,
                     partOf: upsert.partOf,
                     description: upsert.description,
@@ -880,7 +880,9 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             previous: previous
               ? {
                   versionPin: previous.versionPin,
-                  pinned: previous.pinned,
+                  // Stored as `pinned`: the event field kept its first name so every
+                  // recorded change has one shape (see docs/events.md).
+                  pinned: previous.locked,
                   excluded: previous.excluded,
                   partOf: previous.partOf,
                   description: previous.description,
@@ -890,7 +892,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             current: current
               ? {
                   versionPin: current.versionPin,
-                  pinned: current.pinned,
+                  pinned: current.locked,
                   excluded: current.excluded,
                   partOf: current.partOf,
                   description: current.description,
@@ -941,7 +943,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         const rows = (yield* fetchManifestRows(machine)).map(toManifestRow);
         const manifest = resolveManifest(rows, {
           orgId: machine.orgId,
-          templateId: machine.templateId,
+          profileId: machine.profileId,
           machineId: machine.id,
         });
         return {
@@ -1003,7 +1005,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         const rows = (yield* fetchManifestRows(machine)).map(toManifestRow);
         const manifest = resolveManifest(rows, {
           orgId: machine.orgId,
-          templateId: machine.templateId,
+          profileId: machine.profileId,
           machineId: machine.id,
         });
         const pendingActions = yield* outstandingActionsByPackage(db, machine.id).pipe(
@@ -1065,7 +1067,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         const rows = (yield* fetchManifestRows(machine)).map(toManifestRow);
         const manifest = resolveManifest(rows, {
           orgId: machine.orgId,
-          templateId: machine.templateId,
+          profileId: machine.profileId,
           machineId: machine.id,
         });
         if (!manifest.some((entry) => entry.setting !== "allowed")) return [];

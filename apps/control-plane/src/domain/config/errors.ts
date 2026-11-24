@@ -23,15 +23,15 @@ export class MachineNotFoundError extends Schema.TaggedError<MachineNotFoundErro
 
 /**
  * A machine (or template) tried to override a package-manifest entry that
- * is pinned at a level above it — attempting to override
+ * is locked at a level above it — attempting to override
  * one is a validation error at edit time, not a silent no-op at reconcile.
  */
-export class PinnedSettingError extends Schema.TaggedError<PinnedSettingError>(
-  "PinnedSettingError",
-)("PinnedSettingError", {
+export class LockedSettingError extends Schema.TaggedError<LockedSettingError>(
+  "LockedSettingError",
+)("LockedSettingError", {
   key: Schema.String,
-  pinnedAtScopeType: Schema.String,
-  pinnedAtScopeId: Schema.String,
+  lockedAtScopeType: Schema.String,
+  lockedAtScopeId: Schema.String,
 }) {}
 
 /** The request shape is internally inconsistent (e.g. org-scope edit whose `scopeId` isn't `orgId`). */

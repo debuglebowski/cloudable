@@ -201,10 +201,10 @@ describe("package manifest summaries", () => {
     });
 
     expect(projectEvent(added).summary).toBe(
-      'Package "ripgrep" at org scope: not declared -> any version, pinned.',
+      'Package "ripgrep" at org scope: not declared -> any version, locked.',
     );
     expect(projectEvent(removed).summary).toBe(
-      'Package "ripgrep" at org scope: any version, pinned -> not declared.',
+      'Package "ripgrep" at org scope: any version, locked -> not declared.',
     );
   });
 

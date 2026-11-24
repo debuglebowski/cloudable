@@ -24,7 +24,7 @@ import type { ImportConfigPayload, PatchSettingPayload } from "../routes/config"
  * Every setting is configuration, so only an admin writes one, at either scope. Two kinds of key
  * not even an admin writes here:
  *
- * - `admin_access_policy` is pinned at deploy time (`ADMIN_ACCESS_POLICY`), so it cannot be
+ * - `admin_access_policy` is locked at deploy time (`ADMIN_ACCESS_POLICY`), so it cannot be
  *   loosened from the console by anyone.
  * - Approval modes change only with an approver's sign-off, through
  *   `POST /api/v1/organisation/approval-modes` (see `domain/organisation/approval-settings-change.ts`).
@@ -63,7 +63,7 @@ export const handlePatchSetting = (
         scopeId: payload.scopeId,
         key: payload.key,
         value: payload.value,
-        pinned: payload.pinned,
+        locked: payload.locked,
         actorType: "person",
         actorId: currentUser.personId,
         // One PATCH is one logical operation — one correlationId.
@@ -105,7 +105,7 @@ export const handleImportConfig = (
             scopeId: entry.scopeId,
             key: entry.key,
             value: entry.value,
-            pinned: entry.pinned,
+            locked: entry.locked,
             actorType: "person",
             actorId: currentUser.personId,
             correlationId,

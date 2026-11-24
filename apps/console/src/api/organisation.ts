@@ -94,7 +94,7 @@ export const organisationKeys = {
 export interface OrgPackageEntry {
   packageName: string;
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   /** The declared parent this package is part of, or null. */
   partOf?: string | null;
   /** Why it is allowed, or null. */
@@ -106,7 +106,7 @@ export interface OrgPackageEntry {
 export interface OrgPackageEdit {
   packageName: string;
   versionPin?: string | null;
-  pinned?: boolean;
+  locked?: boolean;
   partOf?: string | null;
   description?: string | null;
   /** Omitted keeps it. Moving to an ensure setting waits for an approval. */
@@ -122,7 +122,7 @@ export interface UpdateOrgPackagesResult extends OrgPackagesResponse {
   ensureApprovals?: PackageEnsureApprovalView[];
 }
 
-/** The control plane's own message for a refused edit (a pin conflict, an ensure setting it cannot take). */
+/** The control plane's own message for a refused edit (a lock conflict, an ensure setting it cannot take). */
 function editErrorMessage(error: Error): string {
   if (error instanceof ApiError && error.body && typeof error.body === "object") {
     const message = (error.body as Partial<ApiErrorBody>).error?.message;

@@ -29,7 +29,7 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
             sizeSku: payload.sizeSku,
             image: payload.image,
             ownerPersonId: payload.ownerPersonId,
-            templateId: payload.templateId ?? null,
+            profileId: payload.profileId ?? null,
             actorPersonId: currentUser.personId,
           })
           .pipe(Effect.catchTag("MachineServiceError", Effect.die));

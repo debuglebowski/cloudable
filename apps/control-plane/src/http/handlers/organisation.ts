@@ -37,7 +37,7 @@ const rethrowInfraAsDefect = (e: OrgSettingsError) =>
 
 /** `org_not_found` is the one client-facing validation reason for
  * `OrgPackagesError` (same convention as `VALIDATION_REASONS` above); every
- * other reason is our own infra breaking (`Effect.die` it). `PackagePinConflictError`
+ * other reason is our own infra breaking (`Effect.die` it). `PackageLockConflictError`
  * is a separate tagged error and passes through untouched to the `.addError()`
  * on the endpoint. */
 const rethrowPackagesInfraAsDefect = (e: OrgPackagesError) =>

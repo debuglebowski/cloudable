@@ -19,7 +19,7 @@ const describePackageState = (state: unknown): string => {
   const value = state as { versionPin?: unknown; pinned?: unknown; excluded?: unknown };
   if (value.excluded === true) return "excluded";
   const version = typeof value.versionPin === "string" ? value.versionPin : "any version";
-  return value.pinned === true ? `${version}, pinned` : version;
+  return value.pinned === true ? `${version}, locked` : version;
 };
 
 const packageChangeSummary = (

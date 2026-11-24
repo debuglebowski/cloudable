@@ -32,7 +32,7 @@ import {
   updateOrgPackages,
 } from "../organisation/packages";
 import { MachineService, type PackageManifestEdit } from "./MachineService";
-import { PackagePinConflictError, ensureSettingError } from "./errors";
+import { PackageLockConflictError, ensureSettingError } from "./errors";
 import { findEnsureSettingProblems } from "./manifest";
 
 export const SETTING_LABELS: Record<PackageSetting, string> = {
@@ -54,6 +54,8 @@ const PackageEnsurePayloadSchema = Schema.Struct({
   edit: Schema.Struct({
     packageName: Schema.String,
     versionPin: Schema.optional(Schema.NullOr(Schema.String)),
+    locked: Schema.optional(Schema.Boolean),
+    // The lock flag's first name. Approvals asked for before the rename store it this way.
     pinned: Schema.optional(Schema.Boolean),
     excluded: Schema.optional(Schema.Boolean),
     partOf: Schema.optional(Schema.NullOr(Schema.String)),
@@ -168,25 +170,25 @@ export const requestMachineManifestEdit = (input: {
     const direct = upserts.filter((edit) => !gated.includes(edit));
 
     yield* checkEnsureEdits(gated, previousByName);
-    // A pinned entry above the machine cannot be overridden here, ensure or not. Checked now
+    // A locked entry above the machine cannot be overridden here, ensure or not. Checked now
     // so nobody approves an edit the writer would refuse.
-    const pinnedAbove = gated.flatMap((edit) => {
+    const lockedAbove = gated.flatMap((edit) => {
       const entry = detail.manifest.find((row) => row.packageName === edit.packageName);
-      return entry?.pinned && entry.source !== "machine" ? [entry] : [];
+      return entry?.locked && entry.source !== "machine" ? [entry] : [];
     });
-    if (pinnedAbove.length > 0) {
+    if (lockedAbove.length > 0) {
       return yield* Effect.fail(
-        new PackagePinConflictError({
+        new PackageLockConflictError({
           error: {
-            code: "pinned_entry_conflict",
-            message: `${pinnedAbove.length} package(s) are pinned above the machine scope and cannot be overridden below.`,
+            code: "locked_entry_conflict",
+            message: `${lockedAbove.length} package(s) are locked above the machine scope and cannot be overridden below.`,
             requestId: ulid(),
             details: {
-              conflicts: pinnedAbove.map((entry) => ({
+              conflicts: lockedAbove.map((entry) => ({
                 packageName: entry.packageName,
-                pinnedAtScope: entry.source,
-                pinnedAtScopeId: entry.resolvedFromScopeId,
-                pinnedVersionPin: entry.versionPin,
+                lockedAtScope: entry.source,
+                lockedAtScopeId: entry.resolvedFromScopeId,
+                lockedVersionPin: entry.versionPin,
               })),
             },
           },
@@ -292,7 +294,9 @@ export const applyApprovedEnsureEdit = (
     if (decoded._tag === "None") {
       return yield* Effect.logError(`approval ${approval.id}: package_ensure payload unreadable`);
     }
-    const { scope, machineId, edit } = decoded.value;
+    const { scope, machineId } = decoded.value;
+    const { pinned, ...rest } = decoded.value.edit;
+    const edit = rest.locked === undefined && pinned !== undefined ? { ...rest, locked: pinned } : rest;
     const write: Effect.Effect<void, unknown, Db | EventBus | MachineService> =
       scope === "org" || machineId === null
         ? updateOrgPackages({
@@ -309,7 +313,7 @@ export const applyApprovedEnsureEdit = (
             }),
           ).pipe(Effect.asVoid);
     // The approval stands either way; it is evidence of the decision. What usually fails here is
-    // a manifest that changed while the request waited (a new pin above the machine, say), and
+    // a manifest that changed while the request waited (a new lock above the machine, say), and
     // the person can ask again.
     yield* write.pipe(
       Effect.catchAll((error) =>

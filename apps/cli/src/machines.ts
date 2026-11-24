@@ -104,11 +104,11 @@ export const settingLabel = (setting: PackageSetting | undefined): string =>
 
 function printManifestTable(manifest: ReadonlyArray<ResolvedPackageManifestEntry>): void {
   printTable(
-    ["package", "version", "pinned", "excluded", "setting", "part of", "from", "description"],
+    ["package", "version", "locked", "excluded", "setting", "part of", "from", "description"],
     manifest.map((entry) => [
       entry.packageName,
       dash(entry.versionPin),
-      entry.pinned ? "yes" : "no",
+      entry.locked ? "yes" : "no",
       entry.excluded ? "yes" : "no",
       settingLabel(entry.setting),
       dash(entry.partOf ?? null),
@@ -329,7 +329,7 @@ export async function runMachinesArchiveCommand(argv: ReadonlyArray<string>): Pr
  * `npm:@openai/codex@0.5.0`, `pipx:black`, `cargo:ripgrep`, `home:<name>`. The
  * `@` that opens an npm scope is part of the name, not a pin.
  */
-export function parsePackageArg(value: string, pinned: boolean): PackageManifestEdit {
+export function parsePackageArg(value: string, locked: boolean): PackageManifestEdit {
   const nameStart = value.indexOf(":") + 1;
   const at = value.lastIndexOf("@");
   const hasPin = at > nameStart;
@@ -338,7 +338,7 @@ export function parsePackageArg(value: string, pinned: boolean): PackageManifest
   if (packageName === "") throw new UsageError(`'${value}' is not a package name`);
   // Both fields are always sent: the wire schema takes them as optional, but
   // the contracts type has them explicit, and "no pin" is a value, not a gap.
-  return { packageName, versionPin: versionPin ?? null, pinned };
+  return { packageName, versionPin: versionPin ?? null, locked };
 }
 
 /**
@@ -353,15 +353,15 @@ export function parsePackageArg(value: string, pinned: boolean): PackageManifest
  * `--exclude`, they send only the setting, so the pin and the rest keep their
  * value. Moving to an Ensure setting waits for a `package_ensure` approval.
  *
- * `--part-of <parent>` makes every `--add`/`--pin` in the same command a part
+ * `--part-of <parent>` makes every `--add`/`--lock` in the same command a part
  * of that declared parent: allowed only while the parent is. `--standalone
  * <pkg>` clears a package's parent. `--description <text>` records why every
- * `--add`/`--pin` in the command is allowed.
+ * `--add`/`--lock` in the command is allowed.
  */
 /** The repeatable flags both `machines packages set` and `org packages set` take. */
 export const PACKAGE_EDIT_FLAGS = [
   "add",
-  "pin",
+  "lock",
   "remove",
   "standalone",
   "ensure",
@@ -382,7 +382,7 @@ export function packageEdits(args: Args): {
   });
   const upserts = [
     ...(args.all.add ?? []).map((value) => withParent(parsePackageArg(value, false))),
-    ...(args.all.pin ?? []).map((value) => withParent(parsePackageArg(value, true))),
+    ...(args.all.lock ?? []).map((value) => withParent(parsePackageArg(value, true))),
     ...(args.all.exclude ?? []).map((packageName) => ({ packageName, excluded: true })),
     ...(args.all.include ?? []).map((packageName) => ({ packageName, excluded: false })),
     ...(args.all.standalone ?? []).map((packageName) => ({ packageName, partOf: null })),
@@ -421,7 +421,7 @@ export async function runMachinesPackagesListCommand(argv: ReadonlyArray<string>
 
 export async function runMachinesPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "machines packages set <machine> [--add <pkg>[@<version>]] [--pin <pkg>[@<version>]] [--remove <pkg>] [--exclude <pkg>] [--include <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>] [--ensure <pkg>] [--ensure-latest <pkg>] [--allow <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>. Only apt packages can be ensured.",
+    "machines packages set <machine> [--add <pkg>[@<version>]] [--lock <pkg>[@<version>]] [--remove <pkg>] [--exclude <pkg>] [--include <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>] [--ensure <pkg>] [--ensure-latest <pkg>] [--allow <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>. Only apt packages can be ensured.",
   );
   const args = parseArgs(
     argv,

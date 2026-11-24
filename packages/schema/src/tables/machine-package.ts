@@ -2,14 +2,14 @@ import { boolean, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-or
 import { sourceEnum } from "../shared";
 
 /**
- * A single package manifest entry at a given scope (org / template / machine).
+ * A single package manifest entry at a given scope (org / profile / machine).
  * An entry names a package and optionally pins a version
  * (`docker`, `nodejs 20`); there is no dependency resolution here, that's the
  * machine's own package manager's job.
  *
  * Rows are scoped exactly like `settingValues` (see `setting.ts`), one row
  * per (scopeType, scopeId, packageName) — resolution across the org →
- * template → machine chain, lowest level wins, is done by `resolveSetting()`
+ * profile → machine chain, lowest level wins, is done by `resolveSetting()`
  * (see `apps/control-plane/src/domain/machine/manifest.ts`, which treats
  * each distinct `packageName` as a `resolveSetting` key rather than
  * reimplementing the chain walk).
@@ -25,7 +25,7 @@ export const machinePackages = pgTable(
   "machine_packages",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    scopeType: text("scope_type", { enum: ["org", "template", "machine"] }).notNull(),
+    scopeType: text("scope_type", { enum: ["org", "profile", "machine"] }).notNull(),
     scopeId: uuid("scope_id").notNull(),
     packageName: text("package_name").notNull(),
     // Optional version pin, e.g. "20" for a `nodejs 20` entry. Null means
@@ -33,10 +33,11 @@ export const machinePackages = pgTable(
     versionPin: text("version_pin"),
     source: sourceEnum("source").notNull(),
     // When true, this entry cannot be overridden by a row at a lower scope
-    // (org pins template/machine, template pins machine). Overriding one is
-    // a validation error at edit time — see `domain/machine/manifest.ts`'s
-    // `findPinConflicts` — never a silent no-op at reconcile.
-    pinned: boolean("pinned").notNull().default(false),
+    // (an org lock binds profiles and machines, a profile lock binds its
+    // machines). Overriding one is a validation error at edit time — see
+    // `domain/machine/manifest.ts`'s `findLockConflicts` — never a silent
+    // no-op at reconcile. Not the same as `versionPin`.
+    locked: boolean("locked").notNull().default(false),
     // Machine scope only: this package must NOT be present on this machine,
     // overriding whatever the org declared. Distinct from having no row at
     // all — no row means "inherit", this means "not here". An excluded entry

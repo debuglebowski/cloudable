@@ -9,6 +9,7 @@ import { machines } from "./tables/machine";
 import { notifications } from "./tables/notification";
 import { orgs } from "./tables/org";
 import { people } from "./tables/person";
+import { profiles } from "./tables/profile";
 import { secretBindings } from "./tables/secret-binding";
 import { sessions } from "./tables/session";
 import { snapshots } from "./tables/snapshot";
@@ -21,6 +22,7 @@ import { upgradeAttempts } from "./tables/upgrade-attempt";
 export const orgsRelations = relations(orgs, ({ many }) => ({
   people: many(people),
   machines: many(machines),
+  profiles: many(profiles),
   approvals: many(approvals),
   certificates: many(certificates),
   sessions: many(sessions),
@@ -46,6 +48,14 @@ export const peopleRelations = relations(people, ({ one, many }) => ({
   notifications: many(notifications),
 }));
 
+export const profilesRelations = relations(profiles, ({ one, many }) => ({
+  org: one(orgs, {
+    fields: [profiles.orgId],
+    references: [orgs.id],
+  }),
+  machines: many(machines),
+}));
+
 export const machinesRelations = relations(machines, ({ one, many }) => ({
   org: one(orgs, {
     fields: [machines.orgId],
@@ -55,6 +65,10 @@ export const machinesRelations = relations(machines, ({ one, many }) => ({
   owner: one(people, {
     fields: [machines.ownerPersonId],
     references: [people.id],
+  }),
+  profile: one(profiles, {
+    fields: [machines.profileId],
+    references: [profiles.id],
   }),
   sessions: many(sessions),
   snapshots: many(snapshots),

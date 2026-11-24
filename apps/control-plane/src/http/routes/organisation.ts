@@ -1,7 +1,7 @@
 import { isValidDeclaredPackageName } from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
-import { PackageEnsureSettingError, PackagePinConflictError } from "../../domain/machine/errors";
+import { PackageEnsureSettingError, PackageLockConflictError } from "../../domain/machine/errors";
 import { OrgPackagesError } from "../../domain/organisation/packages";
 import { OrgSettingsError } from "../../domain/organisation/settings";
 import { CurrentUserAuthentication } from "../middleware/auth";
@@ -87,7 +87,7 @@ const DeclaredPackageName = Schema.String.pipe(
 const PackageManifestEntry = Schema.Struct({
   packageName: DeclaredPackageName,
   versionPin: Schema.optional(Schema.NullOr(Schema.String)),
-  pinned: Schema.optional(Schema.Boolean),
+  locked: Schema.optional(Schema.Boolean),
   // The declared parent this package is part of. Null clears it.
   partOf: Schema.optional(Schema.NullOr(DeclaredPackageName)),
   // Why it is allowed. Free text for people; nothing acts on it.
@@ -103,7 +103,7 @@ const PackageManifestEntry = Schema.Struct({
 const OrgPackageEntryResource = Schema.Struct({
   packageName: Schema.String,
   versionPin: Schema.NullOr(Schema.String),
-  pinned: Schema.Boolean,
+  locked: Schema.Boolean,
   partOf: Schema.NullOr(Schema.String),
   description: Schema.NullOr(Schema.String),
   setting: packageSettingSchema,
@@ -155,7 +155,7 @@ export const OrganisationGroup = HttpApiGroup.make("organisation")
     HttpApiEndpoint.patch("updatePackages", "/api/v1/organisation/packages")
       .setPayload(UpdateOrgPackagesPayload)
       .addSuccess(UpdateOrgPackagesResponse)
-      .addError(PackagePinConflictError, { status: 422 })
+      .addError(PackageLockConflictError, { status: 422 })
       .addError(PackageEnsureSettingError, { status: 422 })
       .addError(OrgPackagesError, { status: 404 })
       .middleware(CurrentUserAuthentication),

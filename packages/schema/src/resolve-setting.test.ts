@@ -10,14 +10,14 @@ const rows: ReadonlyArray<SettingRow<string>> = [
     value: "us-east",
     source: "machine",
   },
-  { scopeType: "template", scopeId: "template-1", key: "size", value: "small", source: "template" },
+  { scopeType: "profile", scopeId: "profile-1", key: "size", value: "small", source: "profile" },
 ];
 
 describe("resolveSetting", () => {
   test("machine override wins over org and template", () => {
     const resolved = resolveSetting("region", rows, {
       orgId: "org-1",
-      templateId: "template-1",
+      profileId: "profile-1",
       machineId: "machine-1",
     });
 
@@ -32,7 +32,7 @@ describe("resolveSetting", () => {
   test("falls back to org when no machine or template row matches", () => {
     const resolved = resolveSetting("region", rows, {
       orgId: "org-1",
-      templateId: "template-1",
+      profileId: "profile-1",
       machineId: "machine-2",
     });
 
@@ -47,7 +47,7 @@ describe("resolveSetting", () => {
   test("returns undefined when nothing matches", () => {
     const resolved = resolveSetting("does-not-exist", rows, {
       orgId: "org-1",
-      templateId: "template-1",
+      profileId: "profile-1",
       machineId: "machine-1",
     });
 

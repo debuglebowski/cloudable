@@ -6,7 +6,7 @@ import { buildPackagesView, undeclaredFromView } from "./packages-view";
 const entry = (overrides: Partial<ResolvedManifestEntry> = {}): ResolvedManifestEntry => ({
   packageName: "docker",
   versionPin: null,
-  pinned: false,
+  locked: false,
   excluded: false,
   source: "org",
   resolvedFromScopeId: "org-1",

@@ -107,8 +107,8 @@ const toApprovalServiceCallError = (cause: unknown): ApprovalServiceCallError =>
 };
 
 function scopeIdsFor(chain: SettingsChain): ReadonlyArray<string> {
-  return chain.templateId
-    ? [chain.orgId, chain.machineId, chain.templateId]
+  return chain.profileId
+    ? [chain.orgId, chain.machineId, chain.profileId]
     : [chain.orgId, chain.machineId];
 }
 
@@ -260,7 +260,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
 
         const chain: SettingsChain = {
           orgId: machine.orgId,
-          templateId: machine.templateId,
+          profileId: machine.profileId,
           machineId: machine.id,
         };
         const settingRows = yield* loadSettingRows(chain);
@@ -451,7 +451,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
           const machine = yield* loadMachine(elevation.machineId);
           const chain: SettingsChain = {
             orgId: machine.orgId,
-            templateId: machine.templateId,
+            profileId: machine.profileId,
             machineId: machine.id,
           };
           const settingRows = yield* loadSettingRows(chain);

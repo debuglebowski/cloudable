@@ -4,13 +4,13 @@ import {
   computeUndeclaredPackages,
   declaredPackages,
   findEnsureSettingProblems,
-  findPinConflicts,
+  findLockConflicts,
   packageNameFromSettingKey,
   packageSettingKey,
   resolveManifest,
 } from "./manifest";
 
-const chain = { orgId: "org-1", templateId: null, machineId: "machine-1" };
+const chain = { orgId: "org-1", profileId: null, machineId: "machine-1" };
 
 describe("resolveManifest", () => {
   test("machine-level entry overrides an org-level entry for the same package", () => {
@@ -20,7 +20,7 @@ describe("resolveManifest", () => {
         scopeId: "org-1",
         packageName: "docker",
         versionPin: null,
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "org",
       },
@@ -29,7 +29,7 @@ describe("resolveManifest", () => {
         scopeId: "machine-1",
         packageName: "docker",
         versionPin: "24",
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "machine",
       },
@@ -41,7 +41,7 @@ describe("resolveManifest", () => {
       {
         packageName: "docker",
         versionPin: "24",
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "machine",
         resolvedFromScopeId: "machine-1",
@@ -59,7 +59,7 @@ describe("resolveManifest", () => {
         scopeId: "org-1",
         packageName: "docker",
         versionPin: null,
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "org",
       },
@@ -68,7 +68,7 @@ describe("resolveManifest", () => {
         scopeId: "machine-1",
         packageName: "nodejs",
         versionPin: "20",
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "machine",
       },
@@ -78,7 +78,7 @@ describe("resolveManifest", () => {
         scopeId: "machine-2",
         packageName: "python",
         versionPin: null,
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "machine",
       },
@@ -90,7 +90,7 @@ describe("resolveManifest", () => {
       {
         packageName: "docker",
         versionPin: null,
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "org",
         resolvedFromScopeId: "org-1",
@@ -101,7 +101,7 @@ describe("resolveManifest", () => {
       {
         packageName: "nodejs",
         versionPin: "20",
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "machine",
         resolvedFromScopeId: "machine-1",
@@ -117,72 +117,72 @@ describe("resolveManifest", () => {
   });
 });
 
-describe("findPinConflicts", () => {
-  test("an org-pinned entry blocks a machine-level override of the same package", () => {
+describe("findLockConflicts", () => {
+  test("an org-locked entry blocks a machine-level override of the same package", () => {
     const rows: MachinePackageRow[] = [
       {
         scopeType: "org",
         scopeId: "org-1",
         packageName: "docker",
         versionPin: "24",
-        pinned: true,
+        locked: true,
         excluded: false,
         source: "org",
       },
     ];
 
-    const conflicts = findPinConflicts(rows, "machine", ["docker"]);
+    const conflicts = findLockConflicts(rows, "machine", ["docker"]);
 
     expect(conflicts).toEqual([
       {
         packageName: "docker",
-        pinnedAtScope: "org",
-        pinnedAtScopeId: "org-1",
-        pinnedVersionPin: "24",
+        lockedAtScope: "org",
+        lockedAtScopeId: "org-1",
+        lockedVersionPin: "24",
       },
     ]);
   });
 
-  test("an unpinned org entry does not block a machine-level override", () => {
+  test("an unlocked org entry does not block a machine-level override", () => {
     const rows: MachinePackageRow[] = [
       {
         scopeType: "org",
         scopeId: "org-1",
         packageName: "docker",
         versionPin: null,
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "org",
       },
     ];
 
-    expect(findPinConflicts(rows, "machine", ["docker"])).toEqual([]);
+    expect(findLockConflicts(rows, "machine", ["docker"])).toEqual([]);
   });
 
-  test("a machine pinning its own entry is not an override-below and reports no conflict", () => {
+  test("a machine locking its own entry is not an override-below and reports no conflict", () => {
     const rows: MachinePackageRow[] = [
       {
         scopeType: "machine",
         scopeId: "machine-1",
         packageName: "docker",
         versionPin: "24",
-        pinned: true,
+        locked: true,
         excluded: false,
         source: "machine",
       },
     ];
 
-    expect(findPinConflicts(rows, "machine", ["docker"])).toEqual([]);
+    expect(findLockConflicts(rows, "machine", ["docker"])).toEqual([]);
   });
 
-  test("only edited package names that are actually pinned above are reported", () => {
+  test("only edited package names that are actually locked above are reported", () => {
     const rows: MachinePackageRow[] = [
       {
         scopeType: "org",
         scopeId: "org-1",
         packageName: "docker",
         versionPin: null,
-        pinned: true,
+        locked: true,
         excluded: false,
         source: "org",
       },
@@ -191,18 +191,18 @@ describe("findPinConflicts", () => {
         scopeId: "org-1",
         packageName: "nodejs",
         versionPin: null,
-        pinned: false,
+        locked: false,
         excluded: false,
         source: "org",
       },
     ];
 
-    expect(findPinConflicts(rows, "machine", ["docker", "nodejs"])).toEqual([
+    expect(findLockConflicts(rows, "machine", ["docker", "nodejs"])).toEqual([
       {
         packageName: "docker",
-        pinnedAtScope: "org",
-        pinnedAtScopeId: "org-1",
-        pinnedVersionPin: null,
+        lockedAtScope: "org",
+        lockedAtScopeId: "org-1",
+        lockedVersionPin: null,
       },
     ]);
   });
@@ -240,7 +240,7 @@ describe("exclusion", () => {
     scopeId: "org-1",
     packageName: "docker",
     versionPin: "24",
-    pinned: false,
+    locked: false,
     excluded: false,
     source: "org",
   };
@@ -253,7 +253,7 @@ describe("exclusion", () => {
         scopeId: "machine-1",
         packageName: "docker",
         versionPin: null,
-        pinned: false,
+        locked: false,
         excluded: true,
         source: "machine",
       },
@@ -278,7 +278,7 @@ describe("exclusion", () => {
           scopeId: "machine-1",
           packageName: "docker",
           versionPin: null,
-          pinned: false,
+          locked: false,
           excluded: true,
           source: "machine",
         },
@@ -298,7 +298,7 @@ describe("exclusion", () => {
           scopeId: "machine-2",
           packageName: "docker",
           versionPin: null,
-          pinned: false,
+          locked: false,
           excluded: true,
           source: "machine",
         },
@@ -309,17 +309,17 @@ describe("exclusion", () => {
     expect(declaredPackages(manifest).map((entry) => entry.packageName)).toEqual(["docker"]);
   });
 
-  test("an org pin blocks a machine trying to exclude that package", () => {
-    const rows: MachinePackageRow[] = [{ ...orgDocker, pinned: true }];
+  test("an org lock blocks a machine trying to exclude that package", () => {
+    const rows: MachinePackageRow[] = [{ ...orgDocker, locked: true }];
 
     // Exclusion is an override like any other, so it goes through the same
-    // edit-time pin check rather than needing one of its own.
-    expect(findPinConflicts(rows, "machine", ["docker"])).toEqual([
+    // edit-time lock check rather than needing one of its own.
+    expect(findLockConflicts(rows, "machine", ["docker"])).toEqual([
       {
         packageName: "docker",
-        pinnedAtScope: "org",
-        pinnedAtScopeId: "org-1",
-        pinnedVersionPin: "24",
+        lockedAtScope: "org",
+        lockedAtScopeId: "org-1",
+        lockedVersionPin: "24",
       },
     ]);
   });

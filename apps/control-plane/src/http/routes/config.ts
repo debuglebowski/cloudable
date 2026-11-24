@@ -4,7 +4,7 @@ import {
   InvalidScopeError,
   InvalidSettingValueError,
   MachineNotFoundError,
-  PinnedSettingError,
+  LockedSettingError,
   SettingWriteError,
 } from "../../domain/config/errors";
 import { AdminRoleRequiredError } from "../../domain/people/authorization";
@@ -35,7 +35,7 @@ export const PatchSettingPayload = Schema.Struct({
   scopeId: Schema.String,
   key: Schema.String,
   value: Schema.Unknown,
-  pinned: Schema.optional(Schema.Boolean),
+  locked: Schema.optional(Schema.Boolean),
 });
 
 export const PatchSettingResponse = Schema.Struct({
@@ -50,7 +50,7 @@ export const ImportConfigEntry = Schema.Struct({
   scopeId: Schema.String,
   key: Schema.String,
   value: Schema.Unknown,
-  pinned: Schema.optional(Schema.Boolean),
+  locked: Schema.optional(Schema.Boolean),
 });
 
 export const ImportConfigPayload = Schema.Struct({
@@ -71,7 +71,7 @@ export const ConfigGroup = HttpApiGroup.make("config")
       .addError(InvalidScopeError, { status: 400 })
       .addError(InvalidSettingValueError, { status: 400 })
       .addError(MachineNotFoundError, { status: 404 })
-      .addError(PinnedSettingError, { status: 409 })
+      .addError(LockedSettingError, { status: 409 })
       .addError(SettingWriteError, { status: 500 }),
   )
   .add(
@@ -86,7 +86,7 @@ export const ConfigGroup = HttpApiGroup.make("config")
       .addError(InvalidScopeError, { status: 400 })
       .addError(InvalidSettingValueError, { status: 400 })
       .addError(MachineNotFoundError, { status: 404 })
-      .addError(PinnedSettingError, { status: 409 })
+      .addError(LockedSettingError, { status: 409 })
       .addError(SettingWriteError, { status: 500 }),
   )
   .middleware(CurrentUserAuthentication);

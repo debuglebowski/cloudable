@@ -5,7 +5,7 @@ import type { Elevation, ElevationLevel, ElevationStatus } from "./types";
 export interface MachineRecord {
   id: string;
   orgId: string;
-  templateId: string | null;
+  profileId: string | null;
   ownerPersonId: string | null;
   /** For the owner-notification message (`../notify.ts`) — human-readable, unlike `id`. */
   name: string;
@@ -54,7 +54,7 @@ export interface ElevationRepo {
   findMachine(machineId: string): Effect.Effect<MachineRecord | null, Error>;
   findPerson(personId: string): Effect.Effect<PersonRecord | null, Error>;
   findElevation(elevationId: string): Effect.Effect<Elevation | null, Error>;
-  /** `scopeIds` narrows to just this org/template/machine chain — not every org's rows for these keys. */
+  /** `scopeIds` narrows to just this org/profile/machine chain — not every org's rows for these keys. */
   findSettingRows(
     keys: ReadonlyArray<string>,
     scopeIds: ReadonlyArray<string>,

@@ -8,13 +8,13 @@ import { Db } from "../../db/layer";
 import { EventBus } from "../../services/EventBus";
 import {
   type PackageEnsureSettingError,
-  PackagePinConflictError,
+  PackageLockConflictError,
   ensureSettingError,
 } from "../machine/errors";
 import {
   type MachinePackageRow,
   findEnsureSettingProblems,
-  findPinConflicts,
+  findLockConflicts,
   packageSettingKey,
 } from "../machine/manifest";
 
@@ -42,7 +42,7 @@ export class OrgPackagesError extends Schema.TaggedError<OrgPackagesError>()("Or
 export interface OrgPackageEntry {
   packageName: string;
   versionPin: string | null;
-  pinned: boolean;
+  locked: boolean;
   /** The declared parent this package is part of, or null. */
   partOf: string | null;
   /** Why it is allowed, or null. */
@@ -54,7 +54,7 @@ export interface OrgPackageEntry {
 export interface OrgPackageEdit {
   packageName: string;
   versionPin?: string | null | undefined;
-  pinned?: boolean | undefined;
+  locked?: boolean | undefined;
   /** Null clears it; omitted keeps the current value. */
   partOf?: string | null | undefined;
   /** Null clears it; omitted keeps the current value. */
@@ -95,12 +95,12 @@ export const orgPackageSettingKey = packageSettingKey;
 const toEntry = (
   row: Pick<
     MachinePackageRow,
-    "packageName" | "versionPin" | "pinned" | "partOf" | "description" | "setting"
+    "packageName" | "versionPin" | "locked" | "partOf" | "description" | "setting"
   >,
 ): OrgPackageEntry => ({
   packageName: row.packageName,
   versionPin: row.versionPin,
-  pinned: row.pinned,
+  locked: row.locked,
   partOf: row.partOf ?? null,
   description: row.description ?? null,
   setting: row.setting ?? "allowed",
@@ -150,14 +150,27 @@ export const listOrgPackages = (
 const PLACEHOLDER_ID = "";
 const PLACEHOLDER_RECORDED_AT = new Date(0);
 
+/**
+ * An entry as the `org.setting_changed` payload stores it. The lock flag is
+ * stored as `pinned`, its first name, so every recorded change has one shape.
+ * Readers (`manifest-history.ts`, `evidence/projection.ts`) read `pinned`.
+ */
+type OrgPackageEventEntry = Omit<OrgPackageEntry, "locked"> & { pinned: boolean };
+
+const toEventEntry = (entry: OrgPackageEntry | undefined): OrgPackageEventEntry | null => {
+  if (!entry) return null;
+  const { locked, ...rest } = entry;
+  return { ...rest, pinned: locked };
+};
+
 function orgPackageSettingChangedEvent(input: {
   orgId: string;
   correlationId: string;
   actorType: "person" | "system";
   actorId: string;
   packageName: string;
-  previous: OrgPackageEntry | null;
-  current: OrgPackageEntry | null;
+  previous: OrgPackageEventEntry | null;
+  current: OrgPackageEventEntry | null;
 }): OrgEvent {
   return {
     id: PLACEHOLDER_ID,
@@ -181,25 +194,25 @@ function orgPackageSettingChangedEvent(input: {
 
 /**
  * Upserts/removes org-scoped `machine_packages` rows. Runs through the exact
- * same `findPinConflicts` the machine-scope editor does — a pin
- * conflict is a 422 at edit time, never a silent no-op at reconcile. The pin
+ * same `findLockConflicts` the machine-scope editor does — a lock
+ * conflict is a 422 at edit time, never a silent no-op at reconcile. The lock
  * check is already scope-generic and needs no changes for org editing.
  * Nothing sits above `org` in
- * the chain, so `findPinConflicts(existingRows, "org", ...)` can never
+ * the chain, so `findLockConflicts(existingRows, "org", ...)` can never
  * actually report a conflict today; it's wired anyway so this path shares
  * one validation function with the machine-scope path rather than a second
  * copy that could silently drift from it.
  *
- * An upsert that omits `versionPin`/`pinned` preserves that field's existing
- * value rather than resetting it to "any"/unpinned — critical for `pinned`
+ * An upsert that omits `versionPin`/`locked` preserves that field's existing
+ * value rather than resetting it to "any"/unlocked — critical for `locked`
  * specifically: a caller that PATCHes only `{ packageName, versionPin }`
- * against an already-pinned entry must never silently strip its pin.
+ * against an already-locked entry must never silently strip its lock.
  */
 export const updateOrgPackages = (
   input: UpdateOrgPackagesInput,
 ): Effect.Effect<
   OrgPackageEntry[],
-  OrgPackagesError | PackagePinConflictError | PackageEnsureSettingError,
+  OrgPackagesError | PackageLockConflictError | PackageEnsureSettingError,
   Db | EventBus
 > =>
   Effect.gen(function* () {
@@ -212,13 +225,13 @@ export const updateOrgPackages = (
 
     const existingRows = yield* fetchOrgRows(db, input.orgId);
 
-    const conflicts = findPinConflicts(existingRows, "org", editedPackageNames);
+    const conflicts = findLockConflicts(existingRows, "org", editedPackageNames);
     if (conflicts.length > 0) {
       return yield* Effect.fail(
-        new PackagePinConflictError({
+        new PackageLockConflictError({
           error: {
-            code: "pinned_entry_conflict",
-            message: `${conflicts.length} package(s) are pinned above the org scope and cannot be overridden below.`,
+            code: "locked_entry_conflict",
+            message: `${conflicts.length} package(s) are locked above the org scope and cannot be overridden below.`,
             requestId: ulid(),
             details: { conflicts },
           },
@@ -239,7 +252,7 @@ export const updateOrgPackages = (
         packageName: upsert.packageName,
         versionPin:
           upsert.versionPin !== undefined ? upsert.versionPin : (previous?.versionPin ?? null),
-        pinned: upsert.pinned !== undefined ? upsert.pinned : (previous?.pinned ?? false),
+        locked: upsert.locked !== undefined ? upsert.locked : (previous?.locked ?? false),
         partOf: upsert.partOf !== undefined ? upsert.partOf : (previous?.partOf ?? null),
         description:
           upsert.description !== undefined ? upsert.description : (previous?.description ?? null),
@@ -263,7 +276,7 @@ export const updateOrgPackages = (
                 scopeId: input.orgId,
                 packageName: upsert.packageName,
                 versionPin: upsert.versionPin,
-                pinned: upsert.pinned,
+                locked: upsert.locked,
                 partOf: upsert.partOf,
                 description: upsert.description,
                 setting: upsert.setting,
@@ -277,7 +290,7 @@ export const updateOrgPackages = (
                 ],
                 set: {
                   versionPin: upsert.versionPin,
-                  pinned: upsert.pinned,
+                  locked: upsert.locked,
                   partOf: upsert.partOf,
                   description: upsert.description,
                   setting: upsert.setting,
@@ -306,7 +319,7 @@ export const updateOrgPackages = (
       currentByName.set(upsert.packageName, {
         packageName: upsert.packageName,
         versionPin: upsert.versionPin,
-        pinned: upsert.pinned,
+        locked: upsert.locked,
         partOf: upsert.partOf,
         description: upsert.description,
         setting: upsert.setting,
@@ -325,8 +338,8 @@ export const updateOrgPackages = (
           actorType: input.actor.actorType,
           actorId: input.actor.actorId,
           packageName,
-          previous: previousByName.get(packageName) ?? null,
-          current: currentByName.get(packageName) ?? null,
+          previous: toEventEntry(previousByName.get(packageName)),
+          current: toEventEntry(currentByName.get(packageName)),
         }),
       );
       yield* eventBus
