@@ -82,15 +82,22 @@ export interface MachineSummary {
 export interface CreateMachineRequest {
   /** Optional — a friendly, org-unique default is generated when omitted or blank. */
   name?: string;
-  provider: MachineProvider;
+  /** Provider, size and image may be left out when the profile sets them. */
+  provider?: MachineProvider;
   /** Required iff `provider === "azure"` (and must name one of the org's
    * enabled Azure regions) — omitted/ignored for every other provider. */
   region?: string;
-  sizeSku: string;
-  image: string;
+  sizeSku?: string;
+  image?: string;
   /** A machine always has exactly one owner, always a person. */
   ownerPersonId: string;
+  /** The profile it links to. What the profile sets cannot be given a different value here. */
   profileId?: string | null;
+}
+
+/** `PUT /api/v1/machines/:id/profile`: move a machine to another profile, or off one. */
+export interface SetMachineProfileRequest {
+  profileId: string | null;
 }
 
 // `orgId`/`actorPersonId` are gone from every request below: the server

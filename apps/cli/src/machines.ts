@@ -205,29 +205,36 @@ export async function runMachinesGetCommand(argv: ReadonlyArray<string>): Promis
 // ---------------------------------------------------------------------------
 
 const CREATE_USAGE = usageFor(
-  "machines create --owner <email|id> --provider azure|docker|fake --size <sku> --image <image> [--region <region>] [--name <name>]",
+  "machines create --owner <email|id> [--profile <profile>] [--provider azure|docker|fake] [--size <sku>] [--image <image>] [--region <region>] [--name <name>]\n\n--provider, --size and --image are required unless the profile sets them.",
 );
 
 export async function runMachinesCreateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(
     argv,
-    readSpec({ values: ["owner", "provider", "size", "image", "region", "name"] }),
+    readSpec({ values: ["owner", "provider", "size", "image", "region", "name", "profile"] }),
   );
-  const provider = oneOf(
-    requiredFlag(args, "provider", CREATE_USAGE),
-    ["azure", "docker", "fake"] as const,
-    "provider",
-  );
+  const provider = args.flags.provider
+    ? oneOf(args.flags.provider, ["azure", "docker", "fake"] as const, "provider")
+    : undefined;
+  // Without a profile, nothing else can fill these in.
+  if (!args.flags.profile) {
+    requiredFlag(args, "provider", CREATE_USAGE);
+    requiredFlag(args, "size", CREATE_USAGE);
+    requiredFlag(args, "image", CREATE_USAGE);
+  }
   const owner = await personId(requiredFlag(args, "owner", CREATE_USAGE));
+  const { profileId } = await import("./profiles");
+  const profile = args.flags.profile ? await profileId(args.flags.profile) : undefined;
   const machine = await authenticatedApiRequest<MachineSummaryWire>(
     "/api/v1/machines",
     postJson({
-      provider,
       ownerPersonId: owner,
-      sizeSku: requiredFlag(args, "size", CREATE_USAGE),
-      image: requiredFlag(args, "image", CREATE_USAGE),
+      ...(provider ? { provider } : {}),
+      ...(args.flags.size ? { sizeSku: args.flags.size } : {}),
+      ...(args.flags.image ? { image: args.flags.image } : {}),
       ...(args.flags.region ? { region: args.flags.region } : {}),
       ...(args.flags.name ? { name: args.flags.name } : {}),
+      ...(profile ? { profileId: profile } : {}),
     }),
   );
 
@@ -237,6 +244,28 @@ export async function runMachinesCreateCommand(argv: ReadonlyArray<string>): Pro
   }
   console.log(`Creating ${machine.name} (${machine.id}).`);
   console.log("Provisioning runs in the background. Watch it with `cloudable machines get`.");
+}
+
+export async function runMachinesSetProfileCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor("machines set-profile <machine> <profile|none>");
+  const args = parseArgs(argv, readSpec());
+  const id = await machineId(required(args, 0, "a machine", usage));
+  const target = required(args, 1, "a profile, or none", usage);
+  const { profileId } = await import("./profiles");
+  const profile = target === "none" ? null : await profileId(target);
+  const machine = await authenticatedApiRequest<MachineSummaryWire>(
+    `/api/v1/machines/${id}/profile`,
+    { method: "PUT", body: JSON.stringify({ profileId: profile }) },
+  );
+  if (args.booleans.has("json")) {
+    printJson(machine);
+    return;
+  }
+  console.log(
+    profile === null
+      ? `${machine.name} is on no profile now. Its settings come from the org and itself.`
+      : `${machine.name} is on profile ${target} now. Its settings resolve through it.`,
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -51,16 +51,29 @@ function printChanges(changes: ReadonlyArray<SettingChange>): void {
 }
 
 export async function runConfigSetCommand(argv: ReadonlyArray<string>): Promise<void> {
-  const usage = usageFor("config set <key> <value> [--machine <machine>] [--locked]");
-  const args = parseArgs(argv, readSpec({ values: ["machine"], booleans: ["locked"] }));
+  const usage = usageFor(
+    "config set <key> <value> [--machine <machine> | --profile <profile>] [--locked]",
+  );
+  const args = parseArgs(argv, readSpec({ values: ["machine", "profile"], booleans: ["locked"] }));
   const key = required(args, 0, "a key", usage);
   const rawValue = args.positionals[1];
   if (rawValue === undefined) throw new UsageError(`a value is required\n\n${usage}`);
+  if (args.flags.machine && args.flags.profile) {
+    throw new UsageError(`give --machine or --profile, not both\n\n${usage}`);
+  }
 
-  const scopeType = args.flags.machine ? "machine" : "org";
-  const scopeId = args.flags.machine
-    ? await machineId(args.flags.machine)
-    : (await currentIdentity()).orgId;
+  let scopeType: "org" | "profile" | "machine" = "org";
+  let scopeId: string;
+  if (args.flags.machine) {
+    scopeType = "machine";
+    scopeId = await machineId(args.flags.machine);
+  } else if (args.flags.profile) {
+    scopeType = "profile";
+    const { profileId } = await import("./profiles");
+    scopeId = await profileId(args.flags.profile);
+  } else {
+    scopeId = (await currentIdentity()).orgId;
+  }
 
   const res = await authenticatedApiRequest<{ setting: SettingChange }>(
     "/api/v1/config/settings",

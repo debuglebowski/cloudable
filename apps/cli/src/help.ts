@@ -111,14 +111,25 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         summary: "Create a machine for a person",
         options: [
           { flag: "--owner <email|id>", description: "The one person who owns it (required)" },
-          { flag: "--provider azure|docker|fake", description: "Where it runs (required)" },
-          { flag: "--size <sku>", description: "Size SKU (required)" },
-          { flag: "--image <image>", description: "Base image (required)" },
+          { flag: "--profile <profile>", description: "The profile it links to" },
+          { flag: "--provider azure|docker|fake", description: "Where it runs" },
+          { flag: "--size <sku>", description: "Size SKU" },
+          { flag: "--image <image>", description: "Base image" },
           { flag: "--region <region>", description: "Required for azure, ignored otherwise" },
           { flag: "--name <name>", description: "Defaults to a generated, org-unique name" },
         ],
         notes: [
           "A machine has exactly one owner, always a person. Check what this deployment can provision with `cloudable capabilities`.",
+          "--provider, --size and --image are required unless the profile sets them. A value the profile sets cannot be changed here.",
+        ],
+      },
+      {
+        name: "set-profile",
+        summary: "Move a machine to another profile, or off one",
+        args: "<machine> <profile|none>",
+        notes: [
+          "Admin only. The move is recorded. The machine's settings then resolve through the new profile.",
+          "Refused when the profile sets a provider, region, size or image the machine does not have. Those are fixed when a machine is created.",
         ],
       },
       { name: "restart", summary: "Reboot a running machine", args: "<machine>" },
@@ -189,6 +200,74 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       },
     ],
     notes: ["Every command takes a machine name or a machine id."],
+  },
+  {
+    name: "profiles",
+    summary: "Named sets of settings machines link to",
+    subcommands: [
+      { name: "list", summary: "List profiles with their machine counts" },
+      { name: "get", summary: "Show a profile's fields, settings and packages", args: "<profile>" },
+      {
+        name: "create",
+        summary: "Create a profile",
+        options: [
+          { flag: "--name <name>", description: "Unique in the org (required)" },
+          { flag: "--description <text>", description: "What it is for" },
+          { flag: "--provider azure|docker|fake", description: "Every machine on it runs here" },
+          { flag: "--region <region>", description: "Every machine on it runs here" },
+          { flag: "--size <sku>", description: "Every machine on it has this size" },
+          { flag: "--image <image>", description: "Every machine on it starts from this image" },
+        ],
+        notes: [
+          "All optional but the name. The create form asks for what the profile leaves out.",
+          "Set its other settings with `cloudable config set <key> <value> --profile <profile>`.",
+        ],
+      },
+      {
+        name: "update",
+        summary: "Change a profile's name, description or creation fields",
+        args: "<profile>",
+        options: [
+          { flag: "--name <name>", description: "New name" },
+          { flag: "--description <text>|none", description: "New description" },
+          { flag: "--provider <p>|none", description: "Only while no machine uses it" },
+          { flag: "--region <r>|none", description: "Only while no machine uses it" },
+          { flag: "--size <sku>|none", description: "Only while no machine uses it" },
+          { flag: "--image <image>|none", description: "Only while no machine uses it" },
+        ],
+      },
+      {
+        name: "archive",
+        summary: "Archive a profile",
+        args: "<profile>",
+        notes: [
+          "No new machine can use it. Machines already on it keep its settings.",
+          "Profiles are archived, never deleted.",
+        ],
+      },
+      {
+        name: "packages",
+        summary: "The profile layer of the package manifest",
+        subcommands: [
+          {
+            name: "set",
+            summary: "Declare, lock, ensure or drop packages for a profile",
+            args: "<profile>",
+            options: [
+              { flag: "--add <pkg>[@<ver>]", description: "Declare a package (repeatable)" },
+              { flag: "--lock <pkg>[@<ver>]", description: "Declare it locked (repeatable)" },
+              { flag: "--remove <pkg>", description: "Drop the profile entry (repeatable)" },
+              ...ENSURE_OPTIONS,
+            ],
+            notes: [...ENSURE_NOTES, "Every edit is recorded."],
+          },
+        ],
+      },
+    ],
+    notes: [
+      "The chain is org, then profile, then machine. The lowest level that sets something wins, unless a level above locks it.",
+      "Changing a profile needs an admin.",
+    ],
   },
   {
     name: "sessions",
@@ -533,10 +612,11 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
     subcommands: [
       {
         name: "set",
-        summary: "Set one setting at org or machine scope",
+        summary: "Set one setting at org, profile or machine scope",
         args: "<key> <value>",
         options: [
           { flag: "--machine <machine>", description: "Set it on one machine instead of the org" },
+          { flag: "--profile <profile>", description: "Set it on a profile instead of the org" },
           { flag: "--locked", description: "Stop lower scopes overriding it" },
         ],
         notes: ["Values are read as JSON when they look like it, otherwise as text."],

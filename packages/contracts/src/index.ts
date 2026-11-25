@@ -11,6 +11,7 @@ export * from "./domains/approvals";
 export * from "./domains/archive";
 export * from "./domains/elevations";
 export * from "./domains/config";
+export * from "./domains/profiles";
 export * from "./domains/tunnel-signal";
 export * from "./domains/tunnel";
 

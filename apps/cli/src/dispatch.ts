@@ -57,6 +57,10 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     const { runMachinesVulnerabilitiesCommand } = await import("./vulnerability-scan");
     await runMachinesVulnerabilitiesCommand(rest);
   },
+  "machines set-profile": async (rest) => {
+    const { runMachinesSetProfileCommand } = await import("./machines");
+    await runMachinesSetProfileCommand(rest);
+  },
   "machines packages list": async (rest) => {
     const { runMachinesPackagesListCommand } = await import("./machines");
     await runMachinesPackagesListCommand(rest);
@@ -64,6 +68,31 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
   "machines packages set": async (rest) => {
     const { runMachinesPackagesSetCommand } = await import("./machines");
     await runMachinesPackagesSetCommand(rest);
+  },
+
+  "profiles list": async (rest) => {
+    const { runProfilesListCommand } = await import("./profiles");
+    await runProfilesListCommand(rest);
+  },
+  "profiles get": async (rest) => {
+    const { runProfilesGetCommand } = await import("./profiles");
+    await runProfilesGetCommand(rest);
+  },
+  "profiles create": async (rest) => {
+    const { runProfilesCreateCommand } = await import("./profiles");
+    await runProfilesCreateCommand(rest);
+  },
+  "profiles update": async (rest) => {
+    const { runProfilesUpdateCommand } = await import("./profiles");
+    await runProfilesUpdateCommand(rest);
+  },
+  "profiles archive": async (rest) => {
+    const { runProfilesArchiveCommand } = await import("./profiles");
+    await runProfilesArchiveCommand(rest);
+  },
+  "profiles packages set": async (rest) => {
+    const { runProfilesPackagesSetCommand } = await import("./profiles");
+    await runProfilesPackagesSetCommand(rest);
   },
 
   "sessions list": async (rest) => {
