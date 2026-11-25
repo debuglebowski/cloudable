@@ -1,5 +1,6 @@
 import { type PackageActionTrigger, isInstallablePackageName } from "@cloudable/contracts";
 import { type ResolvedManifestEntry, declaredPackages } from "./manifest";
+import { aptVersionMatchesPin } from "./version-pin";
 
 /**
  * Which *Ensure* packages a machine needs an install for, decided from what its
@@ -11,7 +12,9 @@ import { type ResolvedManifestEntry, declaredPackages } from "./manifest";
  * and someone approved it (CLAUDE.md invariants 4, 5 and 10), and it does only
  * what that setting covers:
  *
- * - *Ensure installed*: install the package when it is missing. Never update it.
+ * - *Ensure installed*: install the package when it is missing. With a version pin, also
+ *   when the installed version does not match the pin: the pin is what was approved.
+ *   Without a pin, never update it.
  * - *Ensure latest version*: also install the repository's newer version when
  *   the installed one is behind.
  *
@@ -25,8 +28,11 @@ export interface EnsureDecision {
   trigger: EnsureTrigger;
   /** The manifest's pin, for an *Ensure installed* entry that has one. */
   versionPin: string | null;
-  /** `missing`: not installed at all. `outdated`: installed, but the repository has a newer version. */
-  reason: "missing" | "outdated";
+  /**
+   * `missing`: not installed at all. `outdated`: installed, but the repository has a newer
+   * version. `pin_mismatch`: installed, but not at the version the pin allows.
+   */
+  reason: "missing" | "outdated" | "pin_mismatch";
   installedVersion: string | null;
   availableVersion: string | null;
 }
@@ -102,6 +108,33 @@ export function decideEnsureActions(input: EnsureInput): EnsureDecision[] {
         versionPin: entry.setting === "ensure_installed" ? entry.versionPin : null,
         reason: "missing",
         installedVersion: null,
+        availableVersion,
+      });
+      continue;
+    }
+
+    // Installed, but not at the version the approved pin allows (Node 18 where `24.*` was
+    // approved). apt packages only: other managers' pins are ranges this does not judge.
+    if (
+      entry.setting === "ensure_installed" &&
+      aptVersionMatchesPin(name, installedVersion, entry.versionPin) === false
+    ) {
+      // An install that succeeded and still left the wrong version (a held package, an
+      // apt preference) would otherwise be queued again every few minutes. Wait the
+      // org's retry time instead, the same as after a failure.
+      if (
+        last?.status === "succeeded" &&
+        last.trigger === "ensure_installed" &&
+        sinceLast < input.retryWaitMs
+      ) {
+        continue;
+      }
+      decisions.push({
+        packageName: name,
+        trigger: "ensure_installed",
+        versionPin: entry.versionPin,
+        reason: "pin_mismatch",
+        installedVersion,
         availableVersion,
       });
       continue;

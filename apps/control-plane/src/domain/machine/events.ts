@@ -411,7 +411,7 @@ export function machinePackageActionRequestedEvent(
   input: PackageActionEventInput & {
     versionPin: string | null;
     trigger?: "person" | "ensure_installed" | "ensure_latest";
-    ensureReason?: "missing" | "outdated";
+    ensureReason?: "missing" | "outdated" | "pin_mismatch";
     fromVersion?: string | null;
     toVersion?: string | null;
   },

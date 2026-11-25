@@ -25,7 +25,8 @@ Violating any of these breaks a stated customer promise. They are not preference
    update is recorded. The list is closed and lives in `docs/agents.md`. Why: compliance needs the
    same monitoring on every machine, and asking per machine would leave gaps in the evidence.
 5. **Drift is flagged. Cloudable fixes only what a package's setting covers.** *Ensure installed*
-   fixes a missing package. *Ensure latest version* also fixes an outdated one. Undeclared software
+   fixes a missing package, and with a version pin also a version the pin does not allow.
+   *Ensure latest version* also fixes an outdated one. Undeclared software
    is detected, surfaced and aged. It is never silently removed.
 6. **Machines are never deleted.** Only archived. Snapshot data expires; the record is permanent.
 7. **No inbound network access to any machine, ever.** Agents are pull-only; tunnels are outbound.
@@ -106,7 +107,7 @@ An entry names a package and **optionally** pins a version. `docker` and `nodejs
 
 **Resolution: lowest level wins.** Machine beats profile beats organisation.
 
-**Setting:** each entry is *Allowed* (the default), *Ensure installed* or *Ensure latest version*. Allowed means a machine may have it and a person installs it. Ensure installed means Cloudable installs it when it is missing. Ensure latest version also updates it when the package repository has a newer version. Setting Ensure needs an approval. apt, npm, pipx, cargo and Nix packages can be installed and ensured; `home:` entries cannot. See `docs/inheritance.md`.
+**Setting:** each entry is *Allowed* (the default), *Ensure installed* or *Ensure latest version*. Allowed means a machine may have it and a person installs it. Ensure installed means Cloudable installs it when it is missing, or, with a version pin, when the installed version is not one the pin allows. Ensure latest version also updates it when the package repository has a newer version. Setting Ensure needs an approval. apt, npm, pipx, cargo and Nix packages can be installed and ensured; `home:` entries cannot. See `docs/inheritance.md`.
 
 **Other managers, and why Nix on Ubuntu rather than NixOS.** People want tools from npm, pipx, cargo and Nix, so Cloudable installs through them too, one recorded request per package, as the machine user so no package install script runs as root. Nix is offered as a package manager on Ubuntu (24.04, the apt package `nix-setup-systemd`), not as NixOS. NixOS was assessed on 2026-11-19 and set aside: Defender for Endpoint does not support it, Trivy finds no packages on it, there is no CIS benchmark for it, and its model (converge the whole machine to a config) is the opposite of Cloudable's (nothing converges a machine except a recorded decision). Nix pins a nixpkgs commit, not a package version, so one org-wide commit (`packages.nix.snapshot`) decides every machine's Nix versions, which keeps machines alike and makes an update one admin decision.
 

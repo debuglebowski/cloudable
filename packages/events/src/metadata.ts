@@ -207,7 +207,7 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   "machine.package_action_requested": {
     tier: 1,
     description:
-      "A package install or removal was queued for a machine. Either a person asked for it (actor `person`), or a package set to Ensure installed or Ensure latest version required it (actor `system`). An Ensure install carries `trigger` (the setting), `ensureReason` (`missing` or `outdated`), `fromVersion` and `toVersion`.",
+      "A package install or removal was queued for a machine. Either a person asked for it (actor `person`), or a package set to Ensure installed or Ensure latest version required it (actor `system`). An Ensure install carries `trigger` (the setting), `ensureReason` (`missing`, `outdated` or `pin_mismatch`), `fromVersion` and `toVersion`.",
   },
   "machine.package_action_completed": {
     tier: 1,

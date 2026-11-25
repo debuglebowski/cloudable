@@ -73,7 +73,7 @@ A profile is a named set of settings machines link to (org → profile → machi
 | `machine.drift_resolved` | 1 | Detected drift was removed from a machine under approval. For apt sources, `removedAptSources` lists the ones no longer unexplained, and `approvalId` is null. |
 | `machine.reconciled` | 2 | Reconciliation removed undeclared software or settings to close a gap with desired state. |
 | `machine.first_seen` | 1 | The control agent contacted the control plane for the first time on a machine. |
-| `machine.package_action_requested` | 1 | A package install or removal was queued for a machine. Either a person asked for it (actor `person`), or a package set to Ensure installed or Ensure latest version required it (actor `system`). An Ensure install carries `trigger` (the setting), `ensureReason` (`missing` or `outdated`), `fromVersion` and `toVersion`. |
+| `machine.package_action_requested` | 1 | A package install or removal was queued for a machine. Either a person asked for it (actor `person`), or a package set to Ensure installed or Ensure latest version required it (actor `system`). An Ensure install carries `trigger` (the setting), `ensureReason` (`missing`, `outdated`, or `pin_mismatch`: installed, but not at a version the pin allows), `fromVersion` and `toVersion`. |
 | `machine.package_action_completed` | 1 | A package install or removal completed on a machine. |
 | `machine.package_action_failed` | 1 | A package install or removal failed on a machine, or was collected by the agent and never reported back. |
 | `machine.vulnerability_scan_completed` | 1 | A vulnerability scan of a machine finished. Carries counts and the new Critical and High CVE ids; the findings themselves are current state, not events. |

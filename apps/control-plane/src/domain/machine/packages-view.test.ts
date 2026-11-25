@@ -110,6 +110,21 @@ describe("buildPackagesView", () => {
     expect(rowFor(unknownVersion, "nodejs").versionMismatch).toBe(false);
   });
 
+  test("a pattern pin matches the way apt matches it", () => {
+    const view = (installed: string) =>
+      rowFor(
+        buildPackagesView({
+          manifest: [entry({ packageName: "nodejs", versionPin: "24.*" })],
+          installedPackages: ["nodejs"],
+          declaredPackageVersions: { nodejs: installed },
+          baselinePackages: [],
+        }),
+        "nodejs",
+      ).versionMismatch;
+    expect(view("24.22.3-1nodesource1")).toBe(false);
+    expect(view("18.19.1+dfsg-6ubuntu5")).toBe(true);
+  });
+
   test("an unpinned package can never mismatch", () => {
     const rows = buildPackagesView({
       manifest: [entry({ packageName: "jq", versionPin: null })],

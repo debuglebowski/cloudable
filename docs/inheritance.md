@@ -188,9 +188,15 @@ asking for it at that moment. The rules are in `domain/machine/package-ensure.ts
 ### What gets queued, and when
 
 Each time the agent reports, the control plane looks at every Ensure package on that machine
-(`MachineService.ensurePackages`). It queues an install in two cases:
+(`MachineService.ensurePackages`). It queues an install in three cases:
 
 - The package is missing. This applies to both Ensure settings.
+- The setting is Ensure installed with a version pin, and the installed version is not one the
+  pin allows (`pin_mismatch`). The pin is what was approved, so Node 18 on a machine where
+  `nodejs` is pinned to `24.*` is replaced without a second approval. apt packages only: npm,
+  pipx and cargo pins are ranges in their own syntax, and a Nix pin is a commit. A pin may be a
+  pattern, matched the way apt matches it (`24.*` allows `24.22.3-1nodesource1`;
+  `version-pin.ts`).
 - The setting is Ensure latest version, and the version the repository offers differs from the
   installed one.
 
@@ -198,11 +204,14 @@ The agent reports what the repository offers (`availablePackageVersions`). It re
 `apt-cache policy`. It never runs `apt-get update` itself. So "newer" means newer in the package
 lists the machine already has. Ubuntu refreshes those daily.
 
-Ensure installed never updates a package. It does not change an installed version that differs
-from its pin either.
+Without a pin, Ensure installed never updates a package. With one, it never moves a package
+that matches the pin, even when a newer matching version is offered. A replacement that
+succeeded and still left the wrong version (a held package) waits the retry time before it is
+tried again.
 
 Each queued install is recorded as `machine.package_action_requested`. Its actor is `system`. Its
-payload says which setting caused it (`trigger`), whether the package was missing or outdated
+payload says which setting caused it (`trigger`), whether the package was missing, outdated or
+off its pin
 (`ensureReason`), and the versions it moves between (`fromVersion`, `toVersion`). The people
 behind it are on the setting's approval and its `setting_changed` event.
 

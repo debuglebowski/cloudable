@@ -26,7 +26,7 @@ Never violate these. If one seems wrong, stop and say so — do not work around 
 2. Events are append-only. No updates. The only delete is the retention sweep, which removes events older than the org's retention window.
 3. A machine has exactly one owner, always a person. No shared or unowned machines.
 4. Software changes only through a recorded decision. A person asks for a package, or an admin sets it to *Ensure installed* or *Ensure latest version*. Cloudable's own components install without either. These are the agent, the tunnel daemon, and monitoring tools such as the vulnerability scanner. Monitoring tools install only after an admin turns them on for the org. That list is closed and lives in `docs/agents.md`. Every install, update and removal is recorded.
-5. Cloudable flags all drift. It fixes only what the package's setting covers. *Ensure installed* fixes a missing package. *Ensure latest version* also fixes an outdated one.
+5. Cloudable flags all drift. It fixes only what the package's setting covers. *Ensure installed* fixes a missing package, and with a version pin also an installed version the pin does not allow. *Ensure latest version* also fixes an outdated one.
 6. Machines are archived, never deleted. Data expires; the record is permanent.
 7. No inbound access to any machine. Agents poll; tunnels are outbound.
 8. Cloudable injects secrets, never stores them.
@@ -89,5 +89,6 @@ No Tailscale. No AWS or GCP. No billing. No idle suspend. No full command captur
 Never build: SSH public key upload, per-machine passwords or 2FA codes, shared machines, auto-correcting drift beyond what an *Ensure* setting covers, code-server, application hosting.
 
 Each package in the manifest has a setting. *Allowed* means a machine may have it, and a person
-installs it. *Ensure installed* means Cloudable installs it when missing. *Ensure latest version*
-also keeps it updated. Nothing else moves a machine towards its manifest.
+installs it. *Ensure installed* means Cloudable installs it when missing, or, with a version pin,
+when the installed version is not one the pin allows. *Ensure latest version* also keeps it
+updated. Nothing else moves a machine towards its manifest.

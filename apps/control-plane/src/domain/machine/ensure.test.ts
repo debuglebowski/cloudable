@@ -75,6 +75,73 @@ describe("decideEnsureActions", () => {
     expect(decisions).toEqual([]);
   });
 
+  test("replaces an Ensure installed package that does not match its pin", () => {
+    const nodejs = entry({ packageName: "nodejs", versionPin: "24.*" });
+    const decisions = decideEnsureActions(
+      input({
+        manifest: [nodejs],
+        installedPackages: ["nodejs"],
+        installedVersions: { nodejs: "18.19.1+dfsg-6ubuntu5" },
+        availableVersions: { nodejs: "24.22.3-1nodesource1" },
+      }),
+    );
+    expect(decisions).toEqual([
+      {
+        packageName: "nodejs",
+        trigger: "ensure_installed",
+        versionPin: "24.*",
+        reason: "pin_mismatch",
+        installedVersion: "18.19.1+dfsg-6ubuntu5",
+        availableVersion: "24.22.3-1nodesource1",
+      },
+    ]);
+    // A version the pin allows is left alone, even when a newer one is offered.
+    expect(
+      decideEnsureActions(
+        input({
+          manifest: [nodejs],
+          installedPackages: ["nodejs"],
+          installedVersions: { nodejs: "24.22.0-1nodesource1" },
+          availableVersions: { nodejs: "24.22.3-1nodesource1" },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a pin-mismatch install that succeeded and changed nothing waits the retry time", () => {
+    const decisions = decideEnsureActions(
+      input({
+        manifest: [entry({ packageName: "nodejs", versionPin: "24.*" })],
+        installedPackages: ["nodejs"],
+        installedVersions: { nodejs: "18.19.1" },
+        lastEnsureActions: new Map([["nodejs", last({ status: "succeeded" })]]),
+      }),
+    );
+    expect(decisions).toEqual([]);
+  });
+
+  test("other managers' pins are not judged, and the image's packages are never touched", () => {
+    expect(
+      decideEnsureActions(
+        input({
+          manifest: [entry({ packageName: "npm:typescript", versionPin: "^5.0.0" })],
+          installedPackages: ["npm:typescript"],
+          installedVersions: { "npm:typescript": "4.9.5" },
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      decideEnsureActions(
+        input({
+          manifest: [entry({ packageName: "nodejs", versionPin: "24.*" })],
+          installedPackages: ["nodejs"],
+          installedVersions: { nodejs: "18.19.1" },
+          baselinePackages: new Set(["nodejs"]),
+        }),
+      ),
+    ).toEqual([]);
+  });
+
   test("updates an Ensure latest version package that is behind", () => {
     const decisions = decideEnsureActions(
       input({

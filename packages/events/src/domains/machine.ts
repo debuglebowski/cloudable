@@ -152,7 +152,7 @@ export type MachineEvent =
          */
         trigger?: "person" | "ensure_installed" | "ensure_latest";
         /** For an ensure action: `missing`, or `outdated` with the versions it moves between. */
-        ensureReason?: "missing" | "outdated";
+        ensureReason?: "missing" | "outdated" | "pin_mismatch";
         fromVersion?: string | null;
         toVersion?: string | null;
       };

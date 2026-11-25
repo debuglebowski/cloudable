@@ -5,6 +5,7 @@ import type {
   PendingPackageActionView,
 } from "@cloudable/contracts";
 import { type ResolvedManifestEntry, allowedPackageNames } from "./manifest";
+import { aptVersionMatchesPin } from "./version-pin";
 
 /**
  * Builds a machine's packages table: one row per package across the union of
@@ -96,12 +97,14 @@ export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[]
 
     const installedVersion = declaredPackageVersions?.[packageName];
     // Only a pinned, installed package whose version we actually know can
-    // mismatch. Absent version information is not evidence of a mismatch.
+    // mismatch. Absent version information is not evidence of a mismatch. An apt pin may
+    // be a pattern (`24.*`), matched the way apt matches it.
+    const aptMatch = aptVersionMatchesPin(packageName, installedVersion, entry?.versionPin);
     const versionMismatch =
       installed === "installed" &&
       entry?.versionPin != null &&
       installedVersion !== undefined &&
-      installedVersion !== entry.versionPin;
+      (aptMatch === null ? installedVersion !== entry.versionPin : !aptMatch);
 
     const pendingAction = pendingActions.get(packageName);
     const availableVersion = input.availablePackageVersions?.[packageName];
