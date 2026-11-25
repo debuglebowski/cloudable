@@ -16,7 +16,7 @@ import { CONFIGURED_IDP_PROVIDER_ID, config } from "./config";
 import { openPostgres } from "./db/connect";
 import { withAssertionFacts } from "./idp-roles/saml-assertion";
 import { IDP_ROLE_CLAIM_FIELD, idpRoleProvisioning } from "./idp-roles/sign-in";
-import { SAML_REQUEST_TTL_MS } from "./idp-roles/sync";
+import { SAML_REQUEST_TTL_MS, emailInDomains } from "./idp-roles/sync";
 import { spIssuer } from "./services/saml-metadata";
 
 // BetterAuth baseline: email/password, plus SAML SSO via `@better-auth/sso`
@@ -304,6 +304,15 @@ const options = {
             .from(people)
             .where(eq(people.email, user.email))
             .limit(1);
+          // With roles from the identity provider, a first SSO sign-in from the provider's own
+          // email domains may create the account: the sign-in step that runs next adds the
+          // person if the identity provider gives them a role, and otherwise refuses and
+          // deletes this account again (`idp-roles/sign-in.ts`). Password sign-up is forced
+          // off in that mode, so nothing else reaches here.
+          if (!person && config.idpRoles && config.idpSamlConfig) {
+            const domains = config.idpSamlConfig.emailDomains.split(/[,\s]+/).filter(Boolean);
+            if (emailInDomains(user.email.trim().toLowerCase(), domains)) return;
+          }
           if (!person) {
             throw new APIError("BAD_REQUEST", {
               code: "no_matching_person",

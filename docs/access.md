@@ -192,7 +192,7 @@ verified first sign-in adds the person (`source: "idp"`, recorded as `person.add
 identity provider as actor) when all of these hold: the assertion carries a mapped role, the email
 is in the provider's email domains (`IDP_SAML_CONFIG.emailDomains`), and exactly one org already
 has people from that email domain. Otherwise the sign-in is refused as before ("No Cloudable
-person exists for this account"). An added person is managed in Cloudable like one added by hand:
+person exists for this account"). The sign-in account is created first and deleted again if the sign-in is then refused, so no account is left without a person. An added person is managed in Cloudable like one added by hand:
 an admin can deactivate or offboard them. Only SCIM-synced people are read-only. Email changes, deactivation and
 offboarding still work. The bootstrap admin is added as a member: nothing is promoted locally.
 Recovery when the IdP is unavailable is server administration: switch the mode off and restart.

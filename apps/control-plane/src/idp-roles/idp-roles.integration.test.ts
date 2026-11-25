@@ -574,9 +574,28 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
       .where(and(eq(events.orgId, org.id), eq(events.type, "person.added")));
     expect(addedEvent).toMatchObject({ actorType: "idp", payload: { email, source: "idp" } });
 
-    // No mapped role: nobody is added.
-    expect(await firstSignIn(`norole@${domain}`, ["Unknown"], [domain])).toBe("no_matching_person");
+    // No mapped role: nobody is added, and the account made for the sign-in is deleted again.
+    const orphanId = crypto.randomUUID();
+    await iso.db.insert(authUser).values({
+      id: orphanId,
+      name: `norole@${domain}`,
+      email: `norole@${domain}`,
+      emailVerified: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const refusedHook = idpRoleProvisioning(iso.db, MANAGED, LOGIN_URL, [domain]);
+    await expect(
+      runWithAssertionFacts(freshFacts(), () =>
+        refusedHook.provisionUser({
+          user: { id: orphanId, email: `norole@${domain}` },
+          userInfo: { email: `norole@${domain}`, [IDP_ROLE_CLAIM_FIELD]: ["Unknown"] },
+          provider: { providerId: CONFIGURED_IDP_PROVIDER_ID },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(APIError);
     expect(await byEmail(`norole@${domain}`)).toBeUndefined();
+    expect(await iso.db.select().from(authUser).where(eq(authUser.id, orphanId))).toEqual([]);
     // A domain the provider is not authoritative for: nobody is added.
     expect(await firstSignIn(`x@${domain}`, ["Cloudable.Member"], ["other.example"])).toBe(
       "no_matching_person",

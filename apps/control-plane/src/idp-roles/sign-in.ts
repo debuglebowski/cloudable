@@ -1,4 +1,6 @@
+import { authUser, people } from "@cloudable/schema";
 import { APIError } from "better-auth";
+import { eq, sql } from "drizzle-orm";
 import { CONFIGURED_IDP_PROVIDER_ID } from "../config";
 import type { AnyPgDb } from "./activation";
 import { logAudit } from "./audit";
@@ -37,6 +39,18 @@ const refuse = (loginUrl: string, code: keyof typeof DESCRIPTIONS): never => {
   url.searchParams.set("error", code);
   url.searchParams.set("error_description", DESCRIPTIONS[code] ?? code);
   throw new APIError("FOUND", undefined, new Headers({ location: url.toString() }));
+};
+
+/** Deletes a sign-in account that has no person behind it. Its sessions and SSO links go with it. */
+const removeAccountWithoutPerson = async (db: AnyPgDb, userId: string, email: string) => {
+  const normalized = email.trim().toLowerCase();
+  const [person] = await db
+    .select({ id: people.id })
+    .from(people)
+    .where(sql`lower(${people.email}) = ${normalized}`)
+    .limit(1);
+  if (person) return;
+  await db.delete(authUser).where(eq(authUser.id, userId));
 };
 
 /** The slice of `@better-auth/sso`'s `provisionUser` argument this reads. */
@@ -94,6 +108,9 @@ export const idpRoleProvisioning = (
     }
     if (result.kind === "no_person") {
       console.warn("[security] idp-roles sign-in refused: no person for the signed-in account");
+      // The account may have been created just for this sign-in (auto-add, `auth.ts`). With no
+      // person it could never be used, so it goes: no account without a person.
+      await removeAccountWithoutPerson(db, user.id, user.email);
       return refuse(loginUrl, "no_matching_person");
     }
     if (result.kind === "mode_mismatch") {
