@@ -14,6 +14,7 @@ import {
   collectPendingActions,
   expireStaleActions,
 } from "../../domain/machine/package-actions";
+import { recordReportedAptState } from "../../domain/organisation/apt-repositories";
 import { nixpkgsCommitFor, readNixSnapshot } from "../../domain/organisation/nix-snapshot";
 import {
   recordReportedScanTools,
@@ -488,6 +489,22 @@ export const AgentProtocolLive = HttpApiBuilder.group(Api, "agent-protocol", (ha
           Effect.catchAll((error) =>
             Effect.logWarning(
               `report: failed to record scanner for ${machine.id}: ${error.message}`,
+            ),
+          ),
+        );
+
+        // Apt sources and the org's approved repositories, as the machine has them. Drift and
+        // each repository put in place or gone are recorded here, not by the agent. Logged,
+        // not fatal: the next report compares again.
+        yield* recordReportedAptState(db, {
+          orgId: identity.orgId,
+          machineId: machine.id,
+          aptSources: payload.aptSources,
+          aptRepositoryIds: payload.aptRepositories,
+        }).pipe(
+          Effect.catchAll((error) =>
+            Effect.logWarning(
+              `report: failed to record apt state for ${machine.id}: ${error.message}`,
             ),
           ),
         );

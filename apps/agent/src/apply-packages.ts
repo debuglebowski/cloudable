@@ -90,6 +90,11 @@ async function detectManager(runner: CommandRunner): Promise<PackageManagerOps |
   return null;
 }
 
+/** True when this machine's package manager is apt. Same detection as the package actions use. */
+export async function hasApt(runner: CommandRunner = bunCommandRunner): Promise<boolean> {
+  return (await detectManager(runner)) === APT;
+}
+
 async function installedVersionOf(
   runner: CommandRunner,
   pm: PackageManagerOps,

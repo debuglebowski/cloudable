@@ -110,6 +110,24 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
     description:
       "An admin archived a profile. No new machine can use it; machines already on it keep reading their settings from it.",
   },
+  "org.apt_repository_added": {
+    tier: 1,
+    description:
+      "An apt repository outside Ubuntu's own was added to the org after its approval. Carries its URL, suite, components and the signing key's fingerprint. It installs nothing by itself.",
+  },
+  "org.apt_repository_removed": {
+    tier: 1,
+    description:
+      "An approved apt repository was removed after its approval. Packages installed from it stay installed.",
+  },
+  "machine.apt_repository_configured": {
+    tier: 1,
+    description: "The agent reported an approved apt repository in place on the machine.",
+  },
+  "machine.apt_repository_removed": {
+    tier: 1,
+    description: "The agent reported an approved apt repository gone from the machine.",
+  },
   "machine.profile_assigned": {
     tier: 1,
     description:
@@ -167,7 +185,8 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   },
   "machine.drift_detected": {
     tier: 1,
-    description: "Undeclared packages or open ports were detected on a machine.",
+    description:
+      "Undeclared packages, open ports or apt sources were detected on a machine. An apt source counts when neither Ubuntu nor the org's approved repositories explain it.",
   },
   "machine.drift_resolved": {
     tier: 1,

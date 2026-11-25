@@ -3,6 +3,11 @@ import { Effect } from "effect";
 import { requireAdminUser } from "../../domain/authz";
 import { requestOrgManifestEdit } from "../../domain/machine/package-ensure";
 import { requestApprovalSettingsChange } from "../../domain/organisation/approval-settings-change";
+import {
+  listAptRepositories,
+  requestAptRepositoryAdd,
+  requestAptRepositoryRemove,
+} from "../../domain/organisation/apt-repositories";
 import { ENSURE_RETRY_HOURS_INVALID_REASON } from "../../domain/organisation/ensure-retry";
 import { NIX_SNAPSHOT_INVALID_REASON } from "../../domain/organisation/nix-snapshot";
 import { type OrgPackagesError, listOrgPackages } from "../../domain/organisation/packages";
@@ -97,6 +102,36 @@ export const OrganisationLive = HttpApiBuilder.group(Api, "organisation", (handl
         });
         return toApprovalWire(approval);
       }).pipe(Effect.catchTag("OrgSettingsError", rethrowInfraAsDefect)),
+    )
+    .handle("listAptRepositories", () =>
+      Effect.flatMap(CurrentUserTag, (currentUser) => listAptRepositories(currentUser.orgId)).pipe(
+        Effect.map((items) => ({ items })),
+        Effect.orDie,
+      ),
+    )
+    .handle("addAptRepository", ({ payload }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        // Which sources a machine may install from is configuration: admin, then an approver.
+        yield* requireAdminUser(currentUser, "Only an admin can add an apt repository.");
+        return yield* requestAptRepositoryAdd({
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+          ...payload,
+        });
+      }),
+    )
+    .handle("removeAptRepository", ({ path, payload }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can remove an apt repository.");
+        return yield* requestAptRepositoryRemove({
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+          repositoryId: path.id,
+          reason: payload.reason,
+        });
+      }),
     )
     .handle("listPackages", () =>
       Effect.flatMap(CurrentUserTag, (currentUser) => listOrgPackages(currentUser.orgId)).pipe(

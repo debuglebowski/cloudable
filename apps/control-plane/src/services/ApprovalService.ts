@@ -21,7 +21,8 @@ export type ApprovalActionType =
   | "offboarding"
   | "package_install"
   | "package_ensure"
-  | "approval_settings_change";
+  | "approval_settings_change"
+  | "apt_repository";
 export type ApprovalMode = "none" | "single" | "dual";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 export type ApprovalDecisionValue = "approved" | "rejected";

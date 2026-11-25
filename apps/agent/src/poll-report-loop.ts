@@ -1,5 +1,5 @@
 import type { AgentRelease, PendingPackageAction } from "@cloudable/contracts";
-import type { PackageActionResult } from "@cloudable/contracts";
+import type { AptRepositoryConfig, PackageActionResult } from "@cloudable/contracts";
 import { listRunningAccessMethods } from "./access-methods";
 import { AgentUpdater, UPDATE_EXIT } from "./agent-update";
 import {
@@ -7,8 +7,15 @@ import {
   availablePackageVersions,
   cachedAvailableUserVersions,
   declaredPackageVersions,
+  hasApt,
   userPackageVersions,
 } from "./apply-packages";
+import {
+  applyAptRepositories,
+  aptRepositoriesFrom,
+  readAptRepositoryIds,
+  readAptSources,
+} from "./apt-repositories";
 import { AttestationRejectedError, attest, clearCachedSession } from "./attestation";
 import { DEFAULT_BACKOFF, fullJitterBackoffMs } from "./backoff";
 import { config } from "./config";
@@ -179,6 +186,11 @@ export async function runAgentLoop(
   // only resent when it changes, and the report needs it every time.
   let allowedPackages: readonly string[] = [];
   let nixSnapshot: string | undefined;
+  // The org's approved apt repositories, applied once per fresh poll. A failed
+  // `apt-get update` is run again on the next fresh poll, even if no file changes.
+  let aptRepositories: AptRepositoryConfig[] = [];
+  let aptRepositoriesDue = false;
+  let aptUpdateFailed = false;
   let pendingActions: PendingPackageAction[] = [];
   const waker = makeWaker(options.signal);
 
@@ -225,6 +237,31 @@ export async function runAgentLoop(
           // vulnerabilityScan key means scanning is off, not "unchanged".
           scanManager.setSettings(poll.desiredState?.settings);
           nixSnapshot = nixSnapshotFrom(poll.desiredState?.settings);
+          // Absent means none: every cloudable-* apt file is removed.
+          aptRepositories = aptRepositoriesFrom(poll.desiredState?.settings);
+          aptRepositoriesDue = true;
+        }
+
+        const aptPresent = await hasApt();
+        // Before the package actions, so a package from a just-approved repository
+        // can install in the same cycle.
+        if (aptRepositoriesDue) {
+          aptRepositoriesDue = false;
+          if (aptPresent) {
+            try {
+              const applied = await applyAptRepositories(aptRepositories, {
+                forceUpdate: aptUpdateFailed,
+              });
+              aptUpdateFailed = applied.updateFailed;
+              if (applied.changed > 0) {
+                console.log(`poll: apt repositories changed ${applied.changed} file(s)`);
+              }
+            } catch (error) {
+              // Not fatal: the report still goes out, and the next fresh poll tries again.
+              console.error(`poll: applying apt repositories failed: ${String(error)}`);
+              aptUpdateFailed = true;
+            }
+          }
         }
 
         // A candidate must confirm its check-in before starting a potentially long package
@@ -289,6 +326,9 @@ export async function runAgentLoop(
         const installedScanner = scanManager.installedScanner();
         const scanTools = scanManager.installedScanTools();
         const vulnerabilityScan = scanManager.pendingReport();
+        // Synchronous file reads. Absent where there is no apt.
+        const aptSources = aptPresent ? readAptSources() : undefined;
+        const aptRepositoryIds = aptPresent ? readAptRepositoryIds() : undefined;
         const agentUpdate = updater?.report(AGENT_VERSION);
         await reportObservedState(session.bearerToken, {
           ...(agentUpdate ? { agentUpdate } : {}),
@@ -308,6 +348,10 @@ export async function runAgentLoop(
           configState: { runningAccessMethods },
           // Omitted when there is no stamp. The control plane records that as "no baseline".
           ...(hardeningBaseline ? { hardeningBaseline } : {}),
+          // Every apt source found, and the approved repositories in place. Which sources
+          // are allowed is the control plane's call.
+          ...(aptSources ? { aptSources } : {}),
+          ...(aptRepositoryIds ? { aptRepositories: aptRepositoryIds } : {}),
           // Reported as observed state. What these outcomes mean, and what
           // gets written about them, is the control plane's call (invariant 12).
           ...(actionResults.length > 0 ? { actionResults } : {}),

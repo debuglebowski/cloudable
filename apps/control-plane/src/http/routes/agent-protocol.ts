@@ -182,6 +182,17 @@ const ReportPayload = Schema.Struct({
     Schema.String.pipe(Schema.pattern(HARDENING_BASELINE_PATTERN)),
   ),
   actionResults: Schema.optional(Schema.Array(PackageActionResult)),
+  // Every apt source found on the machine, and the approved repositories it has in place.
+  // Bounded: a machine with hundreds of sources is misreporting, not configured.
+  aptSources: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        file: Schema.String.pipe(Schema.maxLength(512)),
+        uri: Schema.String.pipe(Schema.maxLength(2048)),
+      }),
+    ).pipe(Schema.maxItems(256)),
+  ),
+  aptRepositories: Schema.optional(Schema.Array(Schema.UUID).pipe(Schema.maxItems(64))),
   scanner: Schema.optional(InstalledScanner),
   scanTools: Schema.optional(Schema.Array(InstalledScanTool).pipe(Schema.maxItems(8))),
   vulnerabilityScan: Schema.optional(VulnerabilityScanReport),

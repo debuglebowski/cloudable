@@ -2,6 +2,7 @@ import { isValidDeclaredPackageName } from "@cloudable/contracts";
 import { HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import { PackageEnsureSettingError, PackageLockConflictError } from "../../domain/machine/errors";
+import { AptRepositoryError } from "../../domain/organisation/apt-repositories";
 import { OrgPackagesError } from "../../domain/organisation/packages";
 import { OrgSettingsError } from "../../domain/organisation/settings";
 import { CurrentUserAuthentication } from "../middleware/auth";
@@ -31,6 +32,7 @@ const ApprovalActionType = Schema.Literal(
   "offboarding",
   "package_install",
   "package_ensure",
+  "apt_repository",
 );
 const ApprovalMode = Schema.Literal("none", "single", "dual");
 const LoggingTier = Schema.Literal(1, 2);
@@ -122,6 +124,33 @@ export const UpdateOrgPackagesResponse = Schema.Struct({
   ensureApprovals: Schema.optional(Schema.Array(ensureApprovalSchema)),
 });
 
+const AptRepositoryResource = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  url: Schema.String,
+  suite: Schema.String,
+  components: Schema.Array(Schema.String),
+  fingerprint: Schema.String,
+  addedAt: Schema.String,
+  removedAt: Schema.NullOr(Schema.String),
+});
+
+const AddAptRepositoryPayload = Schema.Struct({
+  name: Schema.String.pipe(Schema.maxLength(100)),
+  url: Schema.String.pipe(Schema.maxLength(2048)),
+  suite: Schema.String.pipe(Schema.maxLength(64)),
+  components: Schema.Array(Schema.String.pipe(Schema.maxLength(64))).pipe(Schema.maxItems(16)),
+  // A public key; a real one is a few KB.
+  signingKey: Schema.String.pipe(Schema.maxLength(65536)),
+  reason: Schema.String.pipe(Schema.maxLength(2000)),
+});
+
+const AptRepositoryChangeResponse = Schema.Struct({
+  approvalId: Schema.String,
+  status: Schema.Literal("pending", "approved", "rejected", "expired"),
+  fingerprint: Schema.optional(Schema.String),
+});
+
 export const OrganisationGroup = HttpApiGroup.make("organisation")
   .add(
     HttpApiEndpoint.get("get", "/api/v1/organisation")
@@ -149,6 +178,27 @@ export const OrganisationGroup = HttpApiGroup.make("organisation")
     HttpApiEndpoint.get("listPackages", "/api/v1/organisation/packages")
       .addSuccess(ListOrgPackagesResponse)
       .addError(OrgPackagesError, { status: 404 })
+      .middleware(CurrentUserAuthentication),
+  )
+  .add(
+    HttpApiEndpoint.get("listAptRepositories", "/api/v1/organisation/apt-repositories")
+      .addSuccess(Schema.Struct({ items: Schema.Array(AptRepositoryResource) }))
+      .middleware(CurrentUserAuthentication),
+  )
+  .add(
+    // Asks to add one. Nothing is written until the `apt_repository` approval is granted.
+    HttpApiEndpoint.post("addAptRepository", "/api/v1/organisation/apt-repositories")
+      .setPayload(AddAptRepositoryPayload)
+      .addSuccess(AptRepositoryChangeResponse, { status: 202 })
+      .addError(AptRepositoryError, { status: 422 })
+      .middleware(CurrentUserAuthentication),
+  )
+  .add(
+    HttpApiEndpoint.post("removeAptRepository", "/api/v1/organisation/apt-repositories/:id/remove")
+      .setPath(Schema.Struct({ id: Schema.UUID }))
+      .setPayload(Schema.Struct({ reason: Schema.String.pipe(Schema.maxLength(2000)) }))
+      .addSuccess(AptRepositoryChangeResponse, { status: 202 })
+      .addError(AptRepositoryError, { status: 422 })
       .middleware(CurrentUserAuthentication),
   )
   .add(

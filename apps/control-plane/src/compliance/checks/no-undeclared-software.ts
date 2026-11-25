@@ -109,6 +109,16 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
                     eq(machinePackages.scopeType, "machine"),
                     eq(machinePackages.scopeId, machine.id),
                   ),
+                  // The machine's profile declares packages too. Without its rows, a
+                  // package the profile allows would read as undeclared.
+                  ...(machine.profileId
+                    ? [
+                        and(
+                          eq(machinePackages.scopeType, "profile"),
+                          eq(machinePackages.scopeId, machine.profileId),
+                        ),
+                      ]
+                    : []),
                 ),
               ),
           ),

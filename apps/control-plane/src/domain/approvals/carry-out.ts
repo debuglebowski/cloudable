@@ -16,6 +16,7 @@ import type { MachineService } from "../machine/MachineService";
 import { applyApprovedEnsureEdit } from "../machine/package-ensure";
 import { decodePackageInstallPayload, queuePackageAction } from "../machine/package-request";
 import { applyApprovalSettingsChange } from "../organisation/approval-settings-change";
+import { applyApprovedAptRepositoryChange } from "../organisation/apt-repositories";
 
 export const carryOutApproved = (
   approval: ApprovalResult,
@@ -46,6 +47,8 @@ export const carryOutApproved = (
     }
     case "package_ensure":
       return applyApprovedEnsureEdit(approval);
+    case "apt_repository":
+      return applyApprovedAptRepositoryChange(approval);
     case "approval_settings_change":
       return applyApprovalSettingsChange(approval).pipe(
         Effect.catchAll((error) =>

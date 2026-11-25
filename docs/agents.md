@@ -276,6 +276,34 @@ The two scan tools follow the same rules, with these differences:
 Adding a component to this list is a deliberate change to this table, to `CLAUDE.md` and to
 `docs/spec.md`.
 
+### Approved apt repositories
+
+`apps/agent/src/apt-repositories.ts`. Only on machines with apt.
+
+The poll's `settings.aptRepositories` lists the org's approved repositories. When a poll
+brings fresh settings, the agent:
+
+- writes `/etc/apt/keyrings/cloudable-<id>.asc` (the signing key) and
+  `/etc/apt/sources.list.d/cloudable-<id>.sources` (deb822, `Signed-By` that key), mode 0644.
+  It writes a file only when its bytes differ.
+- removes any `cloudable-*.sources` or `cloudable-*.asc` file whose id is no longer listed.
+  An absent or empty list removes them all. It never touches a file without that prefix.
+- runs `apt-get update` once if it wrote or removed anything. A failure is logged. The next
+  fresh poll runs it again.
+
+Each entry is checked before it is written: a UUID id, an `https://` URL with no whitespace, a
+valid suite and components, and exactly one armored public key. An invalid entry is skipped and
+logged. A repository installs nothing. Packages from it are ordinary package actions.
+
+Every report carries two fields:
+
+- `aptSources`: each enabled source URI in `/etc/apt/sources.list` and the `.list` and
+  `.sources` files in `sources.list.d`, with the file it is in. `deb-src` lines and stanzas
+  with `Enabled: no` are left out. The control plane decides which sources are allowed.
+- `aptRepositories`: the ids whose `.sources` file and key are both in place.
+
+Both are absent on a machine without apt.
+
 ### Tunnel-signal channel (CP → agent, deliberately not `wake`)
 
 A fifth CP → agent surface, separate from the four-operation agent

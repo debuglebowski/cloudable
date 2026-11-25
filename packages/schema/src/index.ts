@@ -9,6 +9,7 @@ export * from "./tables/profile";
 export * from "./tables/machine";
 export * from "./tables/setting";
 export * from "./tables/machine-package";
+export * from "./tables/apt-repository";
 export * from "./tables/machine-package-action";
 export * from "./tables/machine-vulnerability-scan";
 export * from "./tables/machine-vulnerability";

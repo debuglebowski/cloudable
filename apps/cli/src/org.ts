@@ -42,6 +42,7 @@ const APPROVAL_ACTIONS = [
   "offboarding",
   "package_install",
   "package_ensure",
+  "apt_repository",
 ] as const;
 const APPROVAL_MODES = ["none", "single", "dual"] as const;
 const RETENTION_LOCATIONS = ["customer", "cloudable_sweden_central"] as const;

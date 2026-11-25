@@ -150,6 +150,20 @@ export const machines = pgTable("machines", {
    * way as `scannerVersion`, each change recorded as `machine.scanner_installed`.
    */
   scanTools: jsonb("scan_tools").$type<Array<{ name: string; version: string }>>(),
+  /**
+   * The apt sources the agent last found on the machine (`AptSourceReport[]`), and which of
+   * the org's approved repositories it has in place (ids). Raw report, kept so a change can
+   * be told apart from a repeat.
+   */
+  aptSources: jsonb("apt_sources").$type<{ file: string; uri: string }[]>(),
+  aptRepositoryIds: jsonb("apt_repository_ids").$type<string[]>(),
+  /**
+   * The apt source URIs from `aptSources` that neither Ubuntu nor the org's approved
+   * repositories explain, as of the last report. Drift: recorded as
+   * `machine.drift_detected` when it changes, and read by the "no unapproved apt sources"
+   * compliance check. Null until the agent first reports sources.
+   */
+  undeclaredAptSources: jsonb("undeclared_apt_sources").$type<string[]>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   legalHold: boolean("legal_hold").notNull().default(false),

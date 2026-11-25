@@ -27,6 +27,23 @@ export type OrgEvent =
       payload: { kind: "idp" | "cloud" | "secret_store"; identifier: string };
     })
   | (EventEnvelope & {
+      type: "org.apt_repository_added";
+      /** An approved apt repository was added. `approvalId` is the decision behind it. */
+      payload: {
+        repositoryId: string;
+        name: string;
+        url: string;
+        suite: string;
+        components: string[];
+        fingerprint: string;
+        approvalId: string;
+      };
+    })
+  | (EventEnvelope & {
+      type: "org.apt_repository_removed";
+      payload: { repositoryId: string; name: string; fingerprint: string; approvalId: string };
+    })
+  | (EventEnvelope & {
       type: "org.events_expired";
       /**
        * Written by the retention sweep each time it deletes events for an org. The

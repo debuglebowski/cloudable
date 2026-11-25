@@ -421,6 +421,34 @@ const CASES: readonly Case[] = [
     allow: ADMIN,
   },
   {
+    endpoint: "organisation.listAptRepositories",
+    method: "GET",
+    path: () => "/api/v1/organisation/apt-repositories",
+    allow: EVERYONE,
+  },
+  {
+    // An invalid key: the admin is refused by validation (422), everyone else by role.
+    endpoint: "organisation.addAptRepository",
+    method: "POST",
+    path: () => "/api/v1/organisation/apt-repositories",
+    body: () => ({
+      name: "x",
+      url: "https://example.com/apt",
+      suite: "stable",
+      components: ["main"],
+      signingKey: "not a key",
+      reason: "test",
+    }),
+    allow: ADMIN,
+  },
+  {
+    endpoint: "organisation.removeAptRepository",
+    method: "POST",
+    path: () => `/api/v1/organisation/apt-repositories/${crypto.randomUUID()}/remove`,
+    body: () => ({ reason: "test" }),
+    allow: ADMIN,
+  },
+  {
     endpoint: "profiles.list",
     method: "GET",
     path: () => "/api/v1/profiles",

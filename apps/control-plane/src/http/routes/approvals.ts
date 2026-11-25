@@ -18,6 +18,7 @@ const ActionType = Schema.Literal(
   "package_install",
   "package_ensure",
   "approval_settings_change",
+  "apt_repository",
 );
 /** What `POST /api/v1/approvals` accepts. Package installs and approval-settings changes are
  * requested through their own endpoints, which store what exactly is asked for. */

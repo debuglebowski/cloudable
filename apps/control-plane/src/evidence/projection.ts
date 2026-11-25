@@ -205,9 +205,12 @@ function summarize(row: RawEventRow): string {
       return `Agent reported changed state: ${keys.length > 0 ? keys.join(", ") : "no fields"}.`;
     }
     case "machine.drift_detected":
-      return `Drift detected: ${event.payload.undeclaredPackages.length} undeclared package(s), ${event.payload.undeclaredPorts.length} undeclared port(s).`;
+      return `Drift detected: ${event.payload.undeclaredPackages.length} undeclared package(s), ${event.payload.undeclaredPorts.length} undeclared port(s)${event.payload.undeclaredAptSources?.length ? `, undeclared apt source(s): ${event.payload.undeclaredAptSources.join(", ")}` : ""}.`;
     case "machine.drift_resolved": {
       const removed = event.payload.removed;
+      if (event.payload.removedAptSources?.length) {
+        return `Drift resolved: apt source(s) ${event.payload.removedAptSources.join(", ")} no longer on the machine or now approved.`;
+      }
       return `Drift resolved under approval ${event.payload.approvalId}: removed ${removed.length > 0 ? removed.join(", ") : "nothing"}.`;
     }
     case "machine.reconciled": {
@@ -345,6 +348,14 @@ function summarize(row: RawEventRow): string {
     }
     case "profile.archived":
       return `Profile "${event.payload.name}" (${event.payload.profileId}) was archived.`;
+    case "org.apt_repository_added":
+      return `Apt repository "${event.payload.name}" (${event.payload.url} ${event.payload.suite} ${event.payload.components.join(" ")}) was added under approval ${event.payload.approvalId}, signing key ${event.payload.fingerprint}.`;
+    case "org.apt_repository_removed":
+      return `Apt repository "${event.payload.name}" (signing key ${event.payload.fingerprint}) was removed under approval ${event.payload.approvalId}.`;
+    case "machine.apt_repository_configured":
+      return `Approved apt repository ${event.payload.repositoryId} is in place on the machine.`;
+    case "machine.apt_repository_removed":
+      return `Approved apt repository ${event.payload.repositoryId} is gone from the machine.`;
     case "machine.profile_assigned":
       return `Machine moved from ${event.payload.previousProfileId ? `profile ${event.payload.previousProfileId}` : "no profile"} to ${event.payload.profileId ? `profile ${event.payload.profileId}` : "no profile"}.`;
 
@@ -440,6 +451,10 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "profile.setting_changed":
     case "profile.archived":
     case "machine.profile_assigned":
+    case "org.apt_repository_added":
+    case "org.apt_repository_removed":
+    case "machine.apt_repository_configured":
+    case "machine.apt_repository_removed":
       return undefined;
 
     default:

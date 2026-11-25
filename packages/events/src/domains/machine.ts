@@ -35,6 +35,16 @@ export type MachineEvent =
       };
     })
   | (EventEnvelope & {
+      type: "machine.apt_repository_configured";
+      /** The agent reported the approved repository in place on the machine. */
+      payload: { repositoryId: string };
+    })
+  | (EventEnvelope & {
+      type: "machine.apt_repository_removed";
+      /** The agent reported the repository gone from the machine. */
+      payload: { repositoryId: string };
+    })
+  | (EventEnvelope & {
       type: "machine.profile_assigned";
       /** An admin moved the machine to another profile, or off one (`profileId: null`). */
       payload: { profileId: string | null; previousProfileId: string | null };
@@ -91,7 +101,12 @@ export type MachineEvent =
     })
   | (EventEnvelope & {
       type: "machine.drift_detected";
-      payload: { undeclaredPackages: string[]; undeclaredPorts: number[] };
+      payload: {
+        undeclaredPackages: string[];
+        undeclaredPorts: number[];
+        /** Apt source URIs on the machine that neither Ubuntu nor the org's approved list explains. */
+        undeclaredAptSources?: string[];
+      };
     })
   | (EventEnvelope & {
       type: "machine.drift_resolved";
@@ -100,7 +115,12 @@ export type MachineEvent =
       // without any approval flow to attribute it to yet. Unit 1/8 will
       // wire the real approval trigger through and this stays non-null
       // once that lands.
-      payload: { removed: string[]; approvalId: string | null };
+      payload: {
+        removed: string[];
+        approvalId: string | null;
+        /** Apt source URIs that were undeclared and no longer are. */
+        removedAptSources?: string[];
+      };
     })
   | (EventEnvelope & {
       // Emitted only when something changed.

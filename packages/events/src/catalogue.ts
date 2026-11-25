@@ -118,4 +118,10 @@ export const EVENT_TYPES = [
   "profile.setting_changed",
   "profile.archived",
   "machine.profile_assigned",
+
+  // --- approved apt repositories ---
+  "org.apt_repository_added",
+  "org.apt_repository_removed",
+  "machine.apt_repository_configured",
+  "machine.apt_repository_removed",
 ] as const satisfies ReadonlyArray<DomainEvent["type"]>;

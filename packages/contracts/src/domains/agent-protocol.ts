@@ -1,5 +1,5 @@
-import type { AptSourceReport } from "./apt-repositories";
 import type { AgentRelease, AgentUpdateReport } from "./agent-update";
+import type { AptSourceReport } from "./apt-repositories";
 import type {
   InstalledScanTool,
   InstalledScanner,
