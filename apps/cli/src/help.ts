@@ -44,7 +44,7 @@ const ENSURE_OPTIONS: ReadonlyArray<OptionSpec> = [
 const ENSURE_NOTES: ReadonlyArray<string> = [
   "Allowed: a machine may have it, and a person installs it. Ensure installed: Cloudable installs it when it is missing. Ensure latest version: Cloudable also updates it when the repository has a newer version.",
   "Setting Ensure needs an approval. The installs it then causes do not. Back to Allowed applies at once.",
-  "Only apt packages can be ensured. Ensure latest version cannot have a version pin.",
+  "home: packages cannot be ensured. Ensure latest version cannot have a version pin.",
 ];
 
 export const COMMANDS: ReadonlyArray<CommandSpec> = [

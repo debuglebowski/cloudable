@@ -263,7 +263,7 @@ export async function runOrgPackagesListCommand(argv: ReadonlyArray<string>): Pr
 
 export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "org packages set [--add <pkg>[@<version>]] [--lock <pkg>[@<version>]] [--remove <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>] [--ensure <pkg>] [--ensure-latest <pkg>] [--allow <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>. Only apt packages can be ensured.",
+    "org packages set [--add <pkg>[@<version>]] [--lock <pkg>[@<version>]] [--remove <pkg>] [--part-of <parent>] [--description <text>] [--standalone <pkg>] [--ensure <pkg>] [--ensure-latest <pkg>] [--allow <pkg>]\n\n<pkg> is an apt name, or npm:<name>, pipx:<name>, cargo:<name>, home:<name>. home: packages cannot be ensured.",
   );
   const args = parseArgs(
     argv,

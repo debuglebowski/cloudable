@@ -178,7 +178,7 @@ asking for it at that moment. The rules are in `domain/machine/package-ensure.ts
 - Moving back to Allowed applies at once. It cannot make Cloudable install anything.
 - The installs an Ensure setting causes need no approval of their own. The setting's approval
   covers them.
-- Only apt packages can be ensured. The one list is `INSTALLABLE_PACKAGE_MANAGERS` in
+- apt, npm, pipx, cargo and nix packages can be ensured; `home:` ones cannot. The one list is `INSTALLABLE_PACKAGE_MANAGERS` in
   `packages/contracts`. Ensuring any other name is refused with a 422 `invalid_ensure_setting`.
 - Ensure latest version with a version pin is refused the same way. The two contradict each other.
 - Ensure installed with a version pin installs the pinned version.
