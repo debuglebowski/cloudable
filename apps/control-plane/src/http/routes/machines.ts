@@ -142,14 +142,15 @@ const createMachinePayloadSchema = Schema.Struct({
   // Optional — MachineService.create generates a friendly, org-unique
   // default when omitted or blank.
   name: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
-  provider: machineProviderSchema,
+  // Provider, size and image may be left out when the profile sets them.
+  provider: Schema.optional(machineProviderSchema),
   // Required iff provider === "azure" (and must name an org-enabled
   // region); forbidden otherwise — enforced in `MachineService.create`,
   // not at the wire-schema level, since it needs the org's catalog to check
   // against.
   region: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
-  sizeSku: Schema.String.pipe(Schema.minLength(1)),
-  image: Schema.String.pipe(Schema.minLength(1)),
+  sizeSku: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
+  image: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
   // Required, never omitted — a machine always has exactly one owner,
   // always a person.
   ownerPersonId: Schema.UUID,
@@ -167,6 +168,9 @@ const listMachinesResponseSchema = Schema.Struct({
 });
 
 const machineIdPathSchema = Schema.Struct({ id: Schema.UUID });
+
+// Moves a machine to another profile, or off one (null).
+const setMachineProfilePayloadSchema = Schema.Struct({ profileId: Schema.NullOr(Schema.UUID) });
 
 // An apt name, or `<manager>:<name>` (`npm:playwright`, `home:playwright-chromium`).
 // See `PACKAGE_MANAGERS` in the contracts package.
@@ -337,6 +341,16 @@ export const MachinesGroup = HttpApiGroup.make("machines")
       .setPath(machineIdPathSchema)
       .addSuccess(machineDetailSchema)
       .addError(MachineNotFoundError, { status: 404 }),
+  )
+  .add(
+    // An admin moves a machine to another profile, or off one. Recorded as
+    // `machine.profile_assigned`.
+    HttpApiEndpoint.put("setProfile", "/:id/profile")
+      .setPath(machineIdPathSchema)
+      .setPayload(setMachineProfilePayloadSchema)
+      .addSuccess(machineSummarySchema)
+      .addError(MachineNotFoundError, { status: 404 })
+      .addError(InvalidMachineRequestError, { status: 422 }),
   )
   .add(
     HttpApiEndpoint.patch("updatePackages", "/:id/packages")

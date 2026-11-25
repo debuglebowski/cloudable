@@ -13,6 +13,7 @@ import { UBUNTU_IMAGES } from "../../services/ProvisioningService.azure";
 import { isProviderEnabled } from "../integrations/integrations";
 import { readEnsureRetryHours } from "../organisation/ensure-retry";
 import { readMalwareProtectionWith } from "../organisation/malware-protection";
+import { profileFieldConflict, requireUsableProfile } from "../profile/ProfileService";
 import { generateDefaultMachineName } from "./default-name";
 import { decideEnsureActions, nextEnsureAttemptAt } from "./ensure";
 import {
@@ -28,6 +29,7 @@ import {
   machineOwnerAssignedEvent,
   machinePackageActionRequestedEvent,
   machineProvisioningFailedEvent,
+  machineProfileAssignedEvent,
   machineSettingChangedEvent,
 } from "./events";
 import {
@@ -67,7 +69,9 @@ export interface CreateMachineInput {
   /** Optional — a friendly, org-unique default (e.g. "swift-falcon-4f2a") is
    * generated when omitted or blank. See `generateUniqueDefaultName` below. */
   name?: string;
-  provider: "azure" | "docker" | "fake";
+  // Provider, size and image may be left out when the profile sets them. Whatever the
+  // profile sets wins; a different value here is refused, not silently replaced.
+  provider?: "azure" | "docker" | "fake" | undefined;
   // Required iff `provider === "azure"` (and must name one of the org's
   // enabled Azure regions — see `isCatalogEntryEnabled`); forbidden for
   // every other provider. Not resolved from an org default the way it used
@@ -76,15 +80,19 @@ export interface CreateMachineInput {
   // supplies an explicit choice from the enabled set, never a silent
   // server-side fallback).
   region?: string | null;
-  sizeSku: string;
+  sizeSku?: string | undefined;
   // Required iff `provider === "azure"` (and must name one of the org's
   // enabled Azure images); freeform for docker/fake (docker further
   // constrains it to "ubuntu-XX.YY" itself, at the adapter level).
-  image: string;
+  image?: string | undefined;
   // Required, never null — a machine always has
   // exactly one owner, always a person. An owner is cleared only later, by
   // offboarding an existing machine, never omitted at creation.
   ownerPersonId: string;
+  /**
+   * The profile the machine links to. Must be this org's and not archived. Its creation
+   * fields fill in what the caller left out.
+   */
   profileId?: string | null;
   actorPersonId?: string | null;
   /**
@@ -297,16 +305,48 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         );
 
     const create = (
-      input: CreateMachineInput,
+      rawInput: CreateMachineInput,
     ): Effect.Effect<MachineRow, MachineServiceError | InvalidMachineRequestError> =>
       Effect.gen(function* () {
-        const trimmedRegion = input.region?.trim() ?? "";
         const invalid = (message: string) =>
           Effect.fail(
             new InvalidMachineRequestError({
               error: { code: "invalid_machine_request", message, requestId: ulid() },
             }),
           );
+
+        // The profile's creation fields fill in what the caller left out. A value that
+        // differs from the profile's is refused: the profile decides those.
+        let provider = rawInput.provider;
+        let sizeSku = rawInput.sizeSku?.trim() || undefined;
+        let image = rawInput.image?.trim() || undefined;
+        let requestedRegion = rawInput.region?.trim() || null;
+        if (rawInput.profileId) {
+          const profile = yield* requireUsableProfile(db, rawInput.orgId, rawInput.profileId).pipe(
+            Effect.catchTags({
+              ProfileNotFoundError: () => invalid("the profile must be one of this org's profiles"),
+              ProfileEditError: (error) => invalid(error.message),
+              ProfileWriteError: (cause) =>
+                Effect.fail(new MachineServiceError({ reason: "profile_read_failed", cause })),
+            }),
+          );
+          const conflict = profileFieldConflict(profile, {
+            provider: provider ?? null,
+            region: requestedRegion,
+            sizeSku: sizeSku ?? null,
+            image: image ?? null,
+          });
+          if (conflict) return yield* invalid(conflict);
+          provider = profile.provider ?? provider;
+          sizeSku = profile.sizeSku ?? sizeSku;
+          image = profile.image ?? image;
+          requestedRegion = profile.region ?? requestedRegion;
+        }
+        if (!provider) return yield* invalid('"provider" is required');
+        if (!sizeSku) return yield* invalid('"sizeSku" is required');
+        if (!image) return yield* invalid('"image" is required');
+        const input = { ...rawInput, provider, sizeSku, image, region: requestedRegion };
+        const trimmedRegion = input.region ?? "";
 
         // The owner is a real, active person of this org (invariant 3), and holds no other
         // live machine: an admin creates one machine per person. A machine that is archived
@@ -467,6 +507,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             region: machine.region,
             size: machine.sizeSku,
             image: machine.image,
+            profileId: machine.profileId,
           }),
           machineOwnerAssignedEvent({
             machineId: machine.id,
@@ -1135,8 +1176,75 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         return queued;
       });
 
+    /**
+     * Moves a machine to another profile, or off one (`profileId: null`). An admin's recorded
+     * decision (`machine.profile_assigned`). The machine's settings and packages then resolve
+     * through the new profile. Refused for an archived machine, an archived profile, and a
+     * profile whose provider, region, size or image differ from the machine's: those are fixed
+     * at creation, and a move must not pretend otherwise.
+     */
+    const setProfile = (input: {
+      machineId: string;
+      orgId: string;
+      profileId: string | null;
+      actorPersonId: string;
+    }): Effect.Effect<MachineRow, MachineServiceError | MachineNotFoundError | InvalidMachineRequestError> =>
+      Effect.gen(function* () {
+        const invalid = (message: string) =>
+          Effect.fail(
+            new InvalidMachineRequestError({
+              error: { code: "invalid_machine_request", message, requestId: ulid() },
+            }),
+          );
+        const machine = yield* fetchMachine(input.machineId, input.orgId);
+        if (machine.state === "archived_restorable" || machine.state === "archived_expired") {
+          return yield* invalid("an archived machine cannot move to another profile");
+        }
+        if (machine.profileId === input.profileId) return machine;
+        if (input.profileId !== null) {
+          const profile = yield* requireUsableProfile(db, input.orgId, input.profileId).pipe(
+            Effect.catchTags({
+              ProfileNotFoundError: () => invalid("the profile must be one of this org's profiles"),
+              ProfileEditError: (error) => invalid(error.message),
+              ProfileWriteError: (cause) =>
+                Effect.fail(new MachineServiceError({ reason: "profile_read_failed", cause })),
+            }),
+          );
+          const conflict = profileFieldConflict(profile, machine);
+          if (conflict) {
+            return yield* invalid(`${conflict}. A machine's provider, region, size and image are fixed when it is created.`);
+          }
+        }
+        const updated = yield* Effect.tryPromise({
+          try: () =>
+            db
+              .update(machines)
+              .set({
+                profileId: input.profileId,
+                // The allowed list the agent is sent may change with the profile.
+                desiredStateVersion: sql`${machines.desiredStateVersion} + 1`,
+              })
+              .where(eq(machines.id, machine.id))
+              .returning(),
+          catch: (cause) => new MachineServiceError({ reason: "profile_write_failed", cause }),
+        });
+        yield* publishOrFail([
+          machineProfileAssignedEvent({
+            machineId: machine.id,
+            orgId: machine.orgId,
+            correlationId: ulid(),
+            actorType: "person",
+            actorId: input.actorPersonId,
+            profileId: input.profileId,
+            previousProfileId: machine.profileId,
+          }),
+        ]);
+        return updated[0] ?? machine;
+      });
+
     return {
       create,
+      setProfile,
       list,
       getById,
       updatePackages,

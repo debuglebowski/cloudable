@@ -19,6 +19,7 @@ import { NotificationsGroup } from "./routes/notifications";
 import { OffboardingGroup } from "./routes/offboarding";
 import { OrganisationGroup } from "./routes/organisation";
 import { PeopleGroup } from "./routes/people";
+import { ProfilesGroup } from "./routes/profiles";
 import { ProvisioningCapabilitiesGroup } from "./routes/provisioning-capabilities";
 import { RestartGroup } from "./routes/restart";
 import { TunnelGroup } from "./routes/tunnel";
@@ -57,6 +58,7 @@ export class Api extends HttpApi.make("cloudable")
   .add(AuthSsoStatusGroup)
   .add(CliAuthGroup)
   .add(VulnerabilityScanGroup)
+  .add(ProfilesGroup)
   // Role checks can refuse any endpoint (see `domain/authz`), so every endpoint declares them.
   .addError(NotPermittedError)
   .addError(MachineNotVisibleError)

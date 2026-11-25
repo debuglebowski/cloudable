@@ -80,12 +80,14 @@ interface Fixture {
   /** A granted elevation the admin holds on machine A (from before the policy pin). */
   elevationByAdmin: string;
   integrationId: string;
+  /** A profile with no machines on it. */
+  profileA: string;
 }
 
 interface Case {
   /** `group.endpoint`, as named in `http/api.ts`. */
   readonly endpoint: string;
-  readonly method: "GET" | "POST" | "PATCH";
+  readonly method: "GET" | "POST" | "PATCH" | "PUT";
   readonly path: (f: Fixture) => string;
   readonly body?: (f: Fixture) => unknown;
   readonly allow: readonly Role[];
@@ -419,6 +421,52 @@ const CASES: readonly Case[] = [
     allow: ADMIN,
   },
   {
+    endpoint: "profiles.list",
+    method: "GET",
+    path: () => "/api/v1/profiles",
+    allow: EVERYONE,
+  },
+  {
+    endpoint: "profiles.byId",
+    method: "GET",
+    path: (f) => `/api/v1/profiles/${f.profileA}`,
+    allow: EVERYONE,
+  },
+  {
+    endpoint: "profiles.create",
+    method: "POST",
+    path: () => "/api/v1/profiles",
+    body: () => ({ name: `profile-${crypto.randomUUID()}` }),
+    allow: ADMIN,
+  },
+  {
+    endpoint: "profiles.update",
+    method: "PATCH",
+    path: (f) => `/api/v1/profiles/${f.profileA}`,
+    body: () => ({ description: "for the data team" }),
+    allow: ADMIN,
+  },
+  {
+    endpoint: "profiles.archive",
+    method: "POST",
+    path: (f) => `/api/v1/profiles/${f.profileA}/archive`,
+    allow: ADMIN,
+  },
+  {
+    endpoint: "profiles.updatePackages",
+    method: "PATCH",
+    path: (f) => `/api/v1/profiles/${f.profileA}/packages`,
+    body: () => ({ upserts: [{ packageName: "jq" }] }),
+    allow: ADMIN,
+  },
+  {
+    endpoint: "machines.setProfile",
+    method: "PUT",
+    path: (f) => `/api/v1/machines/${f.machineA}/profile`,
+    body: (f) => ({ profileId: f.profileA }),
+    allow: ADMIN,
+  },
+  {
     endpoint: "config.patchSetting",
     method: "PATCH",
     path: () => "/api/v1/config/settings",
@@ -687,7 +735,19 @@ describe.skipIf(!postgresReachable)(
         .insert(integrations)
         .values({ orgId: org.id, kind: "cloud", provider: "fake", identifier: "fake", config: {} })
         .returning();
-      if (!snapshot || !session || !certificate || !approval || !elevation || !integration) {
+      const [profile] = await db
+        .insert(schema.profiles)
+        .values({ orgId: org.id, name: `profile-${crypto.randomUUID()}` })
+        .returning();
+      if (
+        !snapshot ||
+        !session ||
+        !certificate ||
+        !approval ||
+        !elevation ||
+        !integration ||
+        !profile
+      ) {
         throw new Error("fixture insert failed");
       }
       const tokens = Object.fromEntries(
@@ -705,6 +765,7 @@ describe.skipIf(!postgresReachable)(
         packageApprovalA: approval.id,
         elevationByAdmin: elevation.id,
         integrationId: integration.id,
+        profileA: profile.id,
       };
     };
 

@@ -100,7 +100,7 @@ const PackageManifestEntry = Schema.Struct({
   }),
 );
 
-const OrgPackageEntryResource = Schema.Struct({
+export const OrgPackageEntryResource = Schema.Struct({
   packageName: Schema.String,
   versionPin: Schema.NullOr(Schema.String),
   locked: Schema.Boolean,
@@ -111,12 +111,12 @@ const OrgPackageEntryResource = Schema.Struct({
 
 const ListOrgPackagesResponse = Schema.Struct({ items: Schema.Array(OrgPackageEntryResource) });
 
-const UpdateOrgPackagesPayload = Schema.Struct({
+export const UpdateOrgPackagesPayload = Schema.Struct({
   upserts: Schema.optional(Schema.Array(PackageManifestEntry)),
   removals: Schema.optional(Schema.Array(Schema.String.pipe(Schema.minLength(1)))),
 });
 
-const UpdateOrgPackagesResponse = Schema.Struct({
+export const UpdateOrgPackagesResponse = Schema.Struct({
   items: Schema.Array(OrgPackageEntryResource),
   // One per edit that set an ensure setting; those wait for their approval.
   ensureApprovals: Schema.optional(Schema.Array(ensureApprovalSchema)),

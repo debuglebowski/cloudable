@@ -24,6 +24,7 @@ import { MachinesLive } from "./handlers/machines";
 import { NotificationsLive } from "./handlers/notifications";
 import { OffboardingHttpLive } from "./handlers/offboarding";
 import { OrganisationLive } from "./handlers/organisation";
+import { ProfilesLive } from "./handlers/profiles";
 import { PeopleLive } from "./handlers/people";
 import { ProvisioningCapabilitiesLive } from "./handlers/provisioning-capabilities";
 import { RestartLive } from "./handlers/restart";
@@ -49,6 +50,7 @@ export const ApiLive = HttpApiBuilder.api(Api).pipe(
       AccessLive,
       PeopleLive,
       OrganisationLive,
+      ProfilesLive,
       IntegrationsLive,
       TunnelSignalLive,
       TunnelLive,

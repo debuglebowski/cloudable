@@ -31,6 +31,7 @@ import { MachinesLive } from "../src/http/handlers/machines";
 import { NotificationsLive } from "../src/http/handlers/notifications";
 import { OffboardingHttpLive } from "../src/http/handlers/offboarding";
 import { OrganisationLive } from "../src/http/handlers/organisation";
+import { ProfilesLive } from "../src/http/handlers/profiles";
 import { PeopleLive } from "../src/http/handlers/people";
 import { ProvisioningCapabilitiesLive } from "../src/http/handlers/provisioning-capabilities";
 import { RestartLive } from "../src/http/handlers/restart";
@@ -121,6 +122,7 @@ describe("agent-protocol handlers (integration)", () => {
           AccessLive,
           PeopleLive,
           OrganisationLive,
+          ProfilesLive,
           IntegrationsLive,
           TunnelSignalLive,
           TunnelLive,

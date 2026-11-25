@@ -184,6 +184,7 @@ export interface MachineCreatedInput extends ActorContext {
   region: string | null;
   size: string;
   image: string;
+  profileId?: string | null;
   occurredAt?: Date;
 }
 
@@ -214,7 +215,33 @@ export function machineCreatedEvent(input: MachineCreatedInput): MachineEvent {
       region: input.region,
       size: input.size,
       image: input.image,
+      profileId: input.profileId ?? null,
     },
+  };
+}
+
+export interface MachineProfileAssignedInput extends ActorContext {
+  machineId: string;
+  orgId: string;
+  correlationId: string;
+  profileId: string | null;
+  previousProfileId: string | null;
+  occurredAt?: Date;
+}
+
+export function machineProfileAssignedEvent(input: MachineProfileAssignedInput): MachineEvent {
+  return {
+    id: PLACEHOLDER_ID,
+    type: "machine.profile_assigned",
+    occurredAt: input.occurredAt ?? new Date(),
+    recordedAt: PLACEHOLDER_RECORDED_AT,
+    orgId: input.orgId,
+    actorType: input.actorType,
+    actorId: input.actorId,
+    machineId: input.machineId,
+    correlationId: input.correlationId,
+    schemaVersion: 1,
+    payload: { profileId: input.profileId, previousProfileId: input.previousProfileId },
   };
 }
 

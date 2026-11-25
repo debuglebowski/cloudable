@@ -5,6 +5,7 @@ import { Db } from "../../db/layer";
 import { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { MachineService } from "../machine/MachineService";
 import { readMalwareProtection } from "../organisation/malware-protection";
+import { profileFieldConflict, requireUsableProfile } from "../profile/ProfileService";
 import type { MachineRow } from "./queries";
 import { dbTry } from "./queries";
 import type { SnapshotRow } from "./snapshot";
@@ -197,9 +198,20 @@ export const performRestoreIntoNewMachine = (
 ): Effect.Effect<string | null, never, Db | MachineService> =>
   Effect.gen(function* () {
     const machineService = yield* MachineService;
+    // The new machine keeps the old one's profile while it can: still usable, and still
+    // setting the same provider, region, size and image. Otherwise it starts on none, rather
+    // than the restore failing over a profile.
+    const profileDb = yield* Db;
+    const profileId = source.profileId
+      ? yield* requireUsableProfile(profileDb, source.orgId, source.profileId).pipe(
+          Effect.map((profile) => (profileFieldConflict(profile, source) === null ? profile.id : null)),
+          Effect.orElseSucceed(() => null),
+        )
+      : null;
     const created = yield* machineService
       .create({
         orgId: source.orgId,
+        profileId,
         provider: source.provider,
         region: source.region,
         sizeSku: source.sizeSku,
