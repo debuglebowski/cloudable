@@ -29,6 +29,8 @@ approval settings needs an approver specifically, not just any admin.
 | Inspect a snapshot | yes | no | no |
 | Archive | yes | only by offboarding the owner | no |
 | Restart, upgrade, take a snapshot | yes | yes | no |
+| Ask to change its size (needs a `machine_resize` approval) | yes | yes | no |
+| See its CPU use and credits | yes | yes | no |
 | Ask for a package install or removal | yes | yes | no |
 | Change which packages it may have | no | yes | no |
 | Set a package to Ensure installed or Ensure latest version | no | yes, once a `package_ensure` approval is granted | no |

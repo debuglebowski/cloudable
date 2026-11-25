@@ -7,11 +7,13 @@
 // so the ids printed by `machines list` are never the only way in.
 // ---------------------------------------------------------------------------
 import type {
+  MachineCompute,
   MachineDetail,
   MachineSummary,
   PackageEnsureApprovalView,
   PackageManifestEdit,
   PackageSetting,
+  ResizeMachineResponse,
   ResolvedPackageManifestEntry,
   UpdateMachinePackagesResponse,
 } from "@cloudable/contracts";
@@ -485,4 +487,61 @@ export async function runMachinesPackagesSetCommand(argv: ReadonlyArray<string>)
   for (const line of describeEnsureApprovals(result.ensureApprovals ?? [], upserts))
     console.log(line);
   printManifest(result.manifest);
+}
+
+// ---------------------------------------------------------------------------
+// compute, resize
+// ---------------------------------------------------------------------------
+
+export async function runMachinesComputeCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor("machines compute <machine> [--hours <n>]");
+  const args = parseArgs(argv, readSpec({ values: ["hours"] }));
+  const id = await machineId(required(args, 0, "a machine", usage));
+  const hours = args.flags.hours ? `?hours=${encodeURIComponent(args.flags.hours)}` : "";
+  const res = await authenticatedApiRequest<MachineCompute>(
+    `/api/v1/machines/${id}/compute${hours}`,
+  );
+  if (args.booleans.has("json")) {
+    printJson(res);
+    return;
+  }
+  if (!res.available) {
+    console.log(res.unavailableReason ?? "No measurements for this machine.");
+    return;
+  }
+  const pct = (v: number | null) => (v === null ? "-" : `${Math.round(v)}%`);
+  printFields([
+    ["size", res.sizeSku],
+    ["window", `${res.hours} hours`],
+    ["average CPU", pct(res.summary.cpuAverage)],
+    ["busiest hour", pct(res.summary.cpuPeak)],
+    ...(res.burstable
+      ? ([
+          ["CPU credits now", String(Math.round(res.summary.creditsNow ?? 0))],
+          ["hours throttled", String(res.summary.hoursWithoutCredits ?? 0)],
+        ] as const)
+      : ([["CPU credits", "none: this size is never throttled"]] as const)),
+  ]);
+}
+
+export async function runMachinesResizeCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor("machines resize <machine> --size <sku> --reason <text>");
+  const args = parseArgs(argv, readSpec({ values: ["size", "reason"] }));
+  const id = await machineId(required(args, 0, "a machine", usage));
+  const res = await authenticatedApiRequest<ResizeMachineResponse>(
+    `/api/v1/machines/${id}/resize`,
+    postJson({
+      sizeSku: requiredFlag(args, "size", usage),
+      reason: requiredFlag(args, "reason", usage),
+    }),
+  );
+  if (args.booleans.has("json")) {
+    printJson(res);
+    return;
+  }
+  console.log(
+    res.status === "approved"
+      ? "Resizing. The machine stops for a few minutes and starts again on the new size."
+      : `Approval requested (${res.approvalId}). Nothing changes until an approver signs it off.`,
+  );
 }

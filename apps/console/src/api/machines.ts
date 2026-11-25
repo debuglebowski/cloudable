@@ -2,12 +2,16 @@ import type { AuditActorType } from "@/api/audit";
 import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
 import type {
   ApiErrorBody,
+  MachineCompute,
   PackageActionTrigger,
   PackageEnsureApprovalView,
   PackageSetting,
+  ResizeMachineRequest,
+  ResizeMachineResponse,
 } from "@cloudable/contracts";
+import { useQuery } from "@tanstack/react-query";
 
-export type { PackageActionTrigger, PackageEnsureApprovalView, PackageSetting };
+export type { MachineCompute, PackageActionTrigger, PackageEnsureApprovalView, PackageSetting };
 
 export type MachineState =
   | "provisioning"
@@ -502,5 +506,31 @@ export async function createPackageAction(
       throw new PackageActionError(err.body as ApiErrorBody);
     }
     throw err;
+  }
+}
+
+/** `GET /api/v1/machines/:id/compute`: CPU use and, on a burstable size, CPU credits. */
+export function useMachineCompute(machineId: string, enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: [...machinesKeys.detail(machineId), "compute"] as const,
+    queryFn: () => apiGet<MachineCompute>(`/api/v1/machines/${machineId}/compute`),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Asks for a new size. Waits for a `machine_resize` approval. */
+export async function resizeMachine(
+  machineId: string,
+  input: ResizeMachineRequest,
+): Promise<ResizeMachineResponse> {
+  try {
+    return await apiPost<ResizeMachineResponse>(`/api/v1/machines/${machineId}/resize`, input);
+  } catch (error) {
+    if (error instanceof ApiError && error.body && typeof error.body === "object") {
+      const message = (error.body as { message?: unknown }).message;
+      if (typeof message === "string") throw new Error(message);
+    }
+    throw error;
   }
 }

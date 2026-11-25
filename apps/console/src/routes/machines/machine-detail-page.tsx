@@ -55,6 +55,7 @@ import {
   MachineActivityToolbar,
   useMachineActivityState,
 } from "./machine-activity-tab";
+import { MachineComputeCard } from "./machine-compute-card";
 import { MachineManifestTab } from "./machine-manifest-tab";
 import { MachineProfileDialog } from "./machine-profile-dialog";
 import { MachineSessionsTab } from "./machine-sessions-tab";
@@ -64,6 +65,7 @@ import {
   MACHINE_STATE_LABEL,
 } from "./machine-state";
 import { MachineVulnerabilitiesTab } from "./machine-vulnerabilities-tab";
+import { ResizeMachineDialog } from "./resize-machine-dialog";
 import { RestartMachineDialog } from "./restart-machine-dialog";
 import { UpgradeMachineDialog } from "./upgrade-machine-dialog";
 
@@ -184,6 +186,7 @@ export function MachineDetailPage() {
   const [filesOpen, setFilesOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [resizeOpen, setResizeOpen] = useState(false);
   // Any person in the org may read a profile, so a member sees which one their machine is on.
   const profileQuery = useProfile(machineQuery.data?.profileId);
   const [restartOpen, setRestartOpen] = useState(false);
@@ -282,6 +285,16 @@ export function MachineDetailPage() {
               Restart
             </Button>
           )}
+          {can("resize") && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={ARCHIVED_MACHINE_STATES.has(machine.state)}
+              onClick={() => setResizeOpen(true)}
+            >
+              Resize
+            </Button>
+          )}
           {can("upgrade") && (
             <Button variant="outline" size="sm" onClick={() => setUpgradeOpen(true)}>
               Upgrade
@@ -345,7 +358,7 @@ export function MachineDetailPage() {
           {activeTab === "activity" && <MachineActivityToolbar state={activity} />}
         </div>
 
-        <TabsContent value="properties">
+        <TabsContent value="properties" className="flex flex-col gap-4">
           <Card>
             <CardContent className="pt-4">
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
@@ -435,6 +448,9 @@ export function MachineDetailPage() {
               </dl>
             </CardContent>
           </Card>
+          {can("restart") && (
+            <MachineComputeCard machineId={machine.id} sizeSku={machine.sizeSku} />
+          )}
         </TabsContent>
 
         <TabsContent value="manifest">
@@ -642,6 +658,9 @@ export function MachineDetailPage() {
       <BrowseFilesDialog machine={machine} open={filesOpen} onOpenChange={setFilesOpen} />
       <RestartMachineDialog machine={machine} open={restartOpen} onOpenChange={setRestartOpen} />
       <ArchiveMachineDialog machine={machine} open={archiveOpen} onOpenChange={setArchiveOpen} />
+      {can("resize") && (
+        <ResizeMachineDialog open={resizeOpen} onOpenChange={setResizeOpen} machine={machine} />
+      )}
       <MachineProfileDialog
         open={profileOpen}
         onOpenChange={setProfileOpen}

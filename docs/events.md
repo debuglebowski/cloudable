@@ -67,6 +67,8 @@ A profile is a named set of settings machines link to (org → profile → machi
 | `machine.offboarded` | 1 | A machine was offboarded from its previous owner under approval. |
 | `machine.archived` | 1 | A machine was archived with a final snapshot and retention window. |
 | `machine.state_reported` | 2 | The agent reported observed machine state that changed since the last report. |
+| `machine.resized` | 1 | A machine was moved to a new size after its `machine_resize` approval. Carries `fromSize`, `toSize` and `approvalId`. |
+| `machine.resize_failed` | 1 | An approved resize did not happen; the machine keeps its old size. Carries Azure's `reason`. |
 | `machine.apt_repository_configured` | 1 | The agent reported an approved apt repository in place on the machine. Carries `repositoryId`. |
 | `machine.apt_repository_removed` | 1 | The agent reported an approved apt repository gone from the machine. Carries `repositoryId`. |
 | `machine.drift_detected` | 1 | Undeclared packages, open ports or apt sources were detected on a machine. `undeclaredAptSources` lists apt source URIs that neither Ubuntu nor the org's approved repositories explain. |

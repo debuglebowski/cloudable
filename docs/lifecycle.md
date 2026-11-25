@@ -372,6 +372,33 @@ picks up a restore whose approval was decided later, and does the same provider 
 the same order. A new-machine restore creates its machine **here**, not at request time:
 provisioning one for a restore nobody had approved is exactly what the gate is for.
 
+## Changing a machine's size
+
+A machine's size is chosen when it is created, and can be changed later (`domain/machine/resize.ts`):
+
+- The owner or an admin asks for a new size (`POST /api/v1/machines/:id/resize`, the machine
+  page's Resize button, or `cloudable machines resize`), with a reason.
+- A `machine_resize` approval decides. The mode is on the Organisation page; the default is one
+  approver. A bigger size costs money every hour, so it is a decision.
+- Checked before anyone is asked: the size must be in the catalog and able to run the machine's
+  image, it must differ from today's, and a profile that fixes the size wins. A local Docker
+  machine cannot be resized.
+- Once granted, in the background: Azure deallocates the VM, sets the new size, and starts it again
+  if it was running. Disks, network and managed identity stay, so `/home` and the agent's identity
+  are untouched. It takes a few minutes. If setting the size fails, the VM is started again on its
+  old size.
+- Recorded as `machine.resized` or `machine.resize_failed` (with Azure's reason, also on the
+  machine's `lastError`).
+
+### Seeing why a machine is slow
+
+`GET /api/v1/machines/:id/compute` (the owner or an admin; the machine page's Compute card, or
+`cloudable machines compute`) returns a week of hourly CPU use from Azure Monitor and, on a
+burstable B-series size, its CPU credits: the balance now and how many hours it had none and ran
+at its base rate. It reads them with the control plane's own identity, which needs
+`Microsoft.Insights/metrics/read` on the machines' resource group ("Cloudable Machine Operator",
+applied by hand as Owner). Without it, the card says so instead of showing numbers.
+
 ## Where a machine's files live — and the one-off migration
 
 `/home` is a mount of the machine's **data disk**, not a directory on the OS disk.

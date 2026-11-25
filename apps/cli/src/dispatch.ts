@@ -57,6 +57,14 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     const { runMachinesVulnerabilitiesCommand } = await import("./vulnerability-scan");
     await runMachinesVulnerabilitiesCommand(rest);
   },
+  "machines compute": async (rest) => {
+    const { runMachinesComputeCommand } = await import("./machines");
+    await runMachinesComputeCommand(rest);
+  },
+  "machines resize": async (rest) => {
+    const { runMachinesResizeCommand } = await import("./machines");
+    await runMachinesResizeCommand(rest);
+  },
   "machines set-profile": async (rest) => {
     const { runMachinesSetProfileCommand } = await import("./machines");
     await runMachinesSetProfileCommand(rest);

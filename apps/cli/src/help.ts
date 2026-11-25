@@ -124,6 +124,25 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         ],
       },
       {
+        name: "compute",
+        summary: "How hard a machine works, and whether it is throttled",
+        args: "<machine>",
+        options: [{ flag: "--hours <n>", description: "How far back (default a week)" }],
+        notes: ["From Azure's own measurements. A B-series size also shows its CPU credits."],
+      },
+      {
+        name: "resize",
+        summary: "Ask for a new machine size",
+        args: "<machine>",
+        options: [
+          { flag: "--size <sku>", description: "e.g. Standard_D4as_v5 (required)" },
+          { flag: "--reason <text>", description: "Why, for the approver (required)" },
+        ],
+        notes: [
+          "Waits for a machine_resize approval. Then the machine stops for a few minutes, gets the new size and starts again. Home and data stay.",
+        ],
+      },
+      {
         name: "set-profile",
         summary: "Move a machine to another profile, or off one",
         args: "<machine> <profile|none>",
