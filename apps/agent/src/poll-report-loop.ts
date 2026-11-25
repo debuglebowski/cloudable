@@ -186,7 +186,10 @@ export async function runAgentLoop(
   // only resent when it changes, and the report needs it every time.
   let allowedPackages: readonly string[] = [];
   let nixSnapshot: string | undefined;
-  // The org's approved apt repositories, applied once per fresh poll. A failed
+  // The org's approved apt repositories, applied on every fresh poll and, while there are
+  // any, every cycle: another program can add the same source later (Defender's installer
+  // does), and the agent must then drop its own copy before apt stops working. Writing only
+  // what differs makes a cycle with no change cost a few file reads. A failed
   // `apt-get update` is run again on the next fresh poll, even if no file changes.
   let aptRepositories: AptRepositoryConfig[] = [];
   let aptRepositoriesDue = false;
@@ -245,14 +248,16 @@ export async function runAgentLoop(
         const aptPresent = await hasApt();
         // Before the package actions, so a package from a just-approved repository
         // can install in the same cycle.
-        if (aptRepositoriesDue) {
+        if (aptRepositoriesDue || aptRepositories.length > 0) {
+          const fresh = aptRepositoriesDue;
           aptRepositoriesDue = false;
           if (aptPresent) {
             try {
               const applied = await applyAptRepositories(aptRepositories, {
-                forceUpdate: aptUpdateFailed,
+                forceUpdate: aptUpdateFailed && fresh,
               });
-              aptUpdateFailed = applied.updateFailed;
+              // A cycle that changed nothing ran no update, so it says nothing about the last one.
+              if (fresh || applied.changed > 0) aptUpdateFailed = applied.updateFailed;
               if (applied.changed > 0) {
                 console.log(`poll: apt repositories changed ${applied.changed} file(s)`);
               }

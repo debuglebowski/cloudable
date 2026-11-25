@@ -281,7 +281,8 @@ Adding a component to this list is a deliberate change to this table, to `CLAUDE
 `apps/agent/src/apt-repositories.ts`. Only on machines with apt.
 
 The poll's `settings.aptRepositories` lists the org's approved repositories. When a poll
-brings fresh settings, the agent:
+brings fresh settings, and every cycle while the list is not empty (another program can add the
+same source later), the agent:
 
 - writes `/etc/apt/keyrings/cloudable-<id>.asc` (the signing key) and
   `/etc/apt/sources.list.d/cloudable-<id>.sources` (deb822, `Signed-By` that key), mode 0644.
