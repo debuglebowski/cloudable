@@ -28,6 +28,7 @@ import {
   updateMachinePackages,
 } from "@/api/machines";
 import { useOrgPackages } from "@/api/organisation";
+import { useProfile } from "@/api/profiles";
 import { PackageEntryDialog, type PackageEntryDialogMode } from "@/components/package-entry-dialog";
 import { TableHeaderIcon } from "@/components/table-header-icon";
 import {
@@ -102,10 +103,12 @@ import {
  */
 export function MachinePackagesTable({
   machineId,
+  profileId,
   canEditPermission,
   canRequestActions,
 }: {
   machineId: string;
+  profileId: string | null;
   /** Which packages a machine may have is configuration: admin only. */
   canEditPermission: boolean;
   /** Installing and removing: the owner or an admin. */
@@ -116,10 +119,16 @@ export function MachinePackagesTable({
   const [entryDialog, setEntryDialog] = useState<PackageEntryDialogMode | null>(null);
   const [removing, setRemoving] = useState<MachinePackageRow | null>(null);
 
-  // Which packages the org declares, so a machine entry can say whether it overrides one,
-  // and so its menu offers "reset to org" rather than "remove". Admin only, like editing.
+  // Which packages the org and the machine's profile declare, so a machine entry can say
+  // whether it overrides one, and so its menu offers "reset" rather than "remove". Admin
+  // only, like editing.
   const orgPackagesQuery = useOrgPackages({ enabled: canEditPermission });
-  const orgNames = new Set((orgPackagesQuery.data ?? []).map((entry) => entry.packageName));
+  const profileQuery = useProfile(profileId, { enabled: canEditPermission });
+  const inheritedNames = new Set(
+    [...(orgPackagesQuery.data ?? []), ...(profileQuery.data?.packages ?? [])].map(
+      (entry) => entry.packageName,
+    ),
+  );
 
   const packagesQuery = useQuery({
     queryKey: machinesKeys.packages(machineId),
@@ -204,8 +213,8 @@ export function MachinePackagesTable({
       invalidate();
       setRemoving(null);
       toast.success(
-        orgNames.has(row.packageName)
-          ? `"${row.packageName}" uses the org's entry again`
+        inheritedNames.has(row.packageName)
+          ? `"${row.packageName}" uses the inherited entry again`
           : `"${row.packageName}" removed from this machine's manifest`,
       );
     },
@@ -305,7 +314,7 @@ export function MachinePackagesTable({
                   (removeMutation.isPending &&
                     removeMutation.variables?.packageName === row.packageName)
                 }
-                lineage={lineageOf(row, orgNames)}
+                lineage={lineageOf(row, inheritedNames)}
                 canEditPermission={canEditPermission}
                 canRequestActions={canRequestActions}
                 onAction={(op) => actionMutation.mutate({ packageName: row.packageName, op })}
@@ -325,7 +334,9 @@ export function MachinePackagesTable({
                 }
                 onRemove={() =>
                   // Going back to the org's entry loses nothing, so it needs no confirmation.
-                  orgNames.has(row.packageName) ? removeMutation.mutate(row) : setRemoving(row)
+                  inheritedNames.has(row.packageName)
+                    ? removeMutation.mutate(row)
+                    : setRemoving(row)
                 }
               />
             ))}
@@ -457,20 +468,23 @@ function permissionEdit(row: MachinePackageRow, target: PermissionValue) {
 }
 
 /** Where a row's permission comes from, said in words under the select. */
-type Lineage = "org" | "override" | "machine" | null;
+type Lineage = "org" | "profile" | "override" | "machine" | null;
 
-const lineageOf = (row: MachinePackageRow, orgNames: ReadonlySet<string>): Lineage =>
+const lineageOf = (row: MachinePackageRow, inheritedNames: ReadonlySet<string>): Lineage =>
   row.source === null
     ? null
-    : row.source !== "machine"
-      ? "org"
-      : orgNames.has(row.packageName)
-        ? "override"
-        : "machine";
+    : row.source === "profile"
+      ? "profile"
+      : row.source !== "machine"
+        ? "org"
+        : inheritedNames.has(row.packageName)
+          ? "override"
+          : "machine";
 
 const LINEAGE_LABELS: Record<Exclude<Lineage, null>, string> = {
   org: "From the org",
-  override: "Overrides the org",
+  profile: "From the profile",
+  override: "Overrides the org or profile",
   machine: "This machine only",
 };
 
@@ -792,14 +806,14 @@ function RowMenu({
         {showEdit && (
           <DropdownMenuItem onSelect={onEdit}>
             <Pencil />
-            {lineage === "org" ? "Override on this machine…" : "Edit…"}
+            {lineage === "org" || lineage === "profile" ? "Override on this machine…" : "Edit…"}
           </DropdownMenuItem>
         )}
         {showRemove &&
           (lineage === "override" ? (
             <DropdownMenuItem onSelect={onRemove}>
               <Undo2 />
-              Reset to the org's entry
+              Reset to the inherited entry
             </DropdownMenuItem>
           ) : (
             <DropdownMenuItem destructive onSelect={onRemove}>

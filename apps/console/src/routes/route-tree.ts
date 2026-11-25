@@ -16,6 +16,7 @@ import {
 } from "./machines/route";
 import { organisationRoute } from "./organisation/route";
 import { peopleRoute } from "./people/route";
+import { profileDetailRoute, profilesListRoute } from "./profiles/route";
 import { RootLayout } from "./root";
 
 // Exported so feature units' route modules can import it for `getParentRoute: () =>
@@ -63,4 +64,6 @@ export const routeTree = rootRoute.addChildren([
   organisationRoute,
   loginRoute,
   cliAuthRoute,
+  profilesListRoute,
+  profileDetailRoute,
 ]);

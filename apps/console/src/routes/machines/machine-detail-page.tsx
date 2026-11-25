@@ -8,6 +8,7 @@ import {
   Disc,
   FolderSearch,
   History,
+  Layers,
   Lock,
   LockOpen,
   type LucideIcon,
@@ -20,6 +21,7 @@ import { type ArchivedSnapshot, useMachineSnapshots } from "@/api/archive";
 import { SEVERITY_VARIANT, daysOpen, useComplianceChecks } from "@/api/audit";
 import { getMachine, isMachineStale, machinesKeys } from "@/api/machines";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
+import { useProfile } from "@/api/profiles";
 import { ControlStatus } from "@/components/control-status";
 import { Freshness } from "@/components/freshness";
 import { OsIcon } from "@/components/os-icon";
@@ -54,6 +56,7 @@ import {
   useMachineActivityState,
 } from "./machine-activity-tab";
 import { MachineManifestTab } from "./machine-manifest-tab";
+import { MachineProfileDialog } from "./machine-profile-dialog";
 import { MachineSessionsTab } from "./machine-sessions-tab";
 import {
   ARCHIVED_MACHINE_STATES,
@@ -180,6 +183,9 @@ export function MachineDetailPage() {
   const [connectOpen, setConnectOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  // Any person in the org may read a profile, so a member sees which one their machine is on.
+  const profileQuery = useProfile(machineQuery.data?.profileId);
   const [restartOpen, setRestartOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("properties");
   // Lives here, not inside the tab, because its two halves render on either side
@@ -358,6 +364,39 @@ export function MachineDetailPage() {
                     )
                   }
                 />
+                <PropertyRow
+                  icon={Layers}
+                  label="Profile"
+                  value={
+                    <span className="flex items-center gap-2">
+                      {machine.profileId ? (
+                        isAdmin ? (
+                          <Link
+                            to="/profiles/$profileId"
+                            params={{ profileId: machine.profileId }}
+                            className="text-primary hover:underline"
+                          >
+                            {profileQuery.data?.name ?? "…"}
+                          </Link>
+                        ) : (
+                          (profileQuery.data?.name ?? "…")
+                        )
+                      ) : (
+                        <span className="text-muted-foreground">None</span>
+                      )}
+                      {isAdmin && !ARCHIVED_MACHINE_STATES.has(machine.state) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => setProfileOpen(true)}
+                        >
+                          Change
+                        </Button>
+                      )}
+                    </span>
+                  }
+                />
                 <PropertyRow icon={Cloud} label="Provider" value={machine.provider} />
                 {machine.region && (
                   <PropertyRow icon={MapPin} label="Region" value={machine.region} />
@@ -401,6 +440,7 @@ export function MachineDetailPage() {
         <TabsContent value="manifest">
           <MachineManifestTab
             machineId={machineId}
+            profileId={machine.profileId}
             canEditManifest={can("editManifest")}
             canRequestActions={can("packages")}
           />
@@ -602,6 +642,12 @@ export function MachineDetailPage() {
       <BrowseFilesDialog machine={machine} open={filesOpen} onOpenChange={setFilesOpen} />
       <RestartMachineDialog machine={machine} open={restartOpen} onOpenChange={setRestartOpen} />
       <ArchiveMachineDialog machine={machine} open={archiveOpen} onOpenChange={setArchiveOpen} />
+      <MachineProfileDialog
+        open={profileOpen}
+        onOpenChange={setProfileOpen}
+        machineId={machine.id}
+        currentProfileId={machine.profileId}
+      />
       <LegalHoldDialog
         snapshot={legalHoldTarget}
         onOpenChange={(open) => {

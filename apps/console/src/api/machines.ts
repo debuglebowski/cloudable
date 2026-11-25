@@ -235,6 +235,8 @@ export interface CreateMachineInput {
   image: string;
   /** A machine always has exactly one owner, always a person. */
   ownerPersonId: string;
+  /** The profile it links to. What the profile sets must match, or the server refuses it. */
+  profileId?: string;
 }
 
 /** `orgId`/`actorPersonId` are derived server-side from the caller's session — not sent here. */

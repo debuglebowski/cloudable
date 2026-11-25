@@ -7,6 +7,7 @@ import {
   Cpu,
   Disc,
   Drama,
+  Layers,
   Loader2,
   type LucideIcon,
   MapPin,
@@ -19,6 +20,7 @@ import type { CloudProvider } from "@/api/integrations";
 import { useIntegrations } from "@/api/integrations";
 import { createMachine, listMachines, machinesKeys } from "@/api/machines";
 import { listPeople } from "@/api/people-directory";
+import { useProfiles } from "@/api/profiles";
 import type { CatalogItem } from "@/api/provider-catalog";
 import { useProviderCatalog, useSyncAzureRegions, useSyncAzureSizes } from "@/api/provider-catalog";
 import { useProvisioningCapabilities } from "@/api/provisioning-capabilities";
@@ -147,6 +149,19 @@ function isValidFreeformImage(provider: CloudProvider | "", image: string): bool
 
 const DEFAULTS = { sizeSku: "Standard_D2s_v5", image: "ubuntu-24.04" };
 
+/** Select items cannot have an empty value, so "no profile" needs a name of its own. */
+const NO_PROFILE = "none";
+
+/** A value the chosen profile sets. Shown, not offered: the server refuses a different one. */
+function FixedByProfile({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+      {children}
+      <Badge variant="outline">Set by profile</Badge>
+    </div>
+  );
+}
+
 const STEP_TITLES: Record<WizardStep, string> = {
   1: "Provider & region",
   2: "Size & image",
@@ -216,9 +231,10 @@ function ReviewRow({
  * live region/image/size catalog replaced per-org curation (see
  * `provider-catalog.ts`'s own doc comment on why), so this is now the one place any
  * of it happens, and it needs to disable combinations that don't actually run
- * together rather than let the server reject them after the fact. No scope-2
- * template picker (templates don't exist in v1), no manifest editor (that's the
- * machine detail page's job, once the machine exists). Owner is required and
+ * together rather than let the server reject them after the fact. A profile, when
+ * picked, fixes whichever of provider, region, size and image it sets; the wizard asks
+ * only for the rest. No manifest editor (that's the machine detail page's job, once the
+ * machine exists). Owner is required and
  * picked from the real `people` directory — a machine always has exactly one
  * owner, always a person, never omitted.
  */
@@ -235,6 +251,18 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
   const [image, setImage] = useState(DEFAULTS.image);
   const [imageTouchedByUser, setImageTouchedByUser] = useState(false);
   const [ownerPersonId, setOwnerPersonId] = useState("");
+  const [profileId, setProfileId] = useState("");
+
+  const profilesQuery = useProfiles({ enabled: open });
+  const usableProfiles = (profilesQuery.data ?? []).filter((p) => p.archivedAt === null);
+  const selectedProfile = usableProfiles.find((p) => p.id === profileId);
+  // What the profile sets is fixed: the server refuses a different value.
+  const fixed = {
+    provider: Boolean(selectedProfile?.provider),
+    region: Boolean(selectedProfile?.region),
+    size: Boolean(selectedProfile?.sizeSku),
+    image: Boolean(selectedProfile?.image),
+  };
 
   const peopleQuery = useQuery({
     queryKey: ["people-directory"],
@@ -307,6 +335,20 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
     setImageTouchedByUser(false);
   }
 
+  function handleProfileChange(id: string) {
+    const next = id === NO_PROFILE ? "" : id;
+    setProfileId(next);
+    const profile = usableProfiles.find((p) => p.id === next);
+    if (!profile) return;
+    if (profile.provider) handleProviderChange(profile.provider);
+    if (profile.region) setRegion(profile.region);
+    if (profile.sizeSku) setSizeSku(profile.sizeSku);
+    if (profile.image) {
+      setImage(profile.image);
+      setImageTouchedByUser(true);
+    }
+  }
+
   function handleImageSelect(code: string) {
     setImage(code);
     setImageTouchedByUser(true);
@@ -351,6 +393,7 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
         sizeSku: sizeSku.trim(),
         image: image.trim(),
         ownerPersonId,
+        ...(profileId ? { profileId } : {}),
       });
     },
     onSuccess: () => {
@@ -370,6 +413,7 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
     setImage(DEFAULTS.image);
     setImageTouchedByUser(false);
     setOwnerPersonId("");
+    setProfileId("");
     mutation.reset();
   }
 
@@ -450,12 +494,41 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
 
             <div className="max-h-[65vh] overflow-y-auto px-6 py-5">
               <TabsContent value="1" className="mt-0 flex flex-col gap-8">
+                {usableProfiles.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="add-machine-profile" className="flex items-center gap-1.5">
+                      <TableHeaderIcon icon={Layers} />
+                      Profile
+                    </Label>
+                    <Select value={profileId || NO_PROFILE} onValueChange={handleProfileChange}>
+                      <SelectTrigger id="add-machine-profile">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_PROFILE}>No profile</SelectItem>
+                        {usableProfiles.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-sm text-muted-foreground">
+                      The machine takes its settings and packages from the profile, unless it
+                      overrides them. What the profile sets below cannot be changed here.
+                    </p>
+                  </div>
+                )}
                 <div className="flex flex-col gap-2">
                   <Label className="flex items-center gap-1.5">
                     <TableHeaderIcon icon={Cloud} />
                     Provider
                   </Label>
-                  {integrationsQuery.isLoading ? (
+                  {fixed.provider && provider ? (
+                    <FixedByProfile>
+                      <ProviderOptionRow provider={provider} bare />
+                    </FixedByProfile>
+                  ) : integrationsQuery.isLoading ? (
                     <div className="flex flex-col gap-2">
                       <Skeleton className="h-16 w-full rounded-lg" />
                       <Skeleton className="h-16 w-full rounded-lg" />
@@ -504,6 +577,10 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
                         <span>{lockedRegion}</span>
                         <Badge variant="outline">Fixed for this deployment</Badge>
                       </div>
+                    ) : fixed.region ? (
+                      <FixedByProfile>
+                        <span>{selectedRegion?.displayName ?? region}</span>
+                      </FixedByProfile>
                     ) : regionCatalogQuery.isLoading ? (
                       <Skeleton className="h-9 w-full" />
                     ) : regions.length === 0 ? (
@@ -618,7 +695,11 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
                         <TableHeaderIcon icon={Disc} />
                         Image
                       </Label>
-                      {imageCatalogQuery.isLoading ? (
+                      {fixed.image ? (
+                        <FixedByProfile>
+                          <span>{selectedImage?.displayName ?? image}</span>
+                        </FixedByProfile>
+                      ) : imageCatalogQuery.isLoading ? (
                         <div className="grid grid-cols-2 gap-3">
                           <Skeleton className="h-16 w-full rounded-lg" />
                           <Skeleton className="h-16 w-full rounded-lg" />
@@ -703,7 +784,17 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
                       )}
                     </div>
 
-                    {!lockedRegion && !region ? (
+                    {fixed.size ? (
+                      <div className="flex flex-col gap-3">
+                        <Label className="flex items-center gap-1.5">
+                          <TableHeaderIcon icon={Cpu} />
+                          Size
+                        </Label>
+                        <FixedByProfile>
+                          <span>{selectedSize?.displayName ?? sizeSku}</span>
+                        </FixedByProfile>
+                      </div>
+                    ) : !lockedRegion && !region ? (
                       <div className="flex flex-col gap-3">
                         <Label className="flex items-center gap-1.5">
                           <TableHeaderIcon icon={Cpu} />
@@ -739,6 +830,7 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
                     <Input
                       id="add-machine-image-freeform"
                       required
+                      disabled={fixed.image}
                       value={image}
                       onChange={(event) => setImage(event.target.value)}
                       placeholder="e.g. ubuntu-24.04"
@@ -834,6 +926,11 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
                     </Button>
                   }
                 >
+                  <ReviewRow
+                    icon={Layers}
+                    label="Profile"
+                    value={selectedProfile?.name ?? "No profile"}
+                  />
                   <ReviewRow
                     icon={Cloud}
                     label="Provider"

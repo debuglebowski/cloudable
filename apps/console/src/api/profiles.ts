@@ -96,10 +96,10 @@ export async function updateProfilePackages(
   }
 }
 
-/** Sets one profile-scope setting, optionally locking it. */
+/** Sets one profile-scope setting, optionally locking it. `clear` goes back to the org's value. */
 export async function setProfileSetting(
   id: string,
-  input: { key: string; value: unknown; locked?: boolean },
+  input: { key: string; value: unknown; locked?: boolean; clear?: boolean },
 ): Promise<void> {
   try {
     await apiPatch("/api/v1/config/settings", { scopeType: "profile", scopeId: id, ...input });

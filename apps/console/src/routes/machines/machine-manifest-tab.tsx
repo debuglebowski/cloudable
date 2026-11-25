@@ -41,10 +41,13 @@ import { MachinePackagesTable } from "@/routes/machines/machine-packages-table";
  */
 export function MachineManifestTab({
   machineId,
+  profileId,
   canEditManifest,
   canRequestActions,
 }: {
   machineId: string;
+  /** The machine's profile, whose entries it inherits between the org's and its own. */
+  profileId: string | null;
   /** Changing what the machine may have: admin only. */
   canEditManifest: boolean;
   /** Asking for an install or a removal: the owner or an admin. Installs wait for an approver. */
@@ -69,6 +72,7 @@ export function MachineManifestTab({
         <CardContent className="flex flex-col gap-3">
           <MachinePackagesTable
             machineId={machineId}
+            profileId={profileId}
             canEditPermission={canEditManifest}
             canRequestActions={canRequestActions}
           />

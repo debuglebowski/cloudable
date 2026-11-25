@@ -2,6 +2,7 @@ import {
   Archive,
   Building2,
   KeyRound,
+  Layers,
   type LucideIcon,
   Plug,
   ScrollText,
@@ -106,6 +107,15 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Plug,
     // dataviz palette slot 6 (green).
     iconColorClassName: "text-[#008300] dark:text-[#008300]",
+  },
+  {
+    label: "Profiles",
+    access: "admin",
+    to: "/profiles",
+    group: "Configure",
+    icon: Layers,
+    // dataviz palette slot 1 (blue).
+    iconColorClassName: "text-[#2a78d6] dark:text-[#3987e5]",
   },
   {
     label: "Organisation",
