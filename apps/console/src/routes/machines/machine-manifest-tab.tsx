@@ -65,8 +65,8 @@ export function MachineManifestTab({
           <CardTitle>Packages</CardTitle>
           <CardDescription>
             What this machine is allowed to have, and what it actually has. Each package comes from
-            the org or is set on this machine. Installing and removing happen on the machine's next
-            check-in.
+            the org, the machine's profile, or the machine itself. Installing and removing happen on
+            the machine's next check-in.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -122,8 +122,9 @@ function ManifestHistoryCard({
       <CardHeader>
         <CardTitle>Manifest history</CardTitle>
         <CardDescription>
-          Every recorded change to what this machine is declared to run, newest first. Org-scope
-          changes are included: they change what this machine resolves to.
+          Every recorded change to what this machine is declared to run, newest first. Changes to
+          the org and to the machine's profile are included: they change what this machine resolves
+          to.
         </CardDescription>
       </CardHeader>
       {/* Capped rather than stretched: the card ends where its content does, and a long

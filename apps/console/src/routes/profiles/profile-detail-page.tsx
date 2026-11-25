@@ -39,6 +39,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 import { OrgPackageManifestCard } from "../organisation/org-package-manifest-card";
 import { ProfileFormDialog } from "./profile-form-dialog";
@@ -118,7 +119,15 @@ export function ProfileDetailPage() {
               : "No machine uses this profile yet, so these can still change."}
           </CardDescription>
         </CardHeader>
-        <CardContent className="font-mono text-sm">{creationFieldsSummary(profile)}</CardContent>
+        <CardContent className="text-sm">
+          {creationFieldsSummary(profile) === "—" ? (
+            <span className="text-muted-foreground">
+              None. The Add machine form asks for the provider, region, size and image.
+            </span>
+          ) : (
+            <span className="font-mono">{creationFieldsSummary(profile)}</span>
+          )}
+        </CardContent>
       </Card>
 
       <Card>
@@ -328,19 +337,17 @@ function SettingDialog({
         </DialogHeader>
         <div className="flex flex-col gap-3">
           {spec?.key === "logging_tier" && (
-            <div className="flex flex-col gap-2">
+            <RadioGroup
+              value={String(tier)}
+              onValueChange={(value) => setTier(value === "2" ? 2 : 1)}
+            >
               {([1, 2] as const).map((value) => (
                 <Label key={value} className="flex items-center gap-2 text-sm font-normal">
-                  <input
-                    type="radio"
-                    name="profile-logging-tier"
-                    checked={tier === value}
-                    onChange={() => setTier(value)}
-                  />
+                  <RadioGroupItem value={String(value)} />
                   {value === 1 ? "Tier 1: metadata only" : "Tier 2: also sessions and changes"}
                 </Label>
               ))}
-            </div>
+            </RadioGroup>
           )}
           {spec?.key === "admin_access_elevation_ttl_minutes" && (
             <div className="flex flex-col gap-1">
