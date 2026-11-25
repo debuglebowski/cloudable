@@ -70,7 +70,7 @@ Read the relevant file before working in that area.
 
 | File                  | Covers                                                         |
 | :-------------------- | :------------------------------------------------------------- |
-| `docs/inheritance.md` | org → template → machine, package permission, overrides, pinning |
+| `docs/inheritance.md` | org → profile → machine, profiles, package permission, overrides, locking |
 | `docs/agents.md`      | Control agent, tunnel daemon, wire protocol, attestation       |
 | `docs/cloud-auth.md`  | Self-hosted managed identity (the real path), RBAC scope, why BYOC federation was removed |
 | `docs/access.md`      | Roles (member, admin, approver), web terminal, SSH certificates, session tokens |
@@ -84,7 +84,7 @@ Read the relevant file before working in that area.
 
 ## Not in v1
 
-No templates. No Tailscale. No AWS or GCP. No billing. No idle suspend. No full command capture.
+No Tailscale. No AWS or GCP. No billing. No idle suspend. No full command capture.
 
 Never build: SSH public key upload, per-machine passwords or 2FA codes, shared machines, auto-correcting drift beyond what an *Ensure* setting covers, code-server, application hosting.
 

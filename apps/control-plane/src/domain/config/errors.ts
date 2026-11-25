@@ -22,7 +22,7 @@ export class MachineNotFoundError extends Schema.TaggedError<MachineNotFoundErro
 }) {}
 
 /**
- * A machine (or template) tried to override a package-manifest entry that
+ * A machine or profile tried to override a package-manifest entry that
  * is locked at a level above it — attempting to override
  * one is a validation error at edit time, not a silent no-op at reconcile.
  */

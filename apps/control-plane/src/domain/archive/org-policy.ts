@@ -5,9 +5,9 @@ import { Db } from "../../db/layer";
 import { dbTry } from "./queries";
 
 /**
- * Org-configurable archive policy, resolved through `resolveSetting()` (org → machine —
- * there is no template layer in v1, and no per-machine override is written by any
- * feature unit yet, but the chain supports one for free the day it's needed).
+ * Org-configurable archive policy, resolved through `resolveSetting()` (org → machine). A
+ * profile cannot set it (`domain/profile/setting-keys.ts`), and no per-machine override is
+ * written by any feature unit yet, but the chain supports one for free the day it's needed.
  *
  * Restore-approval policy is NOT resolved here — despite once having its own dead
  * `archive.restoreApprovalMode` key (removed; it was read but never written anywhere,

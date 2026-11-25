@@ -14,7 +14,7 @@ const rows: ReadonlyArray<SettingRow<string>> = [
 ];
 
 describe("resolveSetting", () => {
-  test("machine override wins over org and template", () => {
+  test("machine override wins over org and profile", () => {
     const resolved = resolveSetting("region", rows, {
       orgId: "org-1",
       profileId: "profile-1",
@@ -29,7 +29,7 @@ describe("resolveSetting", () => {
     });
   });
 
-  test("falls back to org when no machine or template row matches", () => {
+  test("falls back to org when no machine or profile row matches", () => {
     const resolved = resolveSetting("region", rows, {
       orgId: "org-1",
       profileId: "profile-1",

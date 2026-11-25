@@ -83,8 +83,8 @@ export function OrganisationPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-xl font-semibold">Organisation</h1>
         <p className="max-w-prose text-sm text-muted-foreground">
-          Org-wide identity and defaults. These settings are policy, inherited down through
-          templates and machines.
+          Org-wide identity and defaults. Profiles and machines inherit these settings unless they
+          set their own.
         </p>
       </div>
 
@@ -157,7 +157,9 @@ export function OrganisationPage() {
           <Card>
             <CardHeader>
               <CardTitle>Logging</CardTitle>
-              <CardDescription>Per-template tier; cost follows.</CardDescription>
+              <CardDescription>
+                A profile or machine can set its own tier; cost follows.
+              </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <SettingRow

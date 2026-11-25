@@ -401,17 +401,23 @@ ever install. They never remove undeclared software.
 
 ## Events
 
-`MachineService` emits `machine.created` on creation and one `machine.setting_changed` event per
+`MachineService` emits `machine.created` on creation (with the machine's `profileId`) and one
+`machine.setting_changed` event per
 edited package name on a successful `updatePackages` call (all sharing one `correlationId` per
 request) — see `apps/control-plane/src/domain/machine/events.ts`. Each `machine.setting_changed`
 payload's `previous`/`current` are the resolved value
-(`{ versionPin, pinned, excluded, partOf, description, setting }` or `null` if the package isn't in
+(`{ versionPin, pinned, excluded, partOf, description, setting }`, where `pinned` is the lock flag's
+stored name, or `null` if the package isn't in
 the manifest on that side) computed via `resolveManifest()` *before* and
 *after* the write, and `overridesLevel` is the `source` of the *previous* resolved value (or
 `"none"` if the package had no prior resolved value at all) — i.e. which level's effective value
 this edit just superseded. `org.setting_changed` for an org package carries the org entry: `packageName`, `versionPin`,
-`pinned`, `partOf`, `description` and `setting`. Events
-recorded before settings existed have no `setting`. Those packages were all Allowed.
+`pinned`, `partOf`, `description` and `setting`. `profile.setting_changed` for a profile package
+carries the same entry plus `profileId`. Events recorded before settings existed have no `setting`.
+Those packages were all Allowed.
+
+A machine's package history (`GET /api/v1/machines/:id/manifest-history`) includes its own edits,
+the org's, and those to its current profile. Edits to a profile it was on earlier are not included.
 
 An Ensure setting that waited for approval is written, and its event recorded, when the approval is
 granted. The event is attributed to the person who asked, not the approver.

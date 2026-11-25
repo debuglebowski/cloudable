@@ -86,11 +86,11 @@ If ever revisited, use OpenTofu.
 
 ## 5. Policy inheritance
 
-**Chain: organisation → template → machine.** The template layer does not exist in v1; the chain is organisation → machine.
+**Chain: organisation → profile → machine.** A profile is a named set of settings and packages machines link to. It was called "template" until 2026-11; renamed because a template sounds like something copied once. See `docs/inheritance.md`.
 
 Required from the first migration:
-- Machines carry a **nullable `templateId`**
-- Every setting carries a **`source` field** (`org` | `machine` in v1, `template` added later)
+- Machines carry a **nullable `profileId`**
+- Every setting carries a **`source` field** (`org` | `profile` | `machine`)
 
 Applies to every setting: packages, access methods, logging tier, retention, approval modes, region.
 
@@ -104,7 +104,7 @@ Overrides render visibly with the inherited value struck through and its origin 
 
 An entry names a package and **optionally** pins a version. `docker` and `nodejs 20` are both valid. No dependency resolution; the machine's package manager does that.
 
-**Resolution: lowest level wins.** Machine beats template beats organisation.
+**Resolution: lowest level wins.** Machine beats profile beats organisation.
 
 **Setting:** each entry is *Allowed* (the default), *Ensure installed* or *Ensure latest version*. Allowed means a machine may have it and a person installs it. Ensure installed means Cloudable installs it when it is missing. Ensure latest version also updates it when the package repository has a newer version. Setting Ensure needs an approval. apt, npm, pipx, cargo and Nix packages can be installed and ensured; `home:` entries cannot. See `docs/inheritance.md`.
 
@@ -112,7 +112,7 @@ An entry names a package and **optionally** pins a version. `docker` and `nodejs
 
 **Scanning what people install.** A scan can cover those tools too (scope `os_and_tools`). Trivy reads npm, pipx and cargo tools; cargo only when built with cargo-auditable, so Cloudable ships it as a scan tool. vulnix reads Nix packages and gives no fixed versions, so Nix findings are evidence but never fail the fixed-on-time check.
 
-**Pinning:** the organisation can mark an entry pinned. A pinned entry cannot be overridden below. Attempting to override one is a **validation error at edit time**, not a silent no-op at reconcile.
+**Locking:** the organisation or a profile can lock an entry (called "pinned" until 2026-11). A locked entry cannot be overridden below. Attempting to override one is a **validation error at edit time**, not a silent no-op at reconcile.
 
 **Scope 2:** per-machine policy disabling local installation entirely.
 
@@ -221,7 +221,7 @@ The Access surface shows only: which certificates are live, for whom, expiring w
 **CA key handling:** the control plane assembles certificate contents, calls a **sign operation** against Azure Key Vault (or Managed HSM), receives only the signature, assembles the certificate around it. The private key never enters the control plane.
 
 ### 11.3 Scope 2
-Tailscale as an integration — customer credentials once, agent joins the tailnet with ACL tags per template, device cleaned up on deprovision.
+Tailscale as an integration — customer credentials once, agent joins the tailnet with ACL tags per profile, device cleaned up on deprovision.
 
 See `docs/access.md` for implementation detail.
 
@@ -229,7 +229,7 @@ See `docs/access.md` for implementation detail.
 
 ## 12. Secrets
 
-**Cloudable is the injector, never the vault.** The customer points at their own store (Azure Key Vault, 1Password). Cloudable fetches and injects at runtime, per template or per user.
+**Cloudable is the injector, never the vault.** The customer points at their own store (Azure Key Vault, 1Password). Cloudable fetches and injects at runtime, per profile or per user.
 
 **Injected at runtime, never written to disk — therefore snapshots contain no secrets.**
 
@@ -319,7 +319,7 @@ Same path whether the change came from the UI or a Git commit.
 
 ## 17. Logging
 
-Per-template tier; cost follows.
+Per-profile tier; cost follows.
 
 1. **Metadata only** — provisioning, auth, lifecycle
 2. **Session-level** — connections, elevations, config changes
@@ -413,9 +413,9 @@ See `docs/compliance.md` for implementation detail.
 
 ## 20. Console structure
 
-- **Operate:** Machines, Templates *(scope 2)*, People
+- **Operate:** Machines, People
 - **Govern:** Approvals (badged queue), Audit, Archive
-- **Configure:** Integrations, Organisation
+- **Configure:** Integrations, Profiles, Organisation
 
 Deliberate omissions:
 - **No Policies section.** A third place to set the same value breaks the inheritance story
@@ -432,7 +432,7 @@ Deliberate omissions:
 Exactly three props:
 
 ```ts
-type Level = 'org' | 'template' | 'machine'
+type Level = 'org' | 'profile' | 'machine'
 
 interface LineageProps {
   source: Level              // where the effective value was set
@@ -469,7 +469,7 @@ See `docs/frontend.md` for implementation detail (tokens, routing/nav convention
 
 ## 22. Build order
 
-1. Control plane schema + reconciliation loop (Azure SDK, no Terraform). Settings carry `source`; machines carry nullable `templateId` from the first migration
+1. Control plane schema + reconciliation loop (Azure SDK, no Terraform). Settings carry `source`; machines carry nullable `profileId` (first named `templateId`) from the first migration
 2. Control agent with **join token** attestation, end to end
 3. **Generic approval object** — before any action that consumes it
 4. **One compliance check end to end** — *access revoked on offboarding*. Forces event fields, query, finding age and control mapping through the whole stack before the other five are built against an unvalidated shape
@@ -484,7 +484,7 @@ See `docs/frontend.md` for implementation detail (tokens, routing/nav convention
 13. Elevation / break-glass
 14. Remaining five compliance checks, finding age, control map, exports
 15. Config editor + GitOps
-16. *Scope 2:* template layer
+16. *Scope 2:* profile layer (built 2026-11)
 17. *Scope 2:* Tailscale
 18. *Scope 2+:* in-tenant provisioning worker
 

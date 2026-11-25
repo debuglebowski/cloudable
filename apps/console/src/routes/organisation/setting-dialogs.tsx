@@ -118,7 +118,7 @@ export function LoggingTierDialog({
       open={open}
       currentValue={currentTier}
       title="Logging tier"
-      description="Per-template tier; cost follows."
+      description="A profile or machine can set its own tier; cost follows."
       onOpenChange={onOpenChange}
       onSave={onSave}
     >

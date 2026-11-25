@@ -15,9 +15,8 @@ import { Data, Effect } from "effect";
  * no migration needed — see docs/inheritance.md), keyed by the string
  * constants below. Unlike logging tier (`logging/settings.ts`), which is
  * deliberately collapsed to org scope only for now, these two are resolved
- * through the real chain (org → machine in v1; template is inert but the
- * resolution call already supports it for free) — a machine can genuinely
- * override either one.
+ * through the real chain (org → profile → machine) — a profile or a machine can
+ * genuinely override either one.
  *
  * Takes a `db` handle directly (`logging/settings.ts`'s style) rather than
  * yielding `Db` from Effect context (`domain/archive/org-policy.ts`'s

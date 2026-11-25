@@ -2,8 +2,8 @@
 // Access method policy: access method is policy, inherited
 // through the chain — contractors browser-only, employees browser plus
 // certificates, exceptions visible as overrides. Stored as an ordinary
-// `settingValues` row (org → machine chain — templates excluded, matching
-// every other settings consumer in this codebase; templates are not in v1)
+// `settingValues` row (org → machine chain only; this superseded resolver never learned
+// about profiles — see the SUPERSEDED note below)
 // rather than a dedicated table, same reasoning `logging/settings.ts`
 // documents for logging tier/retention location: the resolution mechanism
 // already exists and is the single source of truth for every other

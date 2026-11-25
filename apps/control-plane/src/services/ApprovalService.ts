@@ -141,7 +141,8 @@ const resolveApprovalMode = (
       catch: (cause) => new ApprovalError({ reason: "query_failed", cause }),
     });
 
-    // Template layer doesn't exist in v1 — chain is org -> machine only.
+    // Approval modes are org-wide: a profile cannot set them (`domain/profile/setting-keys.ts`),
+    // so a profile row is ignored even if one were ever written.
     const settingRows: SettingRow<ApprovalMode>[] = rows
       .filter((row) => row.scopeType !== "profile")
       .map((row) => ({
@@ -242,7 +243,7 @@ const decodeCursor = (cursor: string): Cursor | null => {
  * The generic approval object: single/dual-control gate for
  * sensitive actions (snapshot restore, break-glass, admin access,
  * offboarding). Approval mode is policy, resolved per action type through
- * the org -> machine chain (`resolveSetting`, template inert in v1), then
+ * the org -> machine chain (`resolveSetting`; a profile cannot set it), then
  * clamped up to `ApprovalRequest.requiredModeFloor` when the caller passes
  * one — a caller-side escalation (see `domain/archive/approval-escalation.ts`)
  * always wins over a weaker org configuration; the org's own mode can never

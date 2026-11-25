@@ -72,7 +72,7 @@ to `409 Conflict`, distinct from `404` (the snapshot exists; it just isn't resto
 ## Retention clock
 
 `retentionDays` is resolved per-snapshot at creation time via `resolveSetting()`
-against the org → machine chain (there is no template layer in v1), key
+against the org → machine chain (retention is org-wide; a profile cannot set it), key
 `archive.retentionDays`, default **30**, org-configurable. `expiresAt =
 createdAt + retentionDays`. The clock is fixed at snapshot creation — changing the org's
 policy afterward does not retroactively move an existing snapshot's `expiresAt`.

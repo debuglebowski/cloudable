@@ -12,14 +12,14 @@ The left nav is grouped under three fixed headers, per spec:
 | :-------- | :---------------- |
 | Operate   | Machines, People, Access |
 | Govern    | Approvals, Audit, Archive |
-| Configure | Integrations, Organisation |
+| Configure | Integrations, Profiles, Organisation |
 
 Nothing is hardcoded into the nav beyond the three group headers — see "Nav registration" below.
 
 ## Deliberate omissions
 
 - **No Policies section.** Settings are inline in each object's page via `SettingRow` +
-  `LineageGutter` (org → template → machine lineage shown per-field), not centralized into a
+  `LineageGutter` (org → profile → machine lineage shown per-field), not centralized into a
   separate policy editor.
 - **No Secrets section.** Cloudable injects secrets, it never stores them —
   there is nothing to list or manage in the console for this.
@@ -30,7 +30,8 @@ Nothing is hardcoded into the nav beyond the three group headers — see "Nav re
   events → checks → controls pipeline (raw event stream, and compliance/control status derived
   from it) as tabs or an in-page toggle within a single Audit page, since both views read from the
   same append-only event log.
-- **No Templates.** Out of scope for this build (scope 2+, see `SCOPE.md`).
+- **Profiles live under Configure.** A profile is configuration, like the org page, and admin
+  only. Its page reuses the org's package card (`OrgPackageManifestCard` with a `profileId`).
 
 ## Design tokens
 
@@ -222,7 +223,7 @@ in place instead.
 `src/components/lineage-gutter.tsx`:
 
 ```tsx
-export type Level = "org" | "template" | "machine";
+export type Level = "org" | "profile" | "machine";
 export interface LineageGutterProps {
   source: Level; // where the effective value was set
   viewing: Level; // which level is being viewed
@@ -242,7 +243,7 @@ export interface FreshnessProps { occurredAt: string; recordedAt: string }
 export interface SettingRowProps {
   label: string;
   value: unknown;
-  source: "org" | "template" | "machine";
+  source: "org" | "profile" | "machine";
   onOverride?: (next: unknown) => void;
 }
 ```

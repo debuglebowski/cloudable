@@ -37,19 +37,31 @@ role contract's, the same in Kahuna and SlayZone: `service`, `actor`, `subject`,
 | `idp_roles.local_change_refused` | 1 | A role or approver change in Cloudable was refused because roles come from the identity provider. |
 | `idp_roles.activation` | 1 | Roles from the identity provider were switched on, off, or remapped. Switching on or remapping ended every human session and credential. |
 
+## Profile
+
+A profile is a named set of settings machines link to (org → profile → machine). See `docs/inheritance.md`. `machineId` is null; `profileId` in the payload says which profile.
+
+| Type | Tier | Description |
+| :--- | :--- | :--- |
+| `profile.created` | 1 | An admin created a profile. Carries any creation fields it sets: provider, region, size, image. |
+| `profile.updated` | 1 | An admin changed a profile's name, description or creation fields. `previous` and `current` hold only the fields that changed. |
+| `profile.setting_changed` | 1 | A setting or package on a profile changed. A package edit has key `package:<name>` and stores the lock flag as `pinned`. A cleared setting has `current: null`. |
+| `profile.archived` | 1 | An admin archived a profile. No new machine can use it; machines already on it keep its settings. |
+
 ## Machine
 
 | Type | Tier | Description |
 | :--- | :--- | :--- |
-| `machine.created` | 1 | A machine was declared with a name, region, size, and image. |
+| `machine.created` | 1 | A machine was declared with a name, region, size, and image, and the profile it was created on, if any (`profileId`). |
 | `machine.provisioned` | 1 | A machine finished provisioning and has a cloud resource. |
 | `machine.provisioning_failed` | 1 | A machine failed to provision at a given stage. |
 | `machine.owner_assigned` | 1 | A machine was assigned to a person owner. |
+| `machine.profile_assigned` | 1 | An admin moved a machine to another profile, or off one. Carries `profileId` and `previousProfileId`. |
 | `machine.owner_cleared` | 1 | A machine's owner was cleared. |
 | `machine.started` | 1 | A machine was started. |
 | `machine.stopped` | 1 | A machine was stopped by a user, policy, or offboarding. |
 | `machine.reimaged` | 1 | A machine's image was replaced with a different image. |
-| `machine.setting_changed` | 2 | A machine-level setting was changed, overriding a template or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did. A package edit's `previous` and `current` include its `setting` (`allowed`, `ensure_installed` or `ensure_latest`). |
+| `machine.setting_changed` | 2 | A machine-level setting was changed, overriding a profile or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did. A package edit's `previous` and `current` include its `setting` (`allowed`, `ensure_installed` or `ensure_latest`). |
 | `machine.offboarded` | 1 | A machine was offboarded from its previous owner under approval. |
 | `machine.archived` | 1 | A machine was archived with a final snapshot and retention window. |
 | `machine.state_reported` | 2 | The agent reported observed machine state that changed since the last report. |

@@ -20,9 +20,8 @@ type DbHandle = PostgresJsDatabase<typeof schema>;
  * table would just be a second, divergence-prone place to look.
  *
  * The two settings differ in how far down the chain they resolve:
- *  - Logging tier has a real machine-level override: "per-template tier;
- *    cost follows" — the template layer is inert in v1, so in practice
- *    that means org → machine, the
+ *  - Logging tier has real profile- and machine-level overrides: "per-profile
+ *    tier; cost follows". It resolves org → profile → machine, the
  *    exact same `resolveSetting()` mechanism every other chain-resolved
  *    setting uses. Writing a machine-scoped `logging_tier` row goes through
  *    the generic `applySettingChange` (`PATCH /api/v1/config/settings`) —
@@ -123,10 +122,8 @@ export interface EffectiveLoggingTier {
  * `resolveSetting()`'s chain walk, the same algorithm every other
  * chain-resolved setting uses (see docs/inheritance.md).
  *
- * `profileId` is accepted for forward compatibility with the template
- * layer (inert in v1 — see the file header) — `resolveSetting()` already
- * checks it when present, so nothing here needs to change when a caller
- * starts passing a real one.
+ * `profileId` is the machine's profile, if any: its row sits between the org's and the
+ * machine's.
  *
  * Falls back to `{ tier: DEFAULT_LOGGING_TIER, source: "org" }` when
  * neither the machine nor the org has ever set a `logging_tier` row —
