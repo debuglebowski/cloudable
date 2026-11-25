@@ -14,6 +14,7 @@ import { TunnelServer } from "../../tunnel/server";
 import { TunnelSignal } from "../../tunnel/signal";
 import { applySettingChange } from "../config/apply-setting-change";
 import { MachineService } from "../machine/MachineService";
+import { queryManifestHistory } from "../machine/manifest-history";
 import { updateOrgPackages } from "../organisation/packages";
 import { EVENTS_RETENTION_DAYS_KEY } from "../retention/policy";
 import { archiveProfile, createProfile, getProfile, updateProfile } from "./ProfileService";
@@ -400,6 +401,35 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
       profileId: profile.id,
       key: "package:jq",
       current: { packageName: "jq", pinned: false },
+    });
+  });
+
+  test("a machine's package history includes edits to its profile", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    const profile = await newProfile(org.id, { provider: "fake" });
+    const machine = await run(
+      createMachine(org.id, owner.id, {
+        profileId: profile.id,
+        sizeSku: "s",
+        image: "ubuntu-24.04",
+      }),
+    );
+    await run(
+      updateOrgPackages({
+        orgId: org.id,
+        profileId: profile.id,
+        upserts: [{ packageName: "jq", locked: true }],
+        actor,
+      }),
+    );
+    const page = await Effect.runPromise(
+      queryManifestHistory(db, { orgId: org.id, machineId: machine.id }),
+    );
+    expect(page.items[0]).toMatchObject({
+      scope: "profile",
+      packageName: "jq",
+      current: { locked: true },
     });
   });
 

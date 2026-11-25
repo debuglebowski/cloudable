@@ -36,7 +36,7 @@ export interface ManifestHistoryEntry {
   actorId: string;
   correlationId: string;
   /** Which scope the edit was made at, not which scope currently wins resolution. */
-  scope: "org" | "machine";
+  scope: "org" | "profile" | "machine";
   packageName: string;
   previous: ManifestHistoryState | null;
   current: ManifestHistoryState | null;
@@ -50,7 +50,11 @@ export interface ManifestHistoryPage {
 export const MANIFEST_HISTORY_DEFAULT_LIMIT = 50;
 export const MANIFEST_HISTORY_MAX_LIMIT = 200;
 
-const HISTORY_EVENT_TYPES = ["machine.setting_changed", "org.setting_changed"] as const;
+const HISTORY_EVENT_TYPES = [
+  "machine.setting_changed",
+  "org.setting_changed",
+  "profile.setting_changed",
+] as const;
 
 /**
  * Normalises both write paths' payloads onto one shape.
@@ -90,8 +94,10 @@ function toState(raw: unknown): ManifestHistoryState | null {
  * Includes org-scope edits as well as this machine's own. An org edit changes
  * what the machine resolves to just as surely as a machine edit does, and
  * `org.setting_changed` carries `machineId: null`, so it can never reach a
- * machine-filtered view any other way. Rows carry `scope` so the two are
- * never confused for each other.
+ * machine-filtered view any other way. The same goes for edits to the
+ * machine's current profile (`profile.setting_changed`, matched on its
+ * `profileId`). Edits to a profile it was on earlier are not included. Rows
+ * carry `scope` so the three are never confused for each other.
  *
  * Read-only over the append-only event log: this derives a view, it never
  * writes. Both write paths namespace their key as `package:<name>`
@@ -121,13 +127,17 @@ export const queryManifestHistory = (
     const machineRows = yield* Effect.tryPromise({
       try: () =>
         db
-          .select({ id: machines.id })
+          .select({ id: machines.id, profileId: machines.profileId })
           .from(machines)
           .where(and(eq(machines.id, params.machineId), eq(machines.orgId, params.orgId)))
           .limit(1),
       catch: (cause) => new ManifestHistoryError({ reason: "query_failed", cause }),
     });
-    if (machineRows.length === 0) return { items: [], nextCursor: null };
+    const machine = machineRows[0];
+    if (!machine) return { items: [], nextCursor: null };
+    const profileClause = machine.profileId
+      ? sql` OR (${events.type} = 'profile.setting_changed' AND ${events.payload}->>'profileId' = ${machine.profileId})`
+      : sql``;
 
     const rows = yield* Effect.tryPromise({
       try: () =>
@@ -139,7 +149,7 @@ export const queryManifestHistory = (
               eq(events.orgId, params.orgId),
               inArray(events.type, [...HISTORY_EVENT_TYPES]),
               sql`${events.payload}->>'key' LIKE ${`${PACKAGE_SETTING_KEY_PREFIX}%`}`,
-              sql`(${events.machineId} = ${params.machineId} OR ${events.type} = 'org.setting_changed')`,
+              sql`(${events.machineId} = ${params.machineId} OR ${events.type} = 'org.setting_changed'${profileClause})`,
               ...(params.cursor ? [lt(events.id, params.cursor)] : []),
             ),
           )
@@ -165,7 +175,12 @@ export const queryManifestHistory = (
         actorType: row.actorType,
         actorId: row.actorId,
         correlationId: row.correlationId,
-        scope: row.type === "org.setting_changed" ? "org" : "machine",
+        scope:
+          row.type === "org.setting_changed"
+            ? "org"
+            : row.type === "profile.setting_changed"
+              ? "profile"
+              : "machine",
         packageName,
         previous: toState(payload.previous),
         current: toState(payload.current),

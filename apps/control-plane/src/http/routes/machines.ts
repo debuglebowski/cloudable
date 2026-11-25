@@ -233,7 +233,7 @@ const manifestHistoryEntrySchema = Schema.Struct({
   actorType: Schema.Literal("person", "system", "agent", "idp"),
   actorId: Schema.String,
   correlationId: Schema.String,
-  scope: Schema.Literal("org", "machine"),
+  scope: Schema.Literal("org", "profile", "machine"),
   packageName: Schema.String,
   previous: Schema.NullOr(manifestHistoryStateSchema),
   current: Schema.NullOr(manifestHistoryStateSchema),

@@ -1,29 +1,57 @@
-# Inheritance: org → template → machine
+# Inheritance: org → profile → machine
 
-Policy inheritance and the package manifest. Owned by unit 2 (machine desired-state
-API + package manifest); see `apps/control-plane/src/domain/machine/*`,
-`packages/schema/src/tables/{setting,machine-package}.ts`.
+Policy inheritance and the package manifest. See `apps/control-plane/src/domain/machine/*`,
+`apps/control-plane/src/domain/profile/*`, and
+`packages/schema/src/tables/{setting,machine-package,profile}.ts`.
 
 ## The chain
 
 Every setting and every package manifest entry lives at one of three **scopes**:
 
 ```
-org  →  template  →  machine
+org  →  profile  →  machine
 ```
 
-**Lowest level wins.** A machine-level row overrides a template-level row, which overrides an
+**Lowest level wins.** A machine-level row overrides a profile-level row, which overrides an
 org-level row. There is no partial merge within one setting or one package entry — resolution
-picks exactly one row per key, from the lowest scope that has one.
+picks exactly one row per key, from the lowest scope that has one. A **lock** on a row stops any
+scope below it from overriding it (see Locking below).
 
-**The template layer is inert in v1** (see `CLAUDE.md` — "Not in v1: No templates"). It exists in
-the data model — `machines.templateId` is a nullable column from the first migration
-(`packages/schema/src/tables/machine.ts`), `settingValues.scopeType` and `machinePackages.scopeType`
-both accept `"template"` as a value, and `resolveSetting()`'s chain walk already checks the template
-scope — but nothing in this build ever writes a `template`-scoped row, because there is no
-`templates` table yet and no UI or API creates one. The chain is *organisation → machine* in
-practice today. When the template layer ships, no schema migration or resolution-function change is
-needed — only something that starts writing `scopeType: "template"` rows.
+## Profiles
+
+A profile is a named set of settings and packages that machines link to. It replaced the old
+placeholder name "template": a template sounds like something copied once, and a profile is not
+copied. Edit a profile and every machine on it follows, unless that machine overrides the setting.
+
+- A machine has zero or one profile (`machines.profileId`). An admin picks it when creating the
+  machine, and can move the machine later (`PUT /api/v1/machines/:id/profile`). Each move is
+  recorded as `machine.profile_assigned`. A move is refused for an archived machine, and when the
+  new profile sets a provider, region, size or image the machine does not have.
+- A profile's settings are `setting_values` rows with `scopeType: "profile"`, written through
+  `PATCH /api/v1/config/settings`. A profile may set only the keys in `PROFILE_SETTING_KEYS`
+  (`domain/profile/setting-keys.ts`): logging tier, access methods and the elevation length.
+  Everything else is org-wide: event retention, approval modes, vulnerability scanning, the Nix
+  snapshot, the Ensure retry wait, malware protection, and the admin access policy.
+  `machine.persistentPaths` is left out because nothing acts on it yet.
+- `clear: true` on that endpoint deletes a profile's own value, so its machines take the org's
+  again. It is recorded as `profile.setting_changed` with `current: null`.
+- A profile's packages are `machine_packages` rows with `scopeType: "profile"`, written through
+  `PATCH /api/v1/profiles/:id/packages` (`updateOrgPackages` with a `profileId`). Moving one to
+  an Ensure setting needs the same `package_ensure` approval as on the org. Moving a machine onto
+  a profile installs that profile's Ensure packages with no new approval: they were approved when
+  they were set.
+- **Creation fields.** A profile may set a provider, region, size and image. All are optional.
+  They are used only when a machine is created: the create form asks for what the profile leaves
+  blank, and refuses a value that differs from the profile's. They cannot change while a machine
+  that is not archived uses the profile. To change them, make a new profile. A profile edit must
+  never resize or move a live machine (invariant 10).
+- Profiles are archived, never deleted (`POST /api/v1/profiles/:id/archive`). No new machine can
+  use an archived profile. Machines already on it keep reading their settings from it.
+- Restoring an archived machine into a new one keeps its profile while that profile is usable and
+  still fits the machine's fields. Otherwise the new machine starts on none.
+- Only admins create, edit, archive or move. Anyone in the org may read a profile.
+- Events: `profile.created`, `profile.updated`, `profile.setting_changed`, `profile.archived`,
+  `machine.profile_assigned`. `machine.created` carries `profileId`.
 
 **No wizard prefill.** A machine is created with an empty manifest and empty setting overrides; it
 *inherits* org defaults live through resolution, it does not *copy* them at creation time. A later
@@ -63,18 +91,18 @@ codebase. Its shape:
 export function resolveSetting<T>(
   key: string,
   rows: ReadonlyArray<SettingRow<T>>,
-  chain: { orgId: string; templateId?: string | null; machineId: string },
+  chain: { orgId: string; profileId?: string | null; machineId: string },
 ): ResolvedSetting<T> | undefined
 ```
 
-It looks for a `machine`-scoped row for `key` first, then (if `chain.templateId` is set) a
-`template`-scoped row, then an `org`-scoped row, and returns the first match with its `value` and
+It looks for a `machine`-scoped row for `key` first, then (if `chain.profileId` is set) a
+`profile`-scoped row, then an `org`-scoped row, and returns the first match with its `value` and
 `source`. No row at any scope means `undefined` — there is no default baked into the function
 itself.
 
 **The package manifest reuses this function rather than reimplementing the chain walk.**
 `resolveManifest()` (`apps/control-plane/src/domain/machine/manifest.ts`) treats each distinct
-`packageName` across a machine's `org`/`template`/`machine`-scoped `machine_packages` rows as a
+`packageName` across a machine's `org`/`profile`/`machine`-scoped `machine_packages` rows as a
 `resolveSetting()` key:
 
 ```ts
@@ -82,7 +110,7 @@ const settingRows: ReadonlyArray<SettingRow<PackageManifestValue>> = rows.map((r
   scopeType: row.scopeType,
   scopeId: row.scopeId,
   key: row.packageName,          // the package name IS the setting key
-  value: { versionPin: row.versionPin, pinned: row.pinned },
+  value: { versionPin: row.versionPin, locked: row.locked },
   source: row.source,
 }));
 ```
@@ -128,7 +156,7 @@ writes against.
 The HTTP-editable surface for this unit is `PATCH /api/v1/machines/:id/packages`
 (`apps/control-plane/src/http/routes/machines.ts`), which only ever writes `machine`-scoped rows.
 The org's own defaults are edited through `PATCH /api/v1/organisation/packages`
-(`domain/organisation/packages.ts`); the schema, `resolveManifest()`, and the pin check below are
+(`domain/organisation/packages.ts`); the schema, `resolveManifest()`, and the lock check below are
 scope-generic and shared by both.
 
 ## Ensure settings
@@ -230,47 +258,52 @@ anyway reads as undeclared software and surfaces as drift, which is the point of
 Lifting an exclusion that is all the machine row ever said deletes the row rather than rewriting it
 as `excluded: false`. Excluding a package the machine had no row for writes one with no version of
 its own (the upsert fallback reads the machine's own row, never the chain — see below), so flipping
-that row back would leave a machine-level entry declaring "any version, unpinned", quietly shadowing
-the org's pin from then on. Undoing an exclusion has to put the machine back where it started, which
+that row back would leave a machine-level entry declaring "any version", quietly shadowing
+the org's version pin from then on. Undoing an exclusion has to put the machine back where it started, which
 is inheriting.
 
-Excluding is an override like any other, so an org pin blocks it: `findPinConflicts()` sees the
+Excluding is an override like any other, so a lock above blocks it: `findLockConflicts()` sees the
 edited package name and rejects the whole edit with the same 422 below. A machine that could opt out
-of a pinned package would make the pin decorative.
+of a locked package would make the lock decorative.
 
-## Pinning
+## Locking
 
-**An org (or, once it exists, a template) can mark an entry `pinned`.** A pinned entry cannot be
-overridden *below* its own scope: *"Attempting to override one is a validation error
-at edit time, not a silent no-op later."*
+**The org or a profile can lock an entry.** A locked entry cannot be overridden *below* its own
+scope: an org lock binds profiles and machines, a profile lock binds its machines. Trying to
+override one is a validation error at edit time, not a silent no-op later. "Locked" was called
+"pinned" until 2026-11; it was renamed because it clashed with version pins (`nodejs 20`), which
+are a different thing. Recorded events keep the old field name `pinned` in their payloads, so every
+change on record has one shape.
 
-This is enforced by `findPinConflicts()` (`apps/control-plane/src/domain/machine/manifest.ts`):
-given the full set of existing rows relevant to a machine and the package names an edit touches, it
-reports a conflict for every edited name that has a `pinned: true` row at a **strictly higher**
-scope than the edit's target (org/template pinning blocks a machine edit; org pinning blocks a
-template edit). Editing at the same scope that owns the pin, or at a higher scope than any existing
-pin, is not "below" and is never reported.
+**Settings.** `applySettingChange` refuses a machine-scope write when the org's or the machine's
+profile's row for that key is locked, and a profile-scope write when the org's row is locked
+(`LockedSettingError`, 409). This applies to every key.
 
-`MachineService.updatePackages` runs this check before writing anything: if any conflict is found,
-the whole edit is rejected with `PackagePinConflictError` — serialized by the HTTP layer as
-**`422 Unprocessable Entity`**, body:
+**Packages.** `findLockConflicts()` (`apps/control-plane/src/domain/machine/manifest.ts`), given the
+existing rows relevant to an edit and the package names it touches, reports a conflict for every
+edited name that has a `locked: true` row at a **strictly higher** scope than the edit's target.
+Editing at the same scope that owns the lock, or at a higher scope than any existing lock, is not
+"below" and is never reported.
+
+`MachineService.updatePackages` and `updateOrgPackages` run this check before writing anything: if
+any conflict is found, the whole edit is rejected with `PackageLockConflictError`, serialized as
+**`422 Unprocessable Entity`**:
 
 ```jsonc
 {
   "error": {
-    "code": "pinned_entry_conflict",
-    "message": "1 package(s) are pinned above the machine scope and cannot be overridden below.",
+    "code": "locked_entry_conflict",
+    "message": "1 package(s) are locked above the machine scope and cannot be overridden below.",
     "requestId": "...",
-    "details": { "conflicts": [{ "packageName": "docker", "pinnedAtScope": "org", "pinnedAtScopeId": "...", "pinnedVersionPin": "24" }] }
+    "details": { "conflicts": [{ "packageName": "docker", "lockedAtScope": "org", "lockedAtScopeId": "...", "lockedVersionPin": "24" }] }
   }
 }
 ```
 
-No row is written and no event is emitted when this happens — the edit fails atomically, before any
-`machine_packages` write. This is deliberately **edit-time-only**: pinning does not retroactively
-change what `resolveManifest()` returns for a machine-level row that was written *before* the pin
-was set (a machine can still be resolving its own pre-existing override). Reconcile never silently
-drops such a row either. The pin only ever blocks a *new* write attempt.
+No row is written and no event is emitted when this happens. This is deliberately
+**edit-time-only**: a lock does not retroactively change what `resolveManifest()` returns for a
+row written *before* the lock was set. Reconcile never silently drops such a row either. The lock
+only ever blocks a *new* write attempt.
 
 ## Allowlist detection
 
