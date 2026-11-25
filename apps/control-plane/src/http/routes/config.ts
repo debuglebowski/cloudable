@@ -37,6 +37,8 @@ export const PatchSettingPayload = Schema.Struct({
   key: Schema.String,
   value: Schema.Unknown,
   locked: Schema.optional(Schema.Boolean),
+  // Profile scope only: delete the profile's own value so its machines take the org's again.
+  clear: Schema.optional(Schema.Boolean),
 });
 
 export const PatchSettingResponse = Schema.Struct({

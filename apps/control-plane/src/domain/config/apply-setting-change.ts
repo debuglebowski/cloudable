@@ -47,6 +47,11 @@ export interface ApplySettingChangeInput {
   value: unknown;
   /** Org and profile scope only. Ignored (existing flag preserved) on a machine-scope write. */
   locked?: boolean | undefined;
+  /**
+   * Profile scope only: delete the profile's own value, so its machines take the org's again.
+   * `value` is ignored. Recorded as `profile.setting_changed` with `current: null`.
+   */
+  clear?: boolean | undefined;
   actorType: "person" | "system";
   actorId: string;
   correlationId: string;
@@ -57,7 +62,8 @@ export interface ApplySettingChangeInput {
 export interface ApplySettingChangeResult {
   previous: unknown;
   current: unknown;
-  event: DomainEvent;
+  /** Undefined only when a clear found nothing to clear. */
+  event: DomainEvent | undefined;
 }
 
 export type ApplySettingChangeError =
@@ -111,7 +117,13 @@ export const applySettingChange = (
       );
     }
 
-    if (input.key === LOGGING_TIER_KEY && !isLoggingTier(input.value)) {
+    if (input.clear && input.scopeType !== "profile") {
+      return yield* Effect.fail(
+        new InvalidScopeError({ message: "only a profile's own value can be cleared" }),
+      );
+    }
+
+    if (!input.clear && input.key === LOGGING_TIER_KEY && !isLoggingTier(input.value)) {
       return yield* Effect.fail(
         new InvalidSettingValueError({
           key: input.key,
@@ -358,9 +370,37 @@ export const applySettingChange = (
         ? (input.locked ?? existing?.locked ?? false)
         : (existing?.locked ?? false);
 
+    // Clearing a profile's value: its machines take the org's value again, so that is the new
+    // value they see. Nothing to clear means nothing changed, and nothing is recorded.
+    let current: unknown = input.value;
+    let reachedValue: unknown = input.value;
+    if (input.clear) {
+      if (!existing) return { previous: null, current: null, event: undefined };
+      const orgRows = yield* Effect.tryPromise({
+        try: () =>
+          db
+            .select({ value: settingValues.value })
+            .from(settingValues)
+            .where(
+              and(
+                eq(settingValues.scopeType, "org"),
+                eq(settingValues.scopeId, input.orgId),
+                eq(settingValues.key, input.key),
+              ),
+            )
+            .limit(1),
+        catch: (cause) =>
+          new SettingWriteError({ message: `reading org value: ${String(cause)}` }),
+      });
+      current = null;
+      reachedValue = orgRows[0]?.value ?? null;
+    }
+
     yield* Effect.tryPromise({
       try: async () => {
-        if (existing) {
+        if (input.clear && existing) {
+          await db.delete(settingValues).where(eq(settingValues.id, existing.id));
+        } else if (existing) {
           await db
             .update(settingValues)
             .set({
@@ -430,7 +470,7 @@ export const applySettingChange = (
         correlationId: input.correlationId,
         schemaVersion: 1,
         type: "profile.setting_changed",
-        payload: { profileId: input.scopeId, key: input.key, previous, current: input.value },
+        payload: { profileId: input.scopeId, key: input.key, previous, current },
       };
     } else {
       event = {
@@ -507,16 +547,16 @@ export const applySettingChange = (
     // `terminateSessionsForMachine` here used to do.
     if (input.key === ACCESS_METHODS_ENABLED_KEY) {
       const newlyDisabled: { method: SessionRowMethod; reason: string }[] = [];
-      if (webTerminalEnabledOf(previous) && !webTerminalEnabledOf(input.value)) {
+      if (webTerminalEnabledOf(previous) && !webTerminalEnabledOf(reachedValue)) {
         newlyDisabled.push({ method: "terminal", reason: "access.web_terminal_disabled" });
       }
-      if (filesEnabledOf(previous) && !filesEnabledOf(input.value)) {
+      if (filesEnabledOf(previous) && !filesEnabledOf(reachedValue)) {
         newlyDisabled.push({ method: "files", reason: "access.files_disabled" });
       }
       // Turning off snapshot inspection ends the inspections already open, for the same
       // reason the other two do: "disabling terminates live sessions" is worth little if
       // whoever is already looking gets to keep looking.
-      if (snapshotInspectEnabledOf(previous) && !snapshotInspectEnabledOf(input.value)) {
+      if (snapshotInspectEnabledOf(previous) && !snapshotInspectEnabledOf(reachedValue)) {
         newlyDisabled.push({
           method: "snapshot_files",
           reason: "access.snapshot_inspect_disabled",
@@ -620,5 +660,5 @@ export const applySettingChange = (
       }
     }
 
-    return { previous, current: input.value, event };
+    return { previous, current, event };
   });

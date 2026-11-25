@@ -272,6 +272,56 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
     expect(changed?.payload).toMatchObject({ profileId: profile.id, key: LOGGING_TIER_KEY });
   });
 
+  test("clearing a profile's value sends its machines back to the org's", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    const profile = await newProfile(org.id, { provider: "fake" });
+    const machine = await run(
+      createMachine(org.id, owner.id, {
+        profileId: profile.id,
+        sizeSku: "s",
+        image: "ubuntu-24.04",
+      }),
+    );
+    const change = (
+      scopeType: "org" | "profile",
+      scopeId: string,
+      value: unknown,
+      clear?: boolean,
+    ) =>
+      applySettingChange({
+        orgId: org.id,
+        scopeType,
+        scopeId,
+        key: LOGGING_TIER_KEY,
+        value,
+        clear,
+        actorType: "person",
+        actorId: "test-admin",
+        correlationId: crypto.randomUUID(),
+      });
+    await run(change("org", org.id, 1));
+    await run(change("profile", profile.id, 2));
+    const cleared = await run(change("profile", profile.id, null, true));
+    expect(cleared).toMatchObject({ previous: 2, current: null });
+
+    const detail = await run(
+      Effect.flatMap(MachineService, (svc) => svc.getById(machine.id, org.id)),
+    );
+    expect(detail.loggingTier).toEqual({ tier: 1, source: "org" });
+    // Clearing again finds nothing, and records nothing.
+    const again = await run(change("profile", profile.id, null, true));
+    expect(again.event).toBeUndefined();
+    const changes = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.orgId, org.id), eq(events.type, "profile.setting_changed")));
+    expect(changes).toHaveLength(2);
+
+    const refused = await fail(change("org", org.id, null, true));
+    expect(refused._tag).toBe("InvalidScopeError");
+  });
+
   test("an org-wide setting cannot be set on a profile", async () => {
     const org = await seedOrg();
     const profile = await newProfile(org.id);

@@ -64,6 +64,7 @@ export const handlePatchSetting = (
         key: payload.key,
         value: payload.value,
         locked: payload.locked,
+        clear: payload.clear,
         actorType: "person",
         actorId: currentUser.personId,
         // One PATCH is one logical operation — one correlationId.
