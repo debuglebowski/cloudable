@@ -46,6 +46,8 @@ const RESET_TABLES = [
   schema.orgs,
   schema.people,
   schema.machines,
+  schema.profiles,
+  schema.aptRepositories,
   schema.machinePackages,
   schema.approvals,
   schema.approvalDecisions,

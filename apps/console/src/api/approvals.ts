@@ -24,7 +24,8 @@ export type ApprovalActionType =
   | "offboarding"
   | "package_install"
   | "package_ensure"
-  | "approval_settings_change";
+  | "approval_settings_change"
+  | "apt_repository";
 
 /** What exactly was asked for, for the action types whose target alone does not say it. */
 export type ApprovalPayload =
@@ -73,6 +74,7 @@ export const ACTION_TYPE_LABELS: Record<ApprovalActionType, string> = {
   offboarding: "Offboarding",
   package_install: "Package install",
   package_ensure: "Package ensure setting",
+  apt_repository: "Apt repository",
   approval_settings_change: "Approval settings change",
 };
 
@@ -89,6 +91,18 @@ export function describePayload(actionType: ApprovalActionType, payload: unknown
     const p = payload as { packageName: string; op: string; versionPin: string | null };
     const verb = p.op === "uninstall" ? "Remove" : "Install";
     return `${verb} ${p.packageName}${p.versionPin ? ` (version ${p.versionPin})` : ""}`;
+  }
+  if (actionType === "apt_repository" && "op" in payload) {
+    const p = payload as {
+      op: "add" | "remove";
+      repository?: { name: string; url: string; suite: string; fingerprint: string };
+      name?: string;
+      fingerprint?: string;
+    };
+    if (p.op === "add" && p.repository) {
+      return `Trust apt repository ${p.repository.name} (${p.repository.url} ${p.repository.suite}), signing key ${p.repository.fingerprint}`;
+    }
+    return `Remove apt repository ${p.name ?? ""} (signing key ${p.fingerprint ?? "?"})`;
   }
   if (actionType === "package_ensure" && "edit" in payload) {
     const p = payload as {

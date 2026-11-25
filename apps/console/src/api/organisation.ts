@@ -22,7 +22,8 @@ export type ApprovalActionType =
   | "admin_access"
   | "offboarding"
   | "package_install"
-  | "package_ensure";
+  | "package_ensure"
+  | "apt_repository";
 
 /** Matches `approvals.mode`. */
 export type ApprovalMode = "none" | "single" | "dual";
@@ -63,6 +64,7 @@ export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
   "offboarding",
   "package_install",
   "package_ensure",
+  "apt_repository",
 ];
 
 export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
@@ -72,6 +74,7 @@ export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
   offboarding: "Offboarding",
   package_install: "Package install",
   package_ensure: "Setting a package to Ensure",
+  apt_repository: "Adding or removing an apt repository",
 };
 
 export const LOGGING_TIER_LABELS: Record<LoggingTier, string> = {

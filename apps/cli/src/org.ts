@@ -291,3 +291,118 @@ export async function runOrgPackagesSetCommand(argv: ReadonlyArray<string>): Pro
   for (const line of describeEnsureApprovals(res.ensureApprovals ?? [], upserts)) console.log(line);
   printOrgPackages(res.items);
 }
+
+// ---------------------------------------------------------------------------
+// org repos: approved apt repositories beyond Ubuntu's own. Adding or removing
+// one waits for an `apt_repository` approval.
+// ---------------------------------------------------------------------------
+
+interface AptRepositoryWire {
+  id: string;
+  name: string;
+  url: string;
+  suite: string;
+  components: string[];
+  fingerprint: string;
+  addedAt: string;
+  removedAt: string | null;
+}
+
+interface AptRepositoryChangeWire {
+  approvalId: string;
+  status: string;
+  fingerprint?: string;
+}
+
+function describeRepoChange(res: AptRepositoryChangeWire): string {
+  return res.status === "approved"
+    ? "Done. Machines pick it up on their next check-in."
+    : `Approval requested (${res.approvalId}). Nothing changes until an approver signs it off.`;
+}
+
+export async function runOrgReposListCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const args = parseArgs(argv, readSpec());
+  const res = await authenticatedApiRequest<{ items: AptRepositoryWire[] }>(
+    "/api/v1/organisation/apt-repositories",
+  );
+  if (args.booleans.has("json")) {
+    printJson(res);
+    return;
+  }
+  if (res.items.length === 0) {
+    printEmpty("apt repositories");
+    return;
+  }
+  printTable(
+    ["name", "source", "signing key", "status", "id"],
+    res.items.map((r) => [
+      r.name,
+      `${r.url} ${r.suite} ${r.components.join(" ")}`,
+      r.fingerprint,
+      r.removedAt ? `removed ${r.removedAt.slice(0, 10)}` : "active",
+      r.id,
+    ]),
+  );
+}
+
+export async function runOrgReposAddCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor(
+    "org repos add --name <name> --url <https-url> --suite <suite> [--components <c1,c2>] --key-file <path|-> --reason <text>",
+  );
+  const args = parseArgs(
+    argv,
+    readSpec({ values: ["name", "url", "suite", "components", "key-file", "reason"] }),
+  );
+  for (const flag of ["name", "url", "suite", "key-file", "reason"]) {
+    if (!args.flags[flag]) throw new UsageError(`--${flag} is required\n\n${usage}`);
+  }
+  const keyFile = args.flags["key-file"] ?? "";
+  const signingKey =
+    keyFile === "-"
+      ? await Bun.stdin.text()
+      : await Bun.file(keyFile)
+          .text()
+          .catch(() => "");
+  if (signingKey.trim() === "") throw new UsageError(`could not read a key from ${keyFile}`);
+  const res = await authenticatedApiRequest<AptRepositoryChangeWire>(
+    "/api/v1/organisation/apt-repositories",
+    postJson({
+      name: args.flags.name,
+      url: args.flags.url,
+      suite: args.flags.suite,
+      components: (args.flags.components ?? "main").split(/[,\s]+/).filter(Boolean),
+      signingKey,
+      reason: args.flags.reason,
+    }),
+  );
+  if (args.booleans.has("json")) {
+    printJson(res);
+    return;
+  }
+  if (res.fingerprint) console.log(`Signing key fingerprint: ${res.fingerprint}`);
+  console.log(describeRepoChange(res));
+}
+
+export async function runOrgReposRemoveCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor("org repos remove <name|id> --reason <text>");
+  const args = parseArgs(argv, readSpec({ values: ["reason"] }));
+  const target = args.positionals[0];
+  if (!target) throw new UsageError(`a repository is required\n\n${usage}`);
+  if (!args.flags.reason) throw new UsageError(`--reason is required\n\n${usage}`);
+  const list = await authenticatedApiRequest<{ items: AptRepositoryWire[] }>(
+    "/api/v1/organisation/apt-repositories",
+  );
+  const repo = list.items.find(
+    (r) => r.removedAt === null && (r.id === target || r.name === target),
+  );
+  if (!repo) throw new UsageError(`no active repository named or with id '${target}'`);
+  const res = await authenticatedApiRequest<AptRepositoryChangeWire>(
+    `/api/v1/organisation/apt-repositories/${repo.id}/remove`,
+    postJson({ reason: args.flags.reason }),
+  );
+  if (args.booleans.has("json")) {
+    printJson(res);
+    return;
+  }
+  console.log(describeRepoChange(res));
+}

@@ -10,6 +10,8 @@ Generated from `packages/events`. Do not hand-edit — run `bun run gen-docs` in
 | `org.setting_changed` | 1 | An org- or machine-level default setting was changed. An org package edit (key `package:<name>`) includes the package's `setting`. The Ensure retry wait is key `packages.ensureRetryHours`. The nixpkgs commit `nix:` packages install from is key `packages.nix.snapshot`. |
 | `org.integration_connected` | 1 | An IdP, cloud, or secret store integration was connected to the org. |
 | `org.integration_removed` | 1 | An IdP, cloud, or secret store integration was removed from the org. |
+| `org.apt_repository_added` | 1 | An apt repository outside Ubuntu's own was added after its `apt_repository` approval. Carries URL, suite, components, the signing key's fingerprint and `approvalId`. It installs nothing by itself. |
+| `org.apt_repository_removed` | 1 | An approved apt repository was removed after its approval. Packages installed from it stay installed. |
 | `org.events_expired` | 1 | The retention sweep deleted events older than the org's retention window. Carries the cutoff and a count, nothing else. |
 
 ## Person
@@ -65,8 +67,10 @@ A profile is a named set of settings machines link to (org → profile → machi
 | `machine.offboarded` | 1 | A machine was offboarded from its previous owner under approval. |
 | `machine.archived` | 1 | A machine was archived with a final snapshot and retention window. |
 | `machine.state_reported` | 2 | The agent reported observed machine state that changed since the last report. |
-| `machine.drift_detected` | 1 | Undeclared packages or open ports were detected on a machine. |
-| `machine.drift_resolved` | 1 | Detected drift was removed from a machine under approval. |
+| `machine.apt_repository_configured` | 1 | The agent reported an approved apt repository in place on the machine. Carries `repositoryId`. |
+| `machine.apt_repository_removed` | 1 | The agent reported an approved apt repository gone from the machine. Carries `repositoryId`. |
+| `machine.drift_detected` | 1 | Undeclared packages, open ports or apt sources were detected on a machine. `undeclaredAptSources` lists apt source URIs that neither Ubuntu nor the org's approved repositories explain. |
+| `machine.drift_resolved` | 1 | Detected drift was removed from a machine under approval. For apt sources, `removedAptSources` lists the ones no longer unexplained, and `approvalId` is null. |
 | `machine.reconciled` | 2 | Reconciliation removed undeclared software or settings to close a gap with desired state. |
 | `machine.first_seen` | 1 | The control agent contacted the control plane for the first time on a machine. |
 | `machine.package_action_requested` | 1 | A package install or removal was queued for a machine. Either a person asked for it (actor `person`), or a package set to Ensure installed or Ensure latest version required it (actor `system`). An Ensure install carries `trigger` (the setting), `ensureReason` (`missing` or `outdated`), `fromVersion` and `toVersion`. |

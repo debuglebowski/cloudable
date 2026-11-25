@@ -587,6 +587,36 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         ],
       },
       {
+        name: "repos",
+        summary: "Apt repositories beyond Ubuntu's own that machines may install from",
+        subcommands: [
+          { name: "list", summary: "Show approved and removed repositories" },
+          {
+            name: "add",
+            summary: "Ask to add a repository",
+            options: [
+              { flag: "--name <name>", description: "e.g. NodeSource (required)" },
+              { flag: "--url <https-url>", description: "The repository URL (required)" },
+              { flag: "--suite <suite>", description: "e.g. nodistro (required)" },
+              { flag: "--components <c1,c2>", description: "Defaults to main" },
+              { flag: "--key-file <path|->", description: "ASCII-armored signing key (required)" },
+              { flag: "--reason <text>", description: "Why, for the approver (required)" },
+            ],
+            notes: [
+              "Nothing changes until an approver signs it off. The key's fingerprint is shown so it can be checked against the vendor's.",
+              "A repository installs nothing by itself. Add its packages with `cloudable org packages set`.",
+            ],
+          },
+          {
+            name: "remove",
+            summary: "Ask to remove a repository",
+            args: "<name|id>",
+            options: [{ flag: "--reason <text>", description: "Why (required)" }],
+            notes: ["Packages installed from it stay installed."],
+          },
+        ],
+      },
+      {
         name: "packages",
         summary: "The org layer every machine inherits",
         subcommands: [

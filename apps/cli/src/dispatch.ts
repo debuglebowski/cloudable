@@ -244,6 +244,18 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     const { runOrgPackagesSetCommand } = await import("./org");
     await runOrgPackagesSetCommand(rest);
   },
+  "org repos list": async (rest) => {
+    const { runOrgReposListCommand } = await import("./org");
+    await runOrgReposListCommand(rest);
+  },
+  "org repos add": async (rest) => {
+    const { runOrgReposAddCommand } = await import("./org");
+    await runOrgReposAddCommand(rest);
+  },
+  "org repos remove": async (rest) => {
+    const { runOrgReposRemoveCommand } = await import("./org");
+    await runOrgReposRemoveCommand(rest);
+  },
 
   "config set": async (rest) => {
     const { runConfigSetCommand } = await import("./settings");

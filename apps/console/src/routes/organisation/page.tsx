@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+import { AptRepositoriesCard } from "./apt-repositories-card";
 import { OrgPackageManifestCard } from "./org-package-manifest-card";
 import {
   ApprovalModeDialog,
@@ -216,6 +217,7 @@ export function OrganisationPage() {
         </TabsContent>
 
         <TabsContent value="packages" className="mt-6 flex flex-col gap-4">
+          <AptRepositoriesCard />
           <OrgPackageManifestCard />
           <Card>
             <CardHeader>

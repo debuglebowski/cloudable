@@ -384,6 +384,36 @@ Running actions expire per manager and per batch (`expiredActionIds` in
 `domain/machine/package-actions.ts`). The agent runs one poll's actions one at a time, so an apt
 install handed out together with a cargo build gets the build's time as well as its own.
 
+### Approved apt repositories
+
+Ubuntu's own archives do not have everything. Node 24, for example, is only in NodeSource's
+repository. An org can trust such a repository (`domain/organisation/apt-repositories.ts`):
+
+- An admin asks to add it with its name, `https` URL, suite, components and the vendor's
+  ASCII-armored signing key (`POST /api/v1/organisation/apt-repositories`, the Organisation
+  page's Packages tab, or `cloudable org repos add`). Cloudable computes the key's fingerprint,
+  so the approver can check it against the vendor's.
+- Adding or removing one needs an `apt_repository` approval. The mode is on the Organisation
+  page; the default is one approver. Nothing is written until it is granted. It is then
+  recorded as `org.apt_repository_added` or `org.apt_repository_removed`.
+- It is org-wide. Profiles and machines cannot add their own.
+- A repository installs nothing by itself. Its packages are ordinary apt entries in a manifest,
+  with the usual Allowed / Ensure settings. Pin `nodejs` to `24.*` (or a full version) to stay on
+  24: with NodeSource added, *Ensure latest version* follows NodeSource's newest.
+- Removing one leaves installed packages alone. A removed repository stays on record.
+- Every live machine gets the change on its next poll (`settings.aptRepositories`). The agent
+  writes `/etc/apt/sources.list.d/cloudable-<id>.sources` and its key, removes files for
+  repositories no longer listed, and runs `apt-get update` (see `docs/agents.md`). It reports
+  which repositories it has in place, and the control plane records each as
+  `machine.apt_repository_configured` or `machine.apt_repository_removed`.
+- **Unapproved sources are drift.** The agent reports every apt source on the machine. Any that is
+  not Ubuntu's own (`UBUNTU_APT_HOST_PATTERN`), not an approved repository in its own
+  `cloudable-<id>` file, and not Microsoft's feed while the org has Defender on, is recorded as
+  `machine.drift_detected` with `undeclaredAptSources`, and fails the `no-unapproved-apt-sources`
+  compliance check. Cloudable never removes such a source; it only flags it.
+- Vulnerability scans may miss findings in third-party packages. See
+  `docs/vulnerability-scanning.md`.
+
 ### Parts
 
 An entry can name another declared entry as its parent (`partOf`). A part is allowed only while its

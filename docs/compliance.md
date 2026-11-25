@@ -23,6 +23,7 @@ One check can evidence several controls; one control usually needs several check
 | 5 | `retention-honoured` | A snapshot outlives its retention window without a legal hold | yes |
 | 6 | `machines-reporting` | `lastVerifiedAt` older than the expected reconcile window | **no** |
 | 7 | `vulnerabilities-remediated` | A fixable Critical or High vulnerability is open past its window, or scans are not keeping up | **no** |
+| 8 | `no-unapproved-apt-sources` | A machine has an apt source that is neither Ubuntu's own nor one of the org's approved repositories (see `docs/inheritance.md`, "Approved apt repositories") | **no** |
 
 Checks 1–5 belong to other feature units and are registered into `COMPLIANCE_CHECKS` as they land — this file, `control-map.ts`, and every endpoint below iterate that array generically, so they work correctly with however many of them are actually registered (including zero).
 
