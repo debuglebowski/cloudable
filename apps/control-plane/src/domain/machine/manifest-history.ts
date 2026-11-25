@@ -1,9 +1,10 @@
 import type { PackageSetting } from "@cloudable/contracts";
 import type * as schema from "@cloudable/schema";
-import { events, machines } from "@cloudable/schema";
+import { events, chainProfileIds, machines } from "@cloudable/schema";
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Data, Effect } from "effect";
+import { withBaseProfile } from "../profile/chain";
 import { PACKAGE_SETTING_KEY_PREFIX, packageNameFromSettingKey } from "./manifest";
 
 type DbHandle = PostgresJsDatabase<typeof schema>;
@@ -95,9 +96,10 @@ function toState(raw: unknown): ManifestHistoryState | null {
  * what the machine resolves to just as surely as a machine edit does, and
  * `org.setting_changed` carries `machineId: null`, so it can never reach a
  * machine-filtered view any other way. The same goes for edits to the
- * machine's current profile (`profile.setting_changed`, matched on its
- * `profileId`). Edits to a profile it was on earlier are not included. Rows
- * carry `scope` so the three are never confused for each other.
+ * machine's current profile and the base that profile extends now
+ * (`profile.setting_changed`, matched on `profileId`). Edits to a profile it
+ * was on earlier, or a base its profile extended earlier, are not included.
+ * Rows carry `scope` so the three are never confused for each other.
  *
  * Read-only over the append-only event log: this derives a view, it never
  * writes. Both write paths namespace their key as `package:<name>`
@@ -135,9 +137,19 @@ export const queryManifestHistory = (
     });
     const machine = machineRows[0];
     if (!machine) return { items: [], nextCursor: null };
-    const profileClause = machine.profileId
-      ? sql` OR (${events.type} = 'profile.setting_changed' AND ${events.payload}->>'profileId' = ${machine.profileId})`
-      : sql``;
+    const profileIds = chainProfileIds(
+      yield* Effect.tryPromise({
+        try: () => withBaseProfile(db, { profileId: machine.profileId }),
+        catch: (cause) => new ManifestHistoryError({ reason: "query_failed", cause }),
+      }),
+    );
+    const profileClause =
+      profileIds.length > 0
+        ? sql` OR (${events.type} = 'profile.setting_changed' AND ${events.payload}->>'profileId' IN (${sql.join(
+            profileIds.map((id) => sql`${id}`),
+            sql`, `,
+          )}))`
+        : sql``;
 
     const rows = yield* Effect.tryPromise({
       try: () =>

@@ -1,11 +1,18 @@
 import { LOGGING_TIER_SETTING_KEY } from "@cloudable/contracts";
 import type { DomainEvent } from "@cloudable/events";
 import type * as schema from "@cloudable/schema";
-import { events, type SettingRow, resolveSetting, settingValues } from "@cloudable/schema";
+import {
+  events,
+  type SettingRow,
+  chainProfileIds,
+  resolveSetting,
+  settingValues,
+} from "@cloudable/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Data, Effect } from "effect";
 import { ulid } from "ulid";
+import { withBaseProfile } from "../domain/profile/chain";
 
 type DbHandle = PostgresJsDatabase<typeof schema>;
 
@@ -123,7 +130,8 @@ export interface EffectiveLoggingTier {
  * chain-resolved setting uses (see docs/inheritance.md).
  *
  * `profileId` is the machine's profile, if any: its row sits between the org's and the
- * machine's.
+ * machine's. The profile's base, if it has one, sits between the org and the profile. It is
+ * read from the profile when the chain leaves `baseProfileId` out.
  *
  * Falls back to `{ tier: DEFAULT_LOGGING_TIER, source: "org" }` when
  * neither the machine nor the org has ever set a `logging_tier` row —
@@ -142,15 +150,17 @@ export const isLoggingTier = (value: unknown): value is LoggingTier => value ===
 
 export const getEffectiveLoggingTier = (
   db: DbHandle,
-  chain: { orgId: string; machineId: string; profileId?: string | null },
+  partialChain: {
+    orgId: string;
+    machineId: string;
+    profileId?: string | null;
+    baseProfileId?: string | null;
+  },
 ): Effect.Effect<EffectiveLoggingTier, LoggingSettingsError> =>
   Effect.tryPromise({
     try: async () => {
-      const scopeIds = [
-        chain.orgId,
-        chain.machineId,
-        ...(chain.profileId ? [chain.profileId] : []),
-      ];
+      const chain = await withBaseProfile(db, partialChain);
+      const scopeIds = [chain.orgId, chain.machineId, ...chainProfileIds(chain)];
       const rows = await db
         .select({
           scopeType: settingValues.scopeType,

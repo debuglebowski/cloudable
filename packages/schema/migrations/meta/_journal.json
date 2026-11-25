@@ -260,6 +260,13 @@
       "when": 1795634458679,
       "tag": "0036_profile_field_locks",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795634958739,
+      "tag": "0037_profile_base",
+      "breakpoints": true
     }
   ]
 }

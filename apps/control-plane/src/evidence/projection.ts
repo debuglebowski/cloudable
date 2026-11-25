@@ -358,6 +358,8 @@ function summarize(row: RawEventRow): string {
     }
     case "profile.archived":
       return `Profile "${event.payload.name}" (${event.payload.profileId}) was archived.`;
+    case "profile.base_changed":
+      return `Profile ${event.payload.profileId} ${event.payload.baseProfileId ? `now extends profile ${event.payload.baseProfileId}` : "now extends no profile"} (before: ${event.payload.previousBaseProfileId ? `profile ${event.payload.previousBaseProfileId}` : "none"}).`;
     case "machine.resized":
       return `Machine size changed from ${event.payload.fromSize} to ${event.payload.toSize} under approval ${event.payload.approvalId}.`;
     case "machine.resize_failed":
@@ -464,6 +466,7 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "profile.updated":
     case "profile.setting_changed":
     case "profile.archived":
+    case "profile.base_changed":
     case "machine.profile_assigned":
     case "machine.resized":
     case "machine.resize_failed":

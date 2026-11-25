@@ -1,4 +1,12 @@
-import { boolean, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  type AnyPgColumn,
+  boolean,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { orgs } from "./org";
 
 /**
@@ -15,7 +23,13 @@ import { orgs } from "./org";
  *   differ. The admin may change it at any time. Existing machines never change.
  * - locked: every machine on the profile must have this value. It cannot change
  *   while a machine that is not archived uses the profile.
- * A lock needs a value. See `docs/inheritance.md`.
+ * A lock needs a value.
+ *
+ * A profile may extend one base profile (`baseProfileId`), in the same org. The
+ * chain is then org → base profile → profile → machine. One level only: a base
+ * has no base of its own, and a profile that is a base cannot get one.
+ *
+ * See `docs/inheritance.md`.
  *
  * Profiles are archived, never deleted. Events and machines point at them.
  */
@@ -28,6 +42,8 @@ export const profiles = pgTable(
       .references(() => orgs.id),
     name: text("name").notNull(),
     description: text("description"),
+    /** The profile this one extends, or null. Same org, one level only (checked in code). */
+    baseProfileId: uuid("base_profile_id").references((): AnyPgColumn => profiles.id),
     provider: text("provider", { enum: ["azure", "docker", "fake"] }),
     region: text("region"),
     sizeSku: text("size_sku"),

@@ -1,4 +1,4 @@
-# Inheritance: org → profile → machine
+# Inheritance: org → base profile → profile → machine
 
 Policy inheritance and the package manifest. See `apps/control-plane/src/domain/machine/*`,
 `apps/control-plane/src/domain/profile/*`, and
@@ -12,10 +12,20 @@ Every setting and every package manifest entry lives at one of three **scopes**:
 org  →  profile  →  machine
 ```
 
-**Lowest level wins.** A machine-level row overrides a profile-level row, which overrides an
-org-level row. There is no partial merge within one setting or one package entry — resolution
-picks exactly one row per key, from the lowest scope that has one. A **lock** on a row stops any
-scope below it from overriding it (see Locking below).
+A profile may extend one **base profile** (see Base profiles below). For a machine on such a
+profile the chain has four levels:
+
+```
+org  →  base profile  →  profile  →  machine
+```
+
+A base profile's rows are ordinary profile rows (`scopeType: "profile"`). What makes them the
+base is only that the machine's profile names it in `profiles.baseProfileId`.
+
+**Lowest level wins.** A machine-level row overrides a profile-level row, which overrides its
+base's row, which overrides an org-level row. There is no partial merge within one setting or one
+package entry — resolution picks exactly one row per key, from the lowest scope that has one. A
+**lock** on a row stops any scope below it from overriding it (see Locking below).
 
 ## Profiles
 
@@ -63,9 +73,46 @@ copied. Edit a profile and every machine on it follows, unless that machine over
   use an archived profile. Machines already on it keep reading their settings from it.
 - Restoring an archived machine into a new one keeps its profile while that profile is usable and
   still fits the machine's fields. Otherwise the new machine starts on none.
-- Only admins create, edit, archive or move. Anyone in the org may read a profile.
+- Profiles are archived, never deleted. A profile that other profiles extend, and that are not
+  archived, cannot be archived (`profile_is_base`). Change their base first.
+- Only admins create, edit, archive, move or set a base. Anyone in the org may read a profile.
 - Events: `profile.created`, `profile.updated`, `profile.setting_changed`, `profile.archived`,
-  `machine.profile_assigned`. `machine.created` carries `profileId`.
+  `profile.base_changed`, `machine.profile_assigned`. `machine.created` carries `profileId`.
+
+### Base profiles
+
+A profile may extend one other profile, its **base** (`profiles.baseProfileId`). Use it for a
+shared starting point: a "Developers" base, and "Frontend" and "Data" profiles that extend it and
+add their own packages.
+
+- **What it inherits.** Settings, packages and creation fields. The profile's own value wins over
+  the base's. What the profile does not set comes from the base, then from the org.
+- **Locks.** A base lock binds the profiles that extend it and their machines. They cannot
+  override it. For creation fields, a field the base locks is the base's value for the profile and
+  every machine on it; the profile cannot set another.
+- **One level only.** A base has no base of its own. A profile that other profiles extend cannot
+  get a base. A profile cannot extend itself. The base must be in the same org and not archived.
+  All of these are refused with `invalid_base_profile`.
+- **Setting or changing the base.** `PUT /api/v1/profiles/:id/base` with `{ baseProfileId }`, or
+  `null` to clear it. A new profile can name one when it is created (`baseProfileId` on
+  `POST /api/v1/profiles`). Recorded as `profile.base_changed` (or in `profile.created`). Refused
+  while the profile sets its own value for a setting or package the new base locks: clear those on
+  the profile first. Also refused when a machine on the profile does not have a creation field the
+  new base locks. Clearing the base is always allowed.
+- **What machines see.** Machines on the profile resolve through the new base from the next read.
+  The base's Ensure packages are installed with no new approval. They were approved when they were
+  set, the same as when a machine moves onto a profile.
+- **Editing a base** reaches every profile that extends it. Locking a creation field on a base is
+  refused when a profile that extends it sets another value, or when a machine on the base or on
+  one of those profiles has another value.
+- **Where the chain is read.** A machine row carries only its `profileId`. `withBaseProfile`
+  (`domain/profile/chain.ts`) reads the base. The setting resolvers (`domain/machine/settings.ts`,
+  `logging/settings.ts`) fill it in themselves when the caller leaves it out. So do the package
+  manifest paths (`MachineService`, the "no undeclared software" check, manifest history), the
+  lock checks (`applySettingChange`, `updateOrgPackages`, `MachineService.updatePackages`),
+  elevation policy, machine creation, moves and resize.
+- A machine's package history includes edits to its profile's current base. The packages table
+  says "From the base profile" for an entry the base declares (`sourceProfileId` on the row).
 
 **No wizard prefill.** A machine is created with an empty manifest and empty setting overrides; it
 *inherits* org defaults live through resolution, it does not *copy* them at creation time. A later
@@ -105,14 +152,15 @@ codebase. Its shape:
 export function resolveSetting<T>(
   key: string,
   rows: ReadonlyArray<SettingRow<T>>,
-  chain: { orgId: string; profileId?: string | null; machineId: string },
+  chain: { orgId: string; profileId?: string | null; baseProfileId?: string | null; machineId: string },
 ): ResolvedSetting<T> | undefined
 ```
 
-It looks for a `machine`-scoped row for `key` first, then (if `chain.profileId` is set) a
-`profile`-scoped row, then an `org`-scoped row, and returns the first match with its `value` and
-`source`. No row at any scope means `undefined` — there is no default baked into the function
-itself.
+It looks for a `machine`-scoped row for `key` first, then (if `chain.profileId` is set) the
+profile's row, then (if `chain.baseProfileId` is set too) the base's row, then an `org`-scoped
+row, and returns the first match with its `value`, `source` and `resolvedFromScopeId`. A row from
+the base has `source: "profile"`; `resolvedFromScopeId` says which profile. No row at any scope
+means `undefined` — there is no default baked into the function itself.
 
 **The package manifest reuses this function rather than reimplementing the chain walk.**
 `resolveManifest()` (`apps/control-plane/src/domain/machine/manifest.ts`) treats each distinct
@@ -292,21 +340,23 @@ of a locked package would make the lock decorative.
 ## Locking
 
 **The org or a profile can lock an entry.** A locked entry cannot be overridden *below* its own
-scope: an org lock binds profiles and machines, a profile lock binds its machines. Trying to
+scope: an org lock binds profiles and machines, a base profile's lock binds the profiles that
+extend it and their machines, a profile lock binds its machines. Trying to
 override one is a validation error at edit time, not a silent no-op later. "Locked" was called
 "pinned" until 2026-11; it was renamed because it clashed with version pins (`nodejs 20`), which
 are a different thing. Recorded events keep the old field name `pinned` in their payloads, so every
 change on record has one shape.
 
-**Settings.** `applySettingChange` refuses a machine-scope write when the org's or the machine's
-profile's row for that key is locked, and a profile-scope write when the org's row is locked
-(`LockedSettingError`, 409). This applies to every key.
+**Settings.** `applySettingChange` refuses a machine-scope write when the org's, the profile's
+base's or the machine's profile's row for that key is locked, and a profile-scope write when the
+org's or its base's row is locked (`LockedSettingError`, 409). This applies to every key.
 
 **Packages.** `findLockConflicts()` (`apps/control-plane/src/domain/machine/manifest.ts`), given the
 existing rows relevant to an edit and the package names it touches, reports a conflict for every
 edited name that has a `locked: true` row at a **strictly higher** scope than the edit's target.
 Editing at the same scope that owns the lock, or at a higher scope than any existing lock, is not
-"below" and is never reported.
+"below" and is never reported. Its `baseProfileId` argument says which profile rows are the base's:
+those rank above the profile's own, so a base lock binds a profile edit.
 
 `MachineService.updatePackages` and `updateOrgPackages` run this check before writing anything: if
 any conflict is found, the whole edit is rejected with `PackageLockConflictError`, serialized as

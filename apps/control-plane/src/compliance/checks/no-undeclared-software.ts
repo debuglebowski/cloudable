@@ -1,10 +1,11 @@
-import { machinePackages, machines } from "@cloudable/schema";
-import { and, eq, notInArray, or } from "drizzle-orm";
+import { chainProfileIds, machinePackages, machines } from "@cloudable/schema";
+import { and, eq, inArray, notInArray, or } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
 import { type MachinePackageRow, resolveManifest } from "../../domain/machine/manifest";
 import { buildPackagesView, undeclaredFromView } from "../../domain/machine/packages-view";
+import { withBaseProfile } from "../../domain/profile/chain";
 import { clearResolvedFindings, upsertFindingFirstSeen } from "../finding-store";
 
 // Same set as active-owner.ts's ARCHIVED_STATES (not shared: two small
@@ -94,6 +95,16 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
         // not spoken to us — that silence is check #4's business, not this one's.
         if (installedPackages === null) continue;
 
+        const chain = yield* Effect.orDie(
+          Effect.tryPromise(() =>
+            withBaseProfile(db, {
+              orgId: machine.orgId,
+              profileId: machine.profileId,
+              machineId: machine.id,
+            }),
+          ),
+        );
+        const profileIds = chainProfileIds(chain);
         const manifestRows = yield* Effect.orDie(
           Effect.tryPromise(() =>
             db
@@ -109,13 +120,13 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
                     eq(machinePackages.scopeType, "machine"),
                     eq(machinePackages.scopeId, machine.id),
                   ),
-                  // The machine's profile declares packages too. Without its rows, a
-                  // package the profile allows would read as undeclared.
-                  ...(machine.profileId
+                  // The machine's profile, and the base it extends, declare packages too.
+                  // Without their rows, a package either allows would read as undeclared.
+                  ...(profileIds.length > 0
                     ? [
                         and(
                           eq(machinePackages.scopeType, "profile"),
-                          eq(machinePackages.scopeId, machine.profileId),
+                          inArray(machinePackages.scopeId, profileIds),
                         ),
                       ]
                     : []),
@@ -124,11 +135,7 @@ export const noUndeclaredSoftwareCheck: ComplianceCheck = {
           ),
         );
 
-        const manifest = resolveManifest(manifestRows as MachinePackageRow[], {
-          orgId: machine.orgId,
-          profileId: machine.profileId,
-          machineId: machine.id,
-        });
+        const manifest = resolveManifest(manifestRows as MachinePackageRow[], chain);
 
         const undeclaredPackages = undeclaredFromView(
           buildPackagesView({

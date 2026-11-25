@@ -94,6 +94,10 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     const { runProfilesUpdateCommand } = await import("./profiles");
     await runProfilesUpdateCommand(rest);
   },
+  "profiles set-base": async (rest) => {
+    const { runProfilesSetBaseCommand } = await import("./profiles");
+    await runProfilesSetBaseCommand(rest);
+  },
   "profiles archive": async (rest) => {
     const { runProfilesArchiveCommand } = await import("./profiles");
     await runProfilesArchiveCommand(rest);

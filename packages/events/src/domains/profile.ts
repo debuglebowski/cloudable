@@ -32,6 +32,8 @@ export type ProfileEvent =
         profileId: string;
         name: string;
         description: string | null;
+        /** The profile it extends, when created extending one. Added 2026-11. */
+        baseProfileId?: string | null;
       } & ProfileCreationFields &
         ProfileCreationFieldLocks;
     })
@@ -65,4 +67,16 @@ export type ProfileEvent =
   | (EventEnvelope & {
       type: "profile.archived";
       payload: { profileId: string; name: string };
+    })
+  | (EventEnvelope & {
+      type: "profile.base_changed";
+      /**
+       * The profile now extends another, a different one, or none. Its machines resolve
+       * through the new base from then on. Null means none.
+       */
+      payload: {
+        profileId: string;
+        previousBaseProfileId: string | null;
+        baseProfileId: string | null;
+      };
     });

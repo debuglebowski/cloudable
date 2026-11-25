@@ -226,6 +226,49 @@ describe.skipIf(!reachable)("resize (requires Postgres)", () => {
     expect((await outcome(machine.id)).map((e) => e.type)).toEqual(["machine.resized"]);
   });
 
+  test("a size the base profile locks binds machines on the profile that extends it", async () => {
+    const { org, person } = await seed("none");
+    const [base] = await db
+      .insert(profiles)
+      .values({
+        orgId: org.id,
+        name: `base-${crypto.randomUUID()}`,
+        provider: "fake",
+        sizeSku: "small",
+        sizeLocked: true,
+      })
+      .returning();
+    const [child] = await db
+      .insert(profiles)
+      .values({ orgId: org.id, name: `child-${crypto.randomUUID()}`, baseProfileId: base?.id })
+      .returning();
+    const [machine] = await db
+      .insert(machines)
+      .values({
+        orgId: org.id,
+        ownerPersonId: person.id,
+        name: "m",
+        provider: "fake",
+        sizeSku: "small",
+        image: "ubuntu-24.04",
+        state: "running",
+        profileId: child?.id ?? null,
+      })
+      .returning();
+    if (!machine) throw new Error("machine");
+    const refused = await fail(
+      requestMachineResize({
+        machineId: machine.id,
+        orgId: org.id,
+        personId: person.id,
+        sizeSku: "large",
+        reason: "x",
+      }),
+    );
+    expect(refused).toMatchObject({ code: "size_fixed_by_profile" });
+    expect(JSON.stringify(refused)).toContain(base?.name ?? "?");
+  });
+
   test("it waits for its approval, and a provider failure keeps the old size", async () => {
     const { org, person } = await seed("single");
     // Inserted directly, so the fake provider does not know it: the resize fails there.

@@ -118,6 +118,34 @@ describe("resolveManifest", () => {
 });
 
 describe("findLockConflicts", () => {
+  test("a base profile's lock binds the profile that extends it, and the closest lock is reported", () => {
+    const row = (scopeId: string, locked: boolean): MachinePackageRow => ({
+      scopeType: "profile",
+      scopeId,
+      packageName: "jq",
+      versionPin: null,
+      locked,
+      excluded: false,
+      source: "profile",
+    });
+    const baseLocked = [row("base-1", true)];
+    expect(findLockConflicts(baseLocked, "profile", ["jq"], "base-1")).toEqual([
+      {
+        packageName: "jq",
+        lockedAtScope: "profile",
+        lockedAtScopeId: "base-1",
+        lockedVersionPin: null,
+      },
+    ]);
+    // Without knowing which row is the base, a profile row never binds a profile edit.
+    expect(findLockConflicts(baseLocked, "profile", ["jq"])).toEqual([]);
+    // Both lock: a machine edit collides with its own profile's lock first.
+    const both = [row("base-1", true), row("child-1", true)];
+    expect(findLockConflicts(both, "machine", ["jq"], "base-1")[0]?.lockedAtScopeId).toBe(
+      "child-1",
+    );
+  });
+
   test("an org-locked entry blocks a machine-level override of the same package", () => {
     const rows: MachinePackageRow[] = [
       {

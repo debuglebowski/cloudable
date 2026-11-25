@@ -115,6 +115,8 @@ export function buildPackagesView(input: PackagesViewInput): MachinePackageRow[]
       permission: permissionOf(entry, allowed),
       versionPin: entry?.versionPin ?? null,
       source: entry?.source ?? null,
+      // Which profile, when a profile won: the machine's own, or the base it extends.
+      ...(entry?.source === "profile" ? { sourceProfileId: entry.resolvedFromScopeId } : {}),
       installed,
       ...(installedVersion !== undefined ? { installedVersion } : {}),
       versionMismatch,

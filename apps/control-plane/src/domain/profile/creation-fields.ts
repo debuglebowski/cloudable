@@ -7,6 +7,10 @@
 // - locked: every machine on the profile must have this value. While a machine that is not
 //   archived uses the profile, a locked field must match it, so it cannot change.
 //
+// A profile that extends a base takes each field it leaves blank from the base. Its own value
+// wins over the base's, unless the base locks the field: then the base's value is the one, for
+// the profile and every machine on it.
+//
 // See docs/inheritance.md.
 // ---------------------------------------------------------------------------
 import type { profiles } from "@cloudable/schema";
@@ -56,17 +60,63 @@ export type CreationFieldSource = Pick<
   | "imageLocked"
 >;
 
-/** What a machine on `profile` gets for each creation field. */
-export const resolveCreationFields = (profile: CreationFieldSource): ResolvedCreationFields => {
+/**
+ * What a machine on `profile` gets for each creation field. `base` is the profile it extends,
+ * if any: a field the base locks is the base's; otherwise the profile's own value wins, and a
+ * field it leaves blank comes from the base.
+ */
+export const resolveCreationFields = (
+  profile: CreationFieldSource,
+  base?: CreationFieldSource | null,
+): ResolvedCreationFields => {
   const out = {} as ResolvedCreationFields;
+  const own = (source: CreationFieldSource, field: CreationField): ResolvedCreationField | null => {
+    const value = source[field];
+    return value !== null
+      ? { value, locked: source[LOCK_FLAG[field]], fromProfileId: source.id }
+      : null;
+  };
   for (const field of CREATION_FIELDS) {
-    const value = profile[field];
-    out[field] =
-      value !== null
-        ? { value, locked: profile[LOCK_FLAG[field]], fromProfileId: profile.id }
-        : { value: null, locked: false, fromProfileId: null };
+    const fromBase = base ? own(base, field) : null;
+    const fromProfile = own(profile, field);
+    out[field] = (fromBase?.locked ? fromBase : (fromProfile ?? fromBase)) ?? {
+      value: null,
+      locked: false,
+      fromProfileId: null,
+    };
   }
   return out;
+};
+
+/** The resolved values alone, in the shape the validator and a machine row use. */
+export const resolvedValues = (resolved: ResolvedCreationFields) => ({
+  provider: resolved.provider.value as "azure" | "docker" | "fake" | null,
+  region: resolved.region.value,
+  sizeSku: resolved.sizeSku.value,
+  image: resolved.image.value,
+});
+
+/**
+ * Why `profile` cannot set its own creation fields under `base`, or null when it can: a field
+ * the base locks cannot be given another value below it.
+ */
+export const baseLockConflict = (
+  profile: Pick<CreationFieldSource, CreationField>,
+  base: CreationFieldSource & { name: string },
+): string | null => {
+  for (const field of CREATION_FIELDS) {
+    const baseValue = base[field];
+    const ownValue = profile[field];
+    if (
+      base[LOCK_FLAG[field]] &&
+      baseValue !== null &&
+      ownValue !== null &&
+      ownValue !== baseValue
+    ) {
+      return `base profile "${base.name}" locks the ${FIELD_LABEL[field]} at "${baseValue}", so it cannot be "${ownValue}" here`;
+    }
+  }
+  return null;
 };
 
 export interface MachineCreationValues {

@@ -397,6 +397,11 @@ export function MachineDetailPage() {
                       ) : (
                         <span className="text-muted-foreground">None</span>
                       )}
+                      {profileQuery.data?.baseProfileName && (
+                        <span className="text-xs text-muted-foreground">
+                          extends {profileQuery.data.baseProfileName}
+                        </span>
+                      )}
                       {isAdmin && !ARCHIVED_MACHINE_STATES.has(machine.state) && (
                         <Button
                           variant="ghost"

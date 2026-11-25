@@ -1,5 +1,5 @@
 import type { DomainEvent } from "@cloudable/events";
-import { events, elevations } from "@cloudable/schema";
+import { events, chainProfileIds, elevations } from "@cloudable/schema";
 import { and, eq, lt } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
@@ -107,9 +107,7 @@ const toApprovalServiceCallError = (cause: unknown): ApprovalServiceCallError =>
 };
 
 function scopeIdsFor(chain: SettingsChain): ReadonlyArray<string> {
-  return chain.profileId
-    ? [chain.orgId, chain.machineId, chain.profileId]
-    : [chain.orgId, chain.machineId];
+  return [chain.orgId, chain.machineId, ...chainProfileIds(chain)];
 }
 
 /**
@@ -261,6 +259,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
         const chain: SettingsChain = {
           orgId: machine.orgId,
           profileId: machine.profileId,
+          baseProfileId: machine.baseProfileId ?? null,
           machineId: machine.id,
         };
         const settingRows = yield* loadSettingRows(chain);
@@ -452,6 +451,7 @@ export class ElevationService extends Effect.Service<ElevationService>()("Elevat
           const chain: SettingsChain = {
             orgId: machine.orgId,
             profileId: machine.profileId,
+            baseProfileId: machine.baseProfileId ?? null,
             machineId: machine.id,
           };
           const settingRows = yield* loadSettingRows(chain);

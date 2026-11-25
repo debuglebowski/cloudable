@@ -61,6 +61,8 @@ export function requiredApprovalModeFloor(level: ElevationLevel): ApprovalMode {
 export interface SettingsChain {
   orgId: string;
   profileId?: string | null;
+  /** The base the machine's profile extends, if any. */
+  baseProfileId?: string | null;
   machineId: string;
 }
 

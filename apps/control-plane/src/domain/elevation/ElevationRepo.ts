@@ -6,6 +6,8 @@ export interface MachineRecord {
   id: string;
   orgId: string;
   profileId: string | null;
+  /** The base the machine's profile extends, if any. Absent reads as none. */
+  baseProfileId?: string | null;
   ownerPersonId: string | null;
   /** For the owner-notification message (`../notify.ts`) — human-readable, unlike `id`. */
   name: string;

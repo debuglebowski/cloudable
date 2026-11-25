@@ -494,6 +494,13 @@ const CASES: readonly Case[] = [
     allow: ADMIN,
   },
   {
+    endpoint: "profiles.setBase",
+    method: "PUT",
+    path: (f) => `/api/v1/profiles/${f.profileA}/base`,
+    body: () => ({ baseProfileId: null }),
+    allow: ADMIN,
+  },
+  {
     endpoint: "profiles.updatePackages",
     method: "PATCH",
     path: (f) => `/api/v1/profiles/${f.profileA}/packages`,

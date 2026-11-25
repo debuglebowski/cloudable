@@ -14,7 +14,8 @@ import {
   UpdateOrgPackagesResponse,
 } from "./organisation";
 
-// Profiles: named sets of settings machines link to (org → profile → machine).
+// Profiles: named sets of settings machines link to (org → profile → machine). A profile
+// may extend one base profile: org → base → profile → machine.
 // A profile's settings are written through `PATCH /api/v1/config/settings` with
 // `scopeType: "profile"`; its packages through `PATCH /api/v1/profiles/:id/packages`.
 // See docs/inheritance.md.
@@ -52,14 +53,32 @@ export const ProfileResource = Schema.Struct({
   createdAt: Schema.String,
   archivedAt: Schema.NullOr(Schema.String),
   machineCount: Schema.Number,
+  /** The profile this one extends, or null. */
+  baseProfileId: Schema.NullOr(Schema.String),
+  baseProfileName: Schema.NullOr(Schema.String),
+  /** Profiles that are not archived and extend this one. */
+  extendedBy: Schema.Number,
+});
+
+const ProfileSettingResource = Schema.Struct({
+  key: Schema.String,
+  value: Schema.Unknown,
+  locked: Schema.Boolean,
 });
 
 const ProfileDetailResource = Schema.Struct({
   ...ProfileResource.fields,
-  settings: Schema.Array(
-    Schema.Struct({ key: Schema.String, value: Schema.Unknown, locked: Schema.Boolean }),
-  ),
+  settings: Schema.Array(ProfileSettingResource),
   packages: Schema.Array(OrgPackageEntryResource),
+  /** The base's own settings and packages: what this profile inherits from it. */
+  base: Schema.NullOr(
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.String,
+      settings: Schema.Array(ProfileSettingResource),
+      packages: Schema.Array(OrgPackageEntryResource),
+    }),
+  ),
 });
 
 const name = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(100));
@@ -69,6 +88,7 @@ const field = Schema.NullOr(Schema.String);
 const CreateProfilePayload = Schema.Struct({
   name,
   description: Schema.optional(description),
+  baseProfileId: Schema.optional(Schema.NullOr(Schema.UUID)),
   provider: Schema.optional(Schema.NullOr(providerSchema)),
   region: Schema.optional(field),
   sizeSku: Schema.optional(field),
@@ -93,6 +113,8 @@ const UpdateProfilePayload = Schema.Struct({
 });
 
 const profileIdPath = Schema.Struct({ id: Schema.UUID });
+
+const SetBaseProfilePayload = Schema.Struct({ baseProfileId: Schema.NullOr(Schema.UUID) });
 
 export const ProfilesGroup = HttpApiGroup.make("profiles")
   .add(
@@ -128,6 +150,17 @@ export const ProfilesGroup = HttpApiGroup.make("profiles")
       .setPath(profileIdPath)
       .addSuccess(ProfileResource)
       .addError(ProfileNotFoundError, { status: 404 })
+      .addError(ProfileEditError, { status: 422 })
+      .addError(ProfileWriteError, { status: 500 }),
+  )
+  .add(
+    // Sets the profile this one extends, or clears it (`baseProfileId: null`).
+    HttpApiEndpoint.put("setBase", "/:id/base")
+      .setPath(profileIdPath)
+      .setPayload(SetBaseProfilePayload)
+      .addSuccess(ProfileResource)
+      .addError(ProfileNotFoundError, { status: 404 })
+      .addError(ProfileEditError, { status: 422 })
       .addError(ProfileWriteError, { status: 500 }),
   )
   .add(

@@ -14,7 +14,9 @@ import type {
 // the setting. Provider, region, size and image are used only when a machine
 // is created. Each is a starting value the machine may differ from, unless
 // it is locked. A locked one must match every machine on the profile.
-// See docs/inheritance.md.
+//
+// A profile may extend one base profile: org → base → profile → machine. One
+// level only. See docs/inheritance.md.
 // ---------------------------------------------------------------------------
 import { oneOf, parseArgs, readSpec, required } from "./args";
 import { CliError, EXIT, UsageError } from "./errors";
@@ -72,14 +74,16 @@ function creationFields(p: ProfileSummary): string {
 function creationField(p: ProfileSummary, field: (typeof CREATION_FIELDS)[number][0]): string {
   const resolved = p.creation[field];
   if (resolved.value === null) return "-";
-  return `${resolved.value} (${resolved.locked ? "locked" : "starting value"})`;
+  const from = resolved.fromProfileId !== p.id ? `, from base ${p.baseProfileName}` : "";
+  return `${resolved.value} (${resolved.locked ? "locked" : "starting value"}${from})`;
 }
 
 function printProfiles(items: ReadonlyArray<ProfileSummary>): void {
   printTable(
-    ["name", "machines", "sets", "archived", "id"],
+    ["name", "extends", "machines", "sets", "archived", "id"],
     items.map((p) => [
       p.name,
+      dash(p.baseProfileName),
       String(p.machineCount),
       creationFields(p),
       p.archivedAt ? p.archivedAt.slice(0, 10) : "-",
@@ -107,6 +111,8 @@ function printProfile(p: ProfileDetail): void {
     ["name", p.name],
     ["id", p.id],
     ["description", dash(p.description)],
+    ["extends", dash(p.baseProfileName)],
+    ["extended by", `${p.extendedBy} profile(s)`],
     ["provider", creationField(p, "provider")],
     ["region", creationField(p, "region")],
     ["size", creationField(p, "sizeSku")],
@@ -114,8 +120,10 @@ function printProfile(p: ProfileDetail): void {
     ["machines", String(p.machineCount)],
     ["archived", p.archivedAt ?? "no"],
   ]);
+  const above = p.base ? `its base, ${p.base.name}, or the org` : "the org";
   console.log("\nsettings:");
-  if (p.settings.length === 0) console.log("  None. Its machines take every setting from the org.");
+  if (p.settings.length === 0)
+    console.log(`  None of its own. Its machines take them from ${above}.`);
   else
     printTable(
       ["key", "value", "locked"],
@@ -124,6 +132,16 @@ function printProfile(p: ProfileDetail): void {
   console.log("\npackages:");
   if (p.packages.length === 0) console.log("  None of its own.");
   else printPackages(p.packages);
+  if (p.base) {
+    console.log(`\nfrom base ${p.base.name}, unless set above:`);
+    if (p.base.settings.length > 0)
+      printTable(
+        ["key", "value", "locked"],
+        p.base.settings.map((s) => [s.key, JSON.stringify(s.value), s.locked ? "yes" : "no"]),
+      );
+    if (p.base.packages.length > 0) printPackages(p.base.packages);
+    if (p.base.settings.length === 0 && p.base.packages.length === 0) console.log("  Nothing.");
+  }
 }
 
 export async function runProfilesListCommand(argv: ReadonlyArray<string>): Promise<void> {
@@ -152,6 +170,7 @@ export async function runProfilesGetCommand(argv: ReadonlyArray<string>): Promis
 }
 
 const FIELD_FLAGS = ["name", "description", "provider", "region", "size", "image"] as const;
+const CREATE_FLAGS = [...FIELD_FLAGS, "extends"] as const;
 const LOCK_FLAGS = ["lock", "unlock"] as const;
 const LOCKABLE = ["provider", "region", "size", "image"] as const;
 const LOCK_KEY = {
@@ -198,13 +217,21 @@ function fieldsFromArgs(flags: Readonly<Record<string, string | undefined>>): Up
 
 export async function runProfilesCreateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "profiles create --name <name> [--description <text>] [--provider azure|docker|fake] [--region <region>] [--size <sku>] [--image <image>] [--lock provider|region|size|image]",
+    "profiles create --name <name> [--extends <profile>] [--description <text>] [--provider azure|docker|fake] [--region <region>] [--size <sku>] [--image <image>] [--lock provider|region|size|image]",
   );
-  const args = parseArgs(argv, readSpec({ values: [...FIELD_FLAGS], repeatable: [...LOCK_FLAGS] }));
+  const args = parseArgs(
+    argv,
+    readSpec({ values: [...CREATE_FLAGS], repeatable: [...LOCK_FLAGS] }),
+  );
   if (!args.flags.name) throw new UsageError(`--name is required\n\n${usage}`);
+  const base = args.flags.extends ? await profileId(args.flags.extends) : undefined;
   const profile = await authenticatedApiRequest<ProfileSummary>(
     "/api/v1/profiles",
-    postJson({ ...fieldsFromArgs(args.flags), ...locksFromArgs(args.all) }),
+    postJson({
+      ...fieldsFromArgs(args.flags),
+      ...locksFromArgs(args.all),
+      ...(base ? { baseProfileId: base } : {}),
+    }),
   );
   if (args.booleans.has("json")) {
     printJson(profile);
@@ -230,6 +257,27 @@ export async function runProfilesUpdateCommand(argv: ReadonlyArray<string>): Pro
     return;
   }
   console.log(`Updated profile ${profile.name}.`);
+}
+
+export async function runProfilesSetBaseCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const usage = usageFor("profiles set-base <profile> <base|none>");
+  const args = parseArgs(argv, readSpec());
+  const id = await profileId(required(args, 0, "a profile", usage));
+  const target = required(args, 1, "a base profile, or none", usage);
+  const base = target === "none" ? null : await profileId(target);
+  const profile = await authenticatedApiRequest<ProfileSummary>(`/api/v1/profiles/${id}/base`, {
+    method: "PUT",
+    body: JSON.stringify({ baseProfileId: base }),
+  });
+  if (args.booleans.has("json")) {
+    printJson(profile);
+    return;
+  }
+  console.log(
+    profile.baseProfileName
+      ? `${profile.name} extends ${profile.baseProfileName} now. Its machines take what it does not set from there.`
+      : `${profile.name} extends no profile now. Its machines take what it does not set from the org.`,
+  );
 }
 
 export async function runProfilesArchiveCommand(argv: ReadonlyArray<string>): Promise<void> {

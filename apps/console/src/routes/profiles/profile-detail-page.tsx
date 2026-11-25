@@ -11,6 +11,8 @@ import {
   setProfileSetting,
   useArchiveProfile,
   useProfile,
+  useProfiles,
+  useSetProfileBase,
   useUpdateProfile,
 } from "@/api/profiles";
 import { PageLoader } from "@/components/page-loader";
@@ -40,6 +42,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 import { OrgPackageManifestCard } from "../organisation/org-package-manifest-card";
 import { ProfileFormDialog } from "./profile-form-dialog";
@@ -99,7 +108,12 @@ export function ProfileDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            disabled={archived}
+            disabled={archived || profile.extendedBy > 0}
+            title={
+              profile.extendedBy > 0
+                ? "Other profiles extend this one. Change their base before archiving it."
+                : undefined
+            }
             onClick={() => setArchiving(true)}
           >
             Archive
@@ -115,6 +129,8 @@ export function ProfileDetailPage() {
           settings until an admin moves them.
         </p>
       )}
+
+      <BaseProfileCard profile={profile} disabled={archived} />
 
       <Card>
         <CardHeader>
@@ -145,6 +161,11 @@ export function ProfileDetailPage() {
                       ) : (
                         <span className="text-xs text-muted-foreground">Starting value</span>
                       )}
+                      {resolved.fromProfileId !== null && resolved.fromProfileId !== profile.id && (
+                        <span className="text-xs text-muted-foreground">
+                          from base {profile.baseProfileName}
+                        </span>
+                      )}
                     </dd>
                   </div>
                 );
@@ -158,8 +179,9 @@ export function ProfileDetailPage() {
         <CardHeader>
           <CardTitle>Settings</CardTitle>
           <CardDescription>
-            What the profile does not set, its machines take from the org. A locked setting cannot
-            be overridden on a machine.
+            What the profile does not set, its machines take from{" "}
+            {profile.baseProfileName ? `its base, ${profile.baseProfileName}, or ` : ""}the org. A
+            locked setting cannot be overridden on a machine.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col">
@@ -245,11 +267,15 @@ function ProfileSettingRow({
   onCleared: () => void;
 }) {
   const own = profile.settings.find((s) => s.key === spec.key);
+  const fromBase = profile.base?.settings.find((s) => s.key === spec.key);
+  const inheritedFrom = fromBase ? `base ${profile.base?.name}` : "the org";
+  // A base lock binds this profile too: it cannot set its own value.
+  const lockedByBase = Boolean(fromBase?.locked);
   const clear = useMutation({
     mutationFn: () => setProfileSetting(profile.id, { key: spec.key, value: null, clear: true }),
     onSuccess: () => {
       onCleared();
-      toast.success(`${spec.label} now comes from the org`);
+      toast.success(`${spec.label} now comes from ${inheritedFrom}`);
     },
     onError: (error) => toast.error("Couldn't clear it", { description: error.message }),
   });
@@ -266,10 +292,22 @@ function ProfileSettingRow({
             <span className="text-sm">{describeSettingValue(spec.key, own.value)}</span>
             {own.locked && <Badge variant="outline">locked</Badge>}
           </>
+        ) : fromBase ? (
+          <>
+            <span className="text-sm">{describeSettingValue(spec.key, fromBase.value)}</span>
+            <span className="text-xs text-muted-foreground">from base {profile.base?.name}</span>
+            {fromBase.locked && <Badge variant="outline">locked</Badge>}
+          </>
         ) : (
           <span className="text-sm text-muted-foreground">From the org</span>
         )}
-        <Button variant="outline" size="sm" disabled={disabled} onClick={onEdit}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={disabled || (lockedByBase && !own)}
+          title={lockedByBase ? `Locked by base ${profile.base?.name}` : undefined}
+          onClick={onEdit}
+        >
           {own ? "Edit" : "Set"}
         </Button>
         {own && (
@@ -279,7 +317,7 @@ function ProfileSettingRow({
             disabled={disabled || clear.isPending}
             onClick={() => clear.mutate()}
           >
-            Use the org's
+            {fromBase ? "Use the base's" : "Use the org's"}
           </Button>
         )}
       </div>
@@ -425,5 +463,88 @@ function SettingDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Select items cannot have an empty value, so "no base" needs a name of its own. */
+const NO_BASE = "none";
+
+/**
+ * The profile this one extends. Its machines take the base's settings, packages and creation
+ * fields, unless this profile sets its own. A base lock binds this profile too. One level only:
+ * a base cannot extend another, so the list offers only profiles that extend nothing.
+ */
+function BaseProfileCard({ profile, disabled }: { profile: ProfileDetail; disabled: boolean }) {
+  const profilesQuery = useProfiles();
+  const setBase = useSetProfileBase(profile.id);
+  const [choice, setChoice] = useState(profile.baseProfileId ?? NO_BASE);
+  useEffect(() => setChoice(profile.baseProfileId ?? NO_BASE), [profile.baseProfileId]);
+
+  const candidates = (profilesQuery.data ?? []).filter(
+    (p) => p.id !== profile.id && p.archivedAt === null && p.baseProfileId === null,
+  );
+  const isBase = profile.extendedBy > 0;
+  const next = choice === NO_BASE ? null : choice;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Base profile</CardTitle>
+        <CardDescription>
+          {isBase
+            ? `${profile.extendedBy} profile(s) extend this one, so it cannot extend another.`
+            : "Extend another profile to take its settings, packages and creation fields. What this profile sets itself wins, unless the base locks it."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap items-center gap-3 text-sm">
+        {profile.baseProfileId && (
+          <span>
+            Extends{" "}
+            <Link
+              to="/profiles/$profileId"
+              params={{ profileId: profile.baseProfileId }}
+              className="font-medium hover:underline"
+            >
+              {profile.baseProfileName}
+            </Link>
+            .
+          </span>
+        )}
+        {!isBase && (
+          <>
+            <Select value={choice} onValueChange={setChoice} disabled={disabled}>
+              <SelectTrigger className="w-64" aria-label="Base profile">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_BASE}>No base</SelectItem>
+                {candidates.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={disabled || setBase.isPending || next === profile.baseProfileId}
+              onClick={() =>
+                setBase.mutate(next, {
+                  onSuccess: () =>
+                    toast.success(next ? "Base profile set" : "Base profile cleared"),
+                  onError: (error) =>
+                    toast.error("Couldn't change the base", {
+                      description: profileErrorMessage(error),
+                    }),
+                })
+              }
+            >
+              Save
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -3,6 +3,7 @@ import type { SettingRow } from "@cloudable/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { Db } from "../../db/layer";
+import { baseProfileIdOf } from "../profile/chain";
 import { type ElevationRepo, ElevationRepoTag } from "./ElevationRepo";
 
 const toError = (cause: unknown): Error =>
@@ -28,7 +29,11 @@ export const ElevationRepoLive = Layer.effect(
             .select()
             .from(machines)
             .where(eq(machines.id, machineId))
-            .then((rows) => rows[0] ?? null),
+            .then(async (rows) => {
+              const machine = rows[0];
+              if (!machine) return null;
+              return { ...machine, baseProfileId: await baseProfileIdOf(db, machine.profileId) };
+            }),
         catch: toError,
       });
 

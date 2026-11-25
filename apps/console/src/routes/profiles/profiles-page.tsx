@@ -107,6 +107,11 @@ export function ProfilesPage() {
                 >
                   <TableCell className="font-medium">
                     {p.name}
+                    {p.baseProfileName && (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        Extends {p.baseProfileName}
+                      </span>
+                    )}
                     {p.description && (
                       <span className="block text-xs font-normal text-muted-foreground">
                         {p.description}

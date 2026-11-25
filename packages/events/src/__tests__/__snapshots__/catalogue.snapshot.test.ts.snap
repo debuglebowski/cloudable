@@ -67,6 +67,7 @@ exports[`event type catalogue is append-only 1`] = `
   "person.email_changed",
   "person.role_changed",
   "profile.archived",
+  "profile.base_changed",
   "profile.created",
   "profile.setting_changed",
   "profile.updated",

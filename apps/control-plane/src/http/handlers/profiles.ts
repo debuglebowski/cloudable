@@ -8,6 +8,7 @@ import {
   createProfile,
   getProfile,
   listProfiles,
+  setBaseProfile,
   updateProfile,
 } from "../../domain/profile/ProfileService";
 import { Api } from "../api";
@@ -63,11 +64,24 @@ export const ProfilesLive = HttpApiBuilder.group(Api, "profiles", (handlers) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
         yield* requireAdminUser(currentUser, "Only an admin can archive a profile.");
+        // Refused while profiles that are not archived extend it.
         return yield* archiveProfile({
           orgId: currentUser.orgId,
           profileId: path.id,
           actor: { actorType: "person", actorId: currentUser.personId },
-        }).pipe(Effect.catchTag("ProfileEditError", Effect.die));
+        });
+      }),
+    )
+    .handle("setBase", ({ path, payload }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        yield* requireAdminUser(currentUser, "Only an admin can change a profile's base.");
+        return yield* setBaseProfile({
+          orgId: currentUser.orgId,
+          profileId: path.id,
+          baseProfileId: payload.baseProfileId,
+          actor: { actorType: "person", actorId: currentUser.personId },
+        });
       }),
     )
     .handle("updatePackages", ({ path, payload }) =>

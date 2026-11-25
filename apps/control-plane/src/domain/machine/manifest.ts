@@ -12,6 +12,8 @@ export type ManifestScope = "org" | "profile" | "machine";
 export interface ManifestScopeChain {
   orgId: string;
   profileId?: string | null;
+  /** The base the profile extends, if any. Its rows sit between the org's and the profile's. */
+  baseProfileId?: string | null;
   machineId: string;
 }
 
@@ -66,7 +68,7 @@ export interface ResolvedManifestEntry {
 
 /**
  * Resolve the effective package manifest for a machine across the
- * org → profile → machine chain (lowest level wins).
+ * org → base profile → profile → machine chain (lowest level wins).
  *
  * Deliberately does not reimplement the chain walk: each distinct
  * `packageName` across `rows` is resolved individually via
@@ -248,35 +250,44 @@ export interface LockConflict {
   lockedVersionPin: string | null;
 }
 
-const SCOPE_RANK: Record<ManifestScope, number> = { org: 0, profile: 1, machine: 2 };
+/** Higher in the chain is lower here: org, then a base profile, then a profile, then a machine. */
+const SCOPE_RANK: Record<ManifestScope, number> = { org: 0, profile: 2, machine: 3 };
+const BASE_PROFILE_RANK = 1;
 
 /**
- * The organisation can mark an entry locked. A locked entry
+ * The organisation or a profile can mark an entry locked. A locked entry
  * cannot be overridden below. Attempting to override one is a validation
  * error at edit time, not a silent no-op at reconcile.
  *
  * Returns one conflict per edited package name that has a locked row at a
  * *higher* scope than `targetScope` (org/profile lock blocking a machine
- * edit, org lock blocking a profile edit). An edit at the same scope that
- * owns the lock, or at a higher scope than any existing lock, is not an
- * override-below and is never reported.
+ * edit, org or base-profile lock blocking a profile edit). An edit at the
+ * same scope that owns the lock, or at a higher scope than any existing lock,
+ * is not an override-below and is never reported.
+ *
+ * `baseProfileId` names which profile rows in `existingRows` belong to the
+ * base: those rank above the profile's own. Without it every profile row
+ * ranks the same, which is right when the chain has no base.
  */
 export function findLockConflicts(
   existingRows: ReadonlyArray<MachinePackageRow>,
   targetScope: ManifestScope,
   editedPackageNames: ReadonlyArray<string>,
+  baseProfileId?: string | null,
 ): LockConflict[] {
+  const rank = (row: Pick<MachinePackageRow, "scopeType" | "scopeId">) =>
+    row.scopeType === "profile" && baseProfileId && row.scopeId === baseProfileId
+      ? BASE_PROFILE_RANK
+      : SCOPE_RANK[row.scopeType];
   const conflicts: LockConflict[] = [];
   for (const packageName of editedPackageNames) {
     const lockedAbove = existingRows
       .filter(
         (row) =>
-          row.packageName === packageName &&
-          row.locked &&
-          SCOPE_RANK[row.scopeType] < SCOPE_RANK[targetScope],
+          row.packageName === packageName && row.locked && rank(row) < SCOPE_RANK[targetScope],
       )
       // Closest locking scope above the target is the one the edit actually collides with.
-      .sort((a, b) => SCOPE_RANK[b.scopeType] - SCOPE_RANK[a.scopeType])[0];
+      .sort((a, b) => rank(b) - rank(a))[0];
     if (lockedAbove) {
       conflicts.push({
         packageName,

@@ -231,6 +231,10 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         summary: "Create a profile",
         options: [
           { flag: "--name <name>", description: "Unique in the org (required)" },
+          {
+            flag: "--extends <profile>",
+            description: "Take its settings, packages and fields unless set here",
+          },
           { flag: "--description <text>", description: "What it is for" },
           { flag: "--provider azure|docker|fake", description: "Where new machines run" },
           { flag: "--region <region>", description: "Where new machines run" },
@@ -269,11 +273,22 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         ],
       },
       {
+        name: "set-base",
+        summary: "Make a profile extend another, or none",
+        args: "<profile> <base|none>",
+        notes: [
+          "The chain becomes org, then the base, then the profile, then the machine.",
+          "One level only. A base cannot extend another, and a profile others extend cannot get a base.",
+          "Refused while the profile sets something the base locks. Admin only, and recorded.",
+        ],
+      },
+      {
         name: "archive",
         summary: "Archive a profile",
         args: "<profile>",
         notes: [
           "No new machine can use it. Machines already on it keep its settings.",
+          "Refused while other profiles extend it.",
           "Profiles are archived, never deleted.",
         ],
       },
@@ -297,7 +312,7 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       },
     ],
     notes: [
-      "The chain is org, then profile, then machine. The lowest level that sets something wins, unless a level above locks it.",
+      "The chain is org, then profile, then machine. A profile may extend one base profile, which sits between the org and the profile. The lowest level that sets something wins, unless a level above locks it.",
       "Changing a profile needs an admin.",
     ],
   },

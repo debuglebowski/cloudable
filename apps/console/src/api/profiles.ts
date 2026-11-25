@@ -13,7 +13,8 @@ import { ApiError, apiGet, apiPatch, apiPost, apiPut, refusalReason } from "@/li
 import type { OrgPackageEdit, OrgPackageEntry } from "./organisation";
 
 /**
- * Profiles: named sets of settings machines link to (org → profile → machine).
+ * Profiles: named sets of settings machines link to (org → profile → machine). A profile may
+ * extend one base profile: org → base → profile → machine.
  * Wired to `apps/control-plane/src/http/routes/profiles.ts`. A profile's settings
  * are written through `PATCH /api/v1/config/settings` with `scopeType: "profile"`.
  */
@@ -68,6 +69,18 @@ export function useUpdateProfile(id: string) {
   return useMutation({
     mutationFn: (input: UpdateProfileRequest) =>
       apiPatch<ProfileSummary>(`/api/v1/profiles/${id}`, input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: profileKeys.all });
+    },
+  });
+}
+
+/** Sets the profile this one extends, or clears it (`null`). */
+export function useSetProfileBase(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (baseProfileId: string | null) =>
+      apiPut<ProfileSummary>(`/api/v1/profiles/${id}/base`, { baseProfileId }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: profileKeys.all });
     },

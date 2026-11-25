@@ -45,10 +45,11 @@ A profile is a named set of settings machines link to (org → profile → machi
 
 | Type | Tier | Description |
 | :--- | :--- | :--- |
-| `profile.created` | 1 | An admin created a profile. Carries any creation fields it sets: provider, region, size, image. Since 2026-11 also `providerLocked`, `regionLocked`, `sizeLocked`, `imageLocked`. An older event has none; every field it set was locked. |
+| `profile.created` | 1 | An admin created a profile. Carries any creation fields it sets: provider, region, size, image. Since 2026-11 also `providerLocked`, `regionLocked`, `sizeLocked`, `imageLocked`, and `baseProfileId` when it was created extending a base. An older event has no lock flags; every field it set was locked. |
 | `profile.updated` | 1 | An admin changed a profile's name, description, creation fields or their locks. `previous` and `current` hold only the fields that changed. A lock change uses the keys `providerLocked`, `regionLocked`, `sizeLocked`, `imageLocked`. |
 | `profile.setting_changed` | 1 | A setting or package on a profile changed. A package edit has key `package:<name>` and stores the lock flag as `pinned`. A cleared setting has `current: null`. |
-| `profile.archived` | 1 | An admin archived a profile. No new machine can use it; machines already on it keep its settings. |
+| `profile.archived` | 1 | An admin archived a profile. No new machine can use it; machines already on it keep its settings. A profile that others extend cannot be archived. |
+| `profile.base_changed` | 1 | An admin set, changed or cleared the base profile a profile extends. `previousBaseProfileId` and `baseProfileId`, null for none. Machines on the profile resolve through the new base from then on. |
 
 ## Machine
 

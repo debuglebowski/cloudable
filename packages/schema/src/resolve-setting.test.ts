@@ -53,4 +53,26 @@ describe("resolveSetting", () => {
 
     expect(resolved).toBeUndefined();
   });
+
+  test("a profile's own row wins over its base's, and the base's over the org's", () => {
+    const chained: ReadonlyArray<SettingRow<string>> = [
+      { scopeType: "org", scopeId: "org-1", key: "tier", value: "org", source: "org" },
+      { scopeType: "profile", scopeId: "base-1", key: "tier", value: "base", source: "profile" },
+      { scopeType: "profile", scopeId: "base-1", key: "size", value: "big", source: "profile" },
+      { scopeType: "profile", scopeId: "child-1", key: "tier", value: "child", source: "profile" },
+    ];
+    const chain = {
+      orgId: "org-1",
+      profileId: "child-1",
+      baseProfileId: "base-1",
+      machineId: "machine-1",
+    };
+    expect(resolveSetting("tier", chained, chain)?.resolvedFromScopeId).toBe("child-1");
+    expect(resolveSetting("size", chained, chain)).toMatchObject({
+      value: "big",
+      resolvedFromScopeId: "base-1",
+    });
+    // Without the base in the chain, its rows are not read.
+    expect(resolveSetting("size", chained, { ...chain, baseProfileId: null })).toBeUndefined();
+  });
 });

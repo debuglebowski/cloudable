@@ -17,6 +17,7 @@ import {
   findLockConflicts,
   packageSettingKey,
 } from "../machine/manifest";
+import { baseProfileIdOf } from "../profile/chain";
 
 /**
  * Org-scope write path for the package manifest. `domain/machine/MachineService
@@ -182,7 +183,7 @@ export const listOrgPackages = (
     return rows.map(toEntry).sort(byPackageName);
   });
 
-/** A profile's own entries: what it declares, not what it inherits from the org. */
+/** A profile's own entries: what it declares, not what it inherits from its base or the org. */
 export const listProfilePackages = (
   orgId: string,
   profileId: string,
@@ -298,13 +299,28 @@ export const updateOrgPackages = (
     const editedPackageNames = [...new Set([...upserts.map((u) => u.packageName), ...removals])];
 
     const existingRows = yield* fetchScopeRows(db, scopeType, scopeId);
-    // The org's rows are what can lock a profile's entry. Nothing sits above the org.
-    const rowsAbove = profileId !== undefined ? yield* fetchOrgRows(db, input.orgId) : [];
+    // The org's rows, and the base profile's if this profile extends one, are what can lock a
+    // profile's entry. Nothing sits above the org.
+    const baseProfileId =
+      profileId !== undefined
+        ? yield* Effect.tryPromise({
+            try: () => baseProfileIdOf(db, profileId),
+            catch: (cause) => new OrgPackagesError({ reason: "read_failed", cause }),
+          })
+        : null;
+    const rowsAbove =
+      profileId !== undefined
+        ? [
+            ...(yield* fetchOrgRows(db, input.orgId)),
+            ...(baseProfileId ? yield* fetchScopeRows(db, "profile", baseProfileId) : []),
+          ]
+        : [];
 
     const conflicts = findLockConflicts(
       [...rowsAbove, ...existingRows],
       scopeType,
       editedPackageNames,
+      baseProfileId,
     );
     if (conflicts.length > 0) {
       return yield* Effect.fail(

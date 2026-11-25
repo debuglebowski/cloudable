@@ -80,6 +80,7 @@ export function OrgPackageManifestCard({
   const queryClient = useQueryClient();
   const orgQuery = useOrgPackages({ enabled: profileId === undefined });
   const profileQuery = useProfile(profileId);
+  const base = profileId === undefined ? null : (profileQuery.data?.base ?? null);
   const packagesQuery =
     profileId === undefined ? orgQuery : { ...profileQuery, data: profileQuery.data?.packages };
   const [entryDialog, setEntryDialog] = useState<PackageEntryDialogMode | null>(null);
@@ -115,6 +116,18 @@ export function OrgPackageManifestCard({
             : "Every machine on this profile may have these, unless it has its own entry for the package. They add to the org's packages, and replace the org's entry for the same package."}{" "}
           Ensure installed makes Cloudable install a package on every machine missing it. Ensure
           latest version also updates it. Both need an approval first.
+          {base && (
+            <>
+              {" "}
+              It also takes {base.packages.length} package(s) from its base, {base.name}
+              {base.packages.length > 0
+                ? `: ${base.packages
+                    .map((entry) => `${entry.packageName}${entry.locked ? " (locked)" : ""}`)
+                    .join(", ")}`
+                : ""}
+              . An entry here replaces the base's, unless the base locks it.
+            </>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

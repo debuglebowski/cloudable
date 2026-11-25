@@ -35,6 +35,11 @@ export interface ProfileSummary {
   archivedAt: string | null;
   /** Machines on it that are not archived. A locked field must match all of them. */
   machineCount: number;
+  /** The profile this one extends, or null. Its machines resolve org → base → profile → machine. */
+  baseProfileId: string | null;
+  baseProfileName: string | null;
+  /** Profiles that are not archived and extend this one. While above zero, it cannot be archived. */
+  extendedBy: number;
 }
 
 export interface ProfilePackageEntry {
@@ -46,11 +51,24 @@ export interface ProfilePackageEntry {
   setting: PackageSetting;
 }
 
+export interface ProfileSettingEntry {
+  key: string;
+  value: unknown;
+  locked: boolean;
+}
+
 export interface ProfileDetail extends ProfileSummary {
-  /** The profile's own settings. What it does not set, its machines take from the org. */
-  settings: Array<{ key: string; value: unknown; locked: boolean }>;
+  /** The profile's own settings. What it does not set, its machines take from its base or the org. */
+  settings: ProfileSettingEntry[];
   /** The profile's own package entries. */
   packages: ProfilePackageEntry[];
+  /** The base's own settings and packages: what this profile inherits from it. */
+  base: {
+    id: string;
+    name: string;
+    settings: ProfileSettingEntry[];
+    packages: ProfilePackageEntry[];
+  } | null;
 }
 
 export interface ListProfilesResponse {
@@ -60,6 +78,8 @@ export interface ListProfilesResponse {
 export interface CreateProfileRequest {
   name: string;
   description?: string | null;
+  /** The profile to extend. Same org, not archived, and not extending another itself. */
+  baseProfileId?: string | null;
   provider?: MachineProvider | null;
   region?: string | null;
   sizeSku?: string | null;
@@ -75,4 +95,9 @@ export interface CreateProfileRequest {
  * Omitted keeps the field. Null clears it. An unlocked creation field can change at any time.
  * A locked one must still match every machine on the profile.
  */
-export type UpdateProfileRequest = Partial<CreateProfileRequest>;
+export type UpdateProfileRequest = Partial<Omit<CreateProfileRequest, "baseProfileId">>;
+
+/** `PUT /api/v1/profiles/:id/base`: extend another profile, or none (`null`). */
+export interface SetProfileBaseRequest {
+  baseProfileId: string | null;
+}

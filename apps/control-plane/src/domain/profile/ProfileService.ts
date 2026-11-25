@@ -13,14 +13,18 @@
 // profile that is not archived, so it cannot change while one uses it. A profile
 // edit never resizes or moves a live machine (invariant 10). See
 // docs/inheritance.md and ./creation-fields.ts.
+//
+// A profile may extend one base profile in the same org (`baseProfileId`). The chain is then
+// org → base → profile → machine, for settings, packages and creation fields alike. One level
+// only: a base has no base of its own, and a profile that is a base cannot get one.
 // ---------------------------------------------------------------------------
 import type {
   ProfileCreationFieldLocks,
   ProfileCreationFields,
   ProfileEvent,
 } from "@cloudable/events";
-import { machines, profiles, settingValues } from "@cloudable/schema";
-import { and, asc, count, eq, inArray, isNull, notInArray } from "drizzle-orm";
+import { machinePackages, machines, profiles, settingValues } from "@cloudable/schema";
+import { and, asc, count, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { type Context, Effect } from "effect";
 import { ulid } from "ulid";
 import { config } from "../../config";
@@ -35,8 +39,10 @@ import {
   FIELD_LABEL,
   LOCK_FLAG,
   type ResolvedCreationFields,
+  baseLockConflict,
   lockedFieldConflict,
   resolveCreationFields,
+  resolvedValues,
 } from "./creation-fields";
 import { ProfileEditError, ProfileNotFoundError, ProfileWriteError } from "./errors";
 
@@ -64,6 +70,11 @@ export interface ProfileView {
   archivedAt: string | null;
   /** Machines on this profile that are not archived. A locked creation field must match them. */
   machineCount: number;
+  /** The profile this one extends, or null. */
+  baseProfileId: string | null;
+  baseProfileName: string | null;
+  /** Profiles that are not archived and extend this one. While above zero, it cannot be archived. */
+  extendedBy: number;
 }
 
 export interface ProfileSettingView {
@@ -73,10 +84,17 @@ export interface ProfileSettingView {
 }
 
 export interface ProfileDetail extends ProfileView {
-  /** The profile's own settings. What it does not set, its machines take from the org. */
+  /** The profile's own settings. What it does not set, its machines take from its base or the org. */
   settings: ProfileSettingView[];
   /** The profile's own package entries. */
   packages: OrgPackageEntry[];
+  /** The base's own settings and packages: what this profile inherits from it. */
+  base: {
+    id: string;
+    name: string;
+    settings: ProfileSettingView[];
+    packages: OrgPackageEntry[];
+  } | null;
 }
 
 export interface ProfileActor {
@@ -99,6 +117,8 @@ export interface CreateProfileInput extends ProfileFieldsInput {
   orgId: string;
   name: string;
   description?: string | null | undefined;
+  /** The profile it extends. Same org, not archived, and not itself extending another. */
+  baseProfileId?: string | null | undefined;
   actor: ProfileActor;
 }
 
@@ -127,7 +147,16 @@ const blankToNull = (value: string | null | undefined): string | null | undefine
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const toView = (row: ProfileRow, machineCount: number): ProfileView => ({
+interface ViewContext {
+  base: ProfileRow | null;
+  extendedBy: number;
+}
+
+const toView = (
+  row: ProfileRow,
+  machineCount: number,
+  context: ViewContext = { base: null, extendedBy: 0 },
+): ProfileView => ({
   id: row.id,
   name: row.name,
   description: row.description,
@@ -139,10 +168,13 @@ const toView = (row: ProfileRow, machineCount: number): ProfileView => ({
   regionLocked: row.regionLocked,
   sizeLocked: row.sizeLocked,
   imageLocked: row.imageLocked,
-  creation: resolveCreationFields(row),
+  creation: resolveCreationFields(row, context.base),
   createdAt: row.createdAt.toISOString(),
   archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
   machineCount,
+  baseProfileId: row.baseProfileId,
+  baseProfileName: context.base?.name ?? null,
+  extendedBy: context.extendedBy,
 });
 
 const creationFieldsOf = (
@@ -205,6 +237,35 @@ const loadProfile = (db: DbHandle, orgId: string, profileId: string) =>
     return row;
   });
 
+/** The base `row` extends, or null. */
+const loadBase = (db: DbHandle, row: ProfileRow) =>
+  Effect.gen(function* () {
+    if (!row.baseProfileId) return null;
+    const baseId = row.baseProfileId;
+    const rows = yield* write("reading base profile", () =>
+      db.select().from(profiles).where(eq(profiles.id, baseId)).limit(1),
+    );
+    return rows[0] ?? null;
+  });
+
+/** Every profile that extends `profileId`, archived or not. */
+const loadChildren = (db: DbHandle, profileId: string) =>
+  write("reading profiles that extend it", () =>
+    db.select().from(profiles).where(eq(profiles.baseProfileId, profileId)),
+  );
+
+/** The view of one profile, with its base and how many live profiles extend it. */
+const viewOf = (db: DbHandle, row: ProfileRow) =>
+  Effect.gen(function* () {
+    const counts = yield* liveMachineCounts(db, [row.id]);
+    const base = yield* loadBase(db, row);
+    const children = yield* loadChildren(db, row.id);
+    return toView(row, counts.get(row.id) ?? 0, {
+      base,
+      extendedBy: children.filter((child) => child.archivedAt === null).length,
+    });
+  });
+
 const liveMachineCounts = (db: DbHandle, profileIds: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     if (profileIds.length === 0) return new Map<string, number>();
@@ -236,9 +297,12 @@ const validateCreationFields = (
     sizeSku: string | null;
     image: string | null;
   },
+  /** Names the profile in the message when it is not the one being edited. */
+  about?: string,
 ) =>
   Effect.gen(function* () {
-    const invalid = (message: string) => editError("invalid_profile_field", message);
+    const invalid = (message: string) =>
+      editError("invalid_profile_field", about ? `${about}: ${message}` : message);
     const { provider, region, sizeSku, image } = fields;
     if (provider === null) {
       if (region !== null || sizeSku !== null || image !== null) {
@@ -333,8 +397,38 @@ export const listProfiles = (orgId: string): Effect.Effect<ProfileView[], Profil
       db,
       rows.map((row) => row.id),
     );
-    return rows.map((row) => toView(row, counts.get(row.id) ?? 0));
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    return rows.map((row) =>
+      toView(row, counts.get(row.id) ?? 0, {
+        base: row.baseProfileId ? (byId.get(row.baseProfileId) ?? null) : null,
+        extendedBy: rows.filter((child) => child.baseProfileId === row.id && !child.archivedAt)
+          .length,
+      }),
+    );
   });
+
+const ownSettings = (db: DbHandle, profileId: string) =>
+  Effect.map(
+    write("reading profile settings", () =>
+      db
+        .select({
+          key: settingValues.key,
+          value: settingValues.value,
+          locked: settingValues.locked,
+        })
+        .from(settingValues)
+        .where(and(eq(settingValues.scopeType, "profile"), eq(settingValues.scopeId, profileId)))
+        .orderBy(asc(settingValues.key)),
+    ),
+    (rows) => rows.map((s) => ({ key: s.key, value: s.value, locked: s.locked })),
+  );
+
+const ownPackages = (orgId: string, profileId: string) =>
+  listProfilePackages(orgId, profileId).pipe(
+    Effect.mapError(
+      (cause) => new ProfileWriteError({ message: `reading packages: ${cause.reason}` }),
+    ),
+  );
 
 export const getProfile = (
   orgId: string,
@@ -343,28 +437,52 @@ export const getProfile = (
   Effect.gen(function* () {
     const db = yield* Db;
     const row = yield* loadProfile(db, orgId, profileId);
-    const counts = yield* liveMachineCounts(db, [row.id]);
-    const settingRows = yield* write("reading profile settings", () =>
-      db
-        .select({
-          key: settingValues.key,
-          value: settingValues.value,
-          locked: settingValues.locked,
-        })
-        .from(settingValues)
-        .where(and(eq(settingValues.scopeType, "profile"), eq(settingValues.scopeId, row.id)))
-        .orderBy(asc(settingValues.key)),
-    );
-    const packages = yield* listProfilePackages(orgId, row.id).pipe(
-      Effect.mapError(
-        (cause) => new ProfileWriteError({ message: `reading packages: ${cause.reason}` }),
-      ),
-    );
+    const view = yield* viewOf(db, row);
+    const baseRow = yield* loadBase(db, row);
     return {
-      ...toView(row, counts.get(row.id) ?? 0),
-      settings: settingRows.map((s) => ({ key: s.key, value: s.value, locked: s.locked })),
-      packages,
+      ...view,
+      settings: yield* ownSettings(db, row.id),
+      packages: yield* ownPackages(orgId, row.id),
+      base: baseRow
+        ? {
+            id: baseRow.id,
+            name: baseRow.name,
+            settings: yield* ownSettings(db, baseRow.id),
+            packages: yield* ownPackages(orgId, baseRow.id),
+          }
+        : null,
     };
+  });
+
+/**
+ * The base a profile may extend: this org's, not archived, and not extending another itself.
+ * `forProfileId` is the profile that would extend it, when it exists already.
+ */
+const requireUsableBase = (
+  db: DbHandle,
+  orgId: string,
+  baseProfileId: string,
+  forProfileId?: string,
+) =>
+  Effect.gen(function* () {
+    const invalid = (message: string) => editError("invalid_base_profile", message);
+    if (baseProfileId === forProfileId) return yield* invalid("a profile cannot extend itself");
+    const rows = yield* write("reading base profile", () =>
+      db.select().from(profiles).where(eq(profiles.id, baseProfileId)).limit(1),
+    );
+    const base = rows[0];
+    if (!base || base.orgId !== orgId) {
+      return yield* invalid("the base must be one of this org's profiles");
+    }
+    if (base.archivedAt !== null) {
+      return yield* invalid(`Profile "${base.name}" is archived. No profile can extend it now.`);
+    }
+    if (base.baseProfileId !== null) {
+      return yield* invalid(
+        `Profile "${base.name}" extends another profile itself. A profile can extend only a profile that extends nothing.`,
+      );
+    }
+    return base;
   });
 
 export const createProfile = (
@@ -376,13 +494,29 @@ export const createProfile = (
     if (name.length === 0)
       return yield* editError("invalid_profile_field", "a profile needs a name");
     const fields = yield* nextFieldValues(null, input);
-    yield* validateCreationFields(db, fields);
+    const base = input.baseProfileId
+      ? yield* requireUsableBase(db, input.orgId, input.baseProfileId)
+      : null;
+    if (base) {
+      const conflict = baseLockConflict(fields, base);
+      if (conflict) return yield* editError("invalid_profile_field", conflict);
+    }
+    yield* validateCreationFields(
+      db,
+      resolvedValues(resolveCreationFields({ id: "", ...fields }, base)),
+    );
     yield* requireNameFree(db, input.orgId, name);
     const description = blankToNull(input.description) ?? null;
     const rows = yield* write("creating profile", () =>
       db
         .insert(profiles)
-        .values({ orgId: input.orgId, name, description, ...fields })
+        .values({
+          orgId: input.orgId,
+          name,
+          description,
+          baseProfileId: base?.id ?? null,
+          ...fields,
+        })
         .returning(),
     );
     const row = rows[0];
@@ -391,9 +525,15 @@ export const createProfile = (
     yield* publish({
       ...envelope(input.orgId, input.actor),
       type: "profile.created",
-      payload: { profileId: row.id, name, description, ...creationFieldsOf(row) },
+      payload: {
+        profileId: row.id,
+        name,
+        description,
+        ...creationFieldsOf(row),
+        ...(base ? { baseProfileId: base.id } : {}),
+      },
     });
-    return toView(row, 0);
+    return toView(row, 0, { base, extendedBy: 0 });
   });
 
 export const updateProfile = (
@@ -428,11 +568,46 @@ export const updateProfile = (
     const machineCount = counts.get(row.id) ?? 0;
     if (changed.length === 0) return toView(row, machineCount);
 
-    const valueChanged = CREATION_FIELDS.some((field) => changed.includes(field));
-    if (valueChanged) yield* validateCreationFields(db, next);
-    // A locked field must match every machine on the profile. Changing an unlocked one is
-    // always allowed: it is only where the create form starts, and no machine changes.
-    yield* requireLocksMatchMachines(db, row, resolveCreationFields({ ...row, ...fields }));
+    const base = yield* loadBase(db, row);
+    const children = yield* loadChildren(db, row.id);
+    const nextRow = { ...row, ...fields };
+    const creationChanged = CREATION_FIELDS.some(
+      (field) => changed.includes(field) || changed.includes(LOCK_FLAG[field]),
+    );
+    if (creationChanged) {
+      // A field the base locks cannot be given another value here.
+      if (base) {
+        const conflict = baseLockConflict(fields, base);
+        if (conflict) return yield* editError("invalid_profile_field", conflict);
+      }
+      yield* validateCreationFields(db, resolvedValues(resolveCreationFields(nextRow, base)));
+      // Profiles that extend this one take its fields too. A field it locks cannot differ on
+      // them, and what they end up with must still make sense.
+      for (const child of children) {
+        const conflict = baseLockConflict(child, { ...nextRow, name: next.name });
+        if (conflict) {
+          return yield* editError(
+            "profile_in_use",
+            `Profile "${child.name}" extends this one and sets its own value: ${conflict}.`,
+          );
+        }
+        yield* validateCreationFields(
+          db,
+          resolvedValues(resolveCreationFields(child, nextRow)),
+          `profile "${child.name}", which extends this one`,
+        );
+      }
+      // A locked field must match every machine on the profile, and on the profiles that
+      // extend it. Changing an unlocked one is always allowed: it is only where the create
+      // form starts, and no machine changes.
+      yield* requireLocksMatchMachines(db, [
+        { profile: row, resolved: resolveCreationFields(nextRow, base) },
+        ...children.map((child) => ({
+          profile: child,
+          resolved: resolveCreationFields(child, nextRow),
+        })),
+      ]);
+    }
     if (changed.includes("name")) yield* requireNameFree(db, input.orgId, next.name, row.id);
 
     const updated = yield* write("updating profile", () =>
@@ -454,19 +629,27 @@ export const updateProfile = (
       type: "profile.updated",
       payload: { profileId: row.id, previous, current },
     });
-    return toView(updated[0] ?? row, machineCount);
+    return toView(updated[0] ?? row, machineCount, {
+      base,
+      extendedBy: children.filter((child) => child.archivedAt === null).length,
+    });
   });
 
 /**
  * Refuses an edit that would leave a locked creation field different from a machine on the
  * profile that is not archived. Such a machine was created, or moved here, under other rules,
- * and a profile edit never changes a machine (invariant 10).
+ * and a profile edit never changes a machine (invariant 10). Each entry is one profile and
+ * what its machines would get.
  */
 const requireLocksMatchMachines = (
   db: DbHandle,
-  profile: ProfileRow,
-  resolved: ResolvedCreationFields,
+  entries: ReadonlyArray<{ profile: ProfileRow; resolved: ResolvedCreationFields }>,
 ) =>
+  Effect.forEach(entries, ({ profile, resolved }) => requireLocksMatch(db, profile, resolved), {
+    discard: true,
+  });
+
+const requireLocksMatch = (db: DbHandle, profile: ProfileRow, resolved: ResolvedCreationFields) =>
   Effect.gen(function* () {
     const lockedFields = CREATION_FIELDS.filter((field) => resolved[field].locked);
     if (lockedFields.length === 0) return;
@@ -512,7 +695,20 @@ export const archiveProfile = (input: {
     const db = yield* Db;
     const row = yield* loadProfile(db, input.orgId, input.profileId);
     const counts = yield* liveMachineCounts(db, [row.id]);
-    if (row.archivedAt !== null) return toView(row, counts.get(row.id) ?? 0);
+    const base = yield* loadBase(db, row);
+    if (row.archivedAt !== null)
+      return toView(row, counts.get(row.id) ?? 0, { base, extendedBy: 0 });
+    // A profile that others extend stays: they read their settings through it. Move them off
+    // it first.
+    const extending = (yield* loadChildren(db, row.id)).filter(
+      (child) => child.archivedAt === null,
+    );
+    if (extending.length > 0) {
+      return yield* editError(
+        "profile_is_base",
+        `${extending.map((child) => `"${child.name}"`).join(", ")} extend${extending.length === 1 ? "s" : ""} profile "${row.name}", so it cannot be archived. Change their base first.`,
+      );
+    }
     const updated = yield* write("archiving profile", () =>
       db
         .update(profiles)
@@ -525,7 +721,142 @@ export const archiveProfile = (input: {
       type: "profile.archived",
       payload: { profileId: row.id, name: row.name },
     });
-    return toView(updated[0] ?? row, counts.get(row.id) ?? 0);
+    return toView(updated[0] ?? row, counts.get(row.id) ?? 0, { base, extendedBy: 0 });
+  });
+
+export interface SetBaseProfileInput {
+  orgId: string;
+  profileId: string;
+  /** Null: extend nothing. */
+  baseProfileId: string | null;
+  actor: ProfileActor;
+}
+
+/**
+ * Sets the profile `profileId` extends, or clears it. Recorded as `profile.base_changed`.
+ *
+ * Refused when the result would be more than one level, when the profile itself sets a
+ * setting, package or creation field the new base locks, and when a machine on the profile
+ * does not have a creation field the new base locks. Clearing is always allowed.
+ *
+ * Machines on the profile then resolve through the new base. The base's Ensure packages are
+ * installed on them with no new approval: they were approved when they were set, the same as
+ * when a machine moves onto a profile.
+ */
+export const setBaseProfile = (
+  input: SetBaseProfileInput,
+): Effect.Effect<ProfileView, ProfileError, Db | EventBus> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const row = yield* loadProfile(db, input.orgId, input.profileId);
+    if (row.archivedAt !== null) {
+      return yield* editError(
+        "profile_archived",
+        `Profile "${row.name}" is archived and cannot change.`,
+      );
+    }
+    if (row.baseProfileId === input.baseProfileId) return yield* viewOf(db, row);
+
+    const base =
+      input.baseProfileId !== null
+        ? yield* requireUsableBase(db, input.orgId, input.baseProfileId, row.id)
+        : null;
+    if (base) {
+      const children = yield* loadChildren(db, row.id);
+      if (children.length > 0) {
+        return yield* editError(
+          "invalid_base_profile",
+          `${children.map((child) => `"${child.name}"`).join(", ")} extend${children.length === 1 ? "s" : ""} profile "${row.name}". A profile that is a base cannot extend another.`,
+        );
+      }
+      const fieldConflict = baseLockConflict(row, base);
+      if (fieldConflict) return yield* editError("invalid_base_profile", fieldConflict);
+      const lockedSettings = yield* lockedOverrides(db, row.id, base.id);
+      if (lockedSettings.length > 0) {
+        return yield* editError(
+          "invalid_base_profile",
+          `Profile "${base.name}" locks ${lockedSettings.map((key) => `"${key}"`).join(", ")}, and profile "${row.name}" sets its own. Clear those here first.`,
+        );
+      }
+      const resolved = resolveCreationFields(row, base);
+      yield* validateCreationFields(db, resolvedValues(resolved));
+      yield* requireLocksMatch(db, row, resolved);
+    }
+
+    const updated = yield* write("setting the base profile", () =>
+      db
+        .update(profiles)
+        .set({ baseProfileId: base?.id ?? null, updatedAt: new Date() })
+        .where(eq(profiles.id, row.id))
+        .returning(),
+    );
+    // The allowed list the agent is sent may change with the base.
+    yield* write("notifying machines", () =>
+      db
+        .update(machines)
+        .set({ desiredStateVersion: sql`${machines.desiredStateVersion} + 1` })
+        .where(
+          and(
+            eq(machines.profileId, row.id),
+            notInArray(machines.state, [...ARCHIVED_MACHINE_STATES]),
+          ),
+        ),
+    );
+    yield* publish({
+      ...envelope(input.orgId, input.actor),
+      type: "profile.base_changed",
+      payload: {
+        profileId: row.id,
+        previousBaseProfileId: row.baseProfileId,
+        baseProfileId: base?.id ?? null,
+      },
+    });
+    return yield* viewOf(db, updated[0] ?? row);
+  });
+
+/**
+ * The setting keys and packages (`package:<name>`) `profileId` sets itself that `baseId`
+ * locks. A base lock binds the profiles below it, so these block extending it.
+ */
+const lockedOverrides = (db: DbHandle, profileId: string, baseId: string) =>
+  Effect.gen(function* () {
+    const settings = yield* write("reading settings", () =>
+      db
+        .select({
+          scopeId: settingValues.scopeId,
+          key: settingValues.key,
+          locked: settingValues.locked,
+        })
+        .from(settingValues)
+        .where(
+          and(
+            eq(settingValues.scopeType, "profile"),
+            inArray(settingValues.scopeId, [profileId, baseId]),
+          ),
+        ),
+    );
+    const packages = yield* write("reading packages", () =>
+      db
+        .select({
+          scopeId: machinePackages.scopeId,
+          key: machinePackages.packageName,
+          locked: machinePackages.locked,
+        })
+        .from(machinePackages)
+        .where(
+          and(
+            eq(machinePackages.scopeType, "profile"),
+            inArray(machinePackages.scopeId, [profileId, baseId]),
+          ),
+        ),
+    );
+    const conflicts = (rows: ReadonlyArray<{ scopeId: string; key: string; locked: boolean }>) => {
+      const own = new Set(rows.filter((r) => r.scopeId === profileId).map((r) => r.key));
+      return rows
+        .filter((r) => r.scopeId === baseId && r.locked && own.has(r.key))
+        .map((r) => r.key);
+    };
+    return [...conflicts(settings), ...conflicts(packages).map((name) => `package:${name}`)];
   });
 
 /**
@@ -536,7 +867,7 @@ export const requireUsableProfile = (
   db: DbHandle,
   orgId: string,
   profileId: string,
-): Effect.Effect<ProfileRow, ProfileNotFoundError | ProfileEditError | ProfileWriteError> =>
+): Effect.Effect<UsableProfile, ProfileNotFoundError | ProfileEditError | ProfileWriteError> =>
   Effect.gen(function* () {
     const row = yield* loadProfile(db, orgId, profileId);
     if (row.archivedAt !== null) {
@@ -545,19 +876,24 @@ export const requireUsableProfile = (
         `Profile "${row.name}" is archived. No new machine can use it.`,
       );
     }
-    return row;
+    const base = yield* loadBase(db, row);
+    return { ...row, creation: resolveCreationFields(row, base) };
   });
+
+/** A profile a machine may be created on or moved to, with what its machines get. */
+export type UsableProfile = ProfileRow & { creation: ResolvedCreationFields };
 
 /**
  * Why a machine with these creation fields cannot be on this profile, or null when it can.
- * Only a locked field binds the machine. See `lockedFieldConflict`.
+ * Only a locked field binds the machine, whether the profile or its base locks it. See
+ * `lockedFieldConflict`.
  */
 export const profileFieldConflict = (
-  profile: ProfileRow,
+  profile: UsableProfile,
   machine: {
     provider: string | null;
     region: string | null;
     sizeSku: string | null;
     image: string | null;
   },
-): string | null => lockedFieldConflict(profile.name, resolveCreationFields(profile), machine);
+): string | null => lockedFieldConflict(profile.name, profile.creation, machine);

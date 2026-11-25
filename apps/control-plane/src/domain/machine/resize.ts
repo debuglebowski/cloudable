@@ -22,6 +22,7 @@ import { getCatalogEntry } from "../../services/CloudCatalogService";
 import { EventBus } from "../../services/EventBus";
 import { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { UBUNTU_IMAGES } from "../../services/ProvisioningService.azure";
+import { resolveCreationFields } from "../profile/creation-fields";
 
 export class ResizeRefusedError extends Schema.TaggedError<ResizeRefusedError>()(
   "ResizeRefusedError",
@@ -87,18 +88,24 @@ export const requestMachineResize = (input: {
       );
     }
     if (machine.profileId) {
+      const profileId = machine.profileId;
       const [profile] = yield* dbTry("reading profile", () =>
-        db
-          .select()
-          .from(profiles)
-          .where(eq(profiles.id, machine.profileId ?? ""))
-          .limit(1),
+        db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1),
       ).pipe(Effect.orDie);
-      // Only a locked size binds the machine. An unlocked one was a starting value.
-      if (profile?.sizeSku && profile.sizeLocked && profile.sizeSku !== sizeSku) {
+      const baseId = profile?.baseProfileId;
+      const [base] = baseId
+        ? yield* dbTry("reading base profile", () =>
+            db.select().from(profiles).where(eq(profiles.id, baseId)).limit(1),
+          ).pipe(Effect.orDie)
+        : [];
+      // Only a locked size binds the machine, whether the profile or its base locks it. An
+      // unlocked one was a starting value.
+      const size = profile ? resolveCreationFields(profile, base).sizeSku : null;
+      if (size?.locked && size.value !== null && size.value !== sizeSku) {
+        const lockedBy = size.fromProfileId === base?.id ? base : profile;
         return yield* refuse(
           "size_fixed_by_profile",
-          `profile "${profile.name}" locks the size at ${profile.sizeSku}`,
+          `profile "${lockedBy?.name}" locks the size at ${size.value}`,
         );
       }
     }

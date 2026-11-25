@@ -279,6 +279,7 @@ const packageRowSchema = Schema.Struct({
   permission: Schema.NullOr(Schema.Literal("allowed", "disallowed")),
   versionPin: Schema.NullOr(Schema.String),
   source: Schema.NullOr(manifestScopeSchema),
+  sourceProfileId: Schema.optional(Schema.String),
   // "unknown" is not "not_installed" — a machine that has never reported has
   // told us nothing.
   installed: Schema.Literal("installed", "not_installed", "unknown"),

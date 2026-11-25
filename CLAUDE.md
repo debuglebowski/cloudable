@@ -70,7 +70,7 @@ Read the relevant file before working in that area.
 
 | File                  | Covers                                                         |
 | :-------------------- | :------------------------------------------------------------- |
-| `docs/inheritance.md` | org → profile → machine, profiles, package permission, overrides, locking |
+| `docs/inheritance.md` | org → (base) profile → machine, profiles, package permission, overrides, locking |
 | `docs/agents.md`      | Control agent, tunnel daemon, wire protocol, attestation       |
 | `docs/cloud-auth.md`  | Self-hosted managed identity (the real path), RBAC scope, why BYOC federation was removed |
 | `docs/access.md`      | Roles (member, admin, approver), web terminal, SSH certificates, session tokens |

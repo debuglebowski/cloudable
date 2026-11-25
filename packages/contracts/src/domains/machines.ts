@@ -337,6 +337,11 @@ export interface MachinePackageRow {
   versionPin: string | null;
   /** Which scope the permission came from; null when there is no manifest entry. */
   source: ManifestScope | null;
+  /**
+   * When `source` is `profile`: which profile. The machine's own, or the base profile its
+   * profile extends.
+   */
+  sourceProfileId?: string;
   installed: PackageInstallState;
   /** The version the agent reported, when it could determine one. */
   installedVersion?: string;

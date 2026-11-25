@@ -32,6 +32,10 @@ Nothing is hardcoded into the nav beyond the three group headers — see "Nav re
   same append-only event log.
 - **Profiles live under Configure.** A profile is configuration, like the org page, and admin
   only. Its page reuses the org's package card (`OrgPackageManifestCard` with a `profileId`).
+  A profile that extends a base shows it in a "Base profile" card, and shows inherited settings,
+  packages and creation fields as "from base <name>". The machine's packages table says "From the
+  base profile" for a row whose `sourceProfileId` is not the machine's own profile. The level type
+  stays `org | profile | machine`: a base is a profile.
 
 ## Design tokens
 

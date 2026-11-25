@@ -125,9 +125,11 @@ export function MachinePackagesTable({
   const orgPackagesQuery = useOrgPackages({ enabled: canEditPermission });
   const profileQuery = useProfile(profileId, { enabled: canEditPermission });
   const inheritedNames = new Set(
-    [...(orgPackagesQuery.data ?? []), ...(profileQuery.data?.packages ?? [])].map(
-      (entry) => entry.packageName,
-    ),
+    [
+      ...(orgPackagesQuery.data ?? []),
+      ...(profileQuery.data?.packages ?? []),
+      ...(profileQuery.data?.base?.packages ?? []),
+    ].map((entry) => entry.packageName),
   );
 
   const packagesQuery = useQuery({
@@ -314,7 +316,7 @@ export function MachinePackagesTable({
                   (removeMutation.isPending &&
                     removeMutation.variables?.packageName === row.packageName)
                 }
-                lineage={lineageOf(row, inheritedNames)}
+                lineage={lineageOf(row, inheritedNames, profileId)}
                 canEditPermission={canEditPermission}
                 canRequestActions={canRequestActions}
                 onAction={(op) => actionMutation.mutate({ packageName: row.packageName, op })}
@@ -468,13 +470,20 @@ function permissionEdit(row: MachinePackageRow, target: PermissionValue) {
 }
 
 /** Where a row's permission comes from, said in words under the select. */
-type Lineage = "org" | "profile" | "override" | "machine" | null;
+type Lineage = "org" | "base" | "profile" | "override" | "machine" | null;
 
-const lineageOf = (row: MachinePackageRow, inheritedNames: ReadonlySet<string>): Lineage =>
+const lineageOf = (
+  row: MachinePackageRow,
+  inheritedNames: ReadonlySet<string>,
+  profileId: string | null,
+): Lineage =>
   row.source === null
     ? null
     : row.source === "profile"
-      ? "profile"
+      ? // A profile row from another profile than the machine's is its profile's base.
+        row.sourceProfileId && row.sourceProfileId !== profileId
+        ? "base"
+        : "profile"
       : row.source !== "machine"
         ? "org"
         : inheritedNames.has(row.packageName)
@@ -483,6 +492,7 @@ const lineageOf = (row: MachinePackageRow, inheritedNames: ReadonlySet<string>):
 
 const LINEAGE_LABELS: Record<Exclude<Lineage, null>, string> = {
   org: "From the org",
+  base: "From the base profile",
   profile: "From the profile",
   override: "Overrides the org or profile",
   machine: "This machine only",
@@ -806,7 +816,9 @@ function RowMenu({
         {showEdit && (
           <DropdownMenuItem onSelect={onEdit}>
             <Pencil />
-            {lineage === "org" || lineage === "profile" ? "Override on this machine…" : "Edit…"}
+            {lineage === "org" || lineage === "base" || lineage === "profile"
+              ? "Override on this machine…"
+              : "Edit…"}
           </DropdownMenuItem>
         )}
         {showRemove &&

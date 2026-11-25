@@ -112,6 +112,8 @@ export interface MachinePackageRow {
   permission: PackagePermission;
   versionPin: string | null;
   source: SettingLevel | null;
+  /** When `source` is `profile`: the machine's profile, or the base profile it extends. */
+  sourceProfileId?: string;
   installed: PackageInstallState;
   installedVersion?: string;
   versionMismatch: boolean;

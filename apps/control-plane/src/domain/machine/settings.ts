@@ -1,9 +1,10 @@
 import type { AccessMethodsEnabled } from "@cloudable/contracts";
 import type * as schema from "@cloudable/schema";
-import { type SettingRow, resolveSetting, settingValues } from "@cloudable/schema";
+import { type SettingRow, chainProfileIds, resolveSetting, settingValues } from "@cloudable/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { Data, Effect } from "effect";
+import { withBaseProfile } from "../profile/chain";
 
 /**
  * Two more org → profile → machine resolved settings from the
@@ -62,6 +63,8 @@ export interface ResolvedMachineSetting<T> {
 export interface MachineSettingChain {
   orgId: string;
   profileId?: string | null;
+  /** The base the profile extends. Read from the profile when left out. */
+  baseProfileId?: string | null;
   machineId: string;
 }
 
@@ -76,7 +79,7 @@ const loadChainRows = <T>(
   chain: MachineSettingChain,
 ): Effect.Effect<SettingRow<T>[], MachineSettingsError> =>
   Effect.gen(function* () {
-    const scopeIds = [chain.orgId, chain.machineId, ...(chain.profileId ? [chain.profileId] : [])];
+    const scopeIds = [chain.orgId, chain.machineId, ...chainProfileIds(chain)];
     const rows = yield* Effect.tryPromise({
       try: () =>
         db
@@ -105,8 +108,12 @@ const resolveWithDefault = <T>(
   defaultValue: T,
 ): Effect.Effect<ResolvedMachineSetting<T>, MachineSettingsError> =>
   Effect.gen(function* () {
-    const rows = yield* loadChainRows<T>(db, key, chain);
-    const resolved = resolveSetting<T>(key, rows, chain);
+    const fullChain = yield* Effect.tryPromise({
+      try: () => withBaseProfile(db, chain),
+      catch: (cause) => new MachineSettingsError({ reason: "read_failed", cause }),
+    });
+    const rows = yield* loadChainRows<T>(db, key, fullChain);
+    const resolved = resolveSetting<T>(key, rows, fullChain);
     return resolved
       ? {
           value: resolved.value,

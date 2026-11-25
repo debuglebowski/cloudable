@@ -93,7 +93,7 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   "profile.created": {
     tier: 1,
     description:
-      "An admin created a profile: a named set of settings machines link to. Carries any creation fields it sets (provider, region, size, image), and which of them it locks (`providerLocked` and so on).",
+      "An admin created a profile: a named set of settings machines link to. Carries any creation fields it sets (provider, region, size, image), which of them it locks (`providerLocked` and so on), and the base it extends (`baseProfileId`), if any.",
   },
   "profile.updated": {
     tier: 1,
@@ -108,7 +108,12 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   "profile.archived": {
     tier: 1,
     description:
-      "An admin archived a profile. No new machine can use it; machines already on it keep reading their settings from it.",
+      "An admin archived a profile. No new machine can use it; machines already on it keep reading their settings from it. A profile that others extend cannot be archived.",
+  },
+  "profile.base_changed": {
+    tier: 1,
+    description:
+      "An admin set the base profile a profile extends, changed it, or cleared it. Machines on the profile then resolve their settings, packages and creation fields through the new base. Null means none.",
   },
   "org.apt_repository_added": {
     tier: 1,

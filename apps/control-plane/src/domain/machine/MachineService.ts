@@ -1,5 +1,5 @@
 import type { PackageSetting } from "@cloudable/contracts";
-import { machinePackages, machines, people } from "@cloudable/schema";
+import { chainProfileIds, machinePackages, machines, people } from "@cloudable/schema";
 import { and, asc, eq, gt, inArray, or, sql } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { ulid } from "ulid";
@@ -14,6 +14,7 @@ import { isProviderEnabled } from "../integrations/integrations";
 import { readEnsureRetryHours } from "../organisation/ensure-retry";
 import { readMalwareProtectionWith } from "../organisation/malware-protection";
 import { profileFieldConflict, requireUsableProfile } from "../profile/ProfileService";
+import { withBaseProfile } from "../profile/chain";
 import { generateDefaultMachineName } from "./default-name";
 import { decideEnsureActions, nextEnsureAttemptAt } from "./ensure";
 import {
@@ -62,6 +63,13 @@ export class MachineServiceError extends Data.TaggedError("MachineServiceError")
 }> {}
 
 type MachineRow = typeof machines.$inferSelect;
+/** A machine's chain with its profile's base filled in (`withBaseProfile`). */
+type MachineChain = {
+  orgId: string;
+  profileId: string | null;
+  baseProfileId: string | null;
+  machineId: string;
+};
 type MachinePackageTableRow = typeof machinePackages.$inferSelect;
 
 export interface CreateMachineInput {
@@ -230,23 +238,39 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
     const eventBus = yield* EventBus;
     const provisioning = yield* ProvisioningServiceTag;
 
-    const manifestScopeFilter = (machine: Pick<MachineRow, "id" | "orgId" | "profileId">) => {
+    /** The machine's chain, with its profile's base read from the profile. */
+    const chainFor = (machine: Pick<MachineRow, "id" | "orgId" | "profileId">) =>
+      Effect.tryPromise({
+        try: () =>
+          withBaseProfile(db, {
+            orgId: machine.orgId,
+            profileId: machine.profileId,
+            machineId: machine.id,
+          }),
+        catch: (cause) => new MachineServiceError({ reason: "manifest_read_failed", cause }),
+      });
+
+    const manifestScopeFilter = (chain: MachineChain) => {
       const conditions = [
-        and(eq(machinePackages.scopeType, "org"), eq(machinePackages.scopeId, machine.orgId)),
-        and(eq(machinePackages.scopeType, "machine"), eq(machinePackages.scopeId, machine.id)),
+        and(eq(machinePackages.scopeType, "org"), eq(machinePackages.scopeId, chain.orgId)),
+        and(eq(machinePackages.scopeType, "machine"), eq(machinePackages.scopeId, chain.machineId)),
       ];
-      if (machine.profileId) {
-        const profileId = machine.profileId;
+      const profileIds = chainProfileIds(chain);
+      if (profileIds.length > 0) {
         conditions.push(
-          and(eq(machinePackages.scopeType, "profile"), eq(machinePackages.scopeId, profileId)),
+          and(
+            eq(machinePackages.scopeType, "profile"),
+            inArray(machinePackages.scopeId, profileIds),
+          ),
         );
       }
       return or(...conditions);
     };
 
-    const fetchManifestRows = (machine: Pick<MachineRow, "id" | "orgId" | "profileId">) =>
+    /** Every manifest row in the machine's chain: org, base profile, profile, machine. */
+    const fetchManifestRows = (chain: MachineChain) =>
       Effect.tryPromise({
-        try: () => db.select().from(machinePackages).where(manifestScopeFilter(machine)),
+        try: () => db.select().from(machinePackages).where(manifestScopeFilter(chain)),
         catch: (cause) => new MachineServiceError({ reason: "manifest_read_failed", cause }),
       });
 
@@ -337,10 +361,13 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             image: image ?? null,
           });
           if (conflict) return yield* invalid(conflict);
-          provider = provider ?? profile.provider ?? undefined;
-          sizeSku = sizeSku ?? profile.sizeSku ?? undefined;
-          image = image ?? profile.image ?? undefined;
-          requestedRegion = requestedRegion ?? profile.region;
+          // `creation` already folds in the base profile, if the profile extends one.
+          const { creation } = profile;
+          provider =
+            provider ?? (creation.provider.value as CreateMachineInput["provider"]) ?? undefined;
+          sizeSku = sizeSku ?? creation.sizeSku.value ?? undefined;
+          image = image ?? creation.image.value ?? undefined;
+          requestedRegion = requestedRegion ?? creation.region.value;
         }
         if (!provider) return yield* invalid('"provider" is required');
         if (!sizeSku) return yield* invalid('"sizeSku" is required');
@@ -537,13 +564,10 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         // brand-new machine has no machine-level override yet. This is
         // what a provisioning backend (e.g. the local Docker adapter)
         // actually installs.
-        const manifestRows = yield* fetchManifestRows(machine);
+        const createChain = yield* chainFor(machine);
+        const manifestRows = yield* fetchManifestRows(createChain);
         const packages = declaredPackages(
-          resolveManifest(manifestRows.map(toManifestRow), {
-            orgId: machine.orgId,
-            profileId: machine.profileId,
-            machineId: machine.id,
-          }),
+          resolveManifest(manifestRows.map(toManifestRow), createChain),
         ).map((entry) => entry.packageName);
 
         // `"provisioning"` is a real, expected outcome here, not an error — the Azure
@@ -707,12 +731,8 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
     ): Effect.Effect<MachineDetail, MachineServiceError | MachineNotFoundError> =>
       Effect.gen(function* () {
         const machine = yield* fetchMachine(machineId, orgId);
-        const rows = yield* fetchManifestRows(machine);
-        const chain = {
-          orgId: machine.orgId,
-          profileId: machine.profileId,
-          machineId: machine.id,
-        };
+        const chain = yield* chainFor(machine);
+        const rows = yield* fetchManifestRows(chain);
         const manifest = resolveManifest(rows.map(toManifestRow), chain);
         const [persistentPaths, accessMethodsEnabled] = yield* Effect.all([
           resolvePersistentPaths(db, chain),
@@ -747,9 +767,15 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           ...new Set([...upserts.map((u) => u.packageName), ...removals]),
         ];
 
-        const existingRows = (yield* fetchManifestRows(machine)).map(toManifestRow);
+        const chain = yield* chainFor(machine);
+        const existingRows = (yield* fetchManifestRows(chain)).map(toManifestRow);
 
-        const conflicts = findLockConflicts(existingRows, "machine", editedPackageNames);
+        const conflicts = findLockConflicts(
+          existingRows,
+          "machine",
+          editedPackageNames,
+          chain.baseProfileId,
+        );
         if (conflicts.length > 0) {
           return yield* Effect.fail(
             new PackageLockConflictError({
@@ -763,11 +789,6 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           );
         }
 
-        const chain = {
-          orgId: machine.orgId,
-          profileId: machine.profileId,
-          machineId: machine.id,
-        };
         const previousByName = new Map(
           resolveManifest(existingRows, chain).map((entry) => [entry.packageName, entry]),
         );
@@ -897,7 +918,7 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           catch: (cause) => new MachineServiceError({ reason: "manifest_write_failed", cause }),
         });
 
-        const refreshedRows = (yield* fetchManifestRows(machine)).map(toManifestRow);
+        const refreshedRows = (yield* fetchManifestRows(chain)).map(toManifestRow);
         const newManifest = resolveManifest(refreshedRows, chain);
         const newByName = new Map(newManifest.map((entry) => [entry.packageName, entry]));
 
@@ -981,12 +1002,9 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
     const desiredStateFor = (machineId: string, orgId: string) =>
       Effect.gen(function* () {
         const machine = yield* fetchMachine(machineId, orgId);
-        const rows = (yield* fetchManifestRows(machine)).map(toManifestRow);
-        const manifest = resolveManifest(rows, {
-          orgId: machine.orgId,
-          profileId: machine.profileId,
-          machineId: machine.id,
-        });
+        const chain = yield* chainFor(machine);
+        const rows = (yield* fetchManifestRows(chain)).map(toManifestRow);
+        const manifest = resolveManifest(rows, chain);
         return {
           version: String(machine.desiredStateVersion),
           allowedPackages: declaredPackages(manifest).map((entry) => entry.packageName),
@@ -1043,12 +1061,9 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
     const packagesView = (machineId: string, orgId: string) =>
       Effect.gen(function* () {
         const machine = yield* fetchMachine(machineId, orgId);
-        const rows = (yield* fetchManifestRows(machine)).map(toManifestRow);
-        const manifest = resolveManifest(rows, {
-          orgId: machine.orgId,
-          profileId: machine.profileId,
-          machineId: machine.id,
-        });
+        const chain = yield* chainFor(machine);
+        const rows = (yield* fetchManifestRows(chain)).map(toManifestRow);
+        const manifest = resolveManifest(rows, chain);
         const pendingActions = yield* outstandingActionsByPackage(db, machine.id).pipe(
           Effect.catchAll(() => Effect.succeed(new Map())),
         );
@@ -1105,12 +1120,9 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
         const machine = yield* fetchMachine(input.machineId, input.orgId);
         // An archived machine is governed by nothing; it gets nothing installed either.
         if (machine.archivedAt !== null) return [];
-        const rows = (yield* fetchManifestRows(machine)).map(toManifestRow);
-        const manifest = resolveManifest(rows, {
-          orgId: machine.orgId,
-          profileId: machine.profileId,
-          machineId: machine.id,
-        });
+        const chain = yield* chainFor(machine);
+        const rows = (yield* fetchManifestRows(chain)).map(toManifestRow);
+        const manifest = resolveManifest(rows, chain);
         if (!manifest.some((entry) => entry.setting !== "allowed")) return [];
 
         const outstanding = yield* outstandingActionsByPackage(db, machine.id);

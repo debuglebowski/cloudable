@@ -2,7 +2,7 @@ import type { MachineProvider, ProfileSummary } from "@cloudable/contracts";
 import { useMutation } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
 
-import { profileErrorMessage } from "@/api/profiles";
+import { profileErrorMessage, useProfiles } from "@/api/profiles";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -36,9 +36,12 @@ export interface ProfileFormValues {
   regionLocked: boolean;
   sizeLocked: boolean;
   imageLocked: boolean;
+  /** New profiles only. A base is changed later on the profile's page. */
+  baseProfileId?: string | null;
 }
 
 const ANY = "any";
+const NO_BASE = "none";
 const PROVIDERS: MachineProvider[] = ["azure", "docker", "fake"];
 
 type Locks = Pick<
@@ -81,6 +84,11 @@ export function ProfileFormDialog({
   const [sizeSku, setSizeSku] = useState("");
   const [image, setImage] = useState("");
   const [locks, setLocks] = useState<Locks>(NO_LOCKS);
+  const [baseProfileId, setBaseProfileId] = useState(NO_BASE);
+  // One level only: a base extends nothing itself.
+  const bases = (useProfiles({ enabled: open && !profile }).data ?? []).filter(
+    (p) => p.archivedAt === null && p.baseProfileId === null,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -90,6 +98,7 @@ export function ProfileFormDialog({
     setRegion(profile?.region ?? "");
     setSizeSku(profile?.sizeSku ?? "");
     setImage(profile?.image ?? "");
+    setBaseProfileId(NO_BASE);
     setLocks(
       profile
         ? {
@@ -133,6 +142,7 @@ export function ProfileFormDialog({
         regionLocked: regionValue !== null && locks.regionLocked,
         sizeLocked: sizeValue !== null && locks.sizeLocked,
         imageLocked: imageValue !== null && locks.imageLocked,
+        ...(profile ? {} : { baseProfileId: baseProfileId === NO_BASE ? null : baseProfileId }),
       }),
     onSuccess: () => {
       onSaved();
@@ -180,6 +190,29 @@ export function ProfileFormDialog({
               placeholder="Who it is for"
             />
           </div>
+
+          {!profile && bases.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="profile-base">Extends</Label>
+              <Select value={baseProfileId} onValueChange={setBaseProfileId}>
+                <SelectTrigger id="profile-base">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_BASE}>No base</SelectItem>
+                  {bases.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span className="text-xs text-muted-foreground">
+                Optional. The new profile takes the base's settings, packages and fields below,
+                unless it sets its own. What the base locks, it cannot change.
+              </span>
+            </div>
+          )}
 
           <div className="mt-2 flex flex-col gap-1">
             <span className="text-sm font-medium">New machines</span>

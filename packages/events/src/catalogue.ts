@@ -117,6 +117,7 @@ export const EVENT_TYPES = [
   "profile.updated",
   "profile.setting_changed",
   "profile.archived",
+  "profile.base_changed",
   "machine.profile_assigned",
 
   // --- approved apt repositories ---
