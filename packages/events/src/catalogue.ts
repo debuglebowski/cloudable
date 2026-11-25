@@ -6,6 +6,7 @@ import type { IdpRolesEvent } from "./domains/idp-roles";
 import type { MachineEvent } from "./domains/machine";
 import type { OrgEvent } from "./domains/org";
 import type { PersonEvent } from "./domains/person";
+import type { ProfileEvent } from "./domains/profile";
 import type { SnapshotEvent } from "./domains/snapshot";
 
 export type DomainEvent =
@@ -17,7 +18,8 @@ export type DomainEvent =
   | SnapshotEvent
   | CloudEvent
   | AgentEvent
-  | IdpRolesEvent;
+  | IdpRolesEvent
+  | ProfileEvent;
 
 /**
  * The full, ordered catalogue of event type names.
@@ -109,4 +111,11 @@ export const EVENT_TYPES = [
   "idp_roles.revalidated",
   "idp_roles.local_change_refused",
   "idp_roles.activation",
+
+  // --- profile (org → profile → machine) ---
+  "profile.created",
+  "profile.updated",
+  "profile.setting_changed",
+  "profile.archived",
+  "machine.profile_assigned",
 ] as const satisfies ReadonlyArray<DomainEvent["type"]>;

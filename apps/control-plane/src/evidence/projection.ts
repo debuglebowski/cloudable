@@ -22,6 +22,17 @@ const describePackageState = (state: unknown): string => {
   return value.pinned === true ? `${version}, locked` : version;
 };
 
+const profileCreationFieldsSummary = (fields: {
+  provider: string | null;
+  region: string | null;
+  size: string | null;
+  image: string | null;
+}): string =>
+  (["provider", "region", "size", "image"] as const)
+    .filter((key) => fields[key] !== null)
+    .map((key) => `${key} ${fields[key]}`)
+    .join(", ");
+
 const packageChangeSummary = (
   packageName: string,
   previous: unknown,
@@ -156,7 +167,7 @@ function summarize(row: RawEventRow): string {
         : "A person is no longer an approver.";
 
     case "machine.created":
-      return `Machine "${event.payload.name}" was declared (${event.payload.region}, ${event.payload.size}, ${event.payload.image}).`;
+      return `Machine "${event.payload.name}" was declared (${event.payload.region}, ${event.payload.size}, ${event.payload.image})${event.payload.profileId ? ` on profile ${event.payload.profileId}` : ""}.`;
     case "machine.provisioned":
       return `Machine finished provisioning as cloud resource ${event.payload.cloudResourceId}.`;
     case "machine.provisioning_failed":
@@ -314,6 +325,29 @@ function summarize(row: RawEventRow): string {
     case "idp_roles.activation":
       return `Roles from the identity provider: ${event.payload.reason}.`;
 
+    case "profile.created": {
+      const fields = profileCreationFieldsSummary(event.payload);
+      return `Profile "${event.payload.name}" (${event.payload.profileId}) was created${fields ? ` with ${fields}` : ""}.`;
+    }
+    case "profile.updated":
+      return `Profile ${event.payload.profileId} changed from ${JSON.stringify(event.payload.previous)} to ${JSON.stringify(event.payload.current)}.`;
+    case "profile.setting_changed": {
+      const packageName = packageNameFromSettingKey(event.payload.key);
+      if (packageName !== null) {
+        return packageChangeSummary(
+          packageName,
+          event.payload.previous,
+          event.payload.current,
+          `profile ${event.payload.profileId}`,
+        );
+      }
+      return `Setting "${event.payload.key}" on profile ${event.payload.profileId} changed from ${JSON.stringify(event.payload.previous)} to ${JSON.stringify(event.payload.current)}.`;
+    }
+    case "profile.archived":
+      return `Profile "${event.payload.name}" (${event.payload.profileId}) was archived.`;
+    case "machine.profile_assigned":
+      return `Machine moved from ${event.payload.previousProfileId ? `profile ${event.payload.previousProfileId}` : "no profile"} to ${event.payload.profileId ? `profile ${event.payload.profileId}` : "no profile"}.`;
+
     default:
       return assertNever(event);
   }
@@ -401,6 +435,11 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "idp_roles.denied":
     case "idp_roles.local_change_refused":
     case "idp_roles.activation":
+    case "profile.created":
+    case "profile.updated":
+    case "profile.setting_changed":
+    case "profile.archived":
+    case "machine.profile_assigned":
       return undefined;
 
     default:

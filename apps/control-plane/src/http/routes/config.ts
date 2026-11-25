@@ -8,6 +8,7 @@ import {
   SettingWriteError,
 } from "../../domain/config/errors";
 import { AdminRoleRequiredError } from "../../domain/people/authorization";
+import { ProfileEditError, ProfileNotFoundError } from "../../domain/profile/errors";
 import { CurrentUserAuthentication } from "../middleware/auth";
 
 // Wire schemas for `/api/v1/config/...`. These mirror
@@ -16,7 +17,7 @@ import { CurrentUserAuthentication } from "../middleware/auth";
 // HttpApi layer decodes/encodes against — see the comment at the top of
 // that contracts file for why the two aren't the same objects.
 
-export const SettingScopeType = Schema.Literal("org", "machine");
+export const SettingScopeType = Schema.Literal("org", "profile", "machine");
 
 export const SettingChangeResult = Schema.Struct({
   scopeType: SettingScopeType,
@@ -71,6 +72,8 @@ export const ConfigGroup = HttpApiGroup.make("config")
       .addError(InvalidScopeError, { status: 400 })
       .addError(InvalidSettingValueError, { status: 400 })
       .addError(MachineNotFoundError, { status: 404 })
+      .addError(ProfileNotFoundError, { status: 404 })
+      .addError(ProfileEditError, { status: 409 })
       .addError(LockedSettingError, { status: 409 })
       .addError(SettingWriteError, { status: 500 }),
   )
@@ -86,6 +89,8 @@ export const ConfigGroup = HttpApiGroup.make("config")
       .addError(InvalidScopeError, { status: 400 })
       .addError(InvalidSettingValueError, { status: 400 })
       .addError(MachineNotFoundError, { status: 404 })
+      .addError(ProfileNotFoundError, { status: 404 })
+      .addError(ProfileEditError, { status: 409 })
       .addError(LockedSettingError, { status: 409 })
       .addError(SettingWriteError, { status: 500 }),
   )

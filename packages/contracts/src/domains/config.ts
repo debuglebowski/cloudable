@@ -5,8 +5,8 @@
 // `effect/Schema` structs with the same shape for runtime validation; these
 // interfaces are the type-only mirror used by non-Effect consumers.
 
-/** v1 only supports editing at org or machine scope — template scope has no UI yet. */
-export type SettingScopeType = "org" | "machine";
+/** Where a setting is written: the whole org, one profile, or one machine. */
+export type SettingScopeType = "org" | "profile" | "machine";
 
 /**
  * The generic settings key for logging tier — the one literal

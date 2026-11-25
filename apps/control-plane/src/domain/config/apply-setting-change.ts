@@ -1,7 +1,7 @@
 import { type SessionRowMethod, isVulnerabilityScanSettingKey } from "@cloudable/contracts";
 import type { DomainEvent, OrgEvent } from "@cloudable/events";
-import { type SettingRow, machines, resolveSetting, settingValues } from "@cloudable/schema";
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { type SettingRow, machines, profiles, resolveSetting, settingValues } from "@cloudable/schema";
+import { and, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { ulid } from "ulid";
 import { Db } from "../../db/layer";
@@ -17,6 +17,8 @@ import {
 } from "../machine/settings";
 import { NIX_SNAPSHOT_KEY, isValidNixSnapshot } from "../organisation/nix-snapshot";
 import { type AdminRoleRequiredError, requireAdmin } from "../people/authorization";
+import { ProfileEditError, ProfileNotFoundError } from "../profile/errors";
+import { isProfileSettingKey } from "../profile/setting-keys";
 import {
   EVENTS_RETENTION_DAYS_KEY,
   MIN_EVENTS_RETENTION_DAYS,
@@ -30,15 +32,14 @@ import {
   LockedSettingError,
   SettingWriteError,
 } from "./errors";
-import { isPackageManifestKey } from "./validate-locking";
 
 export interface ApplySettingChangeInput {
   orgId: string;
-  scopeType: "org" | "machine";
+  scopeType: "org" | "profile" | "machine";
   scopeId: string;
   key: string;
   value: unknown;
-  /** Org-scope only. Ignored (existing flag preserved) on a machine-scope write. */
+  /** Org and profile scope only. Ignored (existing flag preserved) on a machine-scope write. */
   locked?: boolean | undefined;
   actorType: "person" | "system";
   actorId: string;
@@ -58,6 +59,8 @@ export type ApplySettingChangeError =
   | InvalidScopeError
   | InvalidSettingValueError
   | MachineNotFoundError
+  | ProfileNotFoundError
+  | ProfileEditError
   | LockedSettingError
   | SettingWriteError;
 
@@ -185,9 +188,64 @@ export const applySettingChange = (
       }
     }
 
-    // Machine-scope: resolve the machine, verify tenancy, and (for the
-    // package manifest key only — see validate-locking.ts) check locking
-    // and compute which level this write overrides.
+    // Profile scope: the profile must be this org's and not archived, and the key must be one
+    // a profile may set. An org lock on the key blocks the edit, the same way it blocks a
+    // machine's.
+    if (input.scopeType === "profile") {
+      const profileRows = yield* Effect.tryPromise({
+        try: () => db.select().from(profiles).where(eq(profiles.id, input.scopeId)).limit(1),
+        catch: (cause) =>
+          new SettingWriteError({ message: `looking up profile: ${String(cause)}` }),
+      });
+      const profile = profileRows[0];
+      if (!profile || profile.orgId !== input.orgId) {
+        return yield* Effect.fail(new ProfileNotFoundError({ profileId: input.scopeId }));
+      }
+      if (profile.archivedAt !== null) {
+        return yield* Effect.fail(
+          new ProfileEditError({
+            code: "profile_archived",
+            message: `Profile "${profile.name}" is archived. Its settings can no longer change.`,
+          }),
+        );
+      }
+      if (!isProfileSettingKey(input.key)) {
+        return yield* Effect.fail(
+          new InvalidScopeError({
+            message: `"${input.key}" is set for the whole org or per machine, not on a profile`,
+          }),
+        );
+      }
+      const orgLock = yield* Effect.tryPromise({
+        try: () =>
+          db
+            .select({ id: settingValues.id })
+            .from(settingValues)
+            .where(
+              and(
+                eq(settingValues.scopeType, "org"),
+                eq(settingValues.scopeId, input.orgId),
+                eq(settingValues.key, input.key),
+                eq(settingValues.locked, true),
+              ),
+            )
+            .limit(1),
+        catch: (cause) =>
+          new SettingWriteError({ message: `reading org lock: ${String(cause)}` }),
+      });
+      if (orgLock.length > 0) {
+        return yield* Effect.fail(
+          new LockedSettingError({
+            key: input.key,
+            lockedAtScopeType: "org",
+            lockedAtScopeId: input.orgId,
+          }),
+        );
+      }
+    }
+
+    // Machine-scope: resolve the machine, verify tenancy, check locks above it, and compute
+    // which level this write overrides.
     let machine: typeof machines.$inferSelect | undefined;
     let overridesLevel: "org" | "profile" | "machine" = "org";
 
@@ -224,27 +282,29 @@ export const applySettingChange = (
           new SettingWriteError({ message: `reading setting chain: ${String(cause)}` }),
       });
 
-      if (isPackageManifestKey(input.key)) {
-        const parentScopes: ReadonlyArray<{ scopeType: "org" | "profile"; scopeId: string }> = [
-          { scopeType: "org", scopeId: input.orgId },
-          ...(machine.profileId
-            ? [{ scopeType: "profile" as const, scopeId: machine.profileId }]
-            : []),
-        ];
-        const lockedParent = keyRows.find(
-          (row) =>
-            row.locked &&
-            parentScopes.some((p) => p.scopeType === row.scopeType && p.scopeId === row.scopeId),
+      // A lock on the org's or the profile's row means no machine may override it. The org's
+      // lock is reported first: it is the one a profile could not lift either.
+      const parentScopes: ReadonlyArray<{ scopeType: "org" | "profile"; scopeId: string }> = [
+        { scopeType: "org", scopeId: input.orgId },
+        ...(machine.profileId
+          ? [{ scopeType: "profile" as const, scopeId: machine.profileId }]
+          : []),
+      ];
+      const lockedParent = parentScopes
+        .map((p) =>
+          keyRows.find(
+            (row) => row.locked && row.scopeType === p.scopeType && row.scopeId === p.scopeId,
+          ),
+        )
+        .find((row) => row !== undefined);
+      if (lockedParent) {
+        return yield* Effect.fail(
+          new LockedSettingError({
+            key: input.key,
+            lockedAtScopeType: lockedParent.scopeType,
+            lockedAtScopeId: lockedParent.scopeId,
+          }),
         );
-        if (lockedParent) {
-          return yield* Effect.fail(
-            new LockedSettingError({
-              key: input.key,
-              lockedAtScopeType: lockedParent.scopeType,
-              lockedAtScopeId: lockedParent.scopeId,
-            }),
-          );
-        }
       }
 
       // What would this key resolve to without this machine's own row? That
@@ -285,12 +345,11 @@ export const applySettingChange = (
     // the event row. `null` round-trips explicitly.
     const previous: unknown = existing ? existing.value : null;
 
-    // `locked` is an org-scope-only concept: the
-    // organisation marks an entry locked so nothing below it can override.
-    // A machine-scope write must never be able to set or clear it — that
-    // would let the very override this flag exists to block also toggle it.
+    // The org and a profile can lock an entry so nothing below them can override it. A
+    // machine-scope write must never be able to set or clear it — that would let the very
+    // override this flag exists to block also toggle it.
     const nextLocked =
-      input.scopeType === "org"
+      input.scopeType !== "machine"
         ? (input.locked ?? existing?.locked ?? false)
         : (existing?.locked ?? false);
 
@@ -354,6 +413,20 @@ export const applySettingChange = (
         id: ulid(),
         recordedAt: occurredAt,
       };
+    } else if (input.scopeType === "profile") {
+      event = {
+        id: ulid(),
+        occurredAt,
+        recordedAt: occurredAt,
+        orgId: input.orgId,
+        actorType: input.actorType,
+        actorId: input.actorId,
+        machineId: null,
+        correlationId: input.correlationId,
+        schemaVersion: 1,
+        type: "profile.setting_changed",
+        payload: { profileId: input.scopeId, key: input.key, previous, current: input.value },
+      };
     } else {
       event = {
         id: ulid(),
@@ -370,10 +443,8 @@ export const applySettingChange = (
           key: input.key,
           previous,
           current: input.value,
-          // v1 has no template UI, so an org-scope edit through this
-          // endpoint always changes the org-wide default. "machine" is
-          // reserved for a future path where an org admin pushes a value
-          // that targets machine-level defaults directly.
+          // An org-scope edit always changes the org-wide default. A profile edit has its own
+          // event, `profile.setting_changed`.
           level: "org",
         },
       } satisfies OrgEvent;
@@ -472,19 +543,45 @@ export const applySettingChange = (
         if (input.scopeType === "machine") {
           yield* terminate(input.scopeId);
         } else {
-          // Org-scope edit: every machine in the org WITHOUT its own
-          // machine-level override for this key inherits the new org
-          // default (the template layer is inert in v1 — see
-          // docs/inheritance.md — so for an unoverridden machine the
-          // effective value is exactly the org's own value). A machine
-          // that has its own override is unaffected by this write: its own
-          // row still wins resolution regardless of what the org default
-          // just changed to.
+          // Org or profile edit: every machine this write reaches WITHOUT a row of its own
+          // below it inherits the new value. For a profile edit that is the profile's
+          // machines. For an org edit it is every machine whose profile (if any) has no row
+          // for this key either. A machine with its own override is unaffected: its own row
+          // still wins resolution regardless of what changed above it.
+          const shieldingProfileIds =
+            input.scopeType === "org"
+              ? (yield* Effect.tryPromise({
+                  try: () =>
+                    db
+                      .select({ scopeId: settingValues.scopeId })
+                      .from(settingValues)
+                      .where(
+                        and(eq(settingValues.scopeType, "profile"), eq(settingValues.key, input.key)),
+                      ),
+                  catch: (cause) =>
+                    new SettingWriteError({ message: `listing profile values: ${String(cause)}` }),
+                })).map((row) => row.scopeId)
+              : [];
           const orgMachines = yield* Effect.tryPromise({
             try: () =>
-              db.select({ id: machines.id }).from(machines).where(eq(machines.orgId, input.orgId)),
+              db
+                .select({ id: machines.id })
+                .from(machines)
+                .where(
+                  input.scopeType === "profile"
+                    ? and(eq(machines.orgId, input.orgId), eq(machines.profileId, input.scopeId))
+                    : shieldingProfileIds.length > 0
+                      ? and(
+                          eq(machines.orgId, input.orgId),
+                          or(
+                            isNull(machines.profileId),
+                            notInArray(machines.profileId, shieldingProfileIds),
+                          ),
+                        )
+                      : eq(machines.orgId, input.orgId),
+                ),
             catch: (cause) =>
-              new SettingWriteError({ message: `listing org machines: ${String(cause)}` }),
+              new SettingWriteError({ message: `listing affected machines: ${String(cause)}` }),
           });
 
           if (orgMachines.length > 0) {

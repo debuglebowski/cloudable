@@ -89,11 +89,38 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
       "Roles from the identity provider were switched on, off, or remapped. Switching on or remapping ended every human session and credential.",
   },
 
+  // --- profile --- (tier 1: a profile change reaches every machine on it)
+  "profile.created": {
+    tier: 1,
+    description:
+      "An admin created a profile: a named set of settings machines link to. Carries any creation fields it sets (provider, region, size, image).",
+  },
+  "profile.updated": {
+    tier: 1,
+    description:
+      "An admin changed a profile's name, description or creation fields. Creation fields can change only while no machine that is not archived uses the profile.",
+  },
+  "profile.setting_changed": {
+    tier: 1,
+    description:
+      "A setting or package on a profile changed. Every machine on the profile that has not overridden it follows. A package edit has key `package:<name>` and includes the package's `setting`.",
+  },
+  "profile.archived": {
+    tier: 1,
+    description:
+      "An admin archived a profile. No new machine can use it; machines already on it keep reading their settings from it.",
+  },
+  "machine.profile_assigned": {
+    tier: 1,
+    description:
+      "An admin moved a machine to another profile, or off one. The machine's settings now resolve through the new profile.",
+  },
+
   // --- machine --- (tier 1 by default; setting_changed/state_reported/
   // reconciled are tier 2, routine operational updates)
   "machine.created": {
     tier: 1,
-    description: "A machine was declared with a name, region, size, and image.",
+    description: "A machine was declared with a name, region, size, and image, and the profile it was created on, if any.",
   },
   "machine.provisioned": {
     tier: 1,
@@ -123,7 +150,7 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   "machine.setting_changed": {
     tier: 2,
     description:
-      "A machine-level setting was changed, overriding a template or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did. A package edit's `previous` and `current` include its `setting` (`allowed`, `ensure_installed` or `ensure_latest`).",
+      "A machine-level setting was changed, overriding a profile or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did. A package edit's `previous` and `current` include its `setting` (`allowed`, `ensure_installed` or `ensure_latest`).",
   },
   "machine.offboarded": {
     tier: 1,

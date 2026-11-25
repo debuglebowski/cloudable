@@ -30,7 +30,14 @@ export type MachineEvent =
         region: string | null;
         size: string;
         image: string;
+        /** The profile it was created on. Absent on machines created before profiles existed. */
+        profileId?: string | null;
       };
+    })
+  | (EventEnvelope & {
+      type: "machine.profile_assigned";
+      /** An admin moved the machine to another profile, or off one (`profileId: null`). */
+      payload: { profileId: string | null; previousProfileId: string | null };
     })
   | (EventEnvelope & {
       type: "machine.provisioned";
