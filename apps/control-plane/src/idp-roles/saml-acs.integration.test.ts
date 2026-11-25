@@ -4,7 +4,7 @@ import * as crypto from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
-import { events, orgs, people } from "@cloudable/schema";
+import { events, authUser, orgs, people } from "@cloudable/schema";
 import { and, eq } from "drizzle-orm";
 import { type IsolatedDb, createIsolatedDb } from "../test-support/isolated-db";
 import { isDbReachable } from "../testing/db-reachable";
@@ -130,6 +130,47 @@ describe.skipIf(!reachable || !hasOpenssl)("SAML assertions through the real ACS
     if (!row) throw new Error("person");
     return row;
   };
+
+  // The whole first sign-in, through BetterAuth itself: the account-create hook runs before the
+  // provisioning step, and it once refused every new account, so auto-add never ran in
+  // production even though the provisioning step alone passed its tests.
+  test("a first sign-in with a role adds the person; without one, nothing is left behind", async () => {
+    const newcomer = `new-${crypto.randomUUID().slice(0, 8)}@example.com`;
+    const noRole = `norole-${crypto.randomUUID().slice(0, 8)}@example.com`;
+    const otherDomain = `x-${crypto.randomUUID().slice(0, 8)}@elsewhere.example`;
+    const result = run([
+      {
+        kind: "post",
+        name: "newcomer",
+        email: newcomer,
+        roles: ["Cloudable.Member", "Cloudable.Approver"],
+        variant: "valid",
+      },
+      { kind: "post", name: "noRole", email: noRole, roles: [], variant: "valid" },
+      {
+        kind: "post",
+        name: "otherDomain",
+        email: otherDomain,
+        roles: ["Cloudable.Member"],
+        variant: "valid",
+      },
+    ]);
+
+    expect(result.newcomer?.error).toBeNull();
+    expect(result.newcomer?.sessionCookie).toBe(true);
+    const [added] = await iso.db.select().from(people).where(eq(people.email, newcomer));
+    expect(added).toMatchObject({ orgId, source: "idp", role: "member", approver: true });
+
+    for (const [name, who] of [
+      ["noRole", noRole],
+      ["otherDomain", otherDomain],
+    ] as const) {
+      expect(result[name]?.error).not.toBeNull();
+      expect(result[name]?.sessionCookie).toBe(false);
+      expect(await iso.db.select().from(people).where(eq(people.email, who))).toEqual([]);
+      expect(await iso.db.select().from(authUser).where(eq(authUser.email, who))).toEqual([]);
+    }
+  });
 
   test("valid, then every forged or stale variant refused, then replay refused after restart", async () => {
     const first = run([
