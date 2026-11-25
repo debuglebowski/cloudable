@@ -43,6 +43,7 @@ const APPROVAL_ACTIONS = [
   "package_install",
   "package_ensure",
   "apt_repository",
+  "machine_resize",
 ] as const;
 const APPROVAL_MODES = ["none", "single", "dual"] as const;
 const RETENTION_LOCATIONS = ["customer", "cloudable_sweden_central"] as const;

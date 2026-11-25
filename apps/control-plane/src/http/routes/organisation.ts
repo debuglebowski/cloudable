@@ -33,6 +33,7 @@ const ApprovalActionType = Schema.Literal(
   "package_install",
   "package_ensure",
   "apt_repository",
+  "machine_resize",
 );
 const ApprovalMode = Schema.Literal("none", "single", "dual");
 const LoggingTier = Schema.Literal(1, 2);

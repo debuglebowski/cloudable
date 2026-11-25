@@ -993,6 +993,10 @@ resource "azurerm_role_definition" "machine_operator" {
       "Microsoft.Network/publicIPAddresses/write",
       "Microsoft.Network/publicIPAddresses/delete",
       "Microsoft.Network/publicIPAddresses/join/action",
+      # Reading a machine's hourly CPU use and CPU credits from Azure Monitor, for the machine
+      # page (`ProvisioningService.metrics`). Read only. Applied by hand as Owner, like every
+      # edit to this definition, and about 30 minutes to propagate.
+      "Microsoft.Insights/metrics/read",
     ]
     not_actions = []
   }

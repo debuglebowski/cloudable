@@ -502,6 +502,8 @@ describe.skipIf(!postgresReachable)("MachineService (requires Postgres at DATABA
       reconcile: () => Effect.die("not used in this test"),
       reimage: () => Effect.die("not used in this test"),
       restart: () => Effect.die("not used in this test"),
+      resize: () => Effect.die("not used in this test"),
+      metrics: () => Effect.die("not used in this test"),
     };
     const dbLayer = Layer.succeed(Db, db);
     const layerWithSlowProvisioning = MachineService.Default.pipe(

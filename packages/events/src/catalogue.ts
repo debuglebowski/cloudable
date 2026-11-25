@@ -124,4 +124,8 @@ export const EVENT_TYPES = [
   "org.apt_repository_removed",
   "machine.apt_repository_configured",
   "machine.apt_repository_removed",
+
+  // --- machine size ---
+  "machine.resized",
+  "machine.resize_failed",
 ] as const satisfies ReadonlyArray<DomainEvent["type"]>;

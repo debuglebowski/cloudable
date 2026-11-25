@@ -359,6 +359,15 @@ export const makeDockerProvisioningServiceLive = (options: {
         } satisfies MachineStatus;
       }),
 
+    // A local container has no size to change, and no CPU credits to read.
+    resize: () =>
+      Effect.fail(
+        new ProvisioningError({
+          reason: "provider_error",
+          cause: "a local Docker machine cannot be resized",
+        }),
+      ),
+    metrics: () => Effect.succeed(null),
     restart: (machineId: string, _provider) =>
       Effect.gen(function* () {
         const observed = yield* inspectContainer(machineId);

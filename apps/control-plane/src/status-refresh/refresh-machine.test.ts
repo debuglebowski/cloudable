@@ -103,6 +103,8 @@ describe("refreshMachineStatus", () => {
       const provisioning: ProvisioningService = {
         snapshot: () => Effect.die("not used in this test"),
         create: () => Effect.die("not used in this test"),
+        resize: () => Effect.die("not used in this test"),
+        metrics: () => Effect.die("not used in this test"),
         // Not exercised here — inspection has its own tests. `die` rather than a stub
         // result so an unexpected call fails loudly instead of passing silently.
         snapshotDiskExists: () => Effect.die("not used in this test"),

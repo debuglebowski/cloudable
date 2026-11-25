@@ -23,7 +23,8 @@ export type ApprovalActionType =
   | "offboarding"
   | "package_install"
   | "package_ensure"
-  | "apt_repository";
+  | "apt_repository"
+  | "machine_resize";
 
 /** Matches `approvals.mode`. */
 export type ApprovalMode = "none" | "single" | "dual";
@@ -65,6 +66,7 @@ export const APPROVAL_ACTION_TYPES: ApprovalActionType[] = [
   "package_install",
   "package_ensure",
   "apt_repository",
+  "machine_resize",
 ];
 
 export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
@@ -75,6 +77,7 @@ export const APPROVAL_ACTION_LABELS: Record<ApprovalActionType, string> = {
   package_install: "Package install",
   package_ensure: "Setting a package to Ensure",
   apt_repository: "Adding or removing an apt repository",
+  machine_resize: "Changing a machine's size",
 };
 
 export const LOGGING_TIER_LABELS: Record<LoggingTier, string> = {

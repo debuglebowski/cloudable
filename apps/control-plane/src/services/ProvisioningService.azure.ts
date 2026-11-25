@@ -24,6 +24,7 @@ import { Effect, Layer } from "effect";
 import { config } from "../config";
 import {
   type CapturedDisk,
+  type ComputeMetrics,
   type MachineDescriptor,
   type MachineStatus,
   type MalwareProtection,
@@ -490,6 +491,8 @@ systemctl enable --now cloudable-tunnel-daemon
 export interface ArmClients {
   compute: ComputeManagementClient;
   network: NetworkManagementClient;
+  /** For the one REST call the SDKs above do not cover: Azure Monitor metrics. */
+  credential: DefaultAzureCredential;
   subscriptionId: string;
   subnetId: string;
 }
@@ -517,6 +520,7 @@ const getClients = (): Effect.Effect<ArmClients, ProvisioningError> =>
     }
     const credential = new DefaultAzureCredential();
     cached = {
+      credential,
       compute: new ComputeManagementClient(credential, subscriptionId),
       network: new NetworkManagementClient(credential, subscriptionId),
       subscriptionId,
@@ -1427,6 +1431,86 @@ const service: ProvisioningService = {
    * machine being `running`, but that is the control plane's view of the world and this is
    * the provider's, which is the one that decides.
    */
+  /**
+   * Deallocate, set the new size, and start again if the machine was running. A VM cannot
+   * change size while allocated on hardware that lacks the new one, so deallocating first
+   * makes every size in the region reachable. Disks, NIC and managed identity stay, so the
+   * agent re-attests as the same machine. Machines have no public IP to lose
+   * (provisioned without one).
+   *
+   * If setting the size fails, the VM is started again on its old size before the error is
+   * returned: a refused resize must not leave a running machine switched off.
+   */
+  resize: ({ machineId, externalId, sizeSku, wasRunning }) =>
+    Effect.gen(function* () {
+      const clients = yield* getClients();
+      const rg = config.azureMachinesResourceGroup;
+      const { names, resourceId } = yield* resolveVmNames(clients, rg, machineId, externalId);
+
+      yield* runArm(() => clients.compute.virtualMachines.beginDeallocateAndWait(rg, names.vm));
+      const updated = yield* runArm(() =>
+        clients.compute.virtualMachines.beginUpdateAndWait(rg, names.vm, {
+          hardwareProfile: { vmSize: sizeSku },
+        }),
+      ).pipe(
+        Effect.tapError(() =>
+          wasRunning
+            ? runArm(() => clients.compute.virtualMachines.beginStartAndWait(rg, names.vm)).pipe(
+                Effect.ignore,
+              )
+            : Effect.void,
+        ),
+      );
+      if (wasRunning) {
+        yield* runArm(() => clients.compute.virtualMachines.beginStartAndWait(rg, names.vm));
+      }
+      return {
+        machineId,
+        state: wasRunning ? "running" : "stopped",
+        externalId: updated.id ?? resourceId,
+      } satisfies MachineStatus;
+    }),
+
+  /**
+   * Hourly CPU use and, on a B-series size, CPU credits, from Azure Monitor, read with the
+   * control plane's own identity (`Microsoft.Insights/metrics/read` on the machines'
+   * resource group). One REST call: neither SDK in use here covers metrics.
+   */
+  metrics: ({ externalId, hours }) =>
+    Effect.gen(function* () {
+      if (!externalId) return null;
+      const clients = yield* getClients();
+      const token = yield* Effect.tryPromise({
+        try: () => clients.credential.getToken("https://management.azure.com/.default"),
+        catch: (cause) => new ProvisioningError({ reason: "provider_error", cause }),
+      });
+      const end = new Date();
+      const start = new Date(end.getTime() - hours * 3_600_000);
+      const url = new URL(
+        `https://management.azure.com${externalId}/providers/Microsoft.Insights/metrics`,
+      );
+      url.searchParams.set("api-version", "2023-10-01");
+      url.searchParams.set("metricnames", "Percentage CPU,CPU Credits Remaining");
+      url.searchParams.set("timespan", `${start.toISOString()}/${end.toISOString()}`);
+      url.searchParams.set("interval", "PT1H");
+      url.searchParams.set("aggregation", "Average,Maximum,Minimum");
+      const response = yield* Effect.tryPromise({
+        try: () => fetch(url, { headers: { authorization: `Bearer ${token?.token ?? ""}` } }),
+        catch: (cause) => new ProvisioningError({ reason: "provider_error", cause }),
+      });
+      if (!response.ok) {
+        const body = yield* Effect.promise(() => response.text().catch(() => ""));
+        return yield* Effect.fail(
+          new ProvisioningError({
+            reason: response.status === 404 ? "not_found" : "provider_error",
+            cause: `Azure Monitor ${response.status}: ${body.slice(0, 300)}`,
+          }),
+        );
+      }
+      const json = (yield* Effect.promise(() => response.json())) as AzureMetricsResponse;
+      return computeMetricsFrom(json);
+    }),
+
   restart: (machineId: string, _provider, externalId) =>
     Effect.gen(function* () {
       const clients = yield* getClients();
@@ -1448,3 +1532,31 @@ const service: ProvisioningService = {
 };
 
 export const AzureProvisioningServiceLive = Layer.succeed(ProvisioningServiceTag, service);
+
+interface AzureMetricsResponse {
+  value?: Array<{
+    name?: { value?: string };
+    timeseries?: Array<{
+      data?: Array<{ timeStamp: string; average?: number; maximum?: number; minimum?: number }>;
+    }>;
+  }>;
+}
+
+/** Azure Monitor's answer, as one point per hour. Exported for tests. */
+export function computeMetricsFrom(json: AzureMetricsResponse): ComputeMetrics {
+  const series = (name: string) =>
+    json.value?.find((m) => m.name?.value === name)?.timeseries?.[0]?.data ?? [];
+  const cpu = series("Percentage CPU");
+  const credits = series("CPU Credits Remaining");
+  const creditsByHour = new Map(credits.map((p) => [p.timeStamp, p.minimum ?? p.average]));
+  const burstable = credits.some((p) => p.minimum !== undefined || p.average !== undefined);
+  return {
+    burstable,
+    points: cpu.map((p) => ({
+      at: p.timeStamp,
+      cpuAverage: p.average ?? null,
+      cpuMax: p.maximum ?? null,
+      creditsMin: burstable ? (creditsByHour.get(p.timeStamp) ?? null) : null,
+    })),
+  };
+}

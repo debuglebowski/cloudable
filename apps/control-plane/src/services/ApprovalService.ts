@@ -22,7 +22,8 @@ export type ApprovalActionType =
   | "package_install"
   | "package_ensure"
   | "approval_settings_change"
-  | "apt_repository";
+  | "apt_repository"
+  | "machine_resize";
 export type ApprovalMode = "none" | "single" | "dual";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 export type ApprovalDecisionValue = "approved" | "rejected";

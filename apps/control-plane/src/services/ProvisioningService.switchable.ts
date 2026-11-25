@@ -57,6 +57,8 @@ export const SwitchableProvisioningServiceLive: Layer.Layer<ProvisioningServiceT
       restoreDataDisk: (desc) => implFor(desc.provider).restoreDataDisk(desc),
       restart: (machineId, provider, externalId) =>
         implFor(provider).restart(machineId, provider, externalId),
+      resize: (input) => implFor(input.provider).resize(input),
+      metrics: (input) => implFor(input.provider).metrics(input),
     } satisfies ProvisioningService;
   }),
 );

@@ -301,7 +301,17 @@ export const makeFakeProvisioningServiceLive = (
           return restarted.status;
         });
 
+      const resize: ProvisioningService["resize"] = (input) =>
+        Effect.gen(function* () {
+          const existing = yield* require(input.machineId);
+          return existing.status;
+        });
+
+      const metrics: ProvisioningService["metrics"] = () => Effect.succeed(null);
+
       return {
+        resize,
+        metrics,
         create,
         snapshot,
         grantSnapshotRead,

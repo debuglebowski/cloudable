@@ -166,6 +166,19 @@ const CASES: readonly Case[] = [
     allow: OWNER_OR_ADMIN,
   },
   {
+    endpoint: "machines.compute",
+    method: "GET",
+    path: (f) => `/api/v1/machines/${f.machineA}/compute`,
+    allow: OWNER_OR_ADMIN,
+  },
+  {
+    endpoint: "machines.resize",
+    method: "POST",
+    path: (f) => `/api/v1/machines/${f.machineA}/resize`,
+    body: () => ({ sizeSku: "Standard_D4s_v5", reason: "needs more CPU" }),
+    allow: OWNER_OR_ADMIN,
+  },
+  {
     endpoint: "restart.restartMachine",
     method: "POST",
     path: (f) => `/api/v1/machines/${f.machineA}/restart`,

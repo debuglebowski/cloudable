@@ -35,6 +35,16 @@ export type MachineEvent =
       };
     })
   | (EventEnvelope & {
+      type: "machine.resized";
+      /** The machine runs on a new size, after its `machine_resize` approval. */
+      payload: { fromSize: string; toSize: string; approvalId: string };
+    })
+  | (EventEnvelope & {
+      type: "machine.resize_failed";
+      /** The approved resize did not happen. The machine keeps its old size. */
+      payload: { fromSize: string; toSize: string; approvalId: string; reason: string };
+    })
+  | (EventEnvelope & {
       type: "machine.apt_repository_configured";
       /** The agent reported the approved repository in place on the machine. */
       payload: { repositoryId: string };

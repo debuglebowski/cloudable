@@ -14,6 +14,7 @@ export const approvals = pgTable("approvals", {
       "package_ensure",
       "approval_settings_change",
       "apt_repository",
+      "machine_resize",
     ],
   }).notNull(),
   mode: text("mode", { enum: ["none", "single", "dual"] }).notNull(),

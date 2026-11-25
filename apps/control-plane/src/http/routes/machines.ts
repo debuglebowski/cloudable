@@ -9,6 +9,7 @@ import {
   PackageEnsureSettingError,
   PackageLockConflictError,
 } from "../../domain/machine/errors";
+import { ResizeRefusedError } from "../../domain/machine/resize";
 import { CurrentUserAuthentication } from "../middleware/auth";
 import { ApprovalResource } from "./approvals";
 
@@ -168,6 +169,38 @@ const listMachinesResponseSchema = Schema.Struct({
 });
 
 const machineIdPathSchema = Schema.Struct({ id: Schema.UUID });
+
+const computePointSchema = Schema.Struct({
+  at: Schema.String,
+  cpuAverage: Schema.NullOr(Schema.Number),
+  cpuMax: Schema.NullOr(Schema.Number),
+  creditsMin: Schema.NullOr(Schema.Number),
+});
+
+const machineComputeSchema = Schema.Struct({
+  sizeSku: Schema.String,
+  available: Schema.Boolean,
+  unavailableReason: Schema.optional(Schema.String),
+  burstable: Schema.Boolean,
+  hours: Schema.Number,
+  points: Schema.Array(computePointSchema),
+  summary: Schema.Struct({
+    cpuAverage: Schema.NullOr(Schema.Number),
+    cpuPeak: Schema.NullOr(Schema.Number),
+    creditsNow: Schema.NullOr(Schema.Number),
+    hoursWithoutCredits: Schema.NullOr(Schema.Number),
+  }),
+});
+
+const resizeMachinePayloadSchema = Schema.Struct({
+  sizeSku: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
+  reason: Schema.String.pipe(Schema.maxLength(2000)),
+});
+
+const resizeMachineResponseSchema = Schema.Struct({
+  approvalId: Schema.String,
+  status: Schema.Literal("pending", "approved", "rejected", "expired"),
+});
 
 // Moves a machine to another profile, or off one (null).
 const setMachineProfilePayloadSchema = Schema.Struct({ profileId: Schema.NullOr(Schema.UUID) });
@@ -341,6 +374,23 @@ export const MachinesGroup = HttpApiGroup.make("machines")
       .setPath(machineIdPathSchema)
       .addSuccess(machineDetailSchema)
       .addError(MachineNotFoundError, { status: 404 }),
+  )
+  .add(
+    // How hard the machine works, from the cloud provider's own measurements: hourly CPU and,
+    // on a burstable size, CPU credits. The owner or an admin.
+    HttpApiEndpoint.get("compute", "/:id/compute")
+      .setPath(machineIdPathSchema)
+      .setUrlParams(Schema.Struct({ hours: Schema.optional(Schema.NumberFromString) }))
+      .addSuccess(machineComputeSchema)
+      .addError(MachineNotFoundError, { status: 404 }),
+  )
+  .add(
+    // Ask for a new size. Waits for a `machine_resize` approval; carried out in the background.
+    HttpApiEndpoint.post("resize", "/:id/resize")
+      .setPath(machineIdPathSchema)
+      .setPayload(resizeMachinePayloadSchema)
+      .addSuccess(resizeMachineResponseSchema, { status: 202 })
+      .addError(ResizeRefusedError, { status: 422 }),
   )
   .add(
     // An admin moves a machine to another profile, or off one. Recorded as

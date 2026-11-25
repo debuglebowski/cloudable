@@ -25,7 +25,8 @@ export type ApprovalActionType =
   | "package_install"
   | "package_ensure"
   | "approval_settings_change"
-  | "apt_repository";
+  | "apt_repository"
+  | "machine_resize";
 
 /** What exactly was asked for, for the action types whose target alone does not say it. */
 export type ApprovalPayload =
@@ -75,6 +76,7 @@ export const ACTION_TYPE_LABELS: Record<ApprovalActionType, string> = {
   package_install: "Package install",
   package_ensure: "Package ensure setting",
   apt_repository: "Apt repository",
+  machine_resize: "Machine size",
   approval_settings_change: "Approval settings change",
 };
 
@@ -91,6 +93,10 @@ export function describePayload(actionType: ApprovalActionType, payload: unknown
     const p = payload as { packageName: string; op: string; versionPin: string | null };
     const verb = p.op === "uninstall" ? "Remove" : "Install";
     return `${verb} ${p.packageName}${p.versionPin ? ` (version ${p.versionPin})` : ""}`;
+  }
+  if (actionType === "machine_resize" && "toSize" in payload) {
+    const p = payload as { fromSize: string; toSize: string };
+    return `Change size from ${p.fromSize} to ${p.toSize}`;
   }
   if (actionType === "apt_repository" && "op" in payload) {
     const p = payload as {

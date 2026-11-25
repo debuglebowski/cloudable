@@ -75,7 +75,8 @@ export type ApprovalActionType =
   | "offboarding"
   | "package_install"
   | "package_ensure"
-  | "apt_repository";
+  | "apt_repository"
+  | "machine_resize";
 export type ApprovalMode = "none" | "single" | "dual";
 
 export const APPROVAL_ACTION_TYPES: readonly ApprovalActionType[] = [
@@ -86,6 +87,7 @@ export const APPROVAL_ACTION_TYPES: readonly ApprovalActionType[] = [
   "package_install",
   "package_ensure",
   "apt_repository",
+  "machine_resize",
 ];
 
 export interface OrgSettingsView {

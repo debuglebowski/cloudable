@@ -48,7 +48,8 @@ export const canSeeMachine = (
  * - `connect`: terminal, files, SSH. The owner only. Never an admin on someone else's machine, and
  *   never anyone on a machine with no owner.
  * - `archive`: the owner only. An admin archives someone else's machine by offboarding them.
- * - `restart`, `upgrade`, `snapshot`, `packages`: the owner or an admin. Every one is recorded.
+ * - `restart`, `upgrade`, `snapshot`, `packages`, `resize`: the owner or an admin. Every one is
+ *   recorded. A resize also waits for a `machine_resize` approval.
  * - `editManifest`: what packages a machine may have is configuration, so admin only.
  */
 export type MachineAction =
@@ -58,6 +59,7 @@ export type MachineAction =
   | "upgrade"
   | "snapshot"
   | "packages"
+  | "resize"
   | "editManifest";
 
 export const canActOnMachine = (
@@ -75,6 +77,7 @@ export const canActOnMachine = (
     case "upgrade":
     case "snapshot":
     case "packages":
+    case "resize":
       return isOwner || isAdmin;
     case "editManifest":
       return isAdmin;

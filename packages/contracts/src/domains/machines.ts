@@ -406,3 +406,48 @@ export interface CreatePackageActionRequest {
 export interface CreatePackageActionResponse {
   action: PendingPackageActionView;
 }
+
+/** One hour of a machine's CPU, as the cloud provider measured it. */
+export interface MachineComputePoint {
+  /** Start of the hour, ISO 8601. */
+  at: string;
+  /** Average CPU use across all vCPUs, 0 to 100. Null when there is no reading. */
+  cpuAverage: number | null;
+  cpuMax: number | null;
+  /** Lowest CPU credit balance in the hour. Null on a size without credits. */
+  creditsMin: number | null;
+}
+
+/** `GET /api/v1/machines/:id/compute`: how hard the machine works, and whether it is throttled. */
+export interface MachineCompute {
+  sizeSku: string;
+  /** False when the provider has no numbers (docker, fake) or they could not be read. */
+  available: boolean;
+  /** Why not, in words, when `available` is false. */
+  unavailableReason?: string;
+  /** True on a size with CPU credits (Azure's B series), which slows to a base rate without them. */
+  burstable: boolean;
+  hours: number;
+  points: MachineComputePoint[];
+  summary: {
+    /** Mean of the hourly averages over the window, 0 to 100. Null without readings. */
+    cpuAverage: number | null;
+    /** The busiest hour's maximum, 0 to 100. */
+    cpuPeak: number | null;
+    /** Credit balance in the latest hour. Null on a size without credits. */
+    creditsNow: number | null;
+    /** Hours in the window that ran out of credits (balance under 1), so ran at the base rate. */
+    hoursWithoutCredits: number | null;
+  };
+}
+
+/** `POST /api/v1/machines/:id/resize`: ask for a new size. Waits for a `machine_resize` approval. */
+export interface ResizeMachineRequest {
+  sizeSku: string;
+  reason: string;
+}
+
+export interface ResizeMachineResponse {
+  approvalId: string;
+  status: "pending" | "approved" | "rejected" | "expired";
+}

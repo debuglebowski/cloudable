@@ -112,6 +112,8 @@ describe("archiveMachine — threads externalResourceId to the provisioning port
       reconcile: () => Effect.die("not used in this test"),
       reimage: () => Effect.die("not used in this test"),
       restart: () => Effect.die("not used in this test"),
+      resize: () => Effect.die("not used in this test"),
+      metrics: () => Effect.die("not used in this test"),
     };
     return { calls, provisioning };
   }

@@ -405,6 +405,44 @@ export interface ProvisioningService {
     provider: Provider,
     externalId: string | null,
   ): Effect.Effect<MachineStatus, ProvisioningError>;
+  /**
+   * Changes the machine's size. On Azure: deallocate, set the new size, and start again if it
+   * was running. Disks, identity and network stay. Fails with `provider_error` where the
+   * provider cannot do it.
+   */
+  resize(input: {
+    machineId: string;
+    provider: Provider;
+    externalId: string | null;
+    sizeSku: string;
+    wasRunning: boolean;
+  }): Effect.Effect<MachineStatus, ProvisioningError>;
+  /**
+   * Hourly CPU use, and for a burstable size its CPU credits, over the last `hours`, as the
+   * provider measures them. Null where the provider has no such numbers (docker, fake).
+   */
+  metrics(input: {
+    provider: Provider;
+    externalId: string | null;
+    hours: number;
+  }): Effect.Effect<ComputeMetrics | null, ProvisioningError>;
+}
+
+/** One hour of a machine's CPU, as the provider measured it. */
+export interface ComputeMetricsPoint {
+  /** Start of the hour, ISO 8601. */
+  at: string;
+  /** Average CPU use across all vCPUs, 0 to 100. Null when the provider has no reading. */
+  cpuAverage: number | null;
+  cpuMax: number | null;
+  /** Lowest CPU credit balance in the hour. Null on a size without credits. */
+  creditsMin: number | null;
+}
+
+export interface ComputeMetrics {
+  points: ComputeMetricsPoint[];
+  /** True when the size has CPU credits (Azure's B series). */
+  burstable: boolean;
 }
 
 export class ProvisioningServiceTag extends Context.Tag("ProvisioningService")<

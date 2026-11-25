@@ -11,16 +11,22 @@ import { Effect } from "effect";
 import type { Db } from "../../db/layer";
 import type { ApprovalResult } from "../../services/ApprovalService";
 import type { EventBus } from "../../services/EventBus";
+import type { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import type { TunnelServer } from "../../tunnel/server";
 import type { MachineService } from "../machine/MachineService";
 import { applyApprovedEnsureEdit } from "../machine/package-ensure";
 import { decodePackageInstallPayload, queuePackageAction } from "../machine/package-request";
+import { applyApprovedResize } from "../machine/resize";
 import { applyApprovalSettingsChange } from "../organisation/approval-settings-change";
 import { applyApprovedAptRepositoryChange } from "../organisation/apt-repositories";
 
 export const carryOutApproved = (
   approval: ApprovalResult,
-): Effect.Effect<void, never, Db | EventBus | TunnelServer | MachineService> => {
+): Effect.Effect<
+  void,
+  never,
+  Db | EventBus | TunnelServer | MachineService | ProvisioningServiceTag
+> => {
   if (approval.status !== "approved") return Effect.void;
   switch (approval.actionType) {
     case "package_install": {
@@ -47,6 +53,8 @@ export const carryOutApproved = (
     }
     case "package_ensure":
       return applyApprovedEnsureEdit(approval);
+    case "machine_resize":
+      return applyApprovedResize(approval);
     case "apt_repository":
       return applyApprovedAptRepositoryChange(approval);
     case "approval_settings_change":

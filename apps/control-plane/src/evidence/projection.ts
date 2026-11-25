@@ -348,6 +348,10 @@ function summarize(row: RawEventRow): string {
     }
     case "profile.archived":
       return `Profile "${event.payload.name}" (${event.payload.profileId}) was archived.`;
+    case "machine.resized":
+      return `Machine size changed from ${event.payload.fromSize} to ${event.payload.toSize} under approval ${event.payload.approvalId}.`;
+    case "machine.resize_failed":
+      return `Approved size change from ${event.payload.fromSize} to ${event.payload.toSize} failed: ${event.payload.reason}.`;
     case "org.apt_repository_added":
       return `Apt repository "${event.payload.name}" (${event.payload.url} ${event.payload.suite} ${event.payload.components.join(" ")}) was added under approval ${event.payload.approvalId}, signing key ${event.payload.fingerprint}.`;
     case "org.apt_repository_removed":
@@ -451,6 +455,8 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "profile.setting_changed":
     case "profile.archived":
     case "machine.profile_assigned":
+    case "machine.resized":
+    case "machine.resize_failed":
     case "org.apt_repository_added":
     case "org.apt_repository_removed":
     case "machine.apt_repository_configured":

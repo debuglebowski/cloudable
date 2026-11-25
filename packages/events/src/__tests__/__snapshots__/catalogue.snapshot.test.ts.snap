@@ -44,6 +44,8 @@ exports[`event type catalogue is append-only 1`] = `
   "machine.provisioning_failed",
   "machine.reconciled",
   "machine.reimaged",
+  "machine.resize_failed",
+  "machine.resized",
   "machine.scanner_installed",
   "machine.setting_changed",
   "machine.started",

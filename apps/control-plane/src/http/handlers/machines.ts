@@ -1,11 +1,15 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { Effect } from "effect";
+import { ulid } from "ulid";
 import { getAgentRelease } from "../../domain/agent-update/release";
 import { authorizeMachine, ownOnlyFilter, requireAdminUser } from "../../domain/authz";
 import { MachineService } from "../../domain/machine/MachineService";
+import { DEFAULT_COMPUTE_HOURS, machineCompute } from "../../domain/machine/compute";
+import { MachineNotFoundError } from "../../domain/machine/errors";
 import { toActionView } from "../../domain/machine/package-actions";
 import { requestMachineManifestEdit } from "../../domain/machine/package-ensure";
 import { requestPackageAction } from "../../domain/machine/package-request";
+import { requestMachineResize } from "../../domain/machine/resize";
 import { Api } from "../api";
 import { CurrentUserTag } from "../middleware/auth";
 import { toApprovalWire } from "../routes/approvals";
@@ -68,6 +72,43 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
             ? { version: release.version, releaseId: release.releaseId }
             : null,
         };
+      }),
+    )
+    .handle("compute", ({ path, urlParams }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        // The same people who may restart it: the owner or an admin.
+        yield* authorizeMachine(currentUser, path.id, "restart");
+        const hours = Math.min(
+          Math.max(Math.round(urlParams.hours ?? DEFAULT_COMPUTE_HOURS), 1),
+          720,
+        );
+        const compute = yield* machineCompute(path.id, currentUser.orgId, hours);
+        if (!compute) {
+          return yield* Effect.fail(
+            new MachineNotFoundError({
+              error: {
+                code: "not_found",
+                message: `Machine ${path.id} not found`,
+                requestId: ulid(),
+              },
+            }),
+          );
+        }
+        return compute;
+      }),
+    )
+    .handle("resize", ({ path, payload }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        yield* authorizeMachine(currentUser, path.id, "resize");
+        return yield* requestMachineResize({
+          machineId: path.id,
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+          sizeSku: payload.sizeSku,
+          reason: payload.reason,
+        });
       }),
     )
     .handle("setProfile", ({ path, payload }) =>

@@ -128,6 +128,16 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
     tier: 1,
     description: "The agent reported an approved apt repository gone from the machine.",
   },
+  "machine.resized": {
+    tier: 1,
+    description:
+      "A machine was moved to a new size after its `machine_resize` approval. Carries `fromSize`, `toSize` and `approvalId`. Disks and identity stay.",
+  },
+  "machine.resize_failed": {
+    tier: 1,
+    description:
+      "An approved resize did not happen; the machine keeps its old size. Carries the provider's reason.",
+  },
   "machine.profile_assigned": {
     tier: 1,
     description:
