@@ -21,6 +21,12 @@ import {
 
 const providerSchema = Schema.Literal("azure", "docker", "fake");
 
+const ResolvedCreationField = Schema.Struct({
+  value: Schema.NullOr(Schema.String),
+  locked: Schema.Boolean,
+  fromProfileId: Schema.NullOr(Schema.String),
+});
+
 export const ProfileResource = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -29,6 +35,20 @@ export const ProfileResource = Schema.Struct({
   region: Schema.NullOr(Schema.String),
   sizeSku: Schema.NullOr(Schema.String),
   image: Schema.NullOr(Schema.String),
+  providerLocked: Schema.Boolean,
+  regionLocked: Schema.Boolean,
+  sizeLocked: Schema.Boolean,
+  imageLocked: Schema.Boolean,
+  /**
+   * What a machine created on this profile gets for each creation field. Unlocked: a starting
+   * value the machine may change. Locked: every machine on the profile has it.
+   */
+  creation: Schema.Struct({
+    provider: ResolvedCreationField,
+    region: ResolvedCreationField,
+    sizeSku: ResolvedCreationField,
+    image: ResolvedCreationField,
+  }),
   createdAt: Schema.String,
   archivedAt: Schema.NullOr(Schema.String),
   machineCount: Schema.Number,
@@ -53,6 +73,10 @@ const CreateProfilePayload = Schema.Struct({
   region: Schema.optional(field),
   sizeSku: Schema.optional(field),
   image: Schema.optional(field),
+  providerLocked: Schema.optional(Schema.Boolean),
+  regionLocked: Schema.optional(Schema.Boolean),
+  sizeLocked: Schema.optional(Schema.Boolean),
+  imageLocked: Schema.optional(Schema.Boolean),
 });
 
 const UpdateProfilePayload = Schema.Struct({
@@ -62,6 +86,10 @@ const UpdateProfilePayload = Schema.Struct({
   region: Schema.optional(field),
   sizeSku: Schema.optional(field),
   image: Schema.optional(field),
+  providerLocked: Schema.optional(Schema.Boolean),
+  regionLocked: Schema.optional(Schema.Boolean),
+  sizeLocked: Schema.optional(Schema.Boolean),
+  imageLocked: Schema.optional(Schema.Boolean),
 });
 
 const profileIdPath = Schema.Struct({ id: Schema.UUID });

@@ -120,7 +120,7 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         ],
         notes: [
           "A machine has exactly one owner, always a person. Check what this deployment can provision with `cloudable capabilities`.",
-          "--provider, --size and --image are required unless the profile sets them. A value the profile sets cannot be changed here.",
+          "--provider, --size and --image are required unless the profile sets them. A value the profile sets is a starting value you can change, unless the profile locks it.",
         ],
       },
       {
@@ -148,7 +148,7 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         args: "<machine> <profile|none>",
         notes: [
           "Admin only. The move is recorded. The machine's settings then resolve through the new profile.",
-          "Refused when the profile sets a provider, region, size or image the machine does not have. Those are fixed when a machine is created.",
+          "Refused when the profile locks a provider, region, size or image the machine does not have. Those are fixed when a machine is created.",
         ],
       },
       { name: "restart", summary: "Reboot a running machine", args: "<machine>" },
@@ -232,27 +232,40 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
         options: [
           { flag: "--name <name>", description: "Unique in the org (required)" },
           { flag: "--description <text>", description: "What it is for" },
-          { flag: "--provider azure|docker|fake", description: "Every machine on it runs here" },
-          { flag: "--region <region>", description: "Every machine on it runs here" },
-          { flag: "--size <sku>", description: "Every machine on it has this size" },
-          { flag: "--image <image>", description: "Every machine on it starts from this image" },
+          { flag: "--provider azure|docker|fake", description: "Where new machines run" },
+          { flag: "--region <region>", description: "Where new machines run" },
+          { flag: "--size <sku>", description: "The size new machines start with" },
+          { flag: "--image <image>", description: "The image new machines start from" },
+          {
+            flag: "--lock provider|region|size|image",
+            description: "Make that field the same on every machine on it. Repeatable",
+          },
         ],
         notes: [
           "All optional but the name. The create form asks for what the profile leaves out.",
+          "An unlocked field is a starting value: a machine may differ, and it can change any time.",
           "Set its other settings with `cloudable config set <key> <value> --profile <profile>`.",
         ],
       },
       {
         name: "update",
-        summary: "Change a profile's name, description or creation fields",
+        summary: "Change a profile's name, description, creation fields or their locks",
         args: "<profile>",
         options: [
           { flag: "--name <name>", description: "New name" },
           { flag: "--description <text>|none", description: "New description" },
-          { flag: "--provider <p>|none", description: "Only while no machine uses it" },
-          { flag: "--region <r>|none", description: "Only while no machine uses it" },
-          { flag: "--size <sku>|none", description: "Only while no machine uses it" },
-          { flag: "--image <image>|none", description: "Only while no machine uses it" },
+          { flag: "--provider <p>|none", description: "Where new machines run" },
+          { flag: "--region <r>|none", description: "Where new machines run" },
+          { flag: "--size <sku>|none", description: "The size new machines start with" },
+          { flag: "--image <image>|none", description: "The image new machines start from" },
+          {
+            flag: "--lock <field>",
+            description: "Lock provider, region, size or image. Repeatable",
+          },
+          { flag: "--unlock <field>", description: "Make it a starting value again. Repeatable" },
+        ],
+        notes: [
+          "Existing machines never change. A locked field must match every machine on the profile.",
         ],
       },
       {

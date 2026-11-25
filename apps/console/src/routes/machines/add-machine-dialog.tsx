@@ -152,12 +152,12 @@ const DEFAULTS = { sizeSku: "Standard_D2s_v5", image: "ubuntu-24.04" };
 /** Select items cannot have an empty value, so "no profile" needs a name of its own. */
 const NO_PROFILE = "none";
 
-/** A value the chosen profile sets. Shown, not offered: the server refuses a different one. */
+/** A value the chosen profile locks. Shown, not offered: the server refuses a different one. */
 function FixedByProfile({ children }: { children: ReactNode }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm">
       {children}
-      <Badge variant="outline">Set by profile</Badge>
+      <Badge variant="outline">Fixed by profile</Badge>
     </div>
   );
 }
@@ -256,12 +256,14 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
   const profilesQuery = useProfiles({ enabled: open });
   const usableProfiles = (profilesQuery.data ?? []).filter((p) => p.archivedAt === null);
   const selectedProfile = usableProfiles.find((p) => p.id === profileId);
-  // What the profile sets is fixed: the server refuses a different value.
+  // What the profile locks is fixed: the server refuses a different value. What it only
+  // starts with is filled in when the profile is picked, and can be changed.
+  const creation = selectedProfile?.creation;
   const fixed = {
-    provider: Boolean(selectedProfile?.provider),
-    region: Boolean(selectedProfile?.region),
-    size: Boolean(selectedProfile?.sizeSku),
-    image: Boolean(selectedProfile?.image),
+    provider: Boolean(creation?.provider.locked),
+    region: Boolean(creation?.region.locked),
+    size: Boolean(creation?.sizeSku.locked),
+    image: Boolean(creation?.image.locked),
   };
 
   const peopleQuery = useQuery({
@@ -340,11 +342,12 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
     setProfileId(next);
     const profile = usableProfiles.find((p) => p.id === next);
     if (!profile) return;
-    if (profile.provider) handleProviderChange(profile.provider);
-    if (profile.region) setRegion(profile.region);
-    if (profile.sizeSku) setSizeSku(profile.sizeSku);
-    if (profile.image) {
-      setImage(profile.image);
+    const { provider: p, region: r, sizeSku: size, image: img } = profile.creation;
+    if (p.value) handleProviderChange(p.value as CloudProvider);
+    if (r.value) setRegion(r.value);
+    if (size.value) setSizeSku(size.value);
+    if (img.value) {
+      setImage(img.value);
       setImageTouchedByUser(true);
     }
   }
@@ -515,7 +518,8 @@ export function AddMachineDialog({ open, onOpenChange }: AddMachineDialogProps) 
                     </Select>
                     <p className="text-sm text-muted-foreground">
                       The machine takes its settings and packages from the profile, unless it
-                      overrides them. What the profile sets below cannot be changed here.
+                      overrides them. The profile fills in the fields below. You can change them,
+                      except the ones it fixes.
                     </p>
                   </div>
                 )}

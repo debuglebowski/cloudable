@@ -2,18 +2,38 @@
 // Wire types for `/api/v1/profiles`. See docs/inheritance.md.
 import type { MachineProvider, PackageSetting } from "./machines";
 
+/** The creation fields a profile may set. */
+export type ProfileCreationField = "provider" | "region" | "sizeSku" | "image";
+
+/** What a machine created on a profile gets for one creation field. */
+export interface ResolvedProfileCreationField {
+  /** Null when no profile sets it: the create form asks for it. */
+  value: string | null;
+  /** Locked: every machine on the profile has this value. Unlocked: a starting value. */
+  locked: boolean;
+  /** The profile that set the value, or null when none does. */
+  fromProfileId: string | null;
+}
+
 export interface ProfileSummary {
   id: string;
   name: string;
   description: string | null;
-  /** Creation fields. Null means the create form asks for it. */
+  /** The profile's own creation fields. Null means it does not set one. */
   provider: MachineProvider | null;
   region: string | null;
   sizeSku: string | null;
   image: string | null;
+  /** A locked field must match every machine on the profile. An unlocked one is a starting value. */
+  providerLocked: boolean;
+  regionLocked: boolean;
+  sizeLocked: boolean;
+  imageLocked: boolean;
+  /** What a machine created on this profile gets. Use this to fill in the create form. */
+  creation: Record<ProfileCreationField, ResolvedProfileCreationField>;
   createdAt: string;
   archivedAt: string | null;
-  /** Machines on it that are not archived. While above zero, creation fields cannot change. */
+  /** Machines on it that are not archived. A locked field must match all of them. */
   machineCount: number;
 }
 
@@ -44,7 +64,15 @@ export interface CreateProfileRequest {
   region?: string | null;
   sizeSku?: string | null;
   image?: string | null;
+  /** A lock needs a value. Clearing a value also unlocks it. */
+  providerLocked?: boolean;
+  regionLocked?: boolean;
+  sizeLocked?: boolean;
+  imageLocked?: boolean;
 }
 
-/** Omitted keeps the field. Null clears it. Creation fields change only while no machine uses it. */
+/**
+ * Omitted keeps the field. Null clears it. An unlocked creation field can change at any time.
+ * A locked one must still match every machine on the profile.
+ */
 export type UpdateProfileRequest = Partial<CreateProfileRequest>;

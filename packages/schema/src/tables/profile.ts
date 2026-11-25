@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { orgs } from "./org";
 
 /**
@@ -10,8 +10,12 @@ import { orgs } from "./org";
  *
  * The four creation fields (provider, region, size, image) are used only when a
  * machine is created. All are optional: the create form asks for whatever the
- * profile leaves blank. They cannot be edited while a machine that is not
- * archived uses the profile. See `docs/inheritance.md`.
+ * profile leaves blank. Each has a lock flag:
+ * - unlocked: a starting value. The create form fills it in, and the machine may
+ *   differ. The admin may change it at any time. Existing machines never change.
+ * - locked: every machine on the profile must have this value. It cannot change
+ *   while a machine that is not archived uses the profile.
+ * A lock needs a value. See `docs/inheritance.md`.
  *
  * Profiles are archived, never deleted. Events and machines point at them.
  */
@@ -28,6 +32,10 @@ export const profiles = pgTable(
     region: text("region"),
     sizeSku: text("size_sku"),
     image: text("image"),
+    providerLocked: boolean("provider_locked").notNull().default(false),
+    regionLocked: boolean("region_locked").notNull().default(false),
+    sizeLocked: boolean("size_locked").notNull().default(false),
+    imageLocked: boolean("image_locked").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),

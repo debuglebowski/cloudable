@@ -23,13 +23,12 @@ import {
 import { ProfileFormDialog } from "./profile-form-dialog";
 
 /** "provider fake, size small", or a dash when the profile fixes none of them. */
+/** What a new machine on the profile gets. A locked value says so. */
 export function creationFieldsSummary(p: ProfileSummary): string {
-  const parts = [
-    p.provider && p.provider,
-    p.region && p.region,
-    p.sizeSku && p.sizeSku,
-    p.image && p.image,
-  ].filter(Boolean);
+  const parts = (["provider", "region", "sizeSku", "image"] as const)
+    .map((field) => p.creation[field])
+    .filter((field) => field.value !== null)
+    .map((field) => (field.locked ? `${field.value} (locked)` : (field.value as string)));
   return parts.length > 0 ? parts.join(" · ") : "—";
 }
 
@@ -76,7 +75,7 @@ export function ProfilesPage() {
               <TableRow>
                 <Th icon={Layers}>Name</Th>
                 <Th icon={Server}>Machines</Th>
-                <Th icon={SlidersHorizontal}>Fixed for its machines</Th>
+                <Th icon={SlidersHorizontal}>New machines</Th>
                 <Th icon={Tag}>Status</Th>
               </TableRow>
             </TableHeader>

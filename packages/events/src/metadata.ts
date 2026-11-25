@@ -93,12 +93,12 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   "profile.created": {
     tier: 1,
     description:
-      "An admin created a profile: a named set of settings machines link to. Carries any creation fields it sets (provider, region, size, image).",
+      "An admin created a profile: a named set of settings machines link to. Carries any creation fields it sets (provider, region, size, image), and which of them it locks (`providerLocked` and so on).",
   },
   "profile.updated": {
     tier: 1,
     description:
-      "An admin changed a profile's name, description or creation fields. Creation fields can change only while no machine that is not archived uses the profile.",
+      "An admin changed a profile's name, description, creation fields or their locks. An unlocked creation field is a starting value and can change at any time; existing machines do not change. A locked one can change only while no machine that is not archived uses the profile.",
   },
   "profile.setting_changed": {
     tier: 1,

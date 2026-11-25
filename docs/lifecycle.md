@@ -381,8 +381,9 @@ A machine's size is chosen when it is created, and can be changed later (`domain
 - A `machine_resize` approval decides. The mode is on the Organisation page; the default is one
   approver. A bigger size costs money every hour, so it is a decision.
 - Checked before anyone is asked: the size must be in the catalog and able to run the machine's
-  image, it must differ from today's, and a profile that fixes the size wins. A local Docker
-  machine cannot be resized.
+  image, and it must differ from today's. A profile that locks the size wins
+  (`size_fixed_by_profile`). A size the profile only starts with does not: the machine may move
+  away from it. A local Docker machine cannot be resized.
 - Once granted, in the background: Azure deallocates the VM, sets the new size, and starts it again
   if it was running. Disks, network and managed identity stay, so `/home` and the agent's identity
   are untouched. It takes a few minutes. If setting the size fails, the VM is started again on its

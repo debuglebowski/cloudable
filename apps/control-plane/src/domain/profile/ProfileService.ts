@@ -8,11 +8,17 @@
 // creation fields, and archiving.
 //
 // Creation fields (provider, region, size, image) are used only when a machine is
-// created. They cannot change while a machine that is not archived uses the
-// profile: a profile edit must never resize or move a live machine (invariant 10).
-// To change them, make a new profile. See docs/inheritance.md.
+// created. An unlocked one is a starting value: it can change at any time, and
+// existing machines keep theirs. A locked one must match every machine on the
+// profile that is not archived, so it cannot change while one uses it. A profile
+// edit never resizes or moves a live machine (invariant 10). See
+// docs/inheritance.md and ./creation-fields.ts.
 // ---------------------------------------------------------------------------
-import type { ProfileCreationFields, ProfileEvent } from "@cloudable/events";
+import type {
+  ProfileCreationFieldLocks,
+  ProfileCreationFields,
+  ProfileEvent,
+} from "@cloudable/events";
 import { machines, profiles, settingValues } from "@cloudable/schema";
 import { and, asc, count, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { type Context, Effect } from "effect";
@@ -23,6 +29,15 @@ import { getCatalogEntry } from "../../services/CloudCatalogService";
 import { EventBus } from "../../services/EventBus";
 import { UBUNTU_IMAGES } from "../../services/ProvisioningService.azure";
 import { type OrgPackageEntry, listProfilePackages } from "../organisation/packages";
+import {
+  CREATION_FIELDS,
+  type CreationField,
+  FIELD_LABEL,
+  LOCK_FLAG,
+  type ResolvedCreationFields,
+  lockedFieldConflict,
+  resolveCreationFields,
+} from "./creation-fields";
 import { ProfileEditError, ProfileNotFoundError, ProfileWriteError } from "./errors";
 
 type DbHandle = Context.Tag.Service<typeof Db>;
@@ -39,9 +54,15 @@ export interface ProfileView {
   region: string | null;
   sizeSku: string | null;
   image: string | null;
+  providerLocked: boolean;
+  regionLocked: boolean;
+  sizeLocked: boolean;
+  imageLocked: boolean;
+  /** What a machine created on this profile gets for each creation field, and which are locked. */
+  creation: ResolvedCreationFields;
   createdAt: string;
   archivedAt: string | null;
-  /** Machines on this profile that are not archived. While above zero, creation fields are fixed. */
+  /** Machines on this profile that are not archived. A locked creation field must match them. */
   machineCount: number;
 }
 
@@ -68,6 +89,10 @@ export interface ProfileFieldsInput {
   region?: string | null | undefined;
   sizeSku?: string | null | undefined;
   image?: string | null | undefined;
+  providerLocked?: boolean | undefined;
+  regionLocked?: boolean | undefined;
+  sizeLocked?: boolean | undefined;
+  imageLocked?: boolean | undefined;
 }
 
 export interface CreateProfileInput extends ProfileFieldsInput {
@@ -110,22 +135,63 @@ const toView = (row: ProfileRow, machineCount: number): ProfileView => ({
   region: row.region,
   sizeSku: row.sizeSku,
   image: row.image,
+  providerLocked: row.providerLocked,
+  regionLocked: row.regionLocked,
+  sizeLocked: row.sizeLocked,
+  imageLocked: row.imageLocked,
+  creation: resolveCreationFields(row),
   createdAt: row.createdAt.toISOString(),
   archivedAt: row.archivedAt ? row.archivedAt.toISOString() : null,
   machineCount,
 });
 
-const creationFieldsOf = (row: {
-  provider: Provider | null;
-  region: string | null;
-  sizeSku: string | null;
-  image: string | null;
-}): ProfileCreationFields => ({
+const creationFieldsOf = (
+  row: Pick<ProfileRow, CreationField | (typeof LOCK_FLAG)[CreationField]>,
+): ProfileCreationFields & ProfileCreationFieldLocks => ({
   provider: row.provider,
   region: row.region,
   size: row.sizeSku,
   image: row.image,
+  providerLocked: row.providerLocked,
+  regionLocked: row.regionLocked,
+  sizeLocked: row.sizeLocked,
+  imageLocked: row.imageLocked,
 });
+
+type FieldValues = Pick<ProfileRow, CreationField | (typeof LOCK_FLAG)[CreationField]>;
+
+/**
+ * The creation fields and locks after an edit: each value the input names replaces the
+ * current one, blank reads as none. A lock needs a value, so clearing a value also unlocks
+ * it, and asking to lock a field with no value is refused.
+ */
+const nextFieldValues = (
+  current: FieldValues | null,
+  input: ProfileFieldsInput,
+): Effect.Effect<FieldValues, ProfileEditError> =>
+  Effect.gen(function* () {
+    const next = {} as Record<string, unknown>;
+    for (const field of CREATION_FIELDS) {
+      const given = input[field];
+      const value =
+        given !== undefined
+          ? field === "provider"
+            ? given
+            : (blankToNull(given as string | null) ?? null)
+          : (current?.[field] ?? null);
+      const flag = LOCK_FLAG[field];
+      const askedLock = input[flag];
+      if (askedLock === true && value === null) {
+        return yield* editError(
+          "invalid_profile_field",
+          `set a ${FIELD_LABEL[field]} before locking it`,
+        );
+      }
+      next[field] = value;
+      next[flag] = value === null ? false : (askedLock ?? current?.[flag] ?? false);
+    }
+    return next as FieldValues;
+  });
 
 const loadProfile = (db: DbHandle, orgId: string, profileId: string) =>
   Effect.gen(function* () {
@@ -309,12 +375,7 @@ export const createProfile = (
     const name = input.name.trim();
     if (name.length === 0)
       return yield* editError("invalid_profile_field", "a profile needs a name");
-    const fields = {
-      provider: input.provider ?? null,
-      region: blankToNull(input.region) ?? null,
-      sizeSku: blankToNull(input.sizeSku) ?? null,
-      image: blankToNull(input.image) ?? null,
-    };
+    const fields = yield* nextFieldValues(null, input);
     yield* validateCreationFields(db, fields);
     yield* requireNameFree(db, input.orgId, name);
     const description = blankToNull(input.description) ?? null;
@@ -348,16 +409,14 @@ export const updateProfile = (
       );
     }
 
+    const fields = yield* nextFieldValues(row, input);
     const next = {
       name: input.name !== undefined ? input.name.trim() : row.name,
       description:
         input.description !== undefined
           ? (blankToNull(input.description) ?? null)
           : row.description,
-      provider: input.provider !== undefined ? input.provider : row.provider,
-      region: input.region !== undefined ? (blankToNull(input.region) ?? null) : row.region,
-      sizeSku: input.sizeSku !== undefined ? (blankToNull(input.sizeSku) ?? null) : row.sizeSku,
-      image: input.image !== undefined ? (blankToNull(input.image) ?? null) : row.image,
+      ...fields,
     };
     if (next.name.length === 0)
       return yield* editError("invalid_profile_field", "a profile needs a name");
@@ -369,18 +428,11 @@ export const updateProfile = (
     const machineCount = counts.get(row.id) ?? 0;
     if (changed.length === 0) return toView(row, machineCount);
 
-    const creationChanged = changed.filter((key) =>
-      (["provider", "region", "sizeSku", "image"] as const).some((field) => field === key),
-    );
-    if (creationChanged.length > 0) {
-      if (machineCount > 0) {
-        return yield* editError(
-          "profile_in_use",
-          `${machineCount} machine(s) use profile "${row.name}", so its provider, region, size and image cannot change. Make a new profile instead.`,
-        );
-      }
-      yield* validateCreationFields(db, next);
-    }
+    const valueChanged = CREATION_FIELDS.some((field) => changed.includes(field));
+    if (valueChanged) yield* validateCreationFields(db, next);
+    // A locked field must match every machine on the profile. Changing an unlocked one is
+    // always allowed: it is only where the create form starts, and no machine changes.
+    yield* requireLocksMatchMachines(db, row, resolveCreationFields({ ...row, ...fields }));
     if (changed.includes("name")) yield* requireNameFree(db, input.orgId, next.name, row.id);
 
     const updated = yield* write("updating profile", () =>
@@ -403,6 +455,47 @@ export const updateProfile = (
       payload: { profileId: row.id, previous, current },
     });
     return toView(updated[0] ?? row, machineCount);
+  });
+
+/**
+ * Refuses an edit that would leave a locked creation field different from a machine on the
+ * profile that is not archived. Such a machine was created, or moved here, under other rules,
+ * and a profile edit never changes a machine (invariant 10).
+ */
+const requireLocksMatchMachines = (
+  db: DbHandle,
+  profile: ProfileRow,
+  resolved: ResolvedCreationFields,
+) =>
+  Effect.gen(function* () {
+    const lockedFields = CREATION_FIELDS.filter((field) => resolved[field].locked);
+    if (lockedFields.length === 0) return;
+    const live = yield* write("reading machines", () =>
+      db
+        .select({
+          provider: machines.provider,
+          region: machines.region,
+          sizeSku: machines.sizeSku,
+          image: machines.image,
+        })
+        .from(machines)
+        .where(
+          and(
+            eq(machines.profileId, profile.id),
+            notInArray(machines.state, [...ARCHIVED_MACHINE_STATES]),
+          ),
+        ),
+    );
+    for (const field of lockedFields) {
+      const value = resolved[field].value;
+      const differing = live.filter((machine) => machine[field] !== value).length;
+      if (differing > 0) {
+        return yield* editError(
+          "profile_in_use",
+          `${differing} machine(s) on profile "${profile.name}" have a different ${FIELD_LABEL[field]}. A locked ${FIELD_LABEL[field]} must match every machine on the profile. Leave it unlocked, or move those machines first.`,
+        );
+      }
+    }
   });
 
 /**
@@ -457,28 +550,14 @@ export const requireUsableProfile = (
 
 /**
  * Why a machine with these creation fields cannot be on this profile, or null when it can.
- * A field the profile leaves blank fits anything. A field the machine leaves blank (null) fits
- * too: on create, the profile fills it in.
+ * Only a locked field binds the machine. See `lockedFieldConflict`.
  */
 export const profileFieldConflict = (
-  profile: Pick<ProfileRow, "name" | "provider" | "region" | "sizeSku" | "image">,
+  profile: ProfileRow,
   machine: {
     provider: string | null;
     region: string | null;
     sizeSku: string | null;
     image: string | null;
   },
-): string | null => {
-  const fields = [
-    ["provider", profile.provider, machine.provider],
-    ["region", profile.region, machine.region],
-    ["size", profile.sizeSku, machine.sizeSku],
-    ["image", profile.image, machine.image],
-  ] as const;
-  for (const [label, fromProfile, fromMachine] of fields) {
-    if (fromProfile !== null && fromMachine !== null && fromProfile !== fromMachine) {
-      return `profile "${profile.name}" sets ${label} to "${fromProfile}", not "${fromMachine}"`;
-    }
-  }
-  return null;
-};
+): string | null => lockedFieldConflict(profile.name, resolveCreationFields(profile), machine);

@@ -191,6 +191,41 @@ describe.skipIf(!reachable)("resize (requires Postgres)", () => {
     expect(row?.sizeSku).toBe("large");
   });
 
+  test("an unlocked profile size is a starting value: the machine may resize away from it", async () => {
+    const { org, person } = await seed("none");
+    const [profile] = await db
+      .insert(profiles)
+      .values({
+        orgId: org.id,
+        name: `p-${crypto.randomUUID()}`,
+        provider: "fake",
+        sizeSku: "small",
+      })
+      .returning();
+    const machine = await run(
+      Effect.flatMap(MachineService, (svc) =>
+        svc.create({
+          orgId: org.id,
+          ownerPersonId: person.id,
+          profileId: profile?.id ?? null,
+          image: "ubuntu-24.04",
+        }),
+      ),
+    );
+    expect(machine.sizeSku).toBe("small");
+    const asked = await run(
+      requestMachineResize({
+        machineId: machine.id,
+        orgId: org.id,
+        personId: person.id,
+        sizeSku: "large",
+        reason: "builds are slow",
+      }),
+    );
+    expect(asked.status).toBe("approved");
+    expect((await outcome(machine.id)).map((e) => e.type)).toEqual(["machine.resized"]);
+  });
+
   test("it waits for its approval, and a provider failure keeps the old size", async () => {
     const { org, person } = await seed("single");
     // Inserted directly, so the fake provider does not know it: the resize fails there.
@@ -239,7 +274,7 @@ describe.skipIf(!reachable)("resize (requires Postgres)", () => {
     expect(row?.lastError).toContain("resize to large failed");
   });
 
-  test("refused before anyone is asked: same size, a size the profile fixes, no reason", async () => {
+  test("refused before anyone is asked: same size, a size the profile locks, no reason", async () => {
     const { org, person } = await seed("single");
     const [profile] = await db
       .insert(profiles)
@@ -248,6 +283,7 @@ describe.skipIf(!reachable)("resize (requires Postgres)", () => {
         name: `p-${crypto.randomUUID()}`,
         provider: "fake",
         sizeSku: "small",
+        sizeLocked: true,
       })
       .returning();
     const [machine] = await db

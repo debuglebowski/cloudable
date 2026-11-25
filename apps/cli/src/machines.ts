@@ -207,7 +207,7 @@ export async function runMachinesGetCommand(argv: ReadonlyArray<string>): Promis
 // ---------------------------------------------------------------------------
 
 const CREATE_USAGE = usageFor(
-  "machines create --owner <email|id> [--profile <profile>] [--provider azure|docker|fake] [--size <sku>] [--image <image>] [--region <region>] [--name <name>]\n\n--provider, --size and --image are required unless the profile sets them.",
+  "machines create --owner <email|id> [--profile <profile>] [--provider azure|docker|fake] [--size <sku>] [--image <image>] [--region <region>] [--name <name>]\n\n--provider, --size and --image are required unless the profile sets them. They may differ from what the profile sets, unless it locks them.",
 );
 
 export async function runMachinesCreateCommand(argv: ReadonlyArray<string>): Promise<void> {

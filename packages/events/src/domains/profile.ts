@@ -9,6 +9,18 @@ export interface ProfileCreationFields {
 }
 
 /**
+ * Which creation fields the profile locks. A locked field is fixed for every machine on the
+ * profile. An unlocked one is only a starting value the create form fills in. Added
+ * 2026-11; events recorded before then have no lock fields, and every field they set was fixed.
+ */
+export interface ProfileCreationFieldLocks {
+  providerLocked?: boolean;
+  regionLocked?: boolean;
+  sizeLocked?: boolean;
+  imageLocked?: boolean;
+}
+
+/**
  * Profile events. A profile is a named set of settings machines link to
  * (org → profile → machine). `machineId` is always null: a profile change
  * reaches every machine on it, and `profileId` in the payload says which.
@@ -20,11 +32,16 @@ export type ProfileEvent =
         profileId: string;
         name: string;
         description: string | null;
-      } & ProfileCreationFields;
+      } & ProfileCreationFields &
+        ProfileCreationFieldLocks;
     })
   | (EventEnvelope & {
       type: "profile.updated";
-      /** Name, description or creation fields. Each side holds only the fields that changed. */
+      /**
+       * Name, description, creation fields or their locks. Each side holds only the fields
+       * that changed. Keys: `name`, `description`, `provider`, `region`, `size`, `image`,
+       * `providerLocked`, `regionLocked`, `sizeLocked`, `imageLocked`.
+       */
       payload: {
         profileId: string;
         previous: Record<string, unknown>;

@@ -26,7 +26,7 @@ const NO_PROFILE = "none";
 
 /**
  * Moves a machine to another profile, or off one. Admin only, and recorded. A profile that
- * sets a different provider, region, size or image is refused by the server: those are fixed
+ * locks a different provider, region, size or image is refused by the server: those are fixed
  * when a machine is created.
  */
 export function MachineProfileDialog({

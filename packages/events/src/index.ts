@@ -14,4 +14,8 @@ export type { ApprovalEvent } from "./domains/approval";
 export type { SnapshotEvent } from "./domains/snapshot";
 export type { CloudEvent } from "./domains/cloud";
 export type { AgentEvent } from "./domains/agent";
-export type { ProfileCreationFields, ProfileEvent } from "./domains/profile";
+export type {
+  ProfileCreationFieldLocks,
+  ProfileCreationFields,
+  ProfileEvent,
+} from "./domains/profile";

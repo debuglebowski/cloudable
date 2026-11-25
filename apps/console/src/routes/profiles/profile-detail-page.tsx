@@ -53,6 +53,13 @@ import {
 } from "./profile-settings";
 import { creationFieldsSummary } from "./profiles-page";
 
+const CREATION_FIELD_ROWS = [
+  { field: "provider", label: "Provider" },
+  { field: "region", label: "Region" },
+  { field: "sizeSku", label: "Size" },
+  { field: "image", label: "Image" },
+] as const;
+
 export function ProfileDetailPage() {
   const { profileId } = useParams({ from: "/profiles/$profileId" });
   const queryClient = useQueryClient();
@@ -111,12 +118,11 @@ export function ProfileDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Fixed for every machine on it</CardTitle>
+          <CardTitle>New machines</CardTitle>
           <CardDescription>
-            Used when a machine is created.{" "}
-            {profile.machineCount > 0
-              ? `${profile.machineCount} machine(s) use this profile, so these cannot change.`
-              : "No machine uses this profile yet, so these can still change."}
+            Used when a machine is created. A starting value fills in the Add machine form, and the
+            person can change it. A locked value is the same on every machine on this profile.
+            Editing these never changes a machine that already exists.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-sm">
@@ -125,7 +131,25 @@ export function ProfileDetailPage() {
               None. The Add machine form asks for the provider, region, size and image.
             </span>
           ) : (
-            <span className="font-mono">{creationFieldsSummary(profile)}</span>
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5">
+              {CREATION_FIELD_ROWS.map(({ field, label }) => {
+                const resolved = profile.creation[field];
+                if (resolved.value === null) return null;
+                return (
+                  <div key={field} className="contents">
+                    <dt className="text-muted-foreground">{label}</dt>
+                    <dd className="flex items-center gap-2">
+                      <span className="font-mono">{resolved.value}</span>
+                      {resolved.locked ? (
+                        <Badge variant="outline">Locked</Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Starting value</span>
+                      )}
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
           )}
         </CardContent>
       </Card>

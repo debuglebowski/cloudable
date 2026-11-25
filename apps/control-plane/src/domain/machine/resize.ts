@@ -94,10 +94,11 @@ export const requestMachineResize = (input: {
           .where(eq(profiles.id, machine.profileId ?? ""))
           .limit(1),
       ).pipe(Effect.orDie);
-      if (profile?.sizeSku && profile.sizeSku !== sizeSku) {
+      // Only a locked size binds the machine. An unlocked one was a starting value.
+      if (profile?.sizeSku && profile.sizeLocked && profile.sizeSku !== sizeSku) {
         return yield* refuse(
           "size_fixed_by_profile",
-          `profile "${profile.name}" fixes the size at ${profile.sizeSku}`,
+          `profile "${profile.name}" locks the size at ${profile.sizeSku}`,
         );
       }
     }

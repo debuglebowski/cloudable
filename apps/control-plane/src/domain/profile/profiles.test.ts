@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as schema from "@cloudable/schema";
 import { events, integrations, machines, orgs, people, settingValues } from "@cloudable/schema";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { type PostgresJsDatabase, drizzle } from "drizzle-orm/postgres-js";
 import { Effect, Layer } from "effect";
 import postgres from "postgres";
@@ -154,10 +154,14 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
     expect(created?.payload).toMatchObject({ profileId: profile.id });
   });
 
-  test("a machine cannot be created with a field that differs from its profile's", async () => {
+  test("a machine cannot be created with a field that differs from a locked one", async () => {
     const org = await seedOrg();
     const owner = await seedPerson(org.id);
-    const profile = await newProfile(org.id, { provider: "fake", sizeSku: "small" });
+    const profile = await newProfile(org.id, {
+      provider: "fake",
+      sizeSku: "small",
+      sizeLocked: true,
+    });
 
     const error = await fail(
       createMachine(org.id, owner.id, {
@@ -167,7 +171,7 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
       }),
     );
     expect(error._tag).toBe("InvalidMachineRequestError");
-    expect(JSON.stringify(error)).toContain('sets size to \\"small\\"');
+    expect(JSON.stringify(error)).toContain('locks the size at \\"small\\"');
   });
 
   test("an archived profile cannot take a new machine, but its machines keep reading from it", async () => {
@@ -433,10 +437,14 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
     });
   });
 
-  test("creation fields are fixed while a machine uses the profile", async () => {
+  test("a locked creation field is fixed while a machine uses the profile", async () => {
     const org = await seedOrg();
     const owner = await seedPerson(org.id);
-    const profile = await newProfile(org.id, { provider: "fake", sizeSku: "small" });
+    const profile = await newProfile(org.id, {
+      provider: "fake",
+      sizeSku: "small",
+      sizeLocked: true,
+    });
 
     // No machines yet: allowed.
     await run(updateProfile({ orgId: org.id, profileId: profile.id, sizeSku: "medium", actor }));
@@ -465,8 +473,24 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
         image: "ubuntu-24.04",
       }),
     );
-    const fits = await newProfile(org.id, { provider: "fake", sizeSku: "small" });
-    const misfit = await newProfile(org.id, { provider: "fake", sizeSku: "large" });
+    const fits = await newProfile(org.id, { provider: "fake", sizeSku: "small", sizeLocked: true });
+    const misfit = await newProfile(org.id, {
+      provider: "fake",
+      sizeSku: "large",
+      sizeLocked: true,
+    });
+    // An unlocked size is only a starting value: a machine of another size may move onto it.
+    const loose = await newProfile(org.id, { provider: "fake", sizeSku: "large" });
+    await run(
+      Effect.flatMap(MachineService, (svc) =>
+        svc.setProfile({
+          machineId: machine.id,
+          orgId: org.id,
+          profileId: loose.id,
+          actorPersonId: owner.id,
+        }),
+      ),
+    );
 
     const moved = await run(
       Effect.flatMap(MachineService, (svc) =>
@@ -496,10 +520,88 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
     const [assigned] = await db
       .select()
       .from(events)
-      .where(and(eq(events.machineId, machine.id), eq(events.type, "machine.profile_assigned")));
-    expect(assigned?.payload).toEqual({ profileId: fits.id, previousProfileId: null });
+      .where(and(eq(events.machineId, machine.id), eq(events.type, "machine.profile_assigned")))
+      .orderBy(desc(events.occurredAt))
+      .limit(1);
+    expect(assigned?.payload).toEqual({ profileId: fits.id, previousProfileId: loose.id });
 
     const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
     expect(row?.profileId).toBe(fits.id);
+  });
+  test("an unlocked creation field is a starting value: the machine may differ", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    const profile = await newProfile(org.id, {
+      provider: "fake",
+      sizeSku: "small",
+      image: "ubuntu-24.04",
+    });
+    expect(profile.sizeLocked).toBe(false);
+    expect(profile.creation.sizeSku).toEqual({
+      value: "small",
+      locked: false,
+      fromProfileId: profile.id,
+    });
+
+    const machine = await run(
+      createMachine(org.id, owner.id, { profileId: profile.id, sizeSku: "large" }),
+    );
+    expect(machine).toMatchObject({ sizeSku: "large", image: "ubuntu-24.04" });
+  });
+
+  test("an unlocked creation field can change while machines use the profile, and they keep theirs", async () => {
+    const org = await seedOrg();
+    const owner = await seedPerson(org.id);
+    const profile = await newProfile(org.id, {
+      provider: "fake",
+      sizeSku: "small",
+      image: "ubuntu-24.04",
+    });
+    const machine = await run(createMachine(org.id, owner.id, { profileId: profile.id }));
+
+    const updated = await run(
+      updateProfile({ orgId: org.id, profileId: profile.id, sizeSku: "large", actor }),
+    );
+    expect(updated.sizeSku).toBe("large");
+    const [row] = await db.select().from(machines).where(eq(machines.id, machine.id));
+    expect(row?.sizeSku).toBe("small");
+
+    // Locking it now would leave the machine different from a locked value.
+    const refused = await fail(
+      updateProfile({ orgId: org.id, profileId: profile.id, sizeLocked: true, actor }),
+    );
+    expect(refused).toMatchObject({ code: "profile_in_use" });
+    // Locking the image the machine has is fine.
+    const locked = await run(
+      updateProfile({ orgId: org.id, profileId: profile.id, imageLocked: true, actor }),
+    );
+    expect(locked.imageLocked).toBe(true);
+
+    const recorded = await db
+      .select()
+      .from(events)
+      .where(and(eq(events.orgId, org.id), eq(events.type, "profile.updated")))
+      .orderBy(events.occurredAt);
+    expect(recorded.map((e) => e.payload)).toEqual([
+      { profileId: profile.id, previous: { size: "small" }, current: { size: "large" } },
+      { profileId: profile.id, previous: { imageLocked: false }, current: { imageLocked: true } },
+    ]);
+  });
+
+  test("a lock needs a value, and clearing a value unlocks it", async () => {
+    const org = await seedOrg();
+    const noValue = await fail(
+      createProfile({ orgId: org.id, name: "x", provider: "fake", sizeLocked: true, actor }),
+    );
+    expect(noValue).toMatchObject({ code: "invalid_profile_field" });
+    const profile = await newProfile(org.id, {
+      provider: "fake",
+      sizeSku: "small",
+      sizeLocked: true,
+    });
+    const cleared = await run(
+      updateProfile({ orgId: org.id, profileId: profile.id, sizeSku: null, actor }),
+    );
+    expect(cleared).toMatchObject({ sizeSku: null, sizeLocked: false });
   });
 });

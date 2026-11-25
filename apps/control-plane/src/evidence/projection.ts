@@ -22,15 +22,25 @@ const describePackageState = (state: unknown): string => {
   return value.pinned === true ? `${version}, locked` : version;
 };
 
+/**
+ * An event from before lock flags existed has none, and every field it set was locked then.
+ */
 const profileCreationFieldsSummary = (fields: {
   provider: string | null;
   region: string | null;
   size: string | null;
   image: string | null;
+  providerLocked?: boolean;
+  regionLocked?: boolean;
+  sizeLocked?: boolean;
+  imageLocked?: boolean;
 }): string =>
   (["provider", "region", "size", "image"] as const)
     .filter((key) => fields[key] !== null)
-    .map((key) => `${key} ${fields[key]}`)
+    .map((key) => {
+      const locked = fields[`${key}Locked`] ?? true;
+      return `${key} ${fields[key]}${locked ? " (locked)" : " (starting value)"}`;
+    })
     .join(", ");
 
 const packageChangeSummary = (

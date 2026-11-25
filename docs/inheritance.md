@@ -26,7 +26,7 @@ copied. Edit a profile and every machine on it follows, unless that machine over
 - A machine has zero or one profile (`machines.profileId`). An admin picks it when creating the
   machine, and can move the machine later (`PUT /api/v1/machines/:id/profile`). Each move is
   recorded as `machine.profile_assigned`. A move is refused for an archived machine, and when the
-  new profile sets a provider, region, size or image the machine does not have.
+  new profile locks a provider, region, size or image the machine does not have.
 - A profile's settings are `setting_values` rows with `scopeType: "profile"`, written through
   `PATCH /api/v1/config/settings`. A profile may set only the keys in `PROFILE_SETTING_KEYS`
   (`domain/profile/setting-keys.ts`): logging tier, access methods and the elevation length.
@@ -41,10 +41,24 @@ copied. Edit a profile and every machine on it follows, unless that machine over
   a profile installs that profile's Ensure packages with no new approval: they were approved when
   they were set.
 - **Creation fields.** A profile may set a provider, region, size and image. All are optional.
-  They are used only when a machine is created: the create form asks for what the profile leaves
-  blank, and refuses a value that differs from the profile's. They cannot change while a machine
-  that is not archived uses the profile. To change them, make a new profile. A profile edit must
-  never resize or move a live machine (invariant 10).
+  They are used only when a machine is created. The create form asks for what the profile leaves
+  blank. Each field the profile sets is either a starting value or locked
+  (`providerLocked`, `regionLocked`, `sizeLocked`, `imageLocked` on `profiles`):
+  - **Starting value** (unlocked, the default). The create form fills it in, and the person may
+    change it. The machine may later be resized away from it. The admin may change it at any
+    time, even while machines use the profile.
+  - **Locked.** Every machine on the profile has this value. The create form shows it and
+    refuses another. Resize refuses another size (`size_fixed_by_profile`). A move onto the
+    profile is refused for a machine that has another value.
+
+  A lock needs a value: locking an empty field is refused, and clearing a value also unlocks it.
+  A locked field must match every machine on the profile that is not archived. So it cannot
+  change while one uses the profile, and an edit that locks a field some machine differs from is
+  refused (`profile_in_use`). Unlock it first, or move those machines.
+
+  Editing a creation field never changes a machine that already exists (invariant 10). A profile
+  edit must never resize or move a live machine. Profiles made before 2026-11 had no lock flag,
+  and every field they set was fixed, so migration `0036` locked each one.
 - Profiles are archived, never deleted (`POST /api/v1/profiles/:id/archive`). No new machine can
   use an archived profile. Machines already on it keep reading their settings from it.
 - Restoring an archived machine into a new one keeps its profile while that profile is usable and

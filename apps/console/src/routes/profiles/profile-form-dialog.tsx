@@ -4,6 +4,7 @@ import { type FormEvent, useEffect, useState } from "react";
 
 import { profileErrorMessage } from "@/api/profiles";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -31,17 +32,33 @@ export interface ProfileFormValues {
   region: string | null;
   sizeSku: string | null;
   image: string | null;
+  providerLocked: boolean;
+  regionLocked: boolean;
+  sizeLocked: boolean;
+  imageLocked: boolean;
 }
 
 const ANY = "any";
 const PROVIDERS: MachineProvider[] = ["azure", "docker", "fake"];
 
+type Locks = Pick<
+  ProfileFormValues,
+  "providerLocked" | "regionLocked" | "sizeLocked" | "imageLocked"
+>;
+const NO_LOCKS: Locks = {
+  providerLocked: false,
+  regionLocked: false,
+  sizeLocked: false,
+  imageLocked: false,
+};
+
 const blankToNull = (value: string) => (value.trim() === "" ? null : value.trim());
 
 /**
  * Creates a profile, or edits one. Provider, region, size and image are optional: what the
- * profile leaves blank, the Add machine form asks for. They cannot change while a machine
- * uses the profile, so the dialog shows them read-only then.
+ * profile leaves blank, the Add machine form asks for. Each set field is a starting value the
+ * person can change, unless it is locked. A locked field is the same on every machine on the
+ * profile, so the server refuses to lock one a machine on it does not have.
  */
 export function ProfileFormDialog({
   open,
@@ -63,6 +80,7 @@ export function ProfileFormDialog({
   const [region, setRegion] = useState("");
   const [sizeSku, setSizeSku] = useState("");
   const [image, setImage] = useState("");
+  const [locks, setLocks] = useState<Locks>(NO_LOCKS);
 
   useEffect(() => {
     if (!open) return;
@@ -72,19 +90,49 @@ export function ProfileFormDialog({
     setRegion(profile?.region ?? "");
     setSizeSku(profile?.sizeSku ?? "");
     setImage(profile?.image ?? "");
+    setLocks(
+      profile
+        ? {
+            providerLocked: profile.providerLocked,
+            regionLocked: profile.regionLocked,
+            sizeLocked: profile.sizeLocked,
+            imageLocked: profile.imageLocked,
+          }
+        : NO_LOCKS,
+    );
   }, [open, profile]);
 
-  const fieldsFixed = (profile?.machineCount ?? 0) > 0;
+  const providerValue = provider === ANY ? null : (provider as MachineProvider);
+  const regionValue = provider === "azure" ? blankToNull(region) : null;
+  const sizeValue = blankToNull(sizeSku);
+  const imageValue = blankToNull(image);
+  const lockToggle = (flag: keyof Locks, hasValue: boolean) => (
+    <Label className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+      <Checkbox
+        checked={hasValue && locks[flag]}
+        disabled={!hasValue}
+        onCheckedChange={(checked) =>
+          setLocks((current) => ({ ...current, [flag]: checked === true }))
+        }
+      />
+      Lock
+    </Label>
+  );
 
   const mutation = useMutation({
     mutationFn: () =>
       save({
         name: name.trim(),
         description: blankToNull(description),
-        provider: provider === ANY ? null : (provider as MachineProvider),
-        region: provider === "azure" ? blankToNull(region) : null,
-        sizeSku: blankToNull(sizeSku),
-        image: blankToNull(image),
+        provider: providerValue,
+        region: regionValue,
+        sizeSku: sizeValue,
+        image: imageValue,
+        // A lock needs a value.
+        providerLocked: providerValue !== null && locks.providerLocked,
+        regionLocked: regionValue !== null && locks.regionLocked,
+        sizeLocked: sizeValue !== null && locks.sizeLocked,
+        imageLocked: imageValue !== null && locks.imageLocked,
       }),
     onSuccess: () => {
       onSaved();
@@ -134,17 +182,20 @@ export function ProfileFormDialog({
           </div>
 
           <div className="mt-2 flex flex-col gap-1">
-            <span className="text-sm font-medium">Fixed for every machine on it</span>
+            <span className="text-sm font-medium">New machines</span>
             <span className="text-xs text-muted-foreground">
-              {fieldsFixed
-                ? `${profile?.machineCount} machine(s) use this profile, so these cannot change. Make a new profile instead.`
-                : "Optional. Leave a field empty and the Add machine form asks for it."}
+              Optional. A value here fills in the Add machine form, and the person can change it.
+              Lock it to make it the same on every machine on this profile. A machine never changes
+              when you edit these.
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="profile-provider">Provider</Label>
-              <Select value={provider} onValueChange={setProvider} disabled={fieldsFixed}>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="profile-provider">Provider</Label>
+                {lockToggle("providerLocked", providerValue !== null)}
+              </div>
+              <Select value={provider} onValueChange={setProvider}>
                 <SelectTrigger id="profile-provider">
                   <SelectValue />
                 </SelectTrigger>
@@ -159,31 +210,40 @@ export function ProfileFormDialog({
               </Select>
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="profile-region">Region</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="profile-region">Region</Label>
+                {lockToggle("regionLocked", regionValue !== null)}
+              </div>
               <Input
                 id="profile-region"
                 value={region}
-                disabled={fieldsFixed || provider !== "azure"}
+                disabled={provider !== "azure"}
                 onChange={(event) => setRegion(event.target.value)}
                 placeholder={provider === "azure" ? "e.g. swedencentral" : "Azure only"}
               />
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="profile-size">Size</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="profile-size">Size</Label>
+                {lockToggle("sizeLocked", sizeValue !== null)}
+              </div>
               <Input
                 id="profile-size"
                 value={sizeSku}
-                disabled={fieldsFixed || provider === ANY}
+                disabled={provider === ANY}
                 onChange={(event) => setSizeSku(event.target.value)}
                 placeholder="e.g. Standard_D4s_v5"
               />
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="profile-image">Image</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="profile-image">Image</Label>
+                {lockToggle("imageLocked", imageValue !== null)}
+              </div>
               <Input
                 id="profile-image"
                 value={image}
-                disabled={fieldsFixed || provider === ANY}
+                disabled={provider === ANY}
                 onChange={(event) => setImage(event.target.value)}
                 placeholder="e.g. ubuntu-24.04"
               />

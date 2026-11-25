@@ -315,8 +315,8 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             }),
           );
 
-        // The profile's creation fields fill in what the caller left out. A value that
-        // differs from the profile's is refused: the profile decides those.
+        // The profile's creation fields fill in what the caller left out. An unlocked one is
+        // only a starting value, so the caller's own wins. A locked one cannot differ.
         let provider = rawInput.provider;
         let sizeSku = rawInput.sizeSku?.trim() || undefined;
         let image = rawInput.image?.trim() || undefined;
@@ -337,10 +337,10 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
             image: image ?? null,
           });
           if (conflict) return yield* invalid(conflict);
-          provider = profile.provider ?? provider;
-          sizeSku = profile.sizeSku ?? sizeSku;
-          image = profile.image ?? image;
-          requestedRegion = profile.region ?? requestedRegion;
+          provider = provider ?? profile.provider ?? undefined;
+          sizeSku = sizeSku ?? profile.sizeSku ?? undefined;
+          image = image ?? profile.image ?? undefined;
+          requestedRegion = requestedRegion ?? profile.region;
         }
         if (!provider) return yield* invalid('"provider" is required');
         if (!sizeSku) return yield* invalid('"sizeSku" is required');
@@ -1180,8 +1180,9 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
      * Moves a machine to another profile, or off one (`profileId: null`). An admin's recorded
      * decision (`machine.profile_assigned`). The machine's settings and packages then resolve
      * through the new profile. Refused for an archived machine, an archived profile, and a
-     * profile whose provider, region, size or image differ from the machine's: those are fixed
-     * at creation, and a move must not pretend otherwise.
+     * profile that locks a provider, region, size or image the machine does not have: those
+     * are fixed at creation, and a move must not pretend otherwise. An unlocked field is only
+     * a starting value, so it does not matter here.
      */
     const setProfile = (input: {
       machineId: string;

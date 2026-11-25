@@ -12,7 +12,8 @@ import type {
 // The chain is org → profile → machine; the lowest level that sets something
 // wins. Editing a profile changes every machine on it that has not overridden
 // the setting. Provider, region, size and image are used only when a machine
-// is created, and cannot change while a machine uses the profile.
+// is created. Each is a starting value the machine may differ from, unless
+// it is locked. A locked one must match every machine on the profile.
 // See docs/inheritance.md.
 // ---------------------------------------------------------------------------
 import { oneOf, parseArgs, readSpec, required } from "./args";
@@ -51,14 +52,27 @@ export async function profileId(nameOrId: string): Promise<string> {
   return match.id;
 }
 
+const CREATION_FIELDS = [
+  ["provider", "provider"],
+  ["region", "region"],
+  ["sizeSku", "size"],
+  ["image", "image"],
+] as const;
+
+/** What a new machine on the profile gets. A locked value says so. */
 function creationFields(p: ProfileSummary): string {
-  const parts = [
-    p.provider && `provider ${p.provider}`,
-    p.region && `region ${p.region}`,
-    p.sizeSku && `size ${p.sizeSku}`,
-    p.image && `image ${p.image}`,
-  ].filter(Boolean);
+  const parts = CREATION_FIELDS.filter(([field]) => p.creation[field].value !== null).map(
+    ([field, label]) =>
+      `${label} ${p.creation[field].value}${p.creation[field].locked ? " (locked)" : ""}`,
+  );
   return parts.length > 0 ? parts.join(", ") : "-";
+}
+
+/** One creation field for `profiles get`: the value, and whether it is locked. */
+function creationField(p: ProfileSummary, field: (typeof CREATION_FIELDS)[number][0]): string {
+  const resolved = p.creation[field];
+  if (resolved.value === null) return "-";
+  return `${resolved.value} (${resolved.locked ? "locked" : "starting value"})`;
 }
 
 function printProfiles(items: ReadonlyArray<ProfileSummary>): void {
@@ -93,10 +107,10 @@ function printProfile(p: ProfileDetail): void {
     ["name", p.name],
     ["id", p.id],
     ["description", dash(p.description)],
-    ["provider", dash(p.provider)],
-    ["region", dash(p.region)],
-    ["size", dash(p.sizeSku)],
-    ["image", dash(p.image)],
+    ["provider", creationField(p, "provider")],
+    ["region", creationField(p, "region")],
+    ["size", creationField(p, "sizeSku")],
+    ["image", creationField(p, "image")],
     ["machines", String(p.machineCount)],
     ["archived", p.archivedAt ?? "no"],
   ]);
@@ -138,6 +152,25 @@ export async function runProfilesGetCommand(argv: ReadonlyArray<string>): Promis
 }
 
 const FIELD_FLAGS = ["name", "description", "provider", "region", "size", "image"] as const;
+const LOCK_FLAGS = ["lock", "unlock"] as const;
+const LOCKABLE = ["provider", "region", "size", "image"] as const;
+const LOCK_KEY = {
+  provider: "providerLocked",
+  region: "regionLocked",
+  size: "sizeLocked",
+  image: "imageLocked",
+} as const;
+
+/** `--lock size --unlock image`: which creation fields to lock or unlock. */
+function locksFromArgs(all: Readonly<Record<string, ReadonlyArray<string>>>): UpdateProfileRequest {
+  const body: UpdateProfileRequest = {};
+  for (const flag of LOCK_FLAGS) {
+    for (const raw of all[flag] ?? []) {
+      body[LOCK_KEY[oneOf(raw, LOCKABLE, flag)]] = flag === "lock";
+    }
+  }
+  return body;
+}
 
 /** `none` clears a field; anything else sets it. Only the flags given are sent. */
 function fieldsFromArgs(flags: Readonly<Record<string, string | undefined>>): UpdateProfileRequest {
@@ -165,13 +198,13 @@ function fieldsFromArgs(flags: Readonly<Record<string, string | undefined>>): Up
 
 export async function runProfilesCreateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "profiles create --name <name> [--description <text>] [--provider azure|docker|fake] [--region <region>] [--size <sku>] [--image <image>]",
+    "profiles create --name <name> [--description <text>] [--provider azure|docker|fake] [--region <region>] [--size <sku>] [--image <image>] [--lock provider|region|size|image]",
   );
-  const args = parseArgs(argv, readSpec({ values: [...FIELD_FLAGS] }));
+  const args = parseArgs(argv, readSpec({ values: [...FIELD_FLAGS], repeatable: [...LOCK_FLAGS] }));
   if (!args.flags.name) throw new UsageError(`--name is required\n\n${usage}`);
   const profile = await authenticatedApiRequest<ProfileSummary>(
     "/api/v1/profiles",
-    postJson(fieldsFromArgs(args.flags)),
+    postJson({ ...fieldsFromArgs(args.flags), ...locksFromArgs(args.all) }),
   );
   if (args.booleans.has("json")) {
     printJson(profile);
@@ -182,11 +215,11 @@ export async function runProfilesCreateCommand(argv: ReadonlyArray<string>): Pro
 
 export async function runProfilesUpdateCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor(
-    "profiles update <profile> [--name <name>] [--description <text>|none] [--provider <p>|none] [--region <r>|none] [--size <sku>|none] [--image <image>|none]",
+    "profiles update <profile> [--name <name>] [--description <text>|none] [--provider <p>|none] [--region <r>|none] [--size <sku>|none] [--image <image>|none] [--lock <field>] [--unlock <field>]",
   );
-  const args = parseArgs(argv, readSpec({ values: [...FIELD_FLAGS] }));
+  const args = parseArgs(argv, readSpec({ values: [...FIELD_FLAGS], repeatable: [...LOCK_FLAGS] }));
   const id = await profileId(required(args, 0, "a profile", usage));
-  const body = fieldsFromArgs(args.flags);
+  const body = { ...fieldsFromArgs(args.flags), ...locksFromArgs(args.all) };
   if (Object.keys(body).length === 0) throw new UsageError(`nothing to change\n\n${usage}`);
   const profile = await authenticatedApiRequest<ProfileSummary>(
     `/api/v1/profiles/${id}`,
