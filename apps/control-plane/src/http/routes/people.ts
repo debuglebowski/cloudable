@@ -13,7 +13,7 @@ import { CurrentUserAuthentication } from "../middleware/auth";
 // fully editable" when SCIM is absent). `source`/`active`/`deactivatedAt`
 // mirror `packages/schema/src/tables/person.ts` exactly.
 
-const PersonSource = Schema.Literal("manual", "scim");
+const PersonSource = Schema.Literal("manual", "scim", "idp");
 
 const Person = Schema.Struct({
   id: Schema.String,

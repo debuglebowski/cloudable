@@ -159,7 +159,8 @@ export const updatePerson = (
     const existing = yield* findById(db, input.personId, input.orgId);
     // Email and role come from the IdP for a synced person. The approver flag is Cloudable's own,
     // so it can be set on anyone.
-    if (existing.source !== "manual" && (input.email !== undefined || input.role !== undefined)) {
+    // An `idp` person was added by their first sign-in, not synced: nothing else manages them.
+    if (existing.source === "scim" && (input.email !== undefined || input.role !== undefined)) {
       return yield* Effect.fail(new PersonNotManuallyManagedError({ personId: input.personId }));
     }
 
@@ -215,7 +216,9 @@ export const setPersonActive = (
   Effect.gen(function* () {
     const db = yield* Db;
     const existing = yield* findById(db, input.personId, input.orgId);
-    if (existing.source !== "manual") {
+    // Only a SCIM-synced person is the directory's to deactivate. One added by their first
+    // sign-in (`idp`) must stay deactivatable here: nothing else would ever do it.
+    if (existing.source === "scim") {
       return yield* Effect.fail(new PersonNotManuallyManagedError({ personId: input.personId }));
     }
 

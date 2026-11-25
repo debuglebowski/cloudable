@@ -185,7 +185,15 @@ issued refuses the token too, even after a later fresh SSO sign-in.
 
 **What Cloudable refuses.** Role and approver changes from the People page, the API and the CLI
 answer 409 `ROLES_MANAGED_BY_IDP`, "Roles are managed by your identity provider." Adding a person
-still works, as a member; their first sign-in sets the real role. Email changes, deactivation and
+still works, as a member; their first sign-in sets the real role.
+
+**People are added at their first sign-in.** An admin does not have to add each person first. A
+verified first sign-in adds the person (`source: "idp"`, recorded as `person.added` with the
+identity provider as actor) when all of these hold: the assertion carries a mapped role, the email
+is in the provider's email domains (`IDP_SAML_CONFIG.emailDomains`), and exactly one org already
+has people from that email domain. Otherwise the sign-in is refused as before ("No Cloudable
+person exists for this account"). An added person is managed in Cloudable like one added by hand:
+an admin can deactivate or offboard them. Only SCIM-synced people are read-only. Email changes, deactivation and
 offboarding still work. The bootstrap admin is added as a member: nothing is promoted locally.
 Recovery when the IdP is unavailable is server administration: switch the mode off and restart.
 

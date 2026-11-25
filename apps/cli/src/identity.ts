@@ -5,7 +5,7 @@ export interface PersonWire {
   id: string;
   orgId: string;
   email: string;
-  source: "manual" | "scim";
+  source: "manual" | "scim" | "idp";
   active: boolean;
   role: string;
   /** Approvers decide approval requests. A flag on top of the role. */

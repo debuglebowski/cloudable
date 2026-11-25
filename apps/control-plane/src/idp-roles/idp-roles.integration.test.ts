@@ -532,6 +532,74 @@ describe.skipIf(!reachable)("roles from the identity provider (isolated Postgres
     expect((await signIn(who, "Cloudable.Admin")).refused).toBeNull();
   });
 
+  test("a first sign-in with a role adds the person to the org that has their domain", async () => {
+    await forceModeRow(MANAGED);
+    const domain = `${crypto.randomUUID().slice(0, 8)}.example.org`;
+    const [org] = await iso.db
+      .insert(orgs)
+      .values({ name: `jit-${domain}` })
+      .returning();
+    if (!org) throw new Error("org");
+    await iso.db.insert(people).values({ orgId: org.id, email: `first@${domain}` });
+
+    const firstSignIn = async (email: string, claim: unknown, domains: string[]) => {
+      const hook = idpRoleProvisioning(iso.db, MANAGED, LOGIN_URL, domains);
+      try {
+        await runWithAssertionFacts(freshFacts(), () =>
+          hook.provisionUser({
+            user: { id: crypto.randomUUID(), email },
+            userInfo: { email, [IDP_ROLE_CLAIM_FIELD]: claim },
+            provider: { providerId: CONFIGURED_IDP_PROVIDER_ID },
+          }),
+        );
+        return null;
+      } catch (error) {
+        if (!(error instanceof APIError)) throw error;
+        return new URL(new Headers(error.headers).get("location") ?? "").searchParams.get("error");
+      }
+    };
+    const byEmail = async (email: string) =>
+      (await iso.db.select().from(people).where(eq(people.email, email)))[0];
+
+    // Added, with the role and flag the claim gives, recorded as added by the identity provider.
+    const email = `new@${domain}`;
+    expect(
+      await firstSignIn(email, ["Cloudable.Member", "Cloudable.Approver"], [domain]),
+    ).toBeNull();
+    const added = await byEmail(email);
+    expect(added).toMatchObject({ orgId: org.id, source: "idp", role: "member", approver: true });
+    const [addedEvent] = await iso.db
+      .select()
+      .from(events)
+      .where(and(eq(events.orgId, org.id), eq(events.type, "person.added")));
+    expect(addedEvent).toMatchObject({ actorType: "idp", payload: { email, source: "idp" } });
+
+    // No mapped role: nobody is added.
+    expect(await firstSignIn(`norole@${domain}`, ["Unknown"], [domain])).toBe("no_matching_person");
+    expect(await byEmail(`norole@${domain}`)).toBeUndefined();
+    // A domain the provider is not authoritative for: nobody is added.
+    expect(await firstSignIn(`x@${domain}`, ["Cloudable.Member"], ["other.example"])).toBe(
+      "no_matching_person",
+    );
+    // A domain no org has people in yet: nobody is added.
+    const lonely = `y@${crypto.randomUUID().slice(0, 8)}.example.org`;
+    expect(await firstSignIn(lonely, ["Cloudable.Member"], [lonely.split("@")[1] ?? ""])).toBe(
+      "no_matching_person",
+    );
+    // Without the domains (the default), nobody is added.
+    const hook = idpRoleProvisioning(iso.db, MANAGED, LOGIN_URL);
+    await expect(
+      runWithAssertionFacts(freshFacts(), () =>
+        hook.provisionUser({
+          user: { id: crypto.randomUUID(), email: `z@${domain}` },
+          userInfo: { email: `z@${domain}`, [IDP_ROLE_CLAIM_FIELD]: ["Cloudable.Member"] },
+          provider: { providerId: CONFIGURED_IDP_PROVIDER_ID },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(APIError);
+    expect(await byEmail(`z@${domain}`)).toBeUndefined();
+  });
+
   test("approver alone is not a role: refused", async () => {
     await forceModeRow(MANAGED);
     const who = await seed("admin", { approver: true, verifiedAt: new Date(Date.now() - 60_000) });

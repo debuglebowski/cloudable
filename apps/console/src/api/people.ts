@@ -10,7 +10,7 @@ import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
  * (`@/api/people-directory.ts`).
  */
 
-export type PersonSource = "manual" | "scim";
+export type PersonSource = "manual" | "scim" | "idp";
 
 export interface Person {
   id: string;
@@ -33,7 +33,8 @@ export const peopleKeys = {
 
 /** The single source of truth for "is this row editable here" — used by the API and the page. */
 export function isManuallyManaged(person: Person): boolean {
-  return person.source === "manual";
+  // `idp`: added by their first sign-in. Nothing syncs them, so they are managed here.
+  return person.source !== "scim";
 }
 
 export async function listPeople(): Promise<Person[]> {

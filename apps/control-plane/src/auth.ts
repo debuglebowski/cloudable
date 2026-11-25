@@ -211,7 +211,15 @@ const options = {
       // both the API and the console (see `trustedOrigins` below).
       ...(config.idpRoles
         ? {
-            ...idpRoleProvisioning(authDb, config.idpRoles, `${config.betterAuthUrl}/login`),
+            ...idpRoleProvisioning(
+              authDb,
+              config.idpRoles,
+              `${config.betterAuthUrl}/login`,
+              // A first sign-in from these domains, with a role, adds the person.
+              config.idpSamlConfig?.emailDomains
+                .split(/[,\s]+/)
+                .filter(Boolean),
+            ),
             // Pinned, not left to the plugin's defaults, because role evidence rests on them:
             // every assertion must answer an AuthnRequest this deployment issued (single-use,
             // stored in the database so a restart does not forget it, and at most

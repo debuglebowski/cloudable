@@ -9,7 +9,8 @@ export type PersonEvent =
       type: "person.added";
       payload: {
         email: string;
-        source: "manual" | "scim";
+        /** `idp`: added by their first sign-in through the identity provider. */
+        source: "manual" | "scim" | "idp";
         /** Optional for compatibility with previously recorded events. */
         personId?: string;
         role?: string;
@@ -22,7 +23,7 @@ export type PersonEvent =
     })
   | (EventEnvelope & {
       type: "person.deactivated";
-      payload: { source: "manual" | "scim" };
+      payload: { source: "manual" | "scim" | "idp" };
     })
   | (EventEnvelope & {
       type: "person.role_changed";

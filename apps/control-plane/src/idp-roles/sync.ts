@@ -29,7 +29,27 @@ export interface VerifiedAssertion {
   /** The verified assertion's own signed IssueInstant (`checkFreshAssertion`). Recorded as the
    * time of the role evidence. */
   readonly assertionIssuedAt: Date;
+  /**
+   * The email domains the identity provider is authoritative for (`IDP_SAML_CONFIG.emailDomains`).
+   * A first sign-in from one of them, carrying a mapped role, adds the person. Absent: nobody is
+   * added, and a sign-in without a person is refused.
+   */
+  readonly autoAddDomains?: ReadonlyArray<string>;
 }
+
+/** Exact domain, or one level of subdomain: the same rule the SSO plugin trusts the provider by. */
+export const emailInDomains = (email: string, domains: ReadonlyArray<string>): boolean => {
+  const at = email.lastIndexOf("@");
+  if (at < 1) return false;
+  const host = email.slice(at + 1).toLowerCase();
+  return domains.some((raw) => {
+    const domain = raw.trim().toLowerCase();
+    if (domain === "") return false;
+    if (host === domain) return true;
+    const rest = host.slice(0, -(domain.length + 1));
+    return host.endsWith(`.${domain}`) && rest.length > 0 && !rest.includes(".");
+  });
+};
 
 export type SyncResult =
   | {
@@ -78,17 +98,73 @@ export const applyVerifiedAssertion = async (
       return { kind: "mode_mismatch" } as const;
     }
 
-    const [person] = await tx
+    let [person] = await tx
       .select()
       .from(people)
       .where(sql`lower(${people.email}) = ${email}`)
       .limit(1)
       .for("update");
+    const correlationId = ulid();
+    const batch: DomainEvent[] = [];
+
+    // First sign-in, and the identity provider gives this person a Cloudable role: add them,
+    // as a member with no flag, and let the grant below set their real role in the same
+    // transaction. The identity provider decides who is in, so nobody has to add each person
+    // by hand first. Only for the provider's own email domains, and only into the one org that
+    // already has people from the same domain: none, or several, and there is no telling
+    // which org they belong to, so nobody is added.
+    if (!person && decision.kind === "granted" && input.autoAddDomains) {
+      if (!emailInDomains(email, input.autoAddDomains)) return { kind: "no_person" } as const;
+      const domain = email.slice(email.lastIndexOf("@") + 1);
+      const orgRows = await tx
+        .selectDistinct({ id: people.orgId })
+        .from(people)
+        .where(sql`lower(split_part(${people.email}, '@', 2)) = ${domain}`)
+        .limit(2);
+      const org = orgRows.length === 1 ? orgRows[0] : undefined;
+      if (!org) return { kind: "no_person" } as const;
+      const inserted = await tx
+        .insert(people)
+        .values({ orgId: org.id, email, source: "idp", role: "member", approver: false })
+        .onConflictDoNothing()
+        .returning();
+      // A concurrent first sign-in won the insert: use its row.
+      [person] = inserted.length
+        ? inserted
+        : await tx
+            .select()
+            .from(people)
+            .where(sql`lower(${people.email}) = ${email}`)
+            .limit(1)
+            .for("update");
+      if (person && inserted.length) {
+        const [added] = toEventRows([
+          {
+            id: "",
+            occurredAt: now,
+            recordedAt: now,
+            orgId: person.orgId,
+            actorType: "idp",
+            actorId: input.providerId,
+            machineId: null,
+            correlationId,
+            schemaVersion: 1,
+            type: "person.added",
+            payload: {
+              email,
+              source: "idp",
+              personId: person.id,
+              role: person.role,
+              approver: person.approver,
+            },
+          } as DomainEvent,
+        ]);
+        if (added) batch.push(added);
+      }
+    }
     if (!person) return { kind: "no_person" } as const;
 
     const previousGrants = grantsOf(person);
-    const correlationId = ulid();
-    const batch: DomainEvent[] = [];
     const envelope = {
       orgId: person.orgId,
       actorType: "idp" as const,

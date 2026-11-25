@@ -11,7 +11,8 @@ export const people = pgTable("people", {
     .notNull()
     .references(() => orgs.id),
   email: text("email").notNull().unique(),
-  source: text("source", { enum: ["manual", "scim"] })
+  // `idp`: added by their first sign-in through the identity provider (roles from the IdP).
+  source: text("source", { enum: ["manual", "scim", "idp"] })
     .notNull()
     .default("manual"),
   active: boolean("active").notNull().default(true),

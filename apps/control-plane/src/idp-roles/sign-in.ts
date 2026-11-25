@@ -56,7 +56,13 @@ export interface ProvisionUserArgs {
  *
  * Only the provider declared in deployment config carries roles. Any other is refused.
  */
-export const idpRoleProvisioning = (db: AnyPgDb, config: IdpRolesConfig, loginUrl: string) => ({
+export const idpRoleProvisioning = (
+  db: AnyPgDb,
+  config: IdpRolesConfig,
+  loginUrl: string,
+  /** The provider's email domains. A first sign-in from one of them, with a role, adds the person. */
+  autoAddDomains?: ReadonlyArray<string>,
+) => ({
   provisionUserOnEveryLogin: true,
   provisionUser: async ({ user, userInfo, provider }: ProvisionUserArgs): Promise<void> => {
     if (provider.providerId !== CONFIGURED_IDP_PROVIDER_ID) {
@@ -80,6 +86,7 @@ export const idpRoleProvisioning = (db: AnyPgDb, config: IdpRolesConfig, loginUr
       providerId: provider.providerId,
       claim: userInfo[IDP_ROLE_CLAIM_FIELD],
       assertionIssuedAt: fresh.issuedAt,
+      ...(autoAddDomains ? { autoAddDomains } : {}),
     });
     if (result.kind === "stale_evidence") {
       console.warn("[security] idp-roles sign-in refused: assertion older than recorded evidence");
