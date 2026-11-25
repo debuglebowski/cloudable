@@ -92,12 +92,18 @@ export function describePayload(actionType: ApprovalActionType, payload: unknown
   }
   if (actionType === "package_ensure" && "edit" in payload) {
     const p = payload as {
-      scope: "org" | "machine";
+      scope: "org" | "profile" | "machine";
       edit: { packageName: string; setting?: string };
     };
     const setting =
       p.edit.setting === "ensure_latest" ? "Ensure latest version" : "Ensure installed";
-    return `Set ${p.edit.packageName} to ${setting}${p.scope === "org" ? " for every machine" : ""}`;
+    const reach =
+      p.scope === "org"
+        ? " for every machine"
+        : p.scope === "profile"
+          ? " for every machine on a profile"
+          : "";
+    return `Set ${p.edit.packageName} to ${setting}${reach}`;
   }
   if (actionType === "approval_settings_change" && "approvalModes" in payload) {
     const modes = (payload as { approvalModes: Record<string, ApprovalMode | undefined> })

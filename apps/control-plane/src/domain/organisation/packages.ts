@@ -1,6 +1,6 @@
 import type { PackageSetting } from "@cloudable/contracts";
-import type { OrgEvent } from "@cloudable/events";
-import { machinePackages, orgs } from "@cloudable/schema";
+import type { OrgEvent, ProfileEvent } from "@cloudable/events";
+import { machinePackages, orgs, profiles } from "@cloudable/schema";
 import { and, eq } from "drizzle-orm";
 import { type Context, Effect, Schema } from "effect";
 import { ulid } from "ulid";
@@ -73,6 +73,11 @@ export interface OrgPackagesActor {
 
 export interface UpdateOrgPackagesInput {
   orgId: string;
+  /**
+   * Write a profile's entries instead of the org's. The profile must be this org's and not
+   * archived. Omitted means the org's own entries.
+   */
+  profileId?: string | undefined;
   upserts?: ReadonlyArray<OrgPackageEdit> | undefined;
   removals?: ReadonlyArray<string> | undefined;
   actor: OrgPackagesActor;
@@ -122,18 +127,52 @@ const requireOrg = (db: DbHandle, orgId: string): Effect.Effect<void, OrgPackage
     }
   });
 
-const fetchOrgRows = (
+/**
+ * A profile's entries can be read and written only while it is this org's. Writing also needs
+ * it not archived. `profile_not_found` and `profile_archived` are the reasons.
+ */
+const requireProfile = (
   db: DbHandle,
   orgId: string,
+  profileId: string,
+  forWrite: boolean,
+): Effect.Effect<void, OrgPackagesError> =>
+  Effect.gen(function* () {
+    const rows = yield* Effect.tryPromise({
+      try: () =>
+        db
+          .select({ orgId: profiles.orgId, archivedAt: profiles.archivedAt })
+          .from(profiles)
+          .where(eq(profiles.id, profileId))
+          .limit(1),
+      catch: (cause) => new OrgPackagesError({ reason: "read_failed", cause }),
+    });
+    const profile = rows[0];
+    if (!profile || profile.orgId !== orgId) {
+      return yield* Effect.fail(new OrgPackagesError({ reason: "profile_not_found" }));
+    }
+    if (forWrite && profile.archivedAt !== null) {
+      return yield* Effect.fail(new OrgPackagesError({ reason: "profile_archived" }));
+    }
+  });
+
+const fetchScopeRows = (
+  db: DbHandle,
+  scopeType: "org" | "profile",
+  scopeId: string,
 ): Effect.Effect<MachinePackageRow[], OrgPackagesError> =>
   Effect.tryPromise({
     try: () =>
       db
         .select()
         .from(machinePackages)
-        .where(and(eq(machinePackages.scopeType, "org"), eq(machinePackages.scopeId, orgId))),
+        .where(
+          and(eq(machinePackages.scopeType, scopeType), eq(machinePackages.scopeId, scopeId)),
+        ),
     catch: (cause) => new OrgPackagesError({ reason: "read_failed", cause }),
   });
+
+const fetchOrgRows = (db: DbHandle, orgId: string) => fetchScopeRows(db, "org", orgId);
 
 export const listOrgPackages = (
   orgId: string,
@@ -142,6 +181,18 @@ export const listOrgPackages = (
     const db = yield* Db;
     yield* requireOrg(db, orgId);
     const rows = yield* fetchOrgRows(db, orgId);
+    return rows.map(toEntry).sort(byPackageName);
+  });
+
+/** A profile's own entries: what it declares, not what it inherits from the org. */
+export const listProfilePackages = (
+  orgId: string,
+  profileId: string,
+): Effect.Effect<OrgPackageEntry[], OrgPackagesError, Db> =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    yield* requireProfile(db, orgId, profileId, false);
+    const rows = yield* fetchScopeRows(db, "profile", profileId);
     return rows.map(toEntry).sort(byPackageName);
   });
 
@@ -163,15 +214,36 @@ const toEventEntry = (entry: OrgPackageEntry | undefined): OrgPackageEventEntry 
   return { ...rest, pinned: locked };
 };
 
-function orgPackageSettingChangedEvent(input: {
+function packageSettingChangedEvent(input: {
   orgId: string;
+  profileId: string | undefined;
   correlationId: string;
   actorType: "person" | "system";
   actorId: string;
   packageName: string;
   previous: OrgPackageEventEntry | null;
   current: OrgPackageEventEntry | null;
-}): OrgEvent {
+}): OrgEvent | ProfileEvent {
+  if (input.profileId !== undefined) {
+    return {
+      id: PLACEHOLDER_ID,
+      type: "profile.setting_changed",
+      occurredAt: new Date(),
+      recordedAt: PLACEHOLDER_RECORDED_AT,
+      orgId: input.orgId,
+      actorType: input.actorType,
+      actorId: input.actorId,
+      machineId: null,
+      correlationId: input.correlationId,
+      schemaVersion: 1,
+      payload: {
+        profileId: input.profileId,
+        key: orgPackageSettingKey(input.packageName),
+        previous: input.previous,
+        current: input.current,
+      },
+    };
+  }
   return {
     id: PLACEHOLDER_ID,
     type: "org.setting_changed",
@@ -219,19 +291,29 @@ export const updateOrgPackages = (
     const db = yield* Db;
     const eventBus = yield* EventBus;
     yield* requireOrg(db, input.orgId);
+    const profileId = input.profileId;
+    if (profileId !== undefined) yield* requireProfile(db, input.orgId, profileId, true);
+    const scopeType = profileId !== undefined ? ("profile" as const) : ("org" as const);
+    const scopeId = profileId ?? input.orgId;
     const upserts = input.upserts ?? [];
     const removals = input.removals ?? [];
     const editedPackageNames = [...new Set([...upserts.map((u) => u.packageName), ...removals])];
 
-    const existingRows = yield* fetchOrgRows(db, input.orgId);
+    const existingRows = yield* fetchScopeRows(db, scopeType, scopeId);
+    // The org's rows are what can lock a profile's entry. Nothing sits above the org.
+    const rowsAbove = profileId !== undefined ? yield* fetchOrgRows(db, input.orgId) : [];
 
-    const conflicts = findLockConflicts(existingRows, "org", editedPackageNames);
+    const conflicts = findLockConflicts(
+      [...rowsAbove, ...existingRows],
+      scopeType,
+      editedPackageNames,
+    );
     if (conflicts.length > 0) {
       return yield* Effect.fail(
         new PackageLockConflictError({
           error: {
             code: "locked_entry_conflict",
-            message: `${conflicts.length} package(s) are locked above the org scope and cannot be overridden below.`,
+            message: `${conflicts.length} package(s) are locked above the ${scopeType} scope and cannot be overridden below.`,
             requestId: ulid(),
             details: { conflicts },
           },
@@ -272,15 +354,15 @@ export const updateOrgPackages = (
             await tx
               .insert(machinePackages)
               .values({
-                scopeType: "org",
-                scopeId: input.orgId,
+                scopeType,
+                scopeId,
                 packageName: upsert.packageName,
                 versionPin: upsert.versionPin,
                 locked: upsert.locked,
                 partOf: upsert.partOf,
                 description: upsert.description,
                 setting: upsert.setting,
-                source: "org",
+                source: scopeType,
               })
               .onConflictDoUpdate({
                 target: [
@@ -294,7 +376,7 @@ export const updateOrgPackages = (
                   partOf: upsert.partOf,
                   description: upsert.description,
                   setting: upsert.setting,
-                  source: "org",
+                  source: scopeType,
                   updatedAt: new Date(),
                 },
               });
@@ -304,8 +386,8 @@ export const updateOrgPackages = (
               .delete(machinePackages)
               .where(
                 and(
-                  eq(machinePackages.scopeType, "org"),
-                  eq(machinePackages.scopeId, input.orgId),
+                  eq(machinePackages.scopeType, scopeType),
+                  eq(machinePackages.scopeId, scopeId),
                   eq(machinePackages.packageName, packageName),
                 ),
               );
@@ -332,8 +414,9 @@ export const updateOrgPackages = (
     if (editedPackageNames.length > 0) {
       const correlationId = ulid();
       const settingEvents = editedPackageNames.map((packageName) =>
-        orgPackageSettingChangedEvent({
+        packageSettingChangedEvent({
           orgId: input.orgId,
+          profileId,
           correlationId,
           actorType: input.actor.actorType,
           actorId: input.actor.actorId,

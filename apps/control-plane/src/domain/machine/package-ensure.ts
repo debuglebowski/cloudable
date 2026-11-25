@@ -10,7 +10,8 @@
 // back to *Allowed* included, applies at once: it cannot make Cloudable
 // install anything.
 //
-// The writers (`MachineService.updatePackages`, `updateOrgPackages`) do not
+// The writers (`MachineService.updatePackages`, `updateOrgPackages`, which also writes a
+// profile's entries) do not
 // ask for approval themselves. Everything a person edits goes through here;
 // `domain/approvals/carry-out.ts` calls the writers directly once an approval
 // is granted.
@@ -29,6 +30,7 @@ import {
   type OrgPackageEdit,
   type OrgPackageEntry,
   listOrgPackages,
+  listProfilePackages,
   updateOrgPackages,
 } from "../organisation/packages";
 import { MachineService, type PackageManifestEdit } from "./MachineService";
@@ -43,14 +45,17 @@ export const SETTING_LABELS: Record<PackageSetting, string> = {
 
 /** What a `package_ensure` approval stores, and what is written once it is granted. */
 export interface PackageEnsurePayload {
-  readonly scope: "org" | "machine";
+  readonly scope: "org" | "profile" | "machine";
   readonly machineId: string | null;
+  /** Set when `scope` is `profile`. */
+  readonly profileId?: string;
   readonly edit: PackageManifestEdit;
 }
 
 const PackageEnsurePayloadSchema = Schema.Struct({
-  scope: Schema.Literal("org", "machine"),
+  scope: Schema.Literal("org", "profile", "machine"),
   machineId: Schema.NullOr(Schema.String),
+  profileId: Schema.optional(Schema.String),
   edit: Schema.Struct({
     packageName: Schema.String,
     versionPin: Schema.optional(Schema.NullOr(Schema.String)),
@@ -119,8 +124,9 @@ const checkEnsureEdits = (
 const askForApproval = (input: {
   orgId: string;
   personId: string;
-  scope: "org" | "machine";
+  scope: "org" | "profile" | "machine";
   machineId: string | null;
+  profileId?: string;
   edit: PackageManifestEdit;
 }) =>
   Effect.gen(function* () {
@@ -128,6 +134,7 @@ const askForApproval = (input: {
     const payload: PackageEnsurePayload = {
       scope: input.scope,
       machineId: input.machineId,
+      ...(input.profileId !== undefined ? { profileId: input.profileId } : {}),
       edit: input.edit,
     };
     return yield* approvalService
@@ -230,15 +237,24 @@ export const requestMachineManifestEdit = (input: {
     return { manifest, ...(ensureApprovals.length > 0 ? { ensureApprovals } : {}) };
   });
 
-/** `PATCH /organisation/packages`, with ensure edits held back for approval. */
+/**
+ * `PATCH /organisation/packages`, and `PATCH /profiles/:id/packages` when `profileId` is set,
+ * with ensure edits held back for approval. A profile's Ensure setting needs the same approval
+ * as the org's: it installs software on every machine on the profile.
+ */
 export const requestOrgManifestEdit = (input: {
   orgId: string;
+  profileId?: string | undefined;
   personId: string;
   upserts?: ReadonlyArray<OrgPackageEdit> | undefined;
   removals?: ReadonlyArray<string> | undefined;
 }) =>
   Effect.gen(function* () {
-    const current = yield* listOrgPackages(input.orgId);
+    const profileId = input.profileId;
+    const current =
+      profileId !== undefined
+        ? yield* listProfilePackages(input.orgId, profileId)
+        : yield* listOrgPackages(input.orgId);
     const previousByName = new Map<string, PreviousEntry>(
       current.map((entry) => [
         entry.packageName,
@@ -258,6 +274,7 @@ export const requestOrgManifestEdit = (input: {
     if (direct.length > 0 || (input.removals ?? []).length > 0) {
       items = yield* updateOrgPackages({
         orgId: input.orgId,
+        profileId,
         upserts: direct,
         removals: input.removals,
         actor,
@@ -269,12 +286,13 @@ export const requestOrgManifestEdit = (input: {
       const approval = yield* askForApproval({
         orgId: input.orgId,
         personId: input.personId,
-        scope: "org",
+        scope: profileId !== undefined ? "profile" : "org",
         machineId: null,
+        ...(profileId !== undefined ? { profileId } : {}),
         edit,
       });
       if (approval.status === "approved") {
-        items = yield* updateOrgPackages({ orgId: input.orgId, upserts: [edit], actor });
+        items = yield* updateOrgPackages({ orgId: input.orgId, profileId, upserts: [edit], actor });
       }
       ensureApprovals.push(toView(edit.packageName, approval));
     }
@@ -294,13 +312,17 @@ export const applyApprovedEnsureEdit = (
     if (decoded._tag === "None") {
       return yield* Effect.logError(`approval ${approval.id}: package_ensure payload unreadable`);
     }
-    const { scope, machineId } = decoded.value;
+    const { scope, machineId, profileId } = decoded.value;
+    if (scope === "profile" && profileId === undefined) {
+      return yield* Effect.logError(`approval ${approval.id}: package_ensure for a profile names none`);
+    }
     const { pinned, ...rest } = decoded.value.edit;
     const edit = rest.locked === undefined && pinned !== undefined ? { ...rest, locked: pinned } : rest;
     const write: Effect.Effect<void, unknown, Db | EventBus | MachineService> =
-      scope === "org" || machineId === null
+      scope !== "machine" || machineId === null
         ? updateOrgPackages({
             orgId: approval.orgId,
+            profileId: scope === "profile" ? profileId : undefined,
             upserts: [edit],
             actor: { actorType: "person", actorId: approval.requestedByPersonId },
           }).pipe(Effect.asVoid)
