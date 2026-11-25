@@ -164,7 +164,12 @@ const liveMachineCounts = (db: DbHandle, profileIds: ReadonlyArray<string>) =>
  */
 const validateCreationFields = (
   db: DbHandle,
-  fields: { provider: Provider | null; region: string | null; sizeSku: string | null; image: string | null },
+  fields: {
+    provider: Provider | null;
+    region: string | null;
+    sizeSku: string | null;
+    image: string | null;
+  },
 ) =>
   Effect.gen(function* () {
     const invalid = (message: string) => editError("invalid_profile_field", message);
@@ -182,19 +187,28 @@ const validateCreationFields = (
     if (region !== null && !config.azureMachinesLocation) {
       const entry = yield* getCatalogEntry("azure", "region", region).pipe(
         Effect.provideService(Db, db),
-        Effect.mapError((cause) => new ProfileWriteError({ message: `reading catalog: ${String(cause)}` })),
+        Effect.mapError(
+          (cause) => new ProfileWriteError({ message: `reading catalog: ${String(cause)}` }),
+        ),
       );
       if (!entry) return yield* invalid(`region "${region}" is not recognized`);
     }
     const requiredImage = image !== null ? UBUNTU_IMAGES[image] : undefined;
-    if (image !== null && !requiredImage) return yield* invalid(`image "${image}" is not recognized`);
+    if (image !== null && !requiredImage)
+      return yield* invalid(`image "${image}" is not recognized`);
     if (sizeSku !== null) {
       const entry = yield* getCatalogEntry("azure", "sku", sizeSku).pipe(
         Effect.provideService(Db, db),
-        Effect.mapError((cause) => new ProfileWriteError({ message: `reading catalog: ${String(cause)}` })),
+        Effect.mapError(
+          (cause) => new ProfileWriteError({ message: `reading catalog: ${String(cause)}` }),
+        ),
       );
       if (!entry) return yield* invalid(`size "${sizeSku}" is not recognized`);
-      if (requiredImage && entry.architecture && entry.architecture !== requiredImage.architecture) {
+      if (
+        requiredImage &&
+        entry.architecture &&
+        entry.architecture !== requiredImage.architecture
+      ) {
         return yield* invalid(
           `size "${sizeSku}" (${entry.architecture}) is not compatible with image "${image}" (requires ${requiredImage.architecture})`,
         );
@@ -243,9 +257,7 @@ const publish = (event: ProfileEvent) =>
       ),
   );
 
-export const listProfiles = (
-  orgId: string,
-): Effect.Effect<ProfileView[], ProfileWriteError, Db> =>
+export const listProfiles = (orgId: string): Effect.Effect<ProfileView[], ProfileWriteError, Db> =>
   Effect.gen(function* () {
     const db = yield* Db;
     const rows = yield* write("listing profiles", () =>
@@ -268,13 +280,19 @@ export const getProfile = (
     const counts = yield* liveMachineCounts(db, [row.id]);
     const settingRows = yield* write("reading profile settings", () =>
       db
-        .select({ key: settingValues.key, value: settingValues.value, locked: settingValues.locked })
+        .select({
+          key: settingValues.key,
+          value: settingValues.value,
+          locked: settingValues.locked,
+        })
         .from(settingValues)
         .where(and(eq(settingValues.scopeType, "profile"), eq(settingValues.scopeId, row.id)))
         .orderBy(asc(settingValues.key)),
     );
     const packages = yield* listProfilePackages(orgId, row.id).pipe(
-      Effect.mapError((cause) => new ProfileWriteError({ message: `reading packages: ${cause.reason}` })),
+      Effect.mapError(
+        (cause) => new ProfileWriteError({ message: `reading packages: ${cause.reason}` }),
+      ),
     );
     return {
       ...toView(row, counts.get(row.id) ?? 0),
@@ -289,7 +307,8 @@ export const createProfile = (
   Effect.gen(function* () {
     const db = yield* Db;
     const name = input.name.trim();
-    if (name.length === 0) return yield* editError("invalid_profile_field", "a profile needs a name");
+    if (name.length === 0)
+      return yield* editError("invalid_profile_field", "a profile needs a name");
     const fields = {
       provider: input.provider ?? null,
       region: blankToNull(input.region) ?? null,
@@ -306,7 +325,8 @@ export const createProfile = (
         .returning(),
     );
     const row = rows[0];
-    if (!row) return yield* Effect.fail(new ProfileWriteError({ message: "creating profile: no row" }));
+    if (!row)
+      return yield* Effect.fail(new ProfileWriteError({ message: "creating profile: no row" }));
     yield* publish({
       ...envelope(input.orgId, input.actor),
       type: "profile.created",
@@ -322,19 +342,25 @@ export const updateProfile = (
     const db = yield* Db;
     const row = yield* loadProfile(db, input.orgId, input.profileId);
     if (row.archivedAt !== null) {
-      return yield* editError("profile_archived", `Profile "${row.name}" is archived and cannot change.`);
+      return yield* editError(
+        "profile_archived",
+        `Profile "${row.name}" is archived and cannot change.`,
+      );
     }
 
     const next = {
       name: input.name !== undefined ? input.name.trim() : row.name,
       description:
-        input.description !== undefined ? (blankToNull(input.description) ?? null) : row.description,
+        input.description !== undefined
+          ? (blankToNull(input.description) ?? null)
+          : row.description,
       provider: input.provider !== undefined ? input.provider : row.provider,
       region: input.region !== undefined ? (blankToNull(input.region) ?? null) : row.region,
       sizeSku: input.sizeSku !== undefined ? (blankToNull(input.sizeSku) ?? null) : row.sizeSku,
       image: input.image !== undefined ? (blankToNull(input.image) ?? null) : row.image,
     };
-    if (next.name.length === 0) return yield* editError("invalid_profile_field", "a profile needs a name");
+    if (next.name.length === 0)
+      return yield* editError("invalid_profile_field", "a profile needs a name");
 
     const changed = (Object.keys(next) as Array<keyof typeof next>).filter(
       (key) => next[key] !== row[key],
@@ -436,7 +462,12 @@ export const requireUsableProfile = (
  */
 export const profileFieldConflict = (
   profile: Pick<ProfileRow, "name" | "provider" | "region" | "sizeSku" | "image">,
-  machine: { provider: string | null; region: string | null; sizeSku: string | null; image: string | null },
+  machine: {
+    provider: string | null;
+    region: string | null;
+    sizeSku: string | null;
+    image: string | null;
+  },
 ): string | null => {
   const fields = [
     ["provider", profile.provider, machine.provider],

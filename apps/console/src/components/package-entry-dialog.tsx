@@ -34,7 +34,7 @@ export interface PackageEntryValues {
   partOf: string | null;
   description: string | null;
   setting: PackageSetting;
-  /** Org entries only: machines cannot override a locked entry. */
+  /** Org and profile entries only: a level below cannot override a locked entry. */
   locked?: boolean;
 }
 
@@ -50,7 +50,7 @@ export interface PackageEntrySave {
 
 export type PackageEntryDialogMode =
   | { kind: "add" }
-  /** `inherited`: the values come from the org, and saving writes this machine's own entry. */
+  /** `inherited`: the values come from the org or profile, and saving writes this machine's own entry. */
   | { kind: "edit"; values: PackageEntryValues; inherited: boolean };
 
 /**
@@ -68,8 +68,11 @@ export function PackageEntryDialog({
   partOfOptions,
   onSaved,
 }: {
-  /** The org's entries can be locked and apply to every machine; a machine's apply to it alone. */
-  scope: "machine" | "org";
+  /**
+   * The org's entries apply to every machine, a profile's to every machine on it; both can be
+   * locked. A machine's apply to it alone.
+   */
+  scope: "machine" | "profile" | "org";
   /** Writes the entry. Returns the approvals any Ensure setting asked for. */
   save: (entry: PackageEntrySave) => Promise<{ ensureApprovals?: PackageEnsureApprovalView[] }>;
   /** Null closes the dialog. */
@@ -122,7 +125,12 @@ export function PackageEntryDialog({
         show(outcome.title, outcome.description ? { description: outcome.description } : undefined);
         return;
       }
-      const where = scope === "org" ? "for every machine" : "on this machine";
+      const where =
+        scope === "org"
+          ? "for every machine"
+          : scope === "profile"
+            ? "for every machine on this profile"
+            : "on this machine";
       toast.success(
         mode?.kind === "edit"
           ? `"${entry.packageName}" updated ${where}`
@@ -160,7 +168,7 @@ export function PackageEntryDialog({
       partOf: trimmedParent === "" ? null : trimmedParent,
       description: trimmedDescription === "" ? null : trimmedDescription,
       setting,
-      ...(scope === "org" ? { locked } : {}),
+      ...(scope !== "machine" ? { locked } : {}),
     });
   }
 
@@ -171,7 +179,9 @@ export function PackageEntryDialog({
   const title = !isEdit
     ? scope === "org"
       ? "Add a package for every machine"
-      : "Add a package to this machine"
+      : scope === "profile"
+        ? "Add a package to this profile"
+        : "Add a package to this machine"
     : mode.inherited
       ? `Override "${trimmedName}" on this machine`
       : `Edit "${trimmedName}"`;
@@ -189,9 +199,11 @@ export function PackageEntryDialog({
                 commit), <code>home:</code> for software in the home folder.
               </>
             ) : mode.inherited ? (
-              "This package comes from the org. Saving gives this machine its own entry, which it uses instead. Reset to the org's entry any time from the row's menu."
+              "This package comes from the org or the machine's profile. Saving gives this machine its own entry, which it uses instead. Reset to the inherited entry any time from the row's menu."
             ) : scope === "org" ? (
               "Every machine without its own entry for this package uses this one."
+            ) : scope === "profile" ? (
+              "Every machine on this profile without its own entry for this package uses this one."
             ) : (
               "This entry belongs to this machine."
             )}
@@ -265,7 +277,7 @@ export function PackageEntryDialog({
               className="h-10 w-full"
             />
           </Field>
-          {scope === "org" && (
+          {scope !== "machine" && (
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -278,14 +290,21 @@ export function PackageEntryDialog({
                 </Label>
               </div>
               <span className="text-xs text-muted-foreground">
-                A machine cannot override or exclude a locked package.
+                {scope === "org"
+                  ? "A profile or machine cannot override or exclude a locked package."
+                  : "A machine on this profile cannot override or exclude a locked package."}
               </span>
             </div>
           )}
           {isDuplicate && (
             <p className="text-xs text-destructive">
-              "{trimmedName}" is already {scope === "org" ? "on the org list" : "on this machine"}.
-              Use Edit in its row instead.
+              "{trimmedName}" is already{" "}
+              {scope === "org"
+                ? "on the org list"
+                : scope === "profile"
+                  ? "on this profile"
+                  : "on this machine"}
+              . Use Edit in its row instead.
             </p>
           )}
           {settingProblem && trimmedName !== "" && (

@@ -1,6 +1,12 @@
 import { type SessionRowMethod, isVulnerabilityScanSettingKey } from "@cloudable/contracts";
 import type { DomainEvent, OrgEvent } from "@cloudable/events";
-import { type SettingRow, machines, profiles, resolveSetting, settingValues } from "@cloudable/schema";
+import {
+  type SettingRow,
+  machines,
+  profiles,
+  resolveSetting,
+  settingValues,
+} from "@cloudable/schema";
 import { and, eq, inArray, isNull, notInArray, or, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { ulid } from "ulid";
@@ -28,8 +34,8 @@ import { invalidVulnerabilityScanValue } from "../vulnerability-scan/settings";
 import {
   InvalidScopeError,
   InvalidSettingValueError,
-  MachineNotFoundError,
   LockedSettingError,
+  MachineNotFoundError,
   SettingWriteError,
 } from "./errors";
 
@@ -230,8 +236,7 @@ export const applySettingChange = (
               ),
             )
             .limit(1),
-        catch: (cause) =>
-          new SettingWriteError({ message: `reading org lock: ${String(cause)}` }),
+        catch: (cause) => new SettingWriteError({ message: `reading org lock: ${String(cause)}` }),
       });
       if (orgLock.length > 0) {
         return yield* Effect.fail(
@@ -556,7 +561,10 @@ export const applySettingChange = (
                       .select({ scopeId: settingValues.scopeId })
                       .from(settingValues)
                       .where(
-                        and(eq(settingValues.scopeType, "profile"), eq(settingValues.key, input.key)),
+                        and(
+                          eq(settingValues.scopeType, "profile"),
+                          eq(settingValues.key, input.key),
+                        ),
                       ),
                   catch: (cause) =>
                     new SettingWriteError({ message: `listing profile values: ${String(cause)}` }),

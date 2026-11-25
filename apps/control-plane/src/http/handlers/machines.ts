@@ -74,7 +74,10 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUserTag;
         // Which profile a machine is on is configuration, the same as creating it on one.
-        yield* requireAdminUser(currentUser, "Only an admin can move a machine to another profile.");
+        yield* requireAdminUser(
+          currentUser,
+          "Only an admin can move a machine to another profile.",
+        );
         const machineService = yield* MachineService;
         return yield* machineService
           .setProfile({

@@ -3,8 +3,8 @@ import { Schema } from "effect";
 import {
   InvalidScopeError,
   InvalidSettingValueError,
-  MachineNotFoundError,
   LockedSettingError,
+  MachineNotFoundError,
   SettingWriteError,
 } from "../../domain/config/errors";
 import { AdminRoleRequiredError } from "../../domain/people/authorization";

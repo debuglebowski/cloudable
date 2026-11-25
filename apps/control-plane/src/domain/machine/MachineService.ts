@@ -28,8 +28,8 @@ import {
   machineCreatedEvent,
   machineOwnerAssignedEvent,
   machinePackageActionRequestedEvent,
-  machineProvisioningFailedEvent,
   machineProfileAssignedEvent,
+  machineProvisioningFailedEvent,
   machineSettingChangedEvent,
 } from "./events";
 import {
@@ -1188,7 +1188,10 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
       orgId: string;
       profileId: string | null;
       actorPersonId: string;
-    }): Effect.Effect<MachineRow, MachineServiceError | MachineNotFoundError | InvalidMachineRequestError> =>
+    }): Effect.Effect<
+      MachineRow,
+      MachineServiceError | MachineNotFoundError | InvalidMachineRequestError
+    > =>
       Effect.gen(function* () {
         const invalid = (message: string) =>
           Effect.fail(
@@ -1212,7 +1215,9 @@ export class MachineService extends Effect.Service<MachineService>()("MachineSer
           );
           const conflict = profileFieldConflict(profile, machine);
           if (conflict) {
-            return yield* invalid(`${conflict}. A machine's provider, region, size and image are fixed when it is created.`);
+            return yield* invalid(
+              `${conflict}. A machine's provider, region, size and image are fixed when it is created.`,
+            );
           }
         }
         const updated = yield* Effect.tryPromise({

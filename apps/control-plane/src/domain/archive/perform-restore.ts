@@ -204,7 +204,9 @@ export const performRestoreIntoNewMachine = (
     const profileDb = yield* Db;
     const profileId = source.profileId
       ? yield* requireUsableProfile(profileDb, source.orgId, source.profileId).pipe(
-          Effect.map((profile) => (profileFieldConflict(profile, source) === null ? profile.id : null)),
+          Effect.map((profile) =>
+            profileFieldConflict(profile, source) === null ? profile.id : null,
+          ),
           Effect.orElseSucceed(() => null),
         )
       : null;

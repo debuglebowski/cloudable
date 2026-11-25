@@ -77,11 +77,7 @@ const loadChainRows = <T>(
   chain: MachineSettingChain,
 ): Effect.Effect<SettingRow<T>[], MachineSettingsError> =>
   Effect.gen(function* () {
-    const scopeIds = [
-      chain.orgId,
-      chain.machineId,
-      ...(chain.profileId ? [chain.profileId] : []),
-    ];
+    const scopeIds = [chain.orgId, chain.machineId, ...(chain.profileId ? [chain.profileId] : [])];
     const rows = yield* Effect.tryPromise({
       try: () =>
         db

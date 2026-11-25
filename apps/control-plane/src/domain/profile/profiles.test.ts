@@ -43,7 +43,9 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
       dbLayer,
       eventBusLayer,
       tunnelLayer,
-      MachineService.Default.pipe(Layer.provide(Layer.mergeAll(dbLayer, FakeProvisioningServiceLive))),
+      MachineService.Default.pipe(
+        Layer.provide(Layer.mergeAll(dbLayer, FakeProvisioningServiceLive)),
+      ),
     );
   });
 
@@ -93,7 +95,11 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
 
   test("creating a profile records profile.created with the fields it sets", async () => {
     const org = await seedOrg();
-    const profile = await newProfile(org.id, { provider: "fake", sizeSku: "small", image: "ubuntu-24.04" });
+    const profile = await newProfile(org.id, {
+      provider: "fake",
+      sizeSku: "small",
+      image: "ubuntu-24.04",
+    });
 
     const [event] = await db
       .select()
@@ -114,7 +120,9 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
     const taken = await fail(createProfile({ orgId: org.id, name: first.name, actor }));
     expect(taken).toMatchObject({ _tag: "ProfileEditError", code: "profile_name_taken" });
 
-    const noProvider = await fail(createProfile({ orgId: org.id, name: "x", region: "eastus", actor }));
+    const noProvider = await fail(
+      createProfile({ orgId: org.id, name: "x", region: "eastus", actor }),
+    );
     expect(noProvider).toMatchObject({ code: "invalid_profile_field" });
     const fakeRegion = await fail(
       createProfile({ orgId: org.id, name: "y", provider: "fake", region: "eastus", actor }),
@@ -125,7 +133,11 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
   test("a machine created on a profile takes the fields it leaves out from the profile", async () => {
     const org = await seedOrg();
     const owner = await seedPerson(org.id);
-    const profile = await newProfile(org.id, { provider: "fake", sizeSku: "small", image: "ubuntu-24.04" });
+    const profile = await newProfile(org.id, {
+      provider: "fake",
+      sizeSku: "small",
+      image: "ubuntu-24.04",
+    });
 
     const machine = await run(createMachine(org.id, owner.id, { profileId: profile.id }));
     expect(machine).toMatchObject({
@@ -147,7 +159,11 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
     const profile = await newProfile(org.id, { provider: "fake", sizeSku: "small" });
 
     const error = await fail(
-      createMachine(org.id, owner.id, { profileId: profile.id, sizeSku: "large", image: "ubuntu-24.04" }),
+      createMachine(org.id, owner.id, {
+        profileId: profile.id,
+        sizeSku: "large",
+        image: "ubuntu-24.04",
+      }),
     );
     expect(error._tag).toBe("InvalidMachineRequestError");
     expect(JSON.stringify(error)).toContain('sets size to \\"small\\"');
@@ -170,16 +186,26 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
       }),
     );
     const machine = await run(
-      createMachine(org.id, owner.id, { profileId: profile.id, sizeSku: "s", image: "ubuntu-24.04" }),
+      createMachine(org.id, owner.id, {
+        profileId: profile.id,
+        sizeSku: "s",
+        image: "ubuntu-24.04",
+      }),
     );
     await run(archiveProfile({ orgId: org.id, profileId: profile.id, actor }));
 
-    const detail = await run(Effect.flatMap(MachineService, (svc) => svc.getById(machine.id, org.id)));
+    const detail = await run(
+      Effect.flatMap(MachineService, (svc) => svc.getById(machine.id, org.id)),
+    );
     expect(detail.loggingTier).toEqual({ tier: 2, source: "profile" });
 
     const other = await seedPerson(org.id);
     const refused = await fail(
-      createMachine(org.id, other.id, { profileId: profile.id, sizeSku: "s", image: "ubuntu-24.04" }),
+      createMachine(org.id, other.id, {
+        profileId: profile.id,
+        sizeSku: "s",
+        image: "ubuntu-24.04",
+      }),
     );
     expect(JSON.stringify(refused)).toContain("archived");
   });
@@ -229,7 +255,10 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
     // Locked on the profile: a machine edit is refused.
     await run(set("profile", profile.id, 2, true));
     const machineRefused = await fail(set("machine", machine.id, 2));
-    expect(machineRefused).toMatchObject({ _tag: "LockedSettingError", lockedAtScopeType: "profile" });
+    expect(machineRefused).toMatchObject({
+      _tag: "LockedSettingError",
+      lockedAtScopeType: "profile",
+    });
 
     // Locked on the org: the profile cannot override it either.
     await run(set("org", org.id, 1, true));
@@ -271,13 +300,24 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
     const owner = await seedPerson(org.id);
     const profile = await newProfile(org.id, { provider: "fake" });
     const machine = await run(
-      createMachine(org.id, owner.id, { profileId: profile.id, sizeSku: "s", image: "ubuntu-24.04" }),
+      createMachine(org.id, owner.id, {
+        profileId: profile.id,
+        sizeSku: "s",
+        image: "ubuntu-24.04",
+      }),
     );
 
     await run(
-      updateOrgPackages({ orgId: org.id, profileId: profile.id, upserts: [{ packageName: "jq" }], actor }),
+      updateOrgPackages({
+        orgId: org.id,
+        profileId: profile.id,
+        upserts: [{ packageName: "jq" }],
+        actor,
+      }),
     );
-    const detail = await run(Effect.flatMap(MachineService, (svc) => svc.getById(machine.id, org.id)));
+    const detail = await run(
+      Effect.flatMap(MachineService, (svc) => svc.getById(machine.id, org.id)),
+    );
     expect(detail.manifest.find((entry) => entry.packageName === "jq")).toMatchObject({
       source: "profile",
       resolvedFromScopeId: profile.id,
@@ -293,7 +333,12 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
       }),
     );
     const refused = await fail(
-      updateOrgPackages({ orgId: org.id, profileId: profile.id, upserts: [{ packageName: "curl" }], actor }),
+      updateOrgPackages({
+        orgId: org.id,
+        profileId: profile.id,
+        upserts: [{ packageName: "curl" }],
+        actor,
+      }),
     );
     expect(refused._tag).toBe("PackageLockConflictError");
 
@@ -315,9 +360,7 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
 
     // No machines yet: allowed.
     await run(updateProfile({ orgId: org.id, profileId: profile.id, sizeSku: "medium", actor }));
-    await run(
-      createMachine(org.id, owner.id, { profileId: profile.id, image: "ubuntu-24.04" }),
-    );
+    await run(createMachine(org.id, owner.id, { profileId: profile.id, image: "ubuntu-24.04" }));
 
     const refused = await fail(
       updateProfile({ orgId: org.id, profileId: profile.id, sizeSku: "large", actor }),
@@ -336,14 +379,23 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
     const org = await seedOrg();
     const owner = await seedPerson(org.id);
     const machine = await run(
-      createMachine(org.id, owner.id, { provider: "fake", sizeSku: "small", image: "ubuntu-24.04" }),
+      createMachine(org.id, owner.id, {
+        provider: "fake",
+        sizeSku: "small",
+        image: "ubuntu-24.04",
+      }),
     );
     const fits = await newProfile(org.id, { provider: "fake", sizeSku: "small" });
     const misfit = await newProfile(org.id, { provider: "fake", sizeSku: "large" });
 
     const moved = await run(
       Effect.flatMap(MachineService, (svc) =>
-        svc.setProfile({ machineId: machine.id, orgId: org.id, profileId: fits.id, actorPersonId: owner.id }),
+        svc.setProfile({
+          machineId: machine.id,
+          orgId: org.id,
+          profileId: fits.id,
+          actorPersonId: owner.id,
+        }),
       ),
     );
     expect(moved.profileId).toBe(fits.id);
@@ -351,7 +403,12 @@ describe.skipIf(!reachable)("profiles (requires Postgres at DATABASE_URL)", () =
 
     const refused = await fail(
       Effect.flatMap(MachineService, (svc) =>
-        svc.setProfile({ machineId: machine.id, orgId: org.id, profileId: misfit.id, actorPersonId: owner.id }),
+        svc.setProfile({
+          machineId: machine.id,
+          orgId: org.id,
+          profileId: misfit.id,
+          actorPersonId: owner.id,
+        }),
       ),
     );
     expect(refused._tag).toBe("InvalidMachineRequestError");

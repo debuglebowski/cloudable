@@ -201,7 +201,9 @@ export async function runProfilesUpdateCommand(argv: ReadonlyArray<string>): Pro
 
 export async function runProfilesArchiveCommand(argv: ReadonlyArray<string>): Promise<void> {
   const args = parseArgs(argv, readSpec());
-  const id = await profileId(required(args, 0, "a profile", usageFor("profiles archive <profile>")));
+  const id = await profileId(
+    required(args, 0, "a profile", usageFor("profiles archive <profile>")),
+  );
   const profile = await authenticatedApiRequest<ProfileSummary>(
     `/api/v1/profiles/${id}/archive`,
     postJson({}),

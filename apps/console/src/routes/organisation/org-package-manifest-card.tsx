@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Box,
   type LucideIcon,
@@ -13,13 +13,14 @@ import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 
 import {
+  type OrgPackageEdit,
   type OrgPackageEntry,
+  type UpdateOrgPackagesResult,
   organisationKeys,
   updateOrgPackages,
   useOrgPackages,
-  useRemoveOrgPackage,
-  useSetOrgPackageSetting,
 } from "@/api/organisation";
+import { profileKeys, updateProfilePackages, useProfile } from "@/api/profiles";
 import { PackageEntryDialog, type PackageEntryDialogMode } from "@/components/package-entry-dialog";
 import { PackageSettingSelect } from "@/components/package-setting-select";
 import { TableHeaderIcon } from "@/components/table-header-icon";
@@ -52,37 +53,73 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { describeSettingChange } from "@/lib/package-setting";
+import type { PackageSetting } from "@cloudable/contracts";
+
+type ManifestWrite = (input: {
+  upserts?: OrgPackageEdit[];
+  removals?: string[];
+}) => Promise<UpdateOrgPackagesResult>;
 
 /**
- * The org's package list: what every machine may have, and what Cloudable
- * does about it. A machine without its own entry for a package uses the org's
- * (docs/inheritance.md). A locked entry cannot be overridden or excluded on a
- * machine. This is the only place org entries are added, changed or removed;
- * it mirrors the machine packages table (`routes/machines/machine-packages-table.tsx`)
- * and shares its add/edit dialog.
+ * The org's package list, or a profile's: what every machine (on the profile) may have, and
+ * what Cloudable does about it. A machine without its own entry for a package uses the
+ * profile's, then the org's (docs/inheritance.md). A locked entry cannot be overridden or
+ * excluded below. This is the only place org and profile entries are added, changed or
+ * removed; it mirrors the machine packages table
+ * (`routes/machines/machine-packages-table.tsx`) and shares its add/edit dialog.
  */
-export function OrgPackageManifestCard() {
+export function OrgPackageManifestCard({
+  profileId,
+  readOnly = false,
+}: {
+  /** Show and edit this profile's own entries instead of the org's. */
+  profileId?: string;
+  /** An archived profile can no longer change. */
+  readOnly?: boolean;
+} = {}) {
   const queryClient = useQueryClient();
-  const packagesQuery = useOrgPackages();
+  const orgQuery = useOrgPackages({ enabled: profileId === undefined });
+  const profileQuery = useProfile(profileId);
+  const packagesQuery =
+    profileId === undefined ? orgQuery : { ...profileQuery, data: profileQuery.data?.packages };
   const [entryDialog, setEntryDialog] = useState<PackageEntryDialogMode | null>(null);
   const [removing, setRemoving] = useState<OrgPackageEntry | null>(null);
-  const removePackage = useRemoveOrgPackage();
+
+  const write: ManifestWrite = (input) =>
+    profileId === undefined ? updateOrgPackages(input) : updateProfilePackages(profileId, input);
+  const invalidate = () => {
+    void queryClient.invalidateQueries({
+      queryKey:
+        profileId === undefined ? organisationKeys.packages() : profileKeys.detail(profileId),
+    });
+    void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+  };
+  const everyMachine = profileId === undefined ? "every machine" : "every machine on this profile";
+  const removePackage = useMutation({
+    mutationFn: (packageName: string) => write({ removals: [packageName] }),
+    onSuccess: invalidate,
+    onError: (error) => toast.error("Couldn't remove that package", { description: error.message }),
+  });
 
   const entries = packagesQuery.data ?? [];
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Packages for every machine</CardTitle>
+        <CardTitle>
+          {profileId === undefined ? "Packages for every machine" : "Packages for this profile"}
+        </CardTitle>
         <CardDescription>
-          Every machine may have these, unless it has its own entry for the package. Ensure
-          installed makes Cloudable install a package on every machine missing it. Ensure latest
-          version also updates it. Both need an approval first.
+          {profileId === undefined
+            ? "Every machine may have these, unless its profile or itself has its own entry for the package."
+            : "Every machine on this profile may have these, unless it has its own entry for the package. They add to the org's packages, and replace the org's entry for the same package."}{" "}
+          Ensure installed makes Cloudable install a package on every machine missing it. Ensure
+          latest version also updates it. Both need an approval first.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div className="flex justify-end">
-          <Button size="sm" onClick={() => setEntryDialog({ kind: "add" })}>
+          <Button size="sm" disabled={readOnly} onClick={() => setEntryDialog({ kind: "add" })}>
             <Plus />
             Add package
           </Button>
@@ -115,14 +152,14 @@ export function OrgPackageManifestCard() {
               {packagesQuery.isError && (
                 <TableRow>
                   <TableCell colSpan={4} className="text-sm text-destructive">
-                    Failed to load the org's packages.
+                    Failed to load the packages.
                   </TableCell>
                 </TableRow>
               )}
               {packagesQuery.isSuccess && entries.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={4} className="text-sm text-muted-foreground">
-                    No packages for every machine yet.
+                    No packages for {everyMachine} yet.
                   </TableCell>
                 </TableRow>
               )}
@@ -130,6 +167,13 @@ export function OrgPackageManifestCard() {
                 <OrgPackageRow
                   key={entry.packageName}
                   entry={entry}
+                  readOnly={readOnly}
+                  setSetting={(packageName, setting) =>
+                    write({ upserts: [{ packageName, setting }] }).then((result) => {
+                      invalidate();
+                      return result;
+                    })
+                  }
                   onEdit={() =>
                     setEntryDialog({
                       kind: "edit",
@@ -153,18 +197,15 @@ export function OrgPackageManifestCard() {
       </CardContent>
 
       <PackageEntryDialog
-        scope="org"
-        save={(entry) => updateOrgPackages({ upserts: [entry] })}
+        scope={profileId === undefined ? "org" : "profile"}
+        save={(entry) => write({ upserts: [entry] })}
         mode={entryDialog}
         onOpenChange={(open) => {
           if (!open) setEntryDialog(null);
         }}
         takenNames={new Set(entries.map((entry) => entry.packageName))}
         partOfOptions={entries.map((entry) => entry.packageName)}
-        onSaved={() => {
-          void queryClient.invalidateQueries({ queryKey: organisationKeys.packages() });
-          void queryClient.invalidateQueries({ queryKey: ["approvals"] });
-        }}
+        onSaved={invalidate}
       />
 
       <AlertDialog
@@ -175,10 +216,15 @@ export function OrgPackageManifestCard() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove "{removing?.packageName}" for every machine?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Remove "{removing?.packageName}" for {everyMachine}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Machines without their own entry for it no longer allow it. Where it is installed, it
-              stays installed and counts as undeclared software until someone uninstalls it.
+              {profileId === undefined
+                ? "Machines without their own entry for it no longer allow it, unless their profile does."
+                : "Machines on this profile without their own entry for it go back to the org's entry, if the org has one."}{" "}
+              Where it is no longer allowed and is installed, it stays installed and counts as
+              undeclared software until someone uninstalls it.
               {removing?.setting && removing.setting !== "allowed"
                 ? " Cloudable stops ensuring it."
                 : ""}
@@ -196,7 +242,7 @@ export function OrgPackageManifestCard() {
                 removePackage.mutate(name, {
                   onSuccess: () => {
                     setRemoving(null);
-                    toast.success(`"${name}" removed for every machine`);
+                    toast.success(`"${name}" removed for ${everyMachine}`);
                   },
                 });
               }}
@@ -212,15 +258,23 @@ export function OrgPackageManifestCard() {
 
 function OrgPackageRow({
   entry,
+  readOnly,
+  setSetting: writeSetting,
   onEdit,
   onRemove,
 }: {
   entry: OrgPackageEntry;
+  readOnly: boolean;
+  setSetting: (packageName: string, setting: PackageSetting) => Promise<UpdateOrgPackagesResult>;
   onEdit: () => void;
   onRemove: () => void;
 }) {
   // Its own mutation per row, so one row's pending state never shows on another.
-  const setSetting = useSetOrgPackageSetting();
+  const setSetting = useMutation({
+    mutationFn: (input: { packageName: string; setting: PackageSetting }) =>
+      writeSetting(input.packageName, input.setting),
+    onError: (error) => toast.error("Couldn't change that package", { description: error.message }),
+  });
   const setting = entry.setting ?? "allowed";
 
   return (
@@ -264,7 +318,7 @@ function OrgPackageRow({
           }}
           packageName={entry.packageName}
           versionPin={entry.versionPin}
-          disabled={setSetting.isPending}
+          disabled={readOnly || setSetting.isPending}
         />
       </TableCell>
       <TableCell>
@@ -283,6 +337,7 @@ function OrgPackageRow({
               size="icon"
               className="size-8"
               aria-label={`Actions for ${entry.packageName}`}
+              disabled={readOnly}
             >
               <MoreHorizontal />
             </Button>
@@ -294,7 +349,7 @@ function OrgPackageRow({
             </DropdownMenuItem>
             <DropdownMenuItem destructive onSelect={onRemove}>
               <X />
-              Remove for every machine…
+              Remove…
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

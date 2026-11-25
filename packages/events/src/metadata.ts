@@ -120,7 +120,8 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
   // reconciled are tier 2, routine operational updates)
   "machine.created": {
     tier: 1,
-    description: "A machine was declared with a name, region, size, and image, and the profile it was created on, if any.",
+    description:
+      "A machine was declared with a name, region, size, and image, and the profile it was created on, if any.",
   },
   "machine.provisioned": {
     tier: 1,

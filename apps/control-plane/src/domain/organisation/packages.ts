@@ -166,9 +166,7 @@ const fetchScopeRows = (
       db
         .select()
         .from(machinePackages)
-        .where(
-          and(eq(machinePackages.scopeType, scopeType), eq(machinePackages.scopeId, scopeId)),
-        ),
+        .where(and(eq(machinePackages.scopeType, scopeType), eq(machinePackages.scopeId, scopeId))),
     catch: (cause) => new OrgPackagesError({ reason: "read_failed", cause }),
   });
 

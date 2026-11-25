@@ -208,3 +208,10 @@ export function apiPatch<T>(path: string, body?: unknown): Promise<T> {
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
 }
+
+export function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "PUT",
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+}

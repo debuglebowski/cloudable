@@ -1,6 +1,6 @@
+import { LOGGING_TIER_KEY } from "../../logging/settings";
 import { ADMIN_ACCESS_ELEVATION_TTL_MINUTES_SETTING_KEY } from "../elevation/policy";
 import { ACCESS_METHODS_ENABLED_KEY, PERSISTENT_PATHS_KEY } from "../machine/settings";
-import { LOGGING_TIER_KEY } from "../../logging/settings";
 
 /**
  * The settings a profile may set. Each is read per machine through the

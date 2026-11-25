@@ -314,10 +314,13 @@ export const applyApprovedEnsureEdit = (
     }
     const { scope, machineId, profileId } = decoded.value;
     if (scope === "profile" && profileId === undefined) {
-      return yield* Effect.logError(`approval ${approval.id}: package_ensure for a profile names none`);
+      return yield* Effect.logError(
+        `approval ${approval.id}: package_ensure for a profile names none`,
+      );
     }
     const { pinned, ...rest } = decoded.value.edit;
-    const edit = rest.locked === undefined && pinned !== undefined ? { ...rest, locked: pinned } : rest;
+    const edit =
+      rest.locked === undefined && pinned !== undefined ? { ...rest, locked: pinned } : rest;
     const write: Effect.Effect<void, unknown, Db | EventBus | MachineService> =
       scope !== "machine" || machineId === null
         ? updateOrgPackages({
