@@ -476,7 +476,10 @@ repository. An org can trust such a repository (`domain/organisation/apt-reposit
 - Removing one leaves installed packages alone. A removed repository stays on record.
 - Every live machine gets the change on its next poll (`settings.aptRepositories`). The agent
   writes `/etc/apt/sources.list.d/cloudable-<id>.sources` and its key, removes files for
-  repositories no longer listed, and runs `apt-get update` (see `docs/agents.md`). It reports
+  repositories no longer listed, and runs `apt-get update` (see `docs/agents.md`). It does not
+  write a repository another file on the machine already sets up: two copies with different keys
+  stop apt from working. Approving a feed a vendor installs itself (Microsoft's, for Defender)
+  therefore does nothing on machines that have it. It reports
   which repositories it has in place, and the control plane records each as
   `machine.apt_repository_configured` or `machine.apt_repository_removed`.
 - **Unapproved sources are drift.** The agent reports every apt source on the machine. Any that is

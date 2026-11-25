@@ -286,6 +286,11 @@ brings fresh settings, the agent:
 - writes `/etc/apt/keyrings/cloudable-<id>.asc` (the signing key) and
   `/etc/apt/sources.list.d/cloudable-<id>.sources` (deb822, `Signed-By` that key), mode 0644.
   It writes a file only when its bytes differ.
+- skips a repository whose URI and suite another file already configures, and removes its own
+  copy if it has one. apt refuses every source list when one source has two different
+  `Signed-By` keys. This happened in production: Defender's installer writes Microsoft's feed on
+  every VM, and a person had added GitHub's. The other file's source still counts as unapproved
+  drift; only a `cloudable-<id>` file is approved.
 - removes any `cloudable-*.sources` or `cloudable-*.asc` file whose id is no longer listed.
   An absent or empty list removes them all. It never touches a file without that prefix.
 - runs `apt-get update` once if it wrote or removed anything. A failure is logged. The next

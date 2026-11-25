@@ -6,7 +6,8 @@
  * - Apply. The poll's `settings.aptRepositories` lists the repositories an approver
  *   approved. The agent writes one deb822 `.sources` file and one key file per
  *   repository, removes the ones no longer listed, and runs `apt-get update` when
- *   anything changed. It owns only files named `cloudable-*`. A repository installs
+ *   anything changed. A repository another file already configures (same URI and
+ *   suite) is not written: apt refuses a source with two different keys. It owns only files named `cloudable-*`. A repository installs
  *   nothing by itself: packages from it are ordinary package actions.
  * - Report. Every enabled source URI in `sources.list` and `sources.list.d`, and the
  *   approved repositories that are in place. The control plane decides which sources
@@ -199,11 +200,23 @@ export async function applyAptRepositories(
   const log = options.log ?? console.error;
   let changed = 0;
 
-  if (repos.length > 0) {
+  // An approved repository another file already configures is left to that file: a
+  // second copy with its own key makes apt refuse every source list. Its own cloudable
+  // files, if any, go with the stale ones below.
+  const foreign = foreignSourceKeys(aptDir);
+  const toWrite = repos.filter((repo) => {
+    if (!foreign.has(sourceKey(repo.url, repo.suite))) return true;
+    log(
+      `apt repositories: ${repo.url} ${repo.suite} is already configured by another file, not writing ${repo.id}`,
+    );
+    return false;
+  });
+
+  if (toWrite.length > 0) {
     mkdirSync(sourcesDir(aptDir), { recursive: true, mode: 0o755 });
     mkdirSync(keyringsDir(aptDir), { recursive: true, mode: 0o755 });
   }
-  for (const repo of repos) {
+  for (const repo of toWrite) {
     try {
       // The key first, so a sources file never names a key that is not there.
       if (writeIfChanged(keyPath(aptDir, repo.id), keyFileFor(repo))) changed += 1;
@@ -213,7 +226,7 @@ export async function applyAptRepositories(
     }
   }
 
-  const wanted = new Set(repos.map((r) => r.id));
+  const wanted = new Set(toWrite.map((r) => r.id));
   // The sources file first, so apt never reads a source whose key is gone.
   const stale = [
     ...cloudableIds(sourcesDir(aptDir), ".sources")
@@ -250,25 +263,34 @@ export function readAptRepositoryIds(aptDir: string = APT_DIR): string[] {
     .sort();
 }
 
-/** URIs from one-line `deb [opts] URI suite comps` lines. Exported for the test. */
-export function parseOneLineSources(text: string): string[] {
-  const uris: string[] = [];
+/** One enabled `deb` source: its URI and the suites it names. */
+interface SourceEntry {
+  readonly uri: string;
+  readonly suites: readonly string[];
+}
+
+function oneLineEntries(text: string): SourceEntry[] {
+  const entries: SourceEntry[] = [];
   for (const raw of text.split("\n")) {
     const hash = raw.indexOf("#");
     const line = (hash === -1 ? raw : raw.slice(0, hash)).trim();
     if (line === "") continue;
-    const match = /^([A-Za-z-]+)\s*(?:\[[^\]]*\])?\s*(\S+)/.exec(line);
+    const match = /^([A-Za-z-]+)\s*(?:\[[^\]]*\])?\s*(\S+)(?:\s+(\S+))?/.exec(line);
     if (match?.[1] !== "deb" || match[2] === undefined) continue;
-    uris.push(match[2]);
+    entries.push({ uri: match[2], suites: match[3] === undefined ? [] : [match[3]] });
   }
-  return uris;
+  return entries;
+}
+
+/** URIs from one-line `deb [opts] URI suite comps` lines. Exported for the test. */
+export function parseOneLineSources(text: string): string[] {
+  return oneLineEntries(text).map((e) => e.uri);
 }
 
 const DISABLED = new Set(["no", "false", "off", "without", "disable"]);
 
-/** URIs from deb822 `.sources` stanzas. Exported for the test. */
-export function parseDeb822Sources(text: string): string[] {
-  const uris: string[] = [];
+function deb822Entries(text: string): SourceEntry[] {
+  const entries: SourceEntry[] = [];
   const stanzas: Array<Map<string, string>> = [];
   let current = new Map<string, string>();
   let field: string | undefined;
@@ -300,11 +322,32 @@ export function parseDeb822Sources(text: string): string[] {
     if (enabled !== undefined && DISABLED.has(enabled)) continue;
     const types = (stanza.get("types") ?? "").split(/\s+/);
     if (!types.includes("deb")) continue;
+    const suites = (stanza.get("suites") ?? "").split(/\s+/).filter((x) => x !== "");
     for (const uri of (stanza.get("uris") ?? "").split(/\s+/)) {
-      if (uri !== "") uris.push(uri);
+      if (uri !== "") entries.push({ uri, suites });
     }
   }
-  return uris;
+  return entries;
+}
+
+/** URIs from deb822 `.sources` stanzas. Exported for the test. */
+export function parseDeb822Sources(text: string): string[] {
+  return deb822Entries(text).map((e) => e.uri);
+}
+
+/** The files apt reads sources from: `sources.list`, and `.list` and `.sources` in `sources.list.d`. */
+function sourceFiles(aptDir: string): string[] {
+  const files: string[] = [join(aptDir, "sources.list")];
+  try {
+    for (const name of readdirSync(sourcesDir(aptDir)).sort()) {
+      if (name.endsWith(".list") || name.endsWith(".sources")) {
+        files.push(join(sourcesDir(aptDir), name));
+      }
+    }
+  } catch {
+    // No sources.list.d: only sources.list.
+  }
+  return files.filter(isFile);
 }
 
 function isFile(path: string): boolean {
@@ -321,20 +364,8 @@ function isFile(path: string): boolean {
  * file and URI. Unreadable files are skipped.
  */
 export function readAptSources(aptDir: string = APT_DIR): AptSourceReport[] {
-  const files: string[] = [join(aptDir, "sources.list")];
-  try {
-    for (const name of readdirSync(sourcesDir(aptDir)).sort()) {
-      if (name.endsWith(".list") || name.endsWith(".sources")) {
-        files.push(join(sourcesDir(aptDir), name));
-      }
-    }
-  } catch {
-    // No sources.list.d: only sources.list.
-  }
-
   const reports: AptSourceReport[] = [];
-  for (const file of files) {
-    if (!isFile(file)) continue;
+  for (const file of sourceFiles(aptDir)) {
     let text: string;
     try {
       text = readFileSync(file, "utf-8");
@@ -345,4 +376,32 @@ export function readAptSources(aptDir: string = APT_DIR): AptSourceReport[] {
     for (const uri of new Set(uris)) reports.push({ file, uri });
   }
   return reports;
+}
+
+const trimSlash = (uri: string): string => uri.replace(/\/+$/, "");
+const sourceKey = (uri: string, suite: string): string => `${trimSlash(uri)} ${suite}`;
+
+/**
+ * The `URI suite` pairs that files Cloudable did not write already configure. apt refuses
+ * to read any source list where one URI and suite appear with two different `Signed-By`
+ * keys, so an approved repository already set up this way (a vendor installer, a person
+ * before it was approved) is not written a second time. Exported for the test.
+ */
+export function foreignSourceKeys(aptDir: string = APT_DIR): Set<string> {
+  const keys = new Set<string>();
+  for (const file of sourceFiles(aptDir)) {
+    const name = file.split("/").pop() ?? "";
+    if (name.startsWith(FILE_PREFIX)) continue;
+    let text: string;
+    try {
+      text = readFileSync(file, "utf-8");
+    } catch {
+      continue;
+    }
+    const entries = file.endsWith(".sources") ? deb822Entries(text) : oneLineEntries(text);
+    for (const entry of entries) {
+      for (const suite of entry.suites) keys.add(sourceKey(entry.uri, suite));
+    }
+  }
+  return keys;
 }

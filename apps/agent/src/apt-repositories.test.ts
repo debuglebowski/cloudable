@@ -14,6 +14,7 @@ import type { AptRepositoryConfig } from "@cloudable/contracts";
 import {
   applyAptRepositories,
   aptRepositoriesFrom,
+  foreignSourceKeys,
   parseDeb822Sources,
   parseOneLineSources,
   readAptRepositoryIds,
@@ -149,6 +150,52 @@ describe("applyAptRepositories", () => {
       expect(readFileSync(path, "utf-8")).toBe("keep me\n");
     }
     expect(runner.calls).toEqual([{ binary: "apt-get", args: ["update"] }]);
+  });
+
+  test("a repository another file already configures is not written, and its old copy goes", async () => {
+    // What broke apt on a real machine: Defender's installer and a person had already set
+    // up these sources with their own keys, and a second copy made apt refuse to update.
+    await applyAptRepositories(
+      [repo(), repo({ id: ID_B, url: "https://cli.github.com/packages/", suite: "stable" })],
+      {
+        aptDir,
+        runner: recordingRunner(),
+        log: silent,
+      },
+    );
+    writeFileSync(
+      join(aptDir, "sources.list.d", "github-cli.list"),
+      "deb [arch=amd64 signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n",
+    );
+    const logged: string[] = [];
+    const runner = recordingRunner();
+
+    const result = await applyAptRepositories(
+      [repo(), repo({ id: ID_B, url: "https://cli.github.com/packages/", suite: "stable" })],
+      { aptDir, runner, log: (m) => logged.push(m) },
+    );
+
+    expect(result.changed).toBe(2);
+    expect(existsSync(sourcesPath(ID_A))).toBe(true);
+    expect(existsSync(sourcesPath(ID_B))).toBe(false);
+    expect(existsSync(keyPath(ID_B))).toBe(false);
+    expect(logged.join("\n")).toContain("already configured by another file");
+    expect(runner.calls).toEqual([{ binary: "apt-get", args: ["update"] }]);
+  });
+
+  test("the same URI with another suite, or in a deb822 file, is judged by URI and suite", () => {
+    writeFileSync(
+      join(aptDir, "sources.list.d", "vendor.sources"),
+      "Types: deb\nURIs: https://packages.microsoft.com/ubuntu/24.04/prod\nSuites: noble\nComponents: main\n",
+    );
+    writeFileSync(
+      join(aptDir, "sources.list.d", "other.list"),
+      "deb https://deb.nodesource.com/node_24.x other main\n",
+    );
+    const keys = foreignSourceKeys(aptDir);
+    expect(keys.has("https://packages.microsoft.com/ubuntu/24.04/prod noble")).toBe(true);
+    expect(keys.has("https://deb.nodesource.com/node_24.x other")).toBe(true);
+    expect(keys.has("https://deb.nodesource.com/node_24.x nodistro")).toBe(false);
   });
 
   test("an empty list removes every cloudable file", async () => {
