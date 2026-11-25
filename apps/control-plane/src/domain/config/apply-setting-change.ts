@@ -389,8 +389,7 @@ export const applySettingChange = (
               ),
             )
             .limit(1),
-        catch: (cause) =>
-          new SettingWriteError({ message: `reading org value: ${String(cause)}` }),
+        catch: (cause) => new SettingWriteError({ message: `reading org value: ${String(cause)}` }),
       });
       current = null;
       reachedValue = orgRows[0]?.value ?? null;
