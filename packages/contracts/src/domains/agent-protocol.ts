@@ -1,3 +1,4 @@
+import type { AptSourceReport } from "./apt-repositories";
 import type { AgentRelease, AgentUpdateReport } from "./agent-update";
 import type {
   InstalledScanTool,
@@ -195,8 +196,9 @@ export interface DesiredStateResponse {
   readonly packages: readonly string[];
   /**
    * Org settings the agent acts on, keyed by name. Empty unless something applies.
-   * Today the one key is `vulnerabilityScan` (`VulnerabilityScanConfig`), present only
-   * while an admin has scanning turned on for the org. The agent treats any key it does
+   * Keys: `vulnerabilityScan` (`VulnerabilityScanConfig`), present only while an admin
+   * has scanning turned on for the org; `nix` (`{ snapshot }`); `aptRepositories`
+   * (`AptRepositoryConfig[]`), the org's approved apt repositories, absent when none. The agent treats any key it does
    * not know as absent and validates the ones it does, because the value is acted on as root.
    */
   readonly settings: Readonly<Record<string, unknown>>;
@@ -300,6 +302,17 @@ export interface AgentReportRequest {
   readonly hardeningBaseline?: string;
   /** Outcomes for actions collected since the last report. Absent when none ran. */
   readonly actionResults?: readonly PackageActionResult[];
+  /**
+   * Every apt source the agent found on the machine. The control plane decides which
+   * are allowed (Ubuntu's own, and the org's approved repositories) and flags the
+   * rest as drift. Absent from an older agent, or where there is no apt.
+   */
+  readonly aptSources?: readonly AptSourceReport[];
+  /**
+   * Ids of the org's approved repositories the agent has in place
+   * (`cloudable-<id>.sources` with its key). The control plane records each change.
+   */
+  readonly aptRepositories?: readonly string[];
   /**
    * The vulnerability scanner as installed on this machine. Absent when none is. The
    * control plane compares it with what it last stored and records
