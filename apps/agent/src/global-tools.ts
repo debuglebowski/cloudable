@@ -43,16 +43,30 @@ export const NIX_FEATURES = ["--extra-experimental-features", "nix-command flake
  * and `npm config set` writes to the nearest project's `.npmrc` (seen in testing: it
  * tried to write the agent's checkout). The home is where these tools' settings belong.
  */
-const RUN_AS_USER_SCRIPT =
-  'cd "$HOME" 2>/dev/null || cd /; command -v "$1" >/dev/null 2>&1 || exit 127; exec "$@"';
+/**
+ * Printed on its own line just before the command runs. A login, interactive shell can
+ * print things of its own first: Ubuntu's `/etc/bash.bashrc` prints a sudo tip on stdout
+ * until the user has used sudo once. Everything up to the marker is the shell's, not the
+ * command's. Without this, `npm ls --json` on every new machine did not parse, the
+ * packages read as missing, and *Ensure installed* reinstalled them every few minutes.
+ */
+export const OUTPUT_MARKER = "__cloudable_command_output__";
 
-export function runAsUser(
+const RUN_AS_USER_SCRIPT = `cd "$HOME" 2>/dev/null || cd /; command -v "$1" >/dev/null 2>&1 || exit 127; printf '%s\\n' ${OUTPUT_MARKER}; exec "$@"`;
+
+/** The command's own stdout: whatever follows the marker line, or all of it without one. */
+export function afterMarker(stdout: string): string {
+  const at = stdout.indexOf(`${OUTPUT_MARKER}\n`);
+  return at === -1 ? stdout : stdout.slice(at + OUTPUT_MARKER.length + 1);
+}
+
+export async function runAsUser(
   runner: CommandRunner,
   argv: readonly string[],
   timeoutSeconds: number,
   user: string = MACHINE_OS_USER,
 ): Promise<CommandResult | null> {
-  return runner.run("timeout", [
+  const result = await runner.run("timeout", [
     String(timeoutSeconds),
     "runuser",
     "-u",
@@ -66,6 +80,7 @@ export function runAsUser(
     "bash",
     ...argv,
   ]);
+  return result === null ? null : { ...result, stdout: afterMarker(result.stdout) };
 }
 
 /** One installed package: its bare name and, when the manager says, its version. */

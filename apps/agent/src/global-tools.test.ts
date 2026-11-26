@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  OUTPUT_MARKER,
+  afterMarker,
   cachedUserPackages,
   listGlobalTools,
   listUserPackages,
@@ -155,13 +157,36 @@ describe("runAsUser", () => {
       "--",
       "bash",
       "-lic",
-      'cd "$HOME" 2>/dev/null || cd /; command -v "$1" >/dev/null 2>&1 || exit 127; exec "$@"',
+      `cd "$HOME" 2>/dev/null || cd /; command -v "$1" >/dev/null 2>&1 || exit 127; printf '%s\\n' ${OUTPUT_MARKER}; exec "$@"`,
       "bash",
       "npm",
       "install",
       "-g",
       "$(rm -rf /)",
     ]);
+  });
+});
+
+describe("output marker", () => {
+  test("what the shell prints before the command is dropped; the command's output is kept", async () => {
+    // Ubuntu's bash.bashrc prints this on stdout on every new machine, until the user has
+    // used sudo once. It made `npm ls --json` unparseable and Ensure reinstall in a loop.
+    const tip =
+      'To run a command as administrator (user "root"), use "sudo <command>".\nSee "man sudo_root" for details.\n\n';
+    const json = JSON.stringify({
+      dependencies: { "@anthropic-ai/claude-code": { version: "2.1.332" } },
+    });
+    const runner: CommandRunner = {
+      run: async () => ({ stdout: `${tip}${OUTPUT_MARKER}\n${json}\n`, exitCode: 0 }),
+    };
+    const result = await runAsUser(runner, ["npm", "ls", "-g", "--depth=0", "--json"], 20, "u");
+    expect(result?.stdout).toBe(`${json}\n`);
+    const packages = await listUserPackages(runner, "u");
+    expect(packages.get("npm:@anthropic-ai/claude-code")).toBe("2.1.332");
+  });
+
+  test("output without a marker is left as it is", () => {
+    expect(afterMarker("plain\n")).toBe("plain\n");
   });
 });
 
