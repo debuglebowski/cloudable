@@ -58,6 +58,19 @@ export class MachineNotRunningError extends Schema.TaggedError<MachineNotRunning
   }),
 }) {}
 
+/** Stop or start asked of a machine in the wrong state for it: stopping one that is not
+ * running, starting one that is not stopped, or either while the last one is still under
+ * way. The message says what to do instead. */
+export class MachinePowerConflictError extends Schema.TaggedError<MachinePowerConflictError>(
+  "MachinePowerConflictError",
+)("MachinePowerConflictError", {
+  error: Schema.Struct({
+    code: Schema.Literal("machine_not_running", "machine_not_stopped", "machine_busy"),
+    message: Schema.String,
+    requestId: Schema.String,
+  }),
+}) {}
+
 const LockConflictSchema = Schema.Struct({
   packageName: Schema.String,
   lockedAtScope: Schema.Literal("org", "profile", "machine"),

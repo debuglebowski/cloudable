@@ -179,6 +179,21 @@ const CASES: readonly Case[] = [
     allow: OWNER_OR_ADMIN,
   },
   {
+    // Machine A is running, so a stop is accepted; the fake provider does not know the
+    // inserted row, so it then fails in the background. That is fine here.
+    endpoint: "machines.stop",
+    method: "POST",
+    path: (f) => `/api/v1/machines/${f.machineA}/stop`,
+    allow: OWNER_OR_ADMIN,
+  },
+  {
+    // Machine A is running, so an allowed start is a 409, not a role refusal.
+    endpoint: "machines.start",
+    method: "POST",
+    path: (f) => `/api/v1/machines/${f.machineA}/start`,
+    allow: OWNER_OR_ADMIN,
+  },
+  {
     endpoint: "restart.restartMachine",
     method: "POST",
     path: (f) => `/api/v1/machines/${f.machineA}/restart`,
@@ -1370,6 +1385,49 @@ describe.skipIf(!postgresReachable)(
         expect((await create(f.people.owner)).status).toBe(422);
         expect((await create(f.people.deactivated)).status).toBe(422);
         expect((await create(crypto.randomUUID())).status).toBe(422);
+      });
+    });
+
+    describe("a stopped machine", () => {
+      test("connect, restart, upgrade and stop say what to do; start is accepted", async () => {
+        const f = await seed();
+        await db.update(machines).set({ state: "stopped" }).where(eq(machines.id, f.machineA));
+        const message = (res: { body: unknown }) => {
+          const body = res.body as { message?: string; error?: { message?: string } };
+          return body.error?.message ?? body.message;
+        };
+
+        const connect = await call(f.tokens.owner, "POST", "/api/v1/access/sessions", {
+          targetMachineId: f.machineA,
+          method: "terminal",
+        });
+        expect(connect.status).toBe(403);
+        expect(message(connect)).toBe("The machine is stopped. Start it first.");
+
+        const restart = await call(
+          f.tokens.owner,
+          "POST",
+          `/api/v1/machines/${f.machineA}/restart`,
+        );
+        expect(restart.status).toBe(409);
+        expect(message(restart)).toBe("The machine is stopped. Start it instead.");
+
+        const upgrade = await call(
+          f.tokens.owner,
+          "POST",
+          `/api/v1/machines/${f.machineA}/upgrade`,
+          { targetImage: "ubuntu-24.04", snapshotScope: "shallow" },
+        );
+        expect(upgrade.status).toBe(409);
+        expect(message(upgrade)).toBe("The machine is stopped. Start it first.");
+
+        const stop = await call(f.tokens.owner, "POST", `/api/v1/machines/${f.machineA}/stop`);
+        expect(stop.status).toBe(409);
+        expect(message(stop)).toBe("The machine is already stopped.");
+
+        const start = await call(f.tokens.admin, "POST", `/api/v1/machines/${f.machineA}/start`);
+        expect(start.status).toBe(202);
+        expect(start.body).toEqual({ machineId: f.machineA, state: "starting" });
       });
     });
   },

@@ -45,6 +45,8 @@ function recordingProvisioning(failFor: ReadonlySet<string> = new Set()) {
     reimage: () => Effect.die("not used in this test"),
     restart: () => Effect.die("not used in this test"),
     resize: () => Effect.die("not used in this test"),
+    stop: () => Effect.die("not used in this test"),
+    start: () => Effect.die("not used in this test"),
     metrics: () => Effect.die("not used in this test"),
   } as unknown as ProvisioningService;
   return { deleted, layer: Layer.succeed(ProvisioningServiceTag, service) };

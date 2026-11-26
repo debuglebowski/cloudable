@@ -58,6 +58,8 @@ export const SwitchableProvisioningServiceLive: Layer.Layer<ProvisioningServiceT
       restart: (machineId, provider, externalId) =>
         implFor(provider).restart(machineId, provider, externalId),
       resize: (input) => implFor(input.provider).resize(input),
+      stop: (input) => implFor(input.provider).stop(input),
+      start: (input) => implFor(input.provider).start(input),
       metrics: (input) => implFor(input.provider).metrics(input),
     } satisfies ProvisioningService;
   }),

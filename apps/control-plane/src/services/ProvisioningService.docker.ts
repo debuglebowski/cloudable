@@ -117,8 +117,10 @@ const inspectContainer = (
     return { status: status ?? "", declaredPackages };
   });
 
+/** An `exited` container is off, the way a deallocated Azure VM is: `docker stop` leaves it
+ * there. Reporting it as `error` made a stopped local machine look broken. */
 const statusToMachineState = (dockerStatus: string): MachineStatus["state"] =>
-  dockerStatus === "running" ? "running" : "error";
+  dockerStatus === "running" ? "running" : dockerStatus === "exited" ? "stopped" : "error";
 
 /** Builds the per-Ubuntu-version image the first time it's needed; a no-op once it exists. Can
  * take ~10-30s on first use (apt-get in the build). Build context stays `apps/agent` (not the
@@ -368,6 +370,44 @@ export const makeDockerProvisioningServiceLive = (options: {
         }),
       ),
     metrics: () => Effect.succeed(null),
+    // `docker stop` keeps the container and its volume; `docker start` runs the same one
+    // again. Both succeed on a container already in the state asked for.
+    stop: ({ machineId }) =>
+      Effect.gen(function* () {
+        const observed = yield* inspectContainer(machineId);
+        if (!observed) {
+          return yield* Effect.fail(
+            new ProvisioningError({
+              reason: "not_found",
+              cause: `unknown machineId: ${machineId}`,
+            }),
+          );
+        }
+        yield* runDocker(["stop", containerName(machineId)]);
+        return {
+          machineId,
+          state: "stopped",
+          externalId: containerName(machineId),
+        } satisfies MachineStatus;
+      }),
+    start: ({ machineId }) =>
+      Effect.gen(function* () {
+        const observed = yield* inspectContainer(machineId);
+        if (!observed) {
+          return yield* Effect.fail(
+            new ProvisioningError({
+              reason: "not_found",
+              cause: `unknown machineId: ${machineId}`,
+            }),
+          );
+        }
+        yield* runDocker(["start", containerName(machineId)]);
+        return {
+          machineId,
+          state: "running",
+          externalId: containerName(machineId),
+        } satisfies MachineStatus;
+      }),
     restart: (machineId: string, _provider) =>
       Effect.gen(function* () {
         const observed = yield* inspectContainer(machineId);

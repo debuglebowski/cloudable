@@ -8,7 +8,9 @@ import { Data } from "effect";
  * need to inspect it without unwrapping an error channel.
  */
 export class UpgradeError extends Data.TaggedError("UpgradeError")<{
-  reason: "machine_not_found" | "not_eligible" | "db_error";
+  /** `machine_stopped`: a stopped machine is not upgraded. Reimaging builds a new VM, which
+   * would start a machine its owner switched off. Start it first. */
+  reason: "machine_not_found" | "not_eligible" | "machine_stopped" | "db_error";
   cause?: unknown;
   /** Populated only for "not_eligible" — when the machine becomes eligible again. */
   nextEligibleAt?: Date;

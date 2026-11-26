@@ -418,6 +418,25 @@ export interface ProvisioningService {
     wasRunning: boolean;
   }): Effect.Effect<MachineStatus, ProvisioningError>;
   /**
+   * Turns the machine off to save money. On Azure: deallocate, so no compute is billed.
+   * Disks, network and managed identity stay. Returns `stopped`. A machine that is already
+   * off succeeds.
+   */
+  stop(input: {
+    machineId: string;
+    provider: Provider;
+    externalId: string | null;
+  }): Effect.Effect<MachineStatus, ProvisioningError>;
+  /**
+   * Turns a stopped machine back on, exactly as it was. Returns `running`. A machine that
+   * is already on succeeds.
+   */
+  start(input: {
+    machineId: string;
+    provider: Provider;
+    externalId: string | null;
+  }): Effect.Effect<MachineStatus, ProvisioningError>;
+  /**
    * Hourly CPU use, and for a burstable size its CPU credits, over the last `hours`, as the
    * provider measures them. Null where the provider has no such numbers (docker, fake).
    */

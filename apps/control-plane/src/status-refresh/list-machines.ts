@@ -9,11 +9,11 @@ import type { RefreshInput } from "./loop";
  * module's states carry archive-lifecycle meaning this file doesn't need. */
 const ARCHIVED_DB_STATES = new Set(["archived_restorable", "archived_expired"]);
 
-/** Maps this build's 6 DB machine states onto `ProvisioningService`'s narrower 5-value
- * `MachineStatus.state` — `"stopped"` has no real equivalent yet (nothing in this build
- * transitions a machine there outside the offboarding sequence, which archives it in the
- * same step) so it's treated as `"running"`: the pass still checks it against
- * provisioning rather than silently skipping it. */
+/** Maps this build's 6 DB machine states onto `ProvisioningService`'s narrower
+ * `MachineStatus.state`, for the one thing the pass uses it for: telling a machine that
+ * exists from one that is archived or missing. `"stopped"` and `"running"` both exist, so
+ * a stopped machine is observed like any other, never created or started: `reconcile`
+ * only reads its power state, and a deallocated VM reads `stopped` again. */
 function toLastKnownStatus(row: {
   id: string;
   state: string;

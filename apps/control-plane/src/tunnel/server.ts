@@ -25,6 +25,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Data, Effect } from "effect";
 import { isMachineStale } from "../compliance/checks/machines-reporting";
 import { Db } from "../db/layer";
+import { powerTransitionFor } from "../domain/machine/power";
 import { resolveAccessMethodsEnabled } from "../domain/machine/settings";
 import { EventBus } from "../services/EventBus";
 import type { SignerTag } from "../services/Signer";
@@ -101,11 +102,15 @@ export class TunnelServer extends Effect.Service<TunnelServer>()("TunnelServer",
         const rawMachine = found[0];
         const machine = rawMachine && rawMachine.orgId === input.orgId ? rawMachine : undefined;
 
+        // A machine that is being stopped still reads `running` until the provider is done;
+        // a session opened now would die within minutes.
         let denialReason: string | null = !machine
           ? "machine_not_found"
           : machine.state !== "running"
             ? `machine_${machine.state}`
-            : null;
+            : powerTransitionFor(machine.id) === "stopping"
+              ? "machine_stopping"
+              : null;
 
         // Admin-disablable at any level — refusing new
         // sessions once a method is disabled is the other half of the gap

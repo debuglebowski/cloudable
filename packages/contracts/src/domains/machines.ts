@@ -218,6 +218,8 @@ export interface AccessMethodsEnabled {
 export interface MachineDetail extends MachineSummary {
   agentUpdate?: Omit<AgentUpdateReport, "observations"> | null;
   desiredAgentRelease?: { version: string; releaseId: string } | null;
+  /** A stop or start under way, else null. `state` changes once it is done. */
+  powerTransition?: MachinePowerTransition | null;
   manifest: ResolvedPackageManifestEntry[];
   persistentPaths: ResolvedMachineSetting<PersistentPaths>;
   accessMethodsEnabled: ResolvedMachineSetting<AccessMethodsEnabled>;
@@ -456,3 +458,16 @@ export interface ResizeMachineResponse {
   approvalId: string;
   status: "pending" | "approved" | "rejected" | "expired";
 }
+
+/**
+ * `POST /api/v1/machines/:id/stop` and `/start`: the stop or start is under way. It runs in
+ * the background and takes a few minutes on Azure. The machine's `state` changes when it is
+ * done; until then the machine reads `powerTransition`.
+ */
+export interface MachinePowerResponse {
+  machineId: string;
+  state: MachinePowerTransition;
+}
+
+/** A stop or start under way on a machine. */
+export type MachinePowerTransition = "stopping" | "starting";

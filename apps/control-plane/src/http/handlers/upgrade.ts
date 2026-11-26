@@ -15,6 +15,7 @@ const statusFor = (error: UpgradeError): number => {
     case "machine_not_found":
       return 404;
     case "not_eligible":
+    case "machine_stopped":
       return 409;
     default:
       return 500;
@@ -29,7 +30,9 @@ const errorBodyFor = (error: UpgradeError): ApiErrorBody => ({
         ? `Machine is not eligible for another upgrade attempt until ${error.nextEligibleAt?.toISOString()}.`
         : error.reason === "machine_not_found"
           ? "Machine not found."
-          : "An unexpected error occurred while upgrading the machine.",
+          : error.reason === "machine_stopped"
+            ? "The machine is stopped. Start it first."
+            : "An unexpected error occurred while upgrading the machine.",
     requestId: ulid(),
     // `exactOptionalPropertyTypes`: only include `details` when there's
     // something to put in it, rather than assigning it `undefined`.

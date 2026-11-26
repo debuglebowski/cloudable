@@ -7,6 +7,7 @@ import { EventBus } from "../../services/EventBus";
 import { ProvisioningServiceTag } from "../../services/ProvisioningService";
 import { buildEvent } from "../build-event";
 import { MachineNotFoundError, MachineNotRunningError } from "./errors";
+import { powerTransitionFor } from "./power";
 
 /** Our own DB read/write or event publication failed unexpectedly — never a declared
  * HTTP error (same role as `domain/archive/errors.ts`'s `ArchiveDbError`), always
@@ -24,7 +25,10 @@ const notRunning = (machineId: string, state: string) =>
   new MachineNotRunningError({
     error: {
       code: "machine_not_running",
-      message: `Machine ${machineId} is ${state}, not running`,
+      message:
+        state === "stopped"
+          ? "The machine is stopped. Start it instead."
+          : `Machine ${machineId} is ${state}, not running`,
       requestId: ulid(),
     },
   });
@@ -57,6 +61,11 @@ export const restartMachine = (machineId: string, orgId: string, actorPersonId: 
     }
     if (machine.state !== "running") {
       return yield* Effect.fail(notRunning(machineId, machine.state));
+    }
+    // Still reads `running` while a stop is under way.
+    const transition = powerTransitionFor(machineId);
+    if (transition !== null) {
+      return yield* Effect.fail(notRunning(machineId, transition));
     }
 
     yield* provisioning.restart(machineId, machine.provider, machine.externalResourceId);

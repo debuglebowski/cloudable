@@ -240,6 +240,9 @@ export const upgradeMachine = (
         new UpgradeError({ reason: "machine_not_found", cause: machineId }),
       );
     }
+    if (machine.state === "stopped") {
+      return yield* Effect.fail(new UpgradeError({ reason: "machine_stopped", cause: machineId }));
+    }
 
     // KNOWN LIMITATION: this is a read of the latest attempt, not a lock —
     // two concurrent `upgradeMachine` calls for the SAME machine (a retried

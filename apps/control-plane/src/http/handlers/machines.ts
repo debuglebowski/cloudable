@@ -9,7 +9,9 @@ import { MachineNotFoundError } from "../../domain/machine/errors";
 import { toActionView } from "../../domain/machine/package-actions";
 import { requestMachineManifestEdit } from "../../domain/machine/package-ensure";
 import { requestPackageAction } from "../../domain/machine/package-request";
+import { powerTransitionFor, requestMachinePower } from "../../domain/machine/power";
 import { requestMachineResize } from "../../domain/machine/resize";
+import { TunnelRelay } from "../../tunnel/relay";
 import { Api } from "../api";
 import { CurrentUserTag } from "../middleware/auth";
 import { toApprovalWire } from "../routes/approvals";
@@ -68,6 +70,7 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
         const release = getAgentRelease();
         return {
           ...machine,
+          powerTransition: powerTransitionFor(machine.id),
           desiredAgentRelease: release
             ? { version: release.version, releaseId: release.releaseId }
             : null,
@@ -108,6 +111,42 @@ export const MachinesLive = HttpApiBuilder.group(Api, "machines", (handlers) =>
           personId: currentUser.personId,
           sizeSku: payload.sizeSku,
           reason: payload.reason,
+        });
+      }),
+    )
+    .handle("stop", ({ path }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        yield* authorizeMachine(currentUser, path.id, "power");
+        const accepted = yield* requestMachinePower({
+          machineId: path.id,
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+          action: "stop",
+        });
+        // The machine is going away: end its live terminal, file and SSH sessions now and
+        // tell the browser, the same as a restart does. The tunnel refuses new ones while it
+        // is stopping.
+        const tunnelRelay = yield* TunnelRelay;
+        yield* tunnelRelay
+          .terminateSessionsForMachine({
+            orgId: currentUser.orgId,
+            machineId: path.id,
+            reason: "machine_stopped",
+          })
+          .pipe(Effect.catchTag("TunnelError", (e) => Effect.die(e)));
+        return accepted;
+      }),
+    )
+    .handle("start", ({ path }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUserTag;
+        yield* authorizeMachine(currentUser, path.id, "power");
+        return yield* requestMachinePower({
+          machineId: path.id,
+          orgId: currentUser.orgId,
+          personId: currentUser.personId,
+          action: "start",
         });
       }),
     )

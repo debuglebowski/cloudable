@@ -1,5 +1,5 @@
 import { machines } from "@cloudable/schema";
-import { and, eq, isNull, lt, ne, or } from "drizzle-orm";
+import { and, eq, isNull, lt, notInArray, or } from "drizzle-orm";
 import { Effect } from "effect";
 import { Db } from "../../db/layer";
 import type { ComplianceCheck, ComplianceFinding } from "../../domain/compliance/types";
@@ -24,11 +24,17 @@ export const CHECK_ID = "machines-reporting";
 export const REPORTING_STALENESS_THRESHOLD_MINUTES = 5;
 
 /**
- * Machines in these states are not expected to report — they no longer run
- * a control agent. Excluding them keeps the check from flagging machines
- * that were correctly archived.
+ * Machines in these states are not expected to report. An archived machine no
+ * longer runs a control agent. A stopped one was switched off on purpose by its
+ * owner or an admin, a recorded action (`machine.stopped`), so its silence is
+ * expected, not a gap. Once it is started its agent checks in again within a
+ * poll or two.
  */
-const NOT_EXPECTED_TO_REPORT_STATES = ["archived_restorable", "archived_expired"] as const;
+const NOT_EXPECTED_TO_REPORT_STATES = [
+  "archived_restorable",
+  "archived_expired",
+  "stopped",
+] as const;
 
 const thresholdCutoff = (now: Date): Date =>
   new Date(now.getTime() - REPORTING_STALENESS_THRESHOLD_MINUTES * 60_000);
@@ -75,8 +81,7 @@ export const machinesReportingCheck: ComplianceCheck = {
           .where(
             and(
               eq(machines.orgId, orgId),
-              ne(machines.state, NOT_EXPECTED_TO_REPORT_STATES[0]),
-              ne(machines.state, NOT_EXPECTED_TO_REPORT_STATES[1]),
+              notInArray(machines.state, [...NOT_EXPECTED_TO_REPORT_STATES]),
               or(
                 // Reported before, but has since gone stale.
                 lt(machines.lastVerifiedAt, cutoff),

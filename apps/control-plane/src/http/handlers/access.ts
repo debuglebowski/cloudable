@@ -38,11 +38,25 @@ const toAccessError = (reason: string, message: string): AccessErrorBody => {
   }
 };
 
+/**
+ * Plain words for the denials a person can act on. The code itself still goes into
+ * `access.session_denied`; only the message a person reads changes.
+ */
+const DENIAL_MESSAGE: Record<string, string> = {
+  machine_stopped: "The machine is stopped. Start it first.",
+  machine_stopping: "The machine is stopping. Start it again once it has stopped.",
+};
+
 /** Maps a tagged domain error (`SshCaError` | `TunnelError` | `SignerError`, all shaped `{ reason, cause? }`) onto the shared `AccessApiError` union. */
 const asAccessError = <E extends { reason: string; cause?: unknown; detail?: string }>(
   error: E,
 ): AccessErrorBody =>
-  toAccessError(error.reason, error.detail ?? String(error.cause ?? error.reason));
+  toAccessError(
+    error.reason,
+    (error.detail && DENIAL_MESSAGE[error.detail]) ??
+      error.detail ??
+      String(error.cause ?? error.reason),
+  );
 
 /**
  * The machines a certificate may name: only the person's own. An admin has no live access to

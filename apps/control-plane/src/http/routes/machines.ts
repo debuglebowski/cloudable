@@ -5,6 +5,7 @@ import {
   InvalidCursorError,
   InvalidMachineRequestError,
   MachineNotFoundError,
+  MachinePowerConflictError,
   PackageActionRejected,
   PackageEnsureSettingError,
   PackageLockConflictError,
@@ -127,6 +128,8 @@ const machineDetailSchema = Schema.Struct({
       }),
     ),
   ),
+  // A stop or start under way, else null. `state` changes once it is done.
+  powerTransition: Schema.optional(Schema.NullOr(Schema.Literal("stopping", "starting"))),
   ...machineSummaryFields,
   manifest: Schema.Array(resolvedManifestEntrySchema),
   persistentPaths: resolvedPersistentPathsSchema,
@@ -195,6 +198,11 @@ const machineComputeSchema = Schema.Struct({
 const resizeMachinePayloadSchema = Schema.Struct({
   sizeSku: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
   reason: Schema.String.pipe(Schema.maxLength(2000)),
+});
+
+const machinePowerResponseSchema = Schema.Struct({
+  machineId: Schema.String,
+  state: Schema.Literal("stopping", "starting"),
 });
 
 const resizeMachineResponseSchema = Schema.Struct({
@@ -392,6 +400,23 @@ export const MachinesGroup = HttpApiGroup.make("machines")
       .setPayload(resizeMachinePayloadSchema)
       .addSuccess(resizeMachineResponseSchema, { status: 202 })
       .addError(ResizeRefusedError, { status: 422 }),
+  )
+  .add(
+    // Stop the machine to save money: deallocated, no compute cost, disks stay. The owner or
+    // an admin, no approval. Carried out in the background.
+    HttpApiEndpoint.post("stop", "/:id/stop")
+      .setPath(machineIdPathSchema)
+      .addSuccess(machinePowerResponseSchema, { status: 202 })
+      .addError(MachineNotFoundError, { status: 404 })
+      .addError(MachinePowerConflictError, { status: 409 }),
+  )
+  .add(
+    // Start a stopped machine, exactly as it was. Same people, same background run.
+    HttpApiEndpoint.post("start", "/:id/start")
+      .setPath(machineIdPathSchema)
+      .addSuccess(machinePowerResponseSchema, { status: 202 })
+      .addError(MachineNotFoundError, { status: 404 })
+      .addError(MachinePowerConflictError, { status: 409 }),
   )
   .add(
     // An admin moves a machine to another profile, or off one. Recorded as

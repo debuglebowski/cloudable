@@ -309,9 +309,26 @@ export const makeFakeProvisioningServiceLive = (
 
       const metrics: ProvisioningService["metrics"] = () => Effect.succeed(null);
 
+      const setPower =
+        (to: "stopped" | "running") =>
+        (input: { machineId: string }): Effect.Effect<MachineStatus, ProvisioningError> =>
+          Effect.gen(function* () {
+            const existing = yield* require(input.machineId);
+            const next: FakeMachineEntry = {
+              ...existing,
+              status: { ...existing.status, state: to },
+            };
+            yield* Ref.update(state, (map) => new Map(map).set(input.machineId, next));
+            return next.status;
+          });
+      const stop: ProvisioningService["stop"] = setPower("stopped");
+      const start: ProvisioningService["start"] = setPower("running");
+
       return {
         resize,
         metrics,
+        stop,
+        start,
         create,
         snapshot,
         grantSnapshotRead,

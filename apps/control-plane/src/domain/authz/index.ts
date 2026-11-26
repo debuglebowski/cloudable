@@ -77,6 +77,7 @@ const ACTION_REFUSAL: Record<MachineAction, string> = {
   snapshot: "Only the machine's owner or an admin can take a snapshot of it.",
   packages: "Only the machine's owner or an admin can ask for a package change.",
   resize: "Only the machine's owner or an admin can ask to change its size.",
+  power: "Only the machine's owner or an admin can stop or start it.",
   editManifest: "Only an admin can change which packages a machine may have.",
 };
 

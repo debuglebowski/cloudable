@@ -1472,6 +1472,31 @@ const service: ProvisioningService = {
     }),
 
   /**
+   * Deallocate, the same call `resize` makes first. Not power off: a VM that is only powered
+   * off still holds its hardware and is billed for it. Deallocating an already deallocated VM
+   * succeeds, so a repeated stop is harmless.
+   */
+  stop: ({ machineId, externalId }) =>
+    Effect.gen(function* () {
+      const clients = yield* getClients();
+      const rg = config.azureMachinesResourceGroup;
+      const { names, resourceId } = yield* resolveVmNames(clients, rg, machineId, externalId);
+      yield* runArm(() => clients.compute.virtualMachines.beginDeallocateAndWait(rg, names.vm));
+      return { machineId, state: "stopped", externalId: resourceId } satisfies MachineStatus;
+    }),
+
+  /** Start a deallocated VM, the same call `resize` makes last. Disks, NIC and managed
+   * identity are the ones it stopped with, so the agent re-attests as the same machine. */
+  start: ({ machineId, externalId }) =>
+    Effect.gen(function* () {
+      const clients = yield* getClients();
+      const rg = config.azureMachinesResourceGroup;
+      const { names, resourceId } = yield* resolveVmNames(clients, rg, machineId, externalId);
+      yield* runArm(() => clients.compute.virtualMachines.beginStartAndWait(rg, names.vm));
+      return { machineId, state: "running", externalId: resourceId } satisfies MachineStatus;
+    }),
+
+  /**
    * Hourly CPU use and, on a B-series size, CPU credits, from Azure Monitor, read with the
    * control plane's own identity (`Microsoft.Insights/metrics/read` on the machines'
    * resource group). One REST call: neither SDK in use here covers metrics.
