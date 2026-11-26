@@ -3,6 +3,8 @@ import { ApiError, apiGet, apiPatch, apiPost } from "@/lib/api-client";
 import type {
   ApiErrorBody,
   MachineCompute,
+  MachinePowerResponse,
+  MachinePowerTransition,
   PackageActionTrigger,
   PackageEnsureApprovalView,
   PackageSetting,
@@ -40,6 +42,8 @@ export interface Machine {
   lastError: string | null;
   lastVerifiedAt: string | null;
   archivedAt: string | null;
+  /** A stop or start under way. Only the machine detail endpoint says; null elsewhere. */
+  powerTransition: MachinePowerTransition | null;
 }
 
 /** Mirrors control-plane's `REPORTING_STALENESS_THRESHOLD_MINUTES`
@@ -174,6 +178,7 @@ interface MachineSummaryWire {
   lastError: string | null;
   lastVerifiedAt: string | null;
   createdAt: string;
+  powerTransition?: MachinePowerTransition | null;
 }
 
 function toMachine(wire: MachineSummaryWire): Machine {
@@ -194,6 +199,7 @@ function toMachine(wire: MachineSummaryWire): Machine {
     // `state` — "archived" is the state itself. Kept as a separate field here only
     // because the Machines/Archive pages both read it; derive it from state.
     archivedAt: wire.state.startsWith("archived") ? wire.lastVerifiedAt : null,
+    powerTransition: wire.powerTransition ?? null,
   };
 }
 
@@ -519,6 +525,26 @@ export function useMachineCompute(machineId: string, enabled: boolean) {
     queryFn: () => apiGet<MachineCompute>(`/api/v1/machines/${machineId}/compute`),
     staleTime: 5 * 60_000,
   });
+}
+
+/**
+ * `POST /api/v1/machines/:id/stop` or `/start`. Returns at once; the stop or start runs in
+ * the background and the machine's `powerTransition` says so until it is done. A refusal
+ * comes back as an `Error` carrying the control plane's own sentence.
+ */
+export async function setMachinePower(
+  machineId: string,
+  action: "stop" | "start",
+): Promise<MachinePowerResponse> {
+  try {
+    return await apiPost<MachinePowerResponse>(`/api/v1/machines/${machineId}/${action}`, {});
+  } catch (error) {
+    if (error instanceof ApiError && error.body && typeof error.body === "object") {
+      const message = (error.body as { error?: { message?: unknown } }).error?.message;
+      if (typeof message === "string") throw new Error(message);
+    }
+    throw error;
+  }
 }
 
 /** Asks for a new size. Waits for a `machine_resize` approval. */

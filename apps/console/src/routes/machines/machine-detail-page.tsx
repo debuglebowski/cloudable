@@ -1,5 +1,5 @@
 import { type MachineAction, canActOnMachine, canAdminister } from "@cloudable/contracts";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import {
   Clock,
@@ -16,10 +16,11 @@ import {
   User,
 } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import { type ArchivedSnapshot, useMachineSnapshots } from "@/api/archive";
 import { SEVERITY_VARIANT, daysOpen, useComplianceChecks } from "@/api/audit";
-import { getMachine, isMachineStale, machinesKeys } from "@/api/machines";
+import { getMachine, isMachineStale, machinesKeys, setMachinePower } from "@/api/machines";
 import { listPeople as listPeopleDirectory } from "@/api/people-directory";
 import { useProfile } from "@/api/profiles";
 import { ControlStatus } from "@/components/control-status";
@@ -67,6 +68,7 @@ import {
 import { MachineVulnerabilitiesTab } from "./machine-vulnerabilities-tab";
 import { ResizeMachineDialog } from "./resize-machine-dialog";
 import { RestartMachineDialog } from "./restart-machine-dialog";
+import { StopMachineDialog } from "./stop-machine-dialog";
 import { UpgradeMachineDialog } from "./upgrade-machine-dialog";
 
 const SNAPSHOT_TRIGGER_LABEL: Record<ArchivedSnapshot["trigger"], string> = {
@@ -152,6 +154,19 @@ export function MachineDetailPage() {
   const machineQuery = useQuery({
     queryKey: machinesKeys.detail(machineId),
     queryFn: () => getMachine(machineId),
+    // A stop or start takes a few minutes on Azure. Keep looking until it is done.
+    refetchInterval: (query) => (query.state.data?.powerTransition ? 5_000 : false),
+  });
+  const queryClient = useQueryClient();
+  const startMutation = useMutation({
+    mutationFn: () => setMachinePower(machineId, "start"),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: machinesKeys.detail(machineId) });
+      void queryClient.invalidateQueries({ queryKey: machinesKeys.lists() });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "The machine could not be started.");
+    },
   });
   // What this person may do here (see `@cloudable/contracts` roles.ts). The control plane
   // decides for real; this only hides what would be refused.
@@ -190,6 +205,7 @@ export function MachineDetailPage() {
   // Any person in the org may read a profile, so a member sees which one their machine is on.
   const profileQuery = useProfile(machineQuery.data?.profileId);
   const [restartOpen, setRestartOpen] = useState(false);
+  const [stopOpen, setStopOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DetailTab>("properties");
   // Lives here, not inside the tab, because its two halves render on either side
   // of the Tabs boundary. `enabled` keeps the fetch lazy: the toolbar is mounted
@@ -213,6 +229,17 @@ export function MachineDetailPage() {
   // person — but never shown again after that — not `activePeople`-filtered like the create
   // dialog's picker, since a machine's *existing* owner isn't re-validated as still active here.
   const owner = peopleQuery.data?.find((person) => person.id === machine?.ownerPersonId);
+  const stopped = machine.state === "stopped";
+  const transition = machine.powerTransition;
+  // Why a live action is not available now, in words. Null when it is.
+  const notLive =
+    transition === "stopping"
+      ? "The machine is stopping."
+      : stopped
+        ? "The machine is stopped. Start it first."
+        : machine.state !== "running"
+          ? "Only a running machine has a live tunnel daemon connection to attach to."
+          : null;
 
   // The snapshot `archiveMachine()` took when this machine was archived — the header's
   // Restore action mirrors the header's Archive action, same as the Snapshots tab's own
@@ -236,22 +263,22 @@ export function MachineDetailPage() {
         </span>
         <h1 className="text-xl font-semibold">{machine.name}</h1>
         <Badge
-          variant={MACHINE_STATE_BADGE_VARIANT[machine.state]}
-          dot={machine.state === "stopped"}
+          variant={transition ? "secondary" : MACHINE_STATE_BADGE_VARIANT[machine.state]}
+          dot={stopped || transition !== null}
         >
-          {MACHINE_STATE_LABEL[machine.state]}
+          {transition === "stopping"
+            ? "Stopping…"
+            : transition === "starting"
+              ? "Starting…"
+              : MACHINE_STATE_LABEL[machine.state]}
         </Badge>
         <div className="ml-auto flex items-center gap-2">
           {can("connect") && (
             <Button
               variant="outline"
               size="sm"
-              disabled={machine.state !== "running"}
-              title={
-                machine.state !== "running"
-                  ? "Only a running machine has a live tunnel daemon connection to attach to."
-                  : undefined
-              }
+              disabled={notLive !== null}
+              title={notLive ?? undefined}
               onClick={() => setFilesOpen(true)}
             >
               Files
@@ -261,24 +288,55 @@ export function MachineDetailPage() {
             <Button
               variant="outline"
               size="sm"
-              disabled={machine.state !== "running"}
-              title={
-                machine.state !== "running"
-                  ? "Only a running machine has a live tunnel daemon connection to attach to."
-                  : undefined
-              }
+              disabled={notLive !== null}
+              title={notLive ?? undefined}
               onClick={() => setConnectOpen(true)}
             >
               Connect
+            </Button>
+          )}
+          {/* Stop and Start: the owner or an admin, no approval. Only one shows at a time. */}
+          {can("power") && stopped && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={transition !== null || startMutation.isPending}
+              title={transition === "starting" ? "The machine is starting." : undefined}
+              onClick={() => startMutation.mutate()}
+            >
+              {transition === "starting" || startMutation.isPending ? "Starting…" : "Start"}
+            </Button>
+          )}
+          {can("power") && !stopped && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={machine.state !== "running" || transition !== null}
+              title={
+                transition === "stopping"
+                  ? "The machine is stopping."
+                  : machine.state !== "running"
+                    ? "Only a running machine can be stopped."
+                    : "Stop the machine to save money. Nothing on it is lost."
+              }
+              onClick={() => setStopOpen(true)}
+            >
+              {transition === "stopping" ? "Stopping…" : "Stop"}
             </Button>
           )}
           {can("restart") && (
             <Button
               variant="outline"
               size="sm"
-              disabled={machine.state !== "running"}
+              disabled={machine.state !== "running" || transition !== null}
               title={
-                machine.state !== "running" ? "Only a running machine can be restarted." : undefined
+                stopped
+                  ? "The machine is stopped. Start it instead."
+                  : transition === "stopping"
+                    ? "The machine is stopping."
+                    : machine.state !== "running"
+                      ? "Only a running machine can be restarted."
+                      : undefined
               }
               onClick={() => setRestartOpen(true)}
             >
@@ -296,7 +354,13 @@ export function MachineDetailPage() {
             </Button>
           )}
           {can("upgrade") && (
-            <Button variant="outline" size="sm" onClick={() => setUpgradeOpen(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={stopped}
+              title={stopped ? "The machine is stopped. Start it first." : undefined}
+              onClick={() => setUpgradeOpen(true)}
+            >
               Upgrade
             </Button>
           )}
@@ -662,6 +726,9 @@ export function MachineDetailPage() {
       <ConnectTerminalDialog machine={machine} open={connectOpen} onOpenChange={setConnectOpen} />
       <BrowseFilesDialog machine={machine} open={filesOpen} onOpenChange={setFilesOpen} />
       <RestartMachineDialog machine={machine} open={restartOpen} onOpenChange={setRestartOpen} />
+      {can("power") && (
+        <StopMachineDialog machine={machine} open={stopOpen} onOpenChange={setStopOpen} />
+      )}
       <ArchiveMachineDialog machine={machine} open={archiveOpen} onOpenChange={setArchiveOpen} />
       {can("resize") && (
         <ResizeMachineDialog open={resizeOpen} onOpenChange={setResizeOpen} machine={machine} />
