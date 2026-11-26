@@ -61,8 +61,10 @@ A profile is a named set of settings machines link to (org → profile → machi
 | `machine.owner_assigned` | 1 | A machine was assigned to a person owner. |
 | `machine.profile_assigned` | 1 | An admin moved a machine to another profile, or off one. Carries `profileId` and `previousProfileId`. |
 | `machine.owner_cleared` | 1 | A machine's owner was cleared. |
-| `machine.started` | 1 | A machine was started. |
-| `machine.stopped` | 1 | A machine was stopped by a user, policy, or offboarding. |
+| `machine.started` | 1 | A machine was started. Its owner or an admin started a stopped machine, or a restart brought it back. |
+| `machine.stopped` | 1 | A machine was stopped by a user, policy, or offboarding. When a person stops it, the machine is deallocated: no compute cost, disks stay. A restart also records one, followed by `machine.started` with the same `correlationId`. |
+| `machine.stop_failed` | 1 | A person asked to stop a machine and the provider refused. The machine keeps running. Carries the provider's `reason`. |
+| `machine.start_failed` | 1 | A person asked to start a stopped machine and the provider refused. It stays stopped. Carries the provider's `reason`. |
 | `machine.reimaged` | 1 | A machine's image was replaced with a different image. |
 | `machine.setting_changed` | 2 | A machine-level setting was changed, overriding a profile or org default. Package manifest edits (key `package:<name>`) are exempt from tier filtering and always recorded, so per-machine manifest history survives on a tier-1 org the way org-level history already did. A package edit's `previous` and `current` include its `setting` (`allowed`, `ensure_installed` or `ensure_latest`). |
 | `machine.offboarded` | 1 | A machine was offboarded from its previous owner under approval. |

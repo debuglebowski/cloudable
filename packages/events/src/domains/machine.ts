@@ -84,6 +84,16 @@ export type MachineEvent =
       payload: { initiator: "user" | "policy" | "offboarding" };
     })
   | (EventEnvelope & {
+      type: "machine.stop_failed";
+      /** A person asked to stop the machine and the provider refused. The machine keeps running. */
+      payload: { reason: string };
+    })
+  | (EventEnvelope & {
+      type: "machine.start_failed";
+      /** A person asked to start a stopped machine and the provider refused. It stays stopped. */
+      payload: { reason: string };
+    })
+  | (EventEnvelope & {
       type: "machine.reimaged";
       payload: { previousImage: string; currentImage: string };
     })

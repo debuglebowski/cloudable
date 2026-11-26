@@ -364,6 +364,10 @@ function summarize(row: RawEventRow): string {
       return `Machine size changed from ${event.payload.fromSize} to ${event.payload.toSize} under approval ${event.payload.approvalId}.`;
     case "machine.resize_failed":
       return `Approved size change from ${event.payload.fromSize} to ${event.payload.toSize} failed: ${event.payload.reason}.`;
+    case "machine.stop_failed":
+      return `Stopping the machine failed; it keeps running: ${event.payload.reason}.`;
+    case "machine.start_failed":
+      return `Starting the machine failed; it stays stopped: ${event.payload.reason}.`;
     case "org.apt_repository_added":
       return `Apt repository "${event.payload.name}" (${event.payload.url} ${event.payload.suite} ${event.payload.components.join(" ")}) was added under approval ${event.payload.approvalId}, signing key ${event.payload.fingerprint}.`;
     case "org.apt_repository_removed":
@@ -470,6 +474,8 @@ function extensionsFor(row: RawEventRow): EvidenceExtensions | undefined {
     case "machine.profile_assigned":
     case "machine.resized":
     case "machine.resize_failed":
+    case "machine.stop_failed":
+    case "machine.start_failed":
     case "org.apt_repository_added":
     case "org.apt_repository_removed":
     case "machine.apt_repository_configured":

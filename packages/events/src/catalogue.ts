@@ -129,4 +129,8 @@ export const EVENT_TYPES = [
   // --- machine size ---
   "machine.resized",
   "machine.resize_failed",
+
+  // --- machine stop and start (a person's explicit action, never automatic) ---
+  "machine.stop_failed",
+  "machine.start_failed",
 ] as const satisfies ReadonlyArray<DomainEvent["type"]>;

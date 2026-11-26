@@ -172,10 +172,25 @@ export const EVENT_METADATA: Record<DomainEvent["type"], { tier: 1 | 2; descript
     tier: 1,
     description: "A machine's owner was cleared.",
   },
-  "machine.started": { tier: 1, description: "A machine was started." },
+  "machine.started": {
+    tier: 1,
+    description:
+      "A machine was started. Its owner or an admin started a stopped machine, or a restart brought it back.",
+  },
   "machine.stopped": {
     tier: 1,
-    description: "A machine was stopped by a user, policy, or offboarding.",
+    description:
+      "A machine was stopped by a user, policy, or offboarding. When a person stops it, the machine is deallocated: no compute cost, disks stay. A restart also records one, followed by `machine.started`.",
+  },
+  "machine.stop_failed": {
+    tier: 1,
+    description:
+      "A person asked to stop a machine and the provider refused. The machine keeps running. Carries the provider's reason.",
+  },
+  "machine.start_failed": {
+    tier: 1,
+    description:
+      "A person asked to start a stopped machine and the provider refused. It stays stopped. Carries the provider's reason.",
   },
   "machine.reimaged": {
     tier: 1,
