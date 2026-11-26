@@ -14,7 +14,7 @@ const ARCHIVED_DB_STATES = new Set(["archived_restorable", "archived_expired"]);
  * exists from one that is archived or missing. `"stopped"` and `"running"` both exist, so
  * a stopped machine is observed like any other, never created or started: `reconcile`
  * only reads its power state, and a deallocated VM reads `stopped` again. */
-function toLastKnownStatus(row: {
+export function toLastKnownStatus(row: {
   id: string;
   state: string;
   externalResourceId: string | null;

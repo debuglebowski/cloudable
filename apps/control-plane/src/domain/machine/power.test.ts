@@ -15,7 +15,7 @@ import {
   ProvisioningServiceTag,
 } from "../../services/ProvisioningService";
 import { FakeProvisioningServiceLive } from "../../services/ProvisioningService.fake";
-import { listRefreshableMachines } from "../../status-refresh/list-machines";
+import { toLastKnownStatus } from "../../status-refresh/list-machines";
 import { persistRefreshResult } from "../../status-refresh/persist-result";
 import { refreshMachineStatus } from "../../status-refresh/refresh-machine";
 import { isDbReachable } from "../../testing/db-reachable";
@@ -311,10 +311,19 @@ describe.skipIf(!reachable)("stop and start (requires Postgres)", () => {
     );
     await settled(machine.id);
 
-    const inputs = await run(listRefreshableMachines);
-    const input = inputs.find((i) => i.desired.machineId === machine.id);
-    if (!input) throw new Error("machine not listed for refresh");
-    const result = await run(refreshMachineStatus(input.desired, input.lastKnown));
+    // What `listRefreshableMachines` builds for this row (it reads every machine in the
+    // database, which is slow on a shared test database).
+    const row = await rowOf(machine.id);
+    if (!row) throw new Error("machine");
+    const desired = {
+      machineId: row.id,
+      orgId: row.orgId,
+      provider: row.provider,
+      region: row.region,
+      sizeSku: row.sizeSku,
+      lifecycle: "live" as const,
+    };
+    const result = await run(refreshMachineStatus(desired, toLastKnownStatus(row)));
     // Observed, never created, archived or started.
     expect(result.action.kind).toBe("observed");
     expect(result.action.status.state).toBe("stopped");
