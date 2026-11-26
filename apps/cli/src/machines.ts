@@ -9,6 +9,7 @@
 import type {
   MachineCompute,
   MachineDetail,
+  MachinePowerResponse,
   MachineSummary,
   PackageEnsureApprovalView,
   PackageManifestEdit,
@@ -167,7 +168,12 @@ export async function runMachinesGetCommand(argv: ReadonlyArray<string>): Promis
   printFields([
     ["name", machine.name],
     ["id", machine.id],
-    ["state", STATE_LABEL[machine.state]],
+    [
+      "state",
+      machine.powerTransition
+        ? `${STATE_LABEL[machine.state]} (${machine.powerTransition})`
+        : STATE_LABEL[machine.state],
+    ],
     ["provider", machine.provider],
     ["region", dash(machine.region)],
     ["size", machine.sizeSku],
@@ -289,6 +295,38 @@ export async function runMachinesRestartCommand(argv: ReadonlyArray<string>): Pr
   }
   console.log(`Restarted ${result.machineId} at ${shortTime(result.restartedAt)}.`);
 }
+
+/**
+ * `machines stop` and `machines start`. Both return at once: the stop or start runs in the
+ * background and takes a few minutes on Azure. `machines get` shows it under way.
+ */
+async function runMachinesPowerCommand(
+  argv: ReadonlyArray<string>,
+  action: "stop" | "start",
+): Promise<void> {
+  const args = parseArgs(argv, readSpec());
+  const id = await machineId(
+    required(args, 0, "a machine", usageFor(`machines ${action} <machine>`)),
+  );
+  const result = await authenticatedApiRequest<MachinePowerResponse>(
+    `/api/v1/machines/${id}/${action}`,
+    postJson({}),
+  );
+  if (args.booleans.has("json")) {
+    printJson(result);
+    return;
+  }
+  console.log(
+    action === "stop"
+      ? "Stopping. Open sessions end. It takes a few minutes; nothing on the machine is lost."
+      : "Starting. It takes a few minutes, then you can connect again.",
+  );
+}
+
+export const runMachinesStopCommand = (argv: ReadonlyArray<string>) =>
+  runMachinesPowerCommand(argv, "stop");
+export const runMachinesStartCommand = (argv: ReadonlyArray<string>) =>
+  runMachinesPowerCommand(argv, "start");
 
 export async function runMachinesUpgradeCommand(argv: ReadonlyArray<string>): Promise<void> {
   const usage = usageFor("machines upgrade <machine> --image <image> [--snapshot <scope>]");

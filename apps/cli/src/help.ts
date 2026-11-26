@@ -153,6 +153,21 @@ export const COMMANDS: ReadonlyArray<CommandSpec> = [
       },
       { name: "restart", summary: "Reboot a running machine", args: "<machine>" },
       {
+        name: "stop",
+        summary: "Stop a machine to save money",
+        args: "<machine>",
+        notes: [
+          "The owner or an admin. No approval. Open sessions end. Nothing on the machine is lost.",
+          "A stopped machine costs no compute. Its disks stay. Start it again at any time.",
+        ],
+      },
+      {
+        name: "start",
+        summary: "Start a stopped machine",
+        args: "<machine>",
+        notes: ["It comes back exactly as it was. Takes a few minutes on Azure."],
+      },
+      {
         name: "upgrade",
         summary: "Move a machine to a new image",
         args: "<machine>",

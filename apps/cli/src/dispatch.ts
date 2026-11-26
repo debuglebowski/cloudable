@@ -45,6 +45,14 @@ export const HANDLERS: Readonly<Record<string, CommandHandler>> = {
     const { runMachinesRestartCommand } = await import("./machines");
     await runMachinesRestartCommand(rest);
   },
+  "machines stop": async (rest) => {
+    const { runMachinesStopCommand } = await import("./machines");
+    await runMachinesStopCommand(rest);
+  },
+  "machines start": async (rest) => {
+    const { runMachinesStartCommand } = await import("./machines");
+    await runMachinesStartCommand(rest);
+  },
   "machines upgrade": async (rest) => {
     const { runMachinesUpgradeCommand } = await import("./machines");
     await runMachinesUpgradeCommand(rest);
