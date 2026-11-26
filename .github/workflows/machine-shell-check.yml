@@ -56,6 +56,11 @@ jobs:
       - name: Set up Bun workspace
         uses: ./.github/actions/setup-bun
 
+      # The checks treat an unmigrated server as no Postgres at all (`isDbReachable`), so
+      # migrate it first, as ci.yml does. `test:ensure-settles` then makes its own database.
+      - name: Migrate database
+        run: bun run --cwd packages/schema db:migrate
+
       # The checks tag the image by the Dockerfile's content and build it only when that tag
       # is missing (`apps/agent/src/testing/fresh-user-machine.ts`). Same tag here, so the
       # cached build below is the one they find.
