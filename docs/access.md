@@ -29,6 +29,7 @@ approval settings needs an approver specifically, not just any admin.
 | Inspect a snapshot | yes | no | no |
 | Archive | yes | only by offboarding the owner | no |
 | Restart, upgrade, take a snapshot | yes | yes | no |
+| Stop and start it (no approval) | yes | yes | no |
 | Ask to change its size (needs a `machine_resize` approval) | yes | yes | no |
 | See its CPU use and credits | yes | yes | no |
 | Ask for a package install or removal | yes | yes | no |
@@ -594,7 +595,10 @@ terminal) can be trusted to gate on this token at all.
   `machine_not_found` or `machine_<state>`) any request against a machine that isn't `running`. An
   archived or stopped machine has no live tunnel daemon connection to attach a session to, so
   minting a token for it would be a token nobody could ever redeem — denying it up front, with an
-  audited reason, is more honest than minting a token that would silently never work.
+  audited reason, is more honest than minting a token that would silently never work. A machine
+  that is being stopped still reads `running`, so it is refused too, as `machine_stopping`. The
+  person reads a plain sentence for both: "The machine is stopped. Start it first." The event keeps
+  the code. Stopping a machine also ends its open sessions at once (`docs/lifecycle.md`).
 - On success: mints a session token (see the signed session tokens section above), inserts a `sessions` row (`method`, `osUser`,
   `startedAt`), and emits `access.session_started`.
 - **`endSession`** — marks a `sessions` row ended, computes `durationSeconds`, emits

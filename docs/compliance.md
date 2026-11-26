@@ -36,12 +36,16 @@ Checks 1–5 belong to other feature units and are registered into `COMPLIANCE_C
 Deliberately **not** an event query. Every other check can reasonably ask "what happened, within the retention window?" over the event log (events older than the org's event retention window are deleted; see `docs/lifecycle.md`, "Event retention"). This one can't: a machine that has *stopped* emitting anything is exactly the failure mode an events-only query would miss — the last event it ever produced would look identical whether it stopped one minute ago or one year ago. So `evaluate` reads `machines` directly:
 
 ```
-state NOT IN ('archived_restorable', 'archived_expired')
+state NOT IN ('archived_restorable', 'archived_expired', 'stopped')
 AND (
   lastVerifiedAt < now() - 5 minutes
   OR (lastVerifiedAt IS NULL AND createdAt < now() - 5 minutes)
 )
 ```
+
+A stopped machine is left out. Its owner or an admin switched it off on purpose, and that is
+recorded as `machine.stopped`, so its silence is expected. Once started, its agent checks in within
+a poll or two. See "Stopping and starting a machine" in `docs/lifecycle.md`.
 
 The `createdAt` branch matters: a machine defaults to `state = 'provisioning'`, `lastVerifiedAt = NULL` until the control agent's first successful poll. Without it, every machine would fail this check for the first few minutes of its life, before the agent has had any chance to report. A machine still stuck in `provisioning` past the threshold, with no report ever recorded, is correctly flagged — that's a real signal, not a startup artifact.
 

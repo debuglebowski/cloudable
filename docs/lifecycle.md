@@ -400,6 +400,47 @@ at its base rate. It reads them with the control plane's own identity, which nee
 `Microsoft.Insights/metrics/read` on the machines' resource group ("Cloudable Machine Operator",
 applied by hand as Owner). Without it, the card says so instead of showing numbers.
 
+## Stopping and starting a machine
+
+A machine can be stopped to save money and started again later (`domain/machine/power.ts`).
+
+- The owner or an admin does it: the machine page's Stop and Start buttons,
+  `cloudable machines stop` / `start`, or `POST /api/v1/machines/:id/stop` / `start`. No
+  approval. Stopping saves money, and starting brings back what was already approved.
+- **This is not idle suspend.** CLAUDE.md rules out idle suspend in v1, meaning anything that
+  stops a machine by itself: on a timer, on inactivity, on a schedule. Nothing here does that.
+  A machine stops only because a person pressed Stop, and that is recorded (invariant 10).
+- Stopping on Azure deallocates the VM. No compute is billed; the disks are still billed. Disks,
+  network and managed identity stay, so Start brings the machine back exactly as it was and its
+  agent re-attests as the same machine. On local Docker it is `docker stop` / `docker start`.
+- The call returns `202` at once. The provider work takes a few minutes and runs in the
+  background, like a resize. Until it is done the machine still reads its old `state`, and
+  `powerTransition` says `stopping` or `starting`. The console shows that and refreshes.
+  The in-progress marker lives in the control plane's memory: if the control plane restarts
+  mid-way, the status refresh pass reads the real power state from Azure a minute later.
+- Recorded as `machine.stopped` (`initiator: "user"`) or `machine.started`, with the person as
+  the actor. If the provider refuses, the state stays, the reason goes on `lastError`, and
+  `machine.stop_failed` or `machine.start_failed` is recorded.
+- Refused, with a sentence that says what to do: stopping a machine that is not running,
+  starting one that is not stopped, either while one is already under way, and either on an
+  archived machine.
+
+What a stopped machine means everywhere else:
+
+- **Sessions.** Stopping ends the machine's open terminal, file and SSH sessions at once. New
+  ones are refused while it is stopping or stopped: "The machine is stopped. Start it first."
+- **Restart and upgrade** are refused on a stopped machine. Start it first. An upgrade builds a
+  new VM, which would start a machine its owner switched off.
+- **Resize** works on a stopped machine, which stays stopped. **Archive** works too.
+- **Status refresh** reads a stopped machine's power state like any other and never starts it.
+  A deallocated VM reads `stopped`, and so does an exited Docker container.
+- **Compliance.** `machines-reporting` does not count a stopped machine as silent. The
+  vulnerability check does not fail it for a missing scan; it scans after its next start.
+  Checks on what is installed keep reading the last report.
+- **Agent work** waits. Agent updates, scans, Ensure installs and package actions all reach a
+  machine when its agent polls, and a stopped machine does not poll. A package action asked
+  for while it is stopped stays pending until it is started.
+
 ## Where a machine's files live — and the one-off migration
 
 `/home` is a mount of the machine's **data disk**, not a directory on the OS disk.

@@ -460,7 +460,7 @@ See `docs/frontend.md` for implementation detail (tokens, routing/nav convention
 | Auto-correcting drift beyond what an Ensure setting covers | A tool that deletes an engineer's packages gets routed around. Ensure only installs a missing package or updates an outdated one. It never removes anything |
 | A loop that converges a machine to its whole manifest | Same reason. An Allowed package is installed only when a person asks. Only packages an admin set to Ensure, with an approval, are installed without one |
 | code-server or any full IDE | Owning an IDE's update cadence and vulnerability surface |
-| Idle suspend / cost optimisation | Lowers a bill, does not unlock a customer |
+| Idle suspend / automatic cost optimisation | Lowers a bill, does not unlock a customer. A person stopping and starting their own machine is a different thing and exists: see "Stopping and starting a machine" in `docs/lifecycle.md` |
 | General application hosting | Competing with Kubernetes and Vercel |
 | Consumer/homelab templates | Wrong signal to the buyer evaluating for 200 people |
 | AWS / GCP support | Azure only |
