@@ -1,0 +1,86 @@
+name: Machine shell check
+
+# The agent's per-user commands, run on a real fresh Ubuntu 24.04 machine instead of a fake
+# command runner. On 2026-11-26 every new production machine reinstalled its *Ensure
+# installed* npm packages every five minutes: the user's login shell printed a sudo tip on
+# stdout ahead of `npm ls --json`, and the unit tests' fake runners could never show that.
+#
+# - `test:user-shell` (agent): install an npm package the way the agent does, then list it.
+# - `test:ensure-settles` (control plane): the real control plane, the real compiled agent
+#   and the same container. The Ensure install happens once and is not queued again.
+#
+# Its own job, like docker-provisioning-check.yml: the image runs `apt-get`, which the main
+# job should not wait on. The layer cache below makes that a one-off per Dockerfile change.
+# Both checks need the npm registry.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: machine-shell-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  machine-shell:
+    name: per-user commands on a fresh Ubuntu machine
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # `test:ensure-settles` creates its own database on this server. Same settings as ci.yml.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cloudable
+          POSTGRES_PASSWORD: cloudable
+          POSTGRES_DB: cloudable
+        ports:
+          - 5442:5432
+        options: >-
+          --health-cmd "pg_isready -U cloudable"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://cloudable:cloudable@localhost:5442/cloudable
+      # Fail rather than skip when Docker or Postgres is missing: a skipped check here is a
+      # silent pass.
+      MACHINE_SHELL_CHECK_REQUIRED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Bun workspace
+        uses: ./.github/actions/setup-bun
+
+      # The checks tag the image by the Dockerfile's content and build it only when that tag
+      # is missing (`apps/agent/src/testing/fresh-user-machine.ts`). Same tag here, so the
+      # cached build below is the one they find.
+      - name: Resolve image tag
+        id: image-tag
+        run: |
+          hash=$(sha256sum apps/agent/docker/fresh-user-machine/Dockerfile | cut -c1-12)
+          echo "tag=cloudable-fresh-user-machine:${hash}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build fresh-user-machine image (cached)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: apps/agent/docker/fresh-user-machine
+          push: false
+          load: true
+          tags: ${{ steps.image-tag.outputs.tag }}
+          # Its own scope, so it does not evict the other workflows' cache index.
+          cache-from: type=gha,scope=fresh-user-machine
+          cache-to: type=gha,mode=max,scope=fresh-user-machine
+
+      - name: Agent per-user commands through a real shell
+        run: bun run --cwd apps/agent test:user-shell
+
+      - name: Ensure installed settles (control plane + agent)
+        run: bun run --cwd apps/control-plane test:ensure-settles

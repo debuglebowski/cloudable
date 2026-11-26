@@ -16,6 +16,9 @@
 #   by hand, against a subscription meant for it.
 # - ProvisioningService.docker.integration-check.ts builds two binaries and an image.
 #   `test:docker-provisioning` runs it.
+# - test/ensure-settles.integration-check.ts builds the agent and an Ubuntu image, installs
+#   from the npm registry and takes about two minutes. `test:ensure-settles` runs it, and
+#   CI runs it in machine-shell-check.yml.
 #
 # Two `bun test` runs, not one: the second set starts its own databases and should not
 # share a process (or `config`) with the first.
@@ -27,7 +30,8 @@ cd "$(dirname "$0")/.."
 db_files=$(grep -rl --include='*.test.ts' 'testing/db-reachable' ./src)
 check_files=$(find ./src ./test -name '*.integration-check.ts' \
   ! -name 'ProvisioningService.azure.integration-check.ts' \
-  ! -name 'ProvisioningService.docker.integration-check.ts')
+  ! -name 'ProvisioningService.docker.integration-check.ts' \
+  ! -name 'ensure-settles.integration-check.ts')
 
 # shellcheck disable=SC2086
 bun test ./src/services/reconcile-diff.integration.ts $db_files
